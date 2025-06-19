@@ -1,0 +1,94 @@
+#!/bin/bash
+
+echo $SCOPE_ID
+echo $DEPLOYMENT_ID
+
+MAX_ITERATIONS=$(( TIMEOUT / 10 ))
+K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
+iteration=0
+LATEST_TIMESTAMP=""
+SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
+
+while true; do
+    ((iteration++))
+    if [ $iteration -gt $MAX_ITERATIONS ]; then
+        echo "Error: Maximum number of iterations (${MAX_ITERATIONS}) reached. Not all pods are available."
+        exit 1
+    fi
+    D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status)
+    if [[ -n $CHECK_DEPLOYMENT_STATUS ]]; then
+        echo "Error: Deployment status not found"
+        exit 1
+    fi
+
+    if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
+        if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
+            echo "Deployment it's not running anymore [$D_STATUS]"
+            exit 1
+        fi
+    fi
+
+    deployment_status=$(kubectl get deployment "$K8S_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "Error: Deployment '$K8S_DEPLOYMENT_NAME' not found in namespace '$K8S_NAMESPACE'"
+        exit 1
+    fi
+    desired=$(echo "$deployment_status" | jq '.spec.replicas')
+    current=$(echo "$deployment_status" | jq '.status.availableReplicas // 0')
+    updated=$(echo "$deployment_status" | jq '.status.updatedReplicas // 0')
+    ready=$(echo "$deployment_status" | jq '.status.readyReplicas // 0')
+    echo "$(date): Iteration $iteration - Deployment status - Available: $current/$desired, Updated: $updated/$desired, Ready: $ready/$desired"
+
+    if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
+        echo "Success: All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
+        break
+    fi
+
+    POD_SELECTOR="deployment_id=${DEPLOYMENT_ID}"
+    POD_NAMES=$(kubectl get pods -n $K8S_NAMESPACE -l $POD_SELECTOR -o jsonpath='{.items[*].metadata.name}')
+    # Get events for the deployment first
+    DEPLOYMENT_EVENTS=$(kubectl get events -n $K8S_NAMESPACE --field-selector involvedObject.kind=Deployment,involvedObject.name=$K8S_DEPLOYMENT_NAME -o json)
+    
+    ALL_EVENTS="$DEPLOYMENT_EVENTS"
+
+    for POD in $POD_NAMES; do
+        echo "Checking events for pod: $POD"
+        POD_EVENTS=$(kubectl get events -n $K8S_NAMESPACE --field-selector involvedObject.kind=Pod,involvedObject.name=$POD -o json)
+        # Combine events using jq
+        if [ ! -z "$POD_EVENTS" ] && [ "$POD_EVENTS" != "{}" ]; then
+        ALL_EVENTS=$(echo "$ALL_EVENTS" "$POD_EVENTS" | jq -s '.[0].items = (.[0].items + .[1].items) | .[0]')
+        fi
+    done
+    
+    PROCESSED_EVENTS=$(echo "$ALL_EVENTS" | jq '.items = (.items | map(. + {
+        effectiveTimestamp: (
+        if .eventTime then .eventTime 
+        elif .lastTimestamp then .lastTimestamp 
+        elif .firstTimestamp then .firstTimestamp
+        else .metadata.creationTimestamp
+        end
+        )
+    }))')
+    
+    # Find the newest timestamp in all events
+    NEWEST_TIMESTAMP=$(echo "$PROCESSED_EVENTS" | jq -r '.items | map(.effectiveTimestamp) | max // empty')
+    
+    # Process events with jq, showing only events newer than what we've seen
+    NEW_EVENTS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
+        .items | 
+        sort_by(.effectiveTimestamp) | 
+        .[] | 
+        select($timestamp == "" or (.effectiveTimestamp > $timestamp)) | 
+        "\(.effectiveTimestamp) [\(.type)] \(.involvedObject.kind)/\(.involvedObject.name): \(.reason) - \(.message)"
+    ')
+    
+    # If we have new events, show them and update the timestamp
+    if [ ! -z "$NEW_EVENTS" ]; then
+        echo "$NEW_EVENTS"
+        # Store the newest timestamp for next iteration
+        LATEST_TIMESTAMP="$NEWEST_TIMESTAMP"
+        echo "Updated timestamp to: $LATEST_TIMESTAMP"
+    fi
+
+    sleep 10
+done

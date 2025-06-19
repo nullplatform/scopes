@@ -1,0 +1,48 @@
+#!/bin/bash
+
+ACTION=""
+ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
+
+for arg in "$@"; do
+  case $arg in
+    --action=*) ACTION="${arg#*=}" ;;
+  esac
+done
+
+read -r ELB_DNS_NAME ELB_HOSTED_ZONE_ID <<< $(aws elbv2 describe-load-balancers \
+    --names "$ALB_NAME" \
+    --region us-east-1 \
+    --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' \
+    --output text \
+    --no-cli-pager)
+
+if [ "$SCOPE_VISIBILITY" = "public" ]; then
+    HOSTED_ZONES=("$HOSTED_PUBLIC_ZONE_ID")
+else
+    HOSTED_ZONES=("$HOSTED_PUBLIC_ZONE_ID" "$HOSTED_PRIVATE_ZONE_ID")
+fi
+
+for ZONE_ID in "${HOSTED_ZONES[@]}"; do
+    echo "Creating Route53 record in hosted zone: $ZONE_ID"
+
+    aws route53 change-resource-record-sets \
+        --hosted-zone-id "$ZONE_ID" \
+        --region us-east-1 \
+        --no-cli-pager \
+        --change-batch "{
+            \"Changes\": [
+                {
+                    \"Action\": \"$ACTION\",
+                    \"ResourceRecordSet\": {
+                        \"Name\": \"$SCOPE_DOMAIN\",
+                        \"Type\": \"A\",
+                        \"AliasTarget\": {
+                            \"HostedZoneId\": \"$ELB_HOSTED_ZONE_ID\",
+                            \"DNSName\": \"$ELB_DNS_NAME\",
+                            \"EvaluateTargetHealth\": false
+                        }
+                    }
+                }
+            ]
+        }"
+done

@@ -1,0 +1,14 @@
+#!/bin/bash
+
+VAULT_RESPONSE=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/secret/data/parameters/$EXTERNAL_ID")
+
+if echo "$VAULT_RESPONSE" | grep -q '"data"'; then
+    STORED_VALUE=$(echo "$VAULT_RESPONSE" | jq -r '.data.data.value // empty')
+    echo '{
+      "value": "'$STORED_VALUE'"
+    }'
+else
+    echo '{
+      "value": "value not found"
+    }'
+fi

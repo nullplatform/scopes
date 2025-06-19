@@ -1,0 +1,137 @@
+#!/bin/bash
+
+generate_hash() {
+    local input="$1"
+    
+    local hash=""
+    if command -v sha256sum >/dev/null 2>&1; then
+        hash=$(echo -n "$input" | sha256sum | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+        hash=$(echo -n "$input" | shasum -a 256 | cut -d' ' -f1)
+    elif command -v openssl >/dev/null 2>&1; then
+        hash=$(echo -n "$input" | openssl sha256 | cut -d' ' -f2)
+    else
+        echo "Error: No SHA-256 utility found (sha256sum, shasum, or openssl required)" >&2
+        exit 1
+    fi
+    
+    local simple_hash=""
+    for i in {0..4}; do
+        # Extract 2 hex characters (1 byte)
+        local hex_byte="${hash:$((i*2)):2}"
+        # Convert hex to decimal
+        local decimal=$((16#$hex_byte))
+        # Map to letter a-z (0-25 -> a-z)
+        local letter_index=$((decimal % 26))
+        local letter=$(printf "\\$(printf '%03o' $((97 + letter_index)))")
+        simple_hash="${simple_hash}${letter}"
+    done
+    
+    echo "$simple_hash"
+}
+
+build_scope_domain() {
+    local account_slug="$1"
+    local namespace_slug="$2"
+    local application_slug="$3"
+    local scope_slug="$4"
+    local domain="$5"
+    local use_account_slug="$6"
+    
+    local first_part="${namespace_slug}-${application_slug}-${scope_slug}"
+    
+    local second_part
+    if [[ "$use_account_slug" == "true" ]]; then
+        second_part=".${account_slug}.${domain}"
+    else
+        second_part=".${domain}"
+    fi
+    
+    local hash=$(generate_hash "$first_part")
+    
+    local max_length=57
+    if [[ ${#first_part} -gt $max_length ]]; then
+        local amount_chars_truncate=$((${#first_part} - max_length))
+        first_part="${first_part:0:$((${#first_part} - amount_chars_truncate))}"
+    fi
+    
+    first_part=$(echo "$first_part" | sed 's/[-\.]*$//')
+    
+    echo "${first_part}-${hash}${second_part}"
+}
+
+show_usage() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Required options:
+  --accountSlug=VALUE      Account slug
+  --namespaceSlug=VALUE    Namespace slug  
+  --applicationSlug=VALUE  Application slug
+  --scopeSlug=VALUE        Scope slug
+
+Optional options:
+  --domain=VALUE           Domain suffix (default: nullapps.io)
+  --useAccountSlug=BOOL    Whether to use account slug (default: true)
+  --help                   Show this help message
+
+Examples:
+  $0 --accountSlug="myaccount" --namespaceSlug="prod" --applicationSlug="webapp" --scopeSlug="api"
+  $0 --accountSlug="test" --namespaceSlug="dev" --applicationSlug="app" --scopeSlug="frontend" --domain="example.com" --useAccountSlug="false"
+EOF
+}
+
+account_slug=""
+namespace_slug=""
+application_slug=""
+scope_slug=""
+domain="nullapps.io"
+use_account_slug="true"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --accountSlug=*)
+            account_slug="${1#*=}"
+            shift
+            ;;
+        --namespaceSlug=*)
+            namespace_slug="${1#*=}"
+            shift
+            ;;
+        --applicationSlug=*)
+            application_slug="${1#*=}"
+            shift
+            ;;
+        --scopeSlug=*)
+            scope_slug="${1#*=}"
+            shift
+            ;;
+        --domain=*)
+            domain="${1#*=}"
+            shift
+            ;;
+        --useAccountSlug=*)
+            use_account_slug="${1#*=}"
+            shift
+            ;;
+        --help|-h)
+            show_usage
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$account_slug" || -z "$namespace_slug" || -z "$application_slug" || -z "$scope_slug" ]]; then
+    echo "Error: accountSlug, namespaceSlug, applicationSlug, and scopeSlug are required"
+    echo ""
+    show_usage
+    exit 1
+fi
+
+final_domain=$(build_scope_domain "$account_slug" "$namespace_slug" "$application_slug" "$scope_slug" "$domain" "$use_account_slug")
+echo "$final_domain"

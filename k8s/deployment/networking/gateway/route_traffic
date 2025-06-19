@@ -1,0 +1,16 @@
+#!/bin/bash
+
+echo "Creating $INGRESS_VISIBILITY ingress..."
+
+INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-$DEPLOYMENT_ID.json"
+
+echo "$CONTEXT" > "$CONTEXT_PATH"
+
+echo "Building Template: $TEMPLATE to $INGRESS_FILE"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$TEMPLATE" \
+  --out "$INGRESS_FILE"
+
+rm "$CONTEXT_PATH"

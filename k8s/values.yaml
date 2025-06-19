@@ -1,0 +1,43 @@
+configuration:
+  K8S_NAMESPACE: nullplatform
+  DOMAIN: nullapps.io
+  USE_ACCOUNT_SLUG: true
+  DNS_TYPE: route53
+  DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
+  DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
+  SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
+  SCALING_TEMPLATE: "$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
+  SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/service.yaml.tpl"
+  BASE_INGRESS_PATH: "$SERVICE_PATH/scope/templates/base-ingress.yaml.tpl"
+  INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"
+  BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"
+  IMAGE_PULL_SECRETS:
+    ENABLED: false
+    SECRETS:
+      - ecr-secret
+      - other-secret
+#  DEPLOY_STRATEGY: rolling
+#  K8S_MODIFIERS:
+#    global:
+#      annotations:
+#        priority: P3
+#      labels:
+#        country: argentina
+#    service:
+#      annotations:
+#        some-alb-annotation: value
+#      labels:
+#        cost-center: payments
+#    ingress:
+#      annotations:
+#        some-ingress-annotation: value
+#      labels:
+#        cost-center: payments
+#    deployment:
+#      annotations:
+#        datadog-annotation: value
+#      labels:
+#        cost-center: payments
+#    secret:
+#      labels:
+#        cost-center: payments

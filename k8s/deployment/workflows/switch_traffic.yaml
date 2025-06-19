@@ -1,0 +1,81 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+configuration:
+  INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/deployment/build_context"
+    output:
+      - name: CONTEXT
+        type: environment
+      - name: SCOPE_VISIBILITY
+        type: environment
+      - name: SCOPE_DOMAIN
+        type: environment
+      - name: OUTPUT_DIR
+        type: environment
+      - name: DEPLOYMENT_ID
+        type: environment
+      - name: BLUE_DEPLOYMENT_ID
+        type: environment
+  - name: create deployment
+    type: script
+    file: "$SERVICE_PATH/deployment/build_deployment"
+    output:
+      - name: DEPLOYMENT_PATH
+        type: file
+        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: SECRET_PATH
+        type: file
+        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: SCALING_PATH
+        type: file
+        file: "$OUTPUT_DIR/scaling-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: SERVICE_TEMPLATE_PATH
+        type: file
+        file: "$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: apply
+    type: script
+    file: "$SERVICE_PATH/apply_templates"
+    configuration:
+      ACTION: apply
+      DRY_RUN: false
+    post:
+      name: wait deployment active
+      type: script
+      file: "$SERVICE_PATH/deployment/wait_deployment_active"
+      configuration:
+        TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
+  - name: route traffic
+    type: script
+    file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
+    configuration:
+      type: ingress
+      TEMPLATE: "$INGRESS_TEMPLATE"
+    output:
+      - name: INGRESS_FILE
+        type: file
+        file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: update blue deployment
+    type: script
+    file: "$SERVICE_PATH/deployment/build_blue_deployment"
+    output:
+      - name: DEPLOYMENT_PATH
+        type: file
+        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+      - name: SECRET_PATH
+        type: file
+        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+      - name: SCALING_PATH
+        type: file
+        file: "$OUTPUT_DIR/scaling-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+      - name: SERVICE_TEMPLATE_PATH
+        type: file
+        file: "$OUTPUT_DIR/service-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+  - name: apply traffic
+    type: script
+    file: "$SERVICE_PATH/apply_templates"
+    configuration:
+      ACTION: apply
+      DRY_RUN: false

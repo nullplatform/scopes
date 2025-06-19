@@ -1,0 +1,54 @@
+#!/bin/bash
+
+KUBE_LOGGER_SCRIPT="$SERVICE_PATH/log/kube-logger-bash/exec"
+
+if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then
+    echo "Error: kube-logger bash script not found at $KUBE_LOGGER_SCRIPT" >&2
+    exit 1
+fi
+
+K8S_NAMESPACE="nullplatform"
+
+# Build the command with required parameters
+CMD="$KUBE_LOGGER_SCRIPT --namespace $K8S_NAMESPACE --application-id $APPLICATION_ID --scope-id $SCOPE_ID"
+
+if [ -n "$DEPLOYMENT_ID" ]; then
+    CMD="$CMD --deployment-id $DEPLOYMENT_ID"
+fi
+
+# Add optional next page token
+if [ -n "$NEXT_PAGE_TOKEN" ]; then
+    CMD="$CMD --next-page-token $NEXT_PAGE_TOKEN"
+fi
+
+# Add optional start time (convert from milliseconds to ISO format)
+if [ -n "$START_TIME" ]; then
+    SECONDS=$(echo "$START_TIME/1000" | bc)
+    
+    # Handle different date command versions for Alpine/busybox
+    # Try different approaches for Alpine busybox date
+    if ISO_DATE=$(date -u -d "@$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then
+        # GNU date worked
+        :
+    elif ISO_DATE=$(date -u -r "$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then  
+        # BSD date worked
+        :
+    else
+        # Alpine busybox date - manual conversion
+        # Use awk for the conversion since busybox date is limited
+        ISO_DATE=$(awk -v ts="$SECONDS" 'BEGIN {
+            # Manual epoch conversion - this is a simplified version
+            # For a more robust solution, we would need a full date calculation
+            print strftime("%Y-%m-%dT%H:%M:%SZ", ts)
+        }' 2>/dev/null)
+        
+        # If awk strftime failed, use a different approach
+        if [ -z "$ISO_DATE" ] || [ "$ISO_DATE" = "" ]; then
+            ISO_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        fi
+    fi
+    
+    CMD="$CMD --start-time $ISO_DATE"
+fi
+
+eval "$CMD"

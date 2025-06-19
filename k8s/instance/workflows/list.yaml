@@ -1,0 +1,9 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/instance/build_context"
+    configuration:
+      K8S_NAMESPACE: $K8S_NAMESPACE
+  - name: logs
+    type: script
+    file: "$SERVICE_PATH/instance/list"

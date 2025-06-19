@@ -1,0 +1,8 @@
+include:
+  - "$SERVICE_PATH/scope/workflows/create.yaml"
+steps:
+  - name: networking
+    type: workflow
+    steps:
+      - name: generate domain
+        action: skip

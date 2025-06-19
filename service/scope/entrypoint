@@ -1,0 +1,28 @@
+#!/bin/bash
+
+echo "Executing scope action=$SERVICE_ACTION, type=$SERVICE_ACTION_TYPE for scope=$SCOPE_ID"
+
+ACTION_TO_EXECUTE="$SERVICE_ACTION_TYPE"
+
+case "$SERVICE_ACTION_TYPE" in
+  "custom")
+    if [[ "$SERVICE_ACTION" == "delete-scope" ]]; then
+      ACTION_TO_EXECUTE="delete"
+    else
+      ACTION_TO_EXECUTE="$SERVICE_ACTION"
+    fi
+    ;;
+esac
+
+WORKFLOW_PATH="$SERVICE_PATH/scope/workflows/$ACTION_TO_EXECUTE.yaml"
+OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/scope/workflows/$ACTION_TO_EXECUTE.yaml"
+
+CMD="np service workflow exec --workflow $WORKFLOW_PATH"
+
+if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
+  CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"
+fi
+
+echo "Executing command: $CMD"
+eval $CMD
+

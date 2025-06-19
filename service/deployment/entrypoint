@@ -1,0 +1,42 @@
+#!/bin/bash
+
+echo "Executing deployment action=$SERVICE_ACTION for scope=$SCOPE_ID and deployment=$DEPLOYMENT_ID"
+
+ACTION_TO_EXECUTE=""
+
+case "$SERVICE_ACTION" in
+  "start-initial")
+    ACTION_TO_EXECUTE="initial"
+    ;;
+  "start-blue-green")
+  ACTION_TO_EXECUTE="blue_green"
+    ;;
+  "switch-traffic")
+    ACTION_TO_EXECUTE="switch_traffic"
+    ;;
+  "rollback-deployment")
+    ACTION_TO_EXECUTE="rollback"
+    ;;
+  "finalize-blue-green")
+    ACTION_TO_EXECUTE="finalize"
+    ;;
+  "delete-deployment")
+    ACTION_TO_EXECUTE="delete"
+    ;;
+  *)
+    echo "Unknown action: $SERVICE_ACTION"
+    exit 1
+    ;;
+esac
+
+WORKFLOW_PATH="$SERVICE_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
+OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
+
+CMD="np service workflow exec --workflow $WORKFLOW_PATH"
+
+if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
+  CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"
+fi
+
+echo "Executing command: $CMD"
+eval $CMD

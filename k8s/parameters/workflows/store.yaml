@@ -1,0 +1,7 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/parameters/build_context"
+  - name: store
+    type: script
+    file: "$SERVICE_PATH/parameters/store"

@@ -1,0 +1,22 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows/initial.yaml"
+configuration:
+  INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
+steps:
+  - name: update blue deployment
+    type: script
+    file: "$SERVICE_PATH/deployment/build_blue_deployment"
+    after: create deployment
+    output:
+      - name: DEPLOYMENT_PATH
+        type: file
+        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+      - name: SECRET_PATH
+        type: file
+        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+      - name: SCALING_PATH
+        type: file
+        file: "$OUTPUT_DIR/scaling-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+      - name: SERVICE_TEMPLATE_PATH
+        type: file
+        file: "$OUTPUT_DIR/service-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"

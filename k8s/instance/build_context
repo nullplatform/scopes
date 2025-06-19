@@ -1,0 +1,9 @@
+#!/bin/bash
+
+ARGUMENTS=$(echo "$CONTEXT" | jq -r '.arguments // empty')
+
+export APPLICATION_ID=$(echo "$ARGUMENTS" | jq -r 'if (.application_id | type) == "array" then .application_id[0] else .application_id end')
+export SCOPE_ID=$(echo "$ARGUMENTS" | jq -r 'if (.scope_id | type) == "array" then .scope_id[0] else .scope_id end')
+export DEPLOYMENT_ID=$(echo "$ARGUMENTS" | jq -r 'if (.deployment_id | type) == "array" then .deployment_id[0] else .deployment_id end')
+
+export LIMIT=${LIMIT:-10}

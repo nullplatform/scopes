@@ -1,0 +1,27 @@
+#!/bin/bash
+
+case "$DNS_TYPE" in
+  route53)
+    source "$SERVICE_PATH/scope/networking/dns/route53/manage_route" --action="$ACTION"
+    ;;
+  azure)
+    if [ "$SCOPE_VISIBILITY" = "public" ]; then
+      GATEWAY_NAME="$PUBLIC_GATEWAY_NAME"
+    else
+      GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
+    fi
+    
+    source "$SERVICE_PATH/scope/networking/dns/az-records/manage_route" \
+      --action="$ACTION" \
+      --resource-group="$RESOURCE_GROUP" \
+      --subscription-id="$AZURE_SUBSCRIPTION_ID" \
+      --gateway-name="$GATEWAY_NAME" \
+      --hosted-zone-name="$HOSTED_ZONE_NAME" \
+      --hosted-zone-rg="$HOSTED_ZONE_RG"
+    ;;
+  *)
+    echo "Error: Unsupported dns type '$DNS_TYPE'"
+    exit 1
+    ;;
+esac
+

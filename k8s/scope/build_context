@@ -1,0 +1,38 @@
+#!/bin/bash
+
+CONTEXT=$(np service workflow build-context --format json --include-secrets)
+
+SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
+SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
+
+eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
+export ORGANIZATION_ID=\(capture("organization=(?<id>\\d+)").id)
+export ACCOUNT_ID=\(capture("account=(?<id>\\d+)").id)
+export NAMESPACE_ID=\(capture("namespace=(?<id>\\d+)").id)
+export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
+"')"
+
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+
+export SCOPE_VISIBILITY
+export SCOPE_DOMAIN
+
+if [ "$SCOPE_VISIBILITY" = "public" ]; then
+    export INGRESS_VISIBILITY="internet-facing"
+    export GATEWAY_NAME="${PUBLIC_GATEWAY_NAME:-gateway-public}"
+else
+    export INGRESS_VISIBILITY="internal"
+    export GATEWAY_NAME="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
+fi
+
+CONTEXT=$(echo "$CONTEXT" | jq \
+          --arg ingress_visibility "$INGRESS_VISIBILITY" \
+          --arg k8s_namespace "$K8S_NAMESPACE" \
+          --arg gateway_name "$GATEWAY_NAME" \
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name}')
+
+export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
+export CONTEXT
+
+mkdir -p "$OUTPUT_DIR"
+

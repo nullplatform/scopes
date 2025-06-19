@@ -1,0 +1,9 @@
+#!/bin/bash
+
+curl -s -X DELETE \
+    -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/secret/data/parameters/$EXTERNAL_ID" >/dev/null
+
+echo '{
+  "success": true
+}'

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+export SCOPE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.scope_id // empty')
+export NEXT_PAGE_TOKEN=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.next_page_token // empty')
+export START_TIME=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.start_time // empty')
+export APPLICATION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.application_id // empty')
+export DEPLOYMENT_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.deployment_id // .notification.arguments.deploy_id // empty')
+
+if [ -z "$APPLICATION_ID" ]; then
+    echo "Error: Missing required parameters: APPLICATION_ID" >&2
+    exit 1
+fi

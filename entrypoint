@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# Check if NP_ACTION_CONTEXT is set
+if [ -z "$NP_ACTION_CONTEXT" ]; then
+  echo "NP_ACTION_CONTEXT is not set. Exiting."
+  exit 1
+fi
+
+CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
+
+export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
+
+# Parse the JSON properly - remove the extra quotes
+export CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
+export SCOPE_ID=$(echo $CONTEXT | jq -r '.parameters.scope_id')
+export DEPLOYMENT_ID=$(echo $CONTEXT | jq -r '.parameters.deployment_id // "null"')
+export SERVICE_ACTION=$(echo $CONTEXT | jq -r '.slug')
+export SERVICE_ACTION_TYPE=$(echo $CONTEXT | jq -r '.type')
+export NOTIFICATION_ACTION=$(echo $CONTEXT | jq -r '.action')
+
+export WORKING_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SERVICE_PATH=""
+OVERRIDES_PATH=""
+DEPLOYMENT_TEMPLATE_PATH=""
+BLUE_GREEN_INGRESS_TEMPLATE_PATH=""
+INITIAL_INGRESS_TEMPLATE_PATH=""
+
+for arg in "$@"; do
+  case $arg in
+    --service-path=*)
+      SERVICE_PATH="${arg#*=}"
+      ;;
+    --overrides-path=*)
+      OVERRIDES_PATH="${arg#*=}"
+      ;;
+    *)
+      echo "Unknown argument: $arg"
+      exit 1
+      ;;
+  esac
+done
+
+OVERRIDES_PATH="${OVERRIDES_PATH:-$SERVICE_PATH/overrides}"
+
+export SERVICE_PATH
+export OVERRIDES_PATH
+
+# export util functions
+source "$WORKING_DIRECTORY/utils"
+
+if [[ "$NOTIFICATION_ACTION" == "log:read" ]]; then
+  source "$WORKING_DIRECTORY/service/log/entrypoint"
+elif [[ "$NOTIFICATION_ACTION" =~ ^metric: ]]; then
+  source "$WORKING_DIRECTORY/service/metric/entrypoint"
+elif [[ "$NOTIFICATION_ACTION" == "instance:data" ]]; then
+  source "$WORKING_DIRECTORY/service/instance/entrypoint"
+elif [[ "$DEPLOYMENT_ID" != "null" && -n "$DEPLOYMENT_ID" ]]; then
+  echo "Notification action: $NOTIFICATION_ACTION"
+
+  np service-action exec --live-output --live-report --script="$WORKING_DIRECTORY/service/deployment/entrypoint"
+else
+  echo "Notification action: $NOTIFICATION_ACTION"
+
+  np service-action exec --live-output --live-report --script="$WORKING_DIRECTORY/service/scope/entrypoint"
+fi

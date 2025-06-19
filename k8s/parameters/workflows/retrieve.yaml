@@ -1,0 +1,7 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/parameters/build_context"
+  - name: retrieve
+    type: script
+    file: "$SERVICE_PATH/parameters/retrieve"

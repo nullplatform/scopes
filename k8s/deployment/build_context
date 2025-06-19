@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Build scope and tags env variables
+source "$SERVICE_PATH/scope/build_context"
+
+BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq '.scope.current_active_deployment // empty' -r)
+SCALING_TYPE=$(echo "$CONTEXT" | jq -r .scope.capabilities.scaling_type)
+
+# TODO(federico.maleh) use current number of pods as base.
+if [ "$SCALING_TYPE" = "fixed" ]; then
+  REPLICAS=$(echo "$CONTEXT" | jq -r .scope.capabilities.fixed_instances)
+else
+  REPLICAS=$(echo "$CONTEXT" | jq -r .scope.capabilities.autoscaling.min_replicas)
+fi
+
+GREEN_REPLICAS=$REPLICAS
+BLUE_REPLICAS=$REPLICAS
+SWITCH_TRAFFIC=$(echo "$CONTEXT" | jq -r ".deployment.strategy_data.desired_switched_traffic // 100")
+
+MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
+MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
+  GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
+  GREEN_REPLICAS=$(echo "$GREEN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+  BLUE_REPLICAS=$(( REPLICAS - GREEN_REPLICAS ))
+  BLUE_REPLICAS=$(( MIN_REPLICAS > BLUE_REPLICAS ? MIN_REPLICAS : BLUE_REPLICAS ))
+
+  # Apply minimum after the blue replica calculation so we do not remove pods with 0% traffic switch.
+  GREEN_REPLICAS=$(( MIN_REPLICAS > GREEN_REPLICAS ? MIN_REPLICAS : GREEN_REPLICAS ))
+fi
+
+K8S_MODIFIERS="${K8S_MODIFIERS:-{}}"
+K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
+
+IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-{}}"
+IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
+
+CONTEXT=$(echo "$CONTEXT" | jq \
+          --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
+          --arg blue_replicas "$BLUE_REPLICAS" \
+          --arg green_replicas "$GREEN_REPLICAS" \
+          --arg total_replicas "$REPLICAS" \
+          --argjson modifiers "$K8S_MODIFIERS" \
+          --argjson pull_secrets "$IMAGE_PULL_SECRETS" \
+          '. + {blue_deployment_id: $blue_deployment_id,
+                blue_replicas: $blue_replicas,
+                green_replicas: $green_replicas,
+                total_replicas: $total_replicas,
+                k8s_modifiers: $modifiers,
+                pull_secrets: $pull_secrets
+          }')
+
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
+
+export DEPLOYMENT_ID
+export BLUE_DEPLOYMENT_ID
+
+export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID-$DEPLOYMENT_ID"
+
+mkdir -p "$OUTPUT_DIR"

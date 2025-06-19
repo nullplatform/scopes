@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Build DNS context based on DNS_TYPE
+# This script sets up the necessary environment variables for DNS management
+
+case "$DNS_TYPE" in
+  route53)
+    # For Route53, we need to get hosted zone IDs
+    source "$SERVICE_PATH/scope/networking/dns/get_hosted_zones"
+    ;;
+  azure)
+    # from values.yaml: HOSTED_ZONE_NAME, HOSTED_ZONE_RG, etc.
+    echo "Azure DNS context ready"
+    echo "HOSTED_ZONE_NAME: $HOSTED_ZONE_NAME"
+    echo "HOSTED_ZONE_RG: $HOSTED_ZONE_RG"
+    echo "AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID"
+    echo "RESOURCE_GROUP: $RESOURCE_GROUP"
+    echo "PUBLIC_GATEWAY_NAME: $PUBLIC_GATEWAY_NAME"
+    echo "PRIVATE_GATEWAY_NAME: $PRIVATE_GATEWAY_NAME"
+    ;;
+  *)
+    echo "Error: Unsupported DNS type '$DNS_TYPE'"
+    exit 1
+    ;;
+esac

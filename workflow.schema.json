@@ -1,0 +1,261 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Workflow",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "steps"
+  ],
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/step"
+      }
+    },
+    "nrn": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "provider_categories": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "include": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "step": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "command",
+            "script",
+            "workflow"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "skip",
+            "replace"
+          ]
+        },
+        "before": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "environment",
+                  "file"
+                ]
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "file"
+                    }
+                  },
+                  "required": ["type"]
+                },
+                "then": {
+                  "required": ["file"]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "environment"
+                    }
+                  },
+                  "required": ["type"]
+                },
+                "then": {
+                  "properties": {
+                    "file": {
+                      "not": {}
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "configuration": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "pre": {
+          "$ref": "#/definitions/step"
+        },
+        "post": {
+          "$ref": "#/definitions/step"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/step"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "command"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "command"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "script"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "file"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "workflow"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "steps"
+            ],
+            "properties": {
+              "output": {
+                "not": {}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "workflow"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "steps": {
+                "not": {}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "command"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "command": {
+                "not": {}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "script"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "file": {
+                "not": {}
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,79 @@
+#!/bin/bash
+
+REPLICAS=$(echo "$CONTEXT" | jq -r .green_replicas)
+
+for arg in "$@"; do
+  case $arg in
+    --replicas=*) REPLICAS="${arg#*=}" ;;
+  esac
+done
+
+if [[ -n "$DESIRED_TRAFFIC" && "$DESIRED_TRAFFIC" -ne 0 ]]; then
+  REPLICAS=$(echo "$CONTEXT" | jq -r .total_replicas)
+
+  REPLICAS=$(echo "scale=10; ($REPLICAS * $DESIRED_TRAFFIC) / 100" | bc)
+  REPLICAS=$(echo "$REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+fi
+
+
+DEPLOYMENT_PATH="$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+SECRET_PATH="$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+SCALING_PATH="$OUTPUT_DIR/scaling-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+SERVICE_TEMPLATE_PATH="$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
+
+echo "$CONTEXT" | jq --arg replicas "$REPLICAS" '. + {replicas: $replicas}' > "$CONTEXT_PATH"
+
+echo "Building Template: $DEPLOYMENT_TEMPLATE to $DEPLOYMENT_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$DEPLOYMENT_TEMPLATE" \
+  --out "$DEPLOYMENT_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building deployment template"
+    exit 1
+fi
+
+echo "Building Template: $SECRET_TEMPLATE to $SECRET_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$SECRET_TEMPLATE" \
+  --out "$SECRET_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building secret template"
+    exit 1
+fi
+
+echo "Building Template: $SCALING_TEMPLATE to $SCALING_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$SCALING_TEMPLATE" \
+  --out "$SCALING_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building scaling template"
+    exit 1
+fi
+
+echo "Building Template: $SERVICE_TEMPLATE to $SERVICE_TEMPLATE_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$SERVICE_TEMPLATE" \
+  --out "$SERVICE_TEMPLATE_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building scaling template"
+    exit 1
+fi
+
+rm "$CONTEXT_PATH"

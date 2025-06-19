@@ -1,0 +1,253 @@
+#!/bin/bash
+
+GROUP_BY=${GROUP_BY:-""}
+
+# Validate required parameters
+if [[ -z "$METRIC_NAME" ]]; then
+  echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
+  exit 1
+fi
+
+if [[ -z "$APPLICATION_ID" ]]; then
+  echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
+  exit 1
+fi
+
+if [[ -z "$PROM_URL" ]]; then
+  echo '{"error":"PROM_URL is required. Please specify with PROM_URL environment variable"}'
+  exit 1
+fi
+
+get_metric_config() {
+  case "$METRIC_NAME" in
+    "http.error_rate")
+      echo "gauge percent"
+      ;;
+    "http.response_time")
+      echo "gauge seconds"
+      ;;
+    "http.rpm")
+      echo "gauge count_per_minute"
+      ;;
+    "http.healthcheck_count")
+      echo "gauge count"
+      ;;
+    "http.healthcheck_fail")
+      echo "gauge count"
+      ;;
+    "system.cpu_usage_percentage")
+      echo "gauge percent"
+      ;;
+    "system.cpu_usage_percentage_by_instance")
+      echo "gauge percent"
+      ;;
+    "system.memory_usage_percentage")
+      echo "gauge percent"
+      ;;
+    "system.used_memory_kb")
+      echo "gauge kilobytes"
+      ;;
+    *)
+      echo "gauge unknown"
+      ;;
+  esac
+}
+
+build_filters() {
+  local filters=""
+
+  # Add application_id filter
+  if [[ -n "$APPLICATION_ID" ]]; then
+    filters="application_id=\"$APPLICATION_ID\""
+  fi
+
+  # Add scope_id filter
+  if [[ -n "$SCOPE_ID" ]]; then
+    if [[ -n "$filters" ]]; then
+      filters="$filters,"
+    fi
+    filters="${filters}scope_id=\"$SCOPE_ID\""
+  fi
+
+  if [[ -n "$DEPLOYMENT_ID" && "$DEPLOYMENT_ID" != "null" ]]; then
+    if [[ -n "$filters" ]]; then
+      filters="$filters,"
+    fi
+    filters="${filters}deployment_id=\"$DEPLOYMENT_ID\""
+  fi
+
+  echo "$filters"
+}
+
+# Build Prometheus query based on metric type
+build_query() {
+  local metric="$1"
+  local filters="$2"
+  local interval="$3"
+  local groupBy="$GROUP_BY"
+
+  if [[ "$groupBy" == "[]" || "$groupBy" == "" ]]; then
+    groupBy=""
+  fi
+
+  case "$metric" in
+    "http.healthcheck_count")
+      local healthcheck_filters="${filters},is_healthcheck=\"yes\""
+      echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
+      ;;
+    "http.healthcheck_fail")
+      local healthcheck_filters="${filters},is_healthcheck=\"yes\""
+      local ok_filters="${filters},is_healthcheck=\"yes\",quality=\"OK (2XX, 3XX)\""
+      echo "sum(rate(http_request_count_total{$healthcheck_filters}[$interval])) by ($groupBy) - sum(rate(http_request_count_total{$ok_filters}[$interval])) by ($groupBy)"
+      ;;
+    "system.cpu_usage_percentage_by_instance")
+      echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by (instance_id)"
+      ;;
+    "system.memory_usage_percentage")
+      echo "avg(nullplatform_system_memory_usage_percentage{$filters}) by ($groupBy)"
+      ;;
+    "system.cpu_usage_percentage")
+      echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by ($groupBy)"
+      ;;
+    "system.used_memory_kb")
+      echo "avg(nullplatform_system_used_memory_kb{$filters}) by ($groupBy)"
+      ;;
+    "http.response_time")
+      echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
+      ;;
+    "http.rpm")
+      echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy) * 60"
+      ;;
+    "http.error_rate")
+      local base_filters="$filters"
+      local ok_filters="${filters},quality=\"OK (2XX, 3XX)\""
+      echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by (scope) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) by (scope) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by (scope) * 60 )) *100"
+      ;;
+    *)
+      echo "up{$filters}"  # Default query if metric not recognized
+      ;;
+  esac
+}
+
+# Query Prometheus and return the result
+query_prometheus() {
+  local query="$1"
+  local start_time="$2"
+  local end_time="$3"
+  local step="$4"
+
+  local url="${PROM_URL}/api/v1/query_range"
+  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+
+  curl -s -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
+}
+
+urlencode() {
+  local string="${1}"
+  local strlen=${#string}
+  local encoded=""
+  local pos c o
+
+  for (( pos=0 ; pos<strlen ; pos++ )); do
+    c=${string:$pos:1}
+    case "$c" in
+      [-_.~a-zA-Z0-9] ) o="${c}" ;;
+      * )               printf -v o '%%%02x' "'$c"
+    esac
+    encoded+="${o}"
+  done
+  echo "${encoded}"
+}
+
+# Handle START_TIME/END_TIME for Alpine compatibility
+if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
+  # Convert ISO dates to Unix timestamps (Alpine compatible - remove milliseconds)
+  start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+  now=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+  step=${PERIOD:-60}
+  # Calculate interval like JavaScript service: period/60 + "m"
+  if [[ -n "$PERIOD" && "$PERIOD" -gt 0 ]]; then
+    interval_minutes=$((PERIOD / 60))
+    if [[ $interval_minutes -lt 1 ]]; then
+      interval_minutes=1
+    fi
+    INTERVAL="${interval_minutes}m"
+  else
+    INTERVAL="1m"
+  fi
+else
+  # Fallback to TIME_RANGE logic
+  now=$(date +%s)
+  case "$TIME_RANGE" in
+    *h)
+      hours=${TIME_RANGE%h}
+      start_time=$((now - hours * 3600))
+      ;;
+    *m)
+      minutes=${TIME_RANGE%m}
+      start_time=$((now - minutes * 60))
+      ;;
+    *d)
+      days=${TIME_RANGE%d}
+      start_time=$((now - days * 86400))
+      ;;
+    *)
+      start_time=$((now - 3600))
+      ;;
+  esac
+
+  case "$INTERVAL" in
+    *h)
+      hours=${INTERVAL%h}
+      step=$((hours * 3600))
+      ;;
+    *m)
+      minutes=${INTERVAL%m}
+      step=$((minutes * 60))
+      ;;
+    *s)
+      step=${INTERVAL%s}
+      ;;
+    *)
+      step=60
+      ;;
+  esac
+fi
+
+config=$(get_metric_config)
+metric_type=$(echo $config | cut -d' ' -f1)
+unit=$(echo $config | cut -d' ' -f2)
+
+filters=$(build_filters)
+query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
+
+response=$(query_prometheus "$query" "$start_time" "$now" "$step")
+
+transform_response() {
+  local response="$1"
+  local status=$(echo "$response" | jq -r '.status')
+
+  if [[ "$status" != "success" ]]; then
+    echo "[]"
+    return
+  fi
+
+  local results=$(echo "$response" | jq '.data.result')
+
+  if [[ "$results" == "[]" || "$results" == "null" ]]; then
+    echo "[]"
+    return
+  fi
+
+  echo "$results" | jq 'map({
+    selector: .metric,
+    data: .values | map({
+      timestamp: (.[0] | tonumber | todate),
+      value: (.[1] | tonumber)
+    })
+  })'
+}
+
+transformed_results=$(transform_response "$response")
+
+echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"

@@ -1,0 +1,18 @@
+#!/bin/bash
+
+echo "Creating ingress for scope $SCOPE_ID with domain $SCOPE_DOMAIN"
+
+echo "Creating $INGRESS_VISIBILITY ingress..."
+
+INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$INGRESS_VISIBILITY.yaml"
+CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
+
+echo "$CONTEXT" > "$CONTEXT_PATH"
+
+echo "Building Template: $TEMPLATE to $INGRESS_FILE"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$TEMPLATE" \
+  --out "$INGRESS_FILE"
+
+rm "$CONTEXT_PATH"

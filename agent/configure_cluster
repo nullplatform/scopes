@@ -1,0 +1,90 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Colors
+GREEN="\033[0;32m"
+BLUE="\033[0;34m"
+YELLOW="\033[1;33m"
+RED="\033[0;31m"
+NC="\033[0m"
+
+# Spinner state
+SPINNER_PID=""
+SPINNER_MSG=""
+
+start_spinner() {
+  SPINNER_MSG="$1"
+  echo -ne "${BLUE}==>${NC} $SPINNER_MSG..."
+  (
+    while true; do
+      for c in / - \\ \|; do
+        echo -ne "\r${BLUE}==>${NC} $SPINNER_MSG... $c"
+        sleep 0.1
+      done
+    done
+  ) &
+  SPINNER_PID=$!
+  disown
+}
+
+stop_spinner_success() {
+  kill "$SPINNER_PID" >/dev/null 2>&1 || true
+  wait "$SPINNER_PID" 2>/dev/null || true
+  echo -ne "\r\033[K"
+  echo -e "${GREEN}✔${NC} $SPINNER_MSG"
+}
+
+stop_spinner_error() {
+  kill "$SPINNER_PID" >/dev/null 2>&1 || true
+  wait "$SPINNER_PID" 2>/dev/null || true
+  echo -ne "\r\033[K"
+  echo -e "${RED}✖${NC} $SPINNER_MSG"
+  exit 1
+}
+
+start_spinner "Creating Kubernetes base objects"
+tmpfile=$(mktemp)
+kubectl apply -f - > "$tmpfile" <<EOF
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nullplatform-tools
+---
+  apiVersion: v1
+  kind: Namespace
+  metadata:
+    name: nullplatform
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: np-agent-sa
+  namespace: nullplatform-tools
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: np-agent-role
+rules:
+  - apiGroups: ["*", ""]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: np-agent-binding
+subjects:
+  - kind: ServiceAccount
+    name: np-agent-sa
+    namespace: nullplatform-tools
+roleRef:
+  kind: ClusterRole
+  name: np-agent-role
+  apiGroup: rbac.authorization.k8s.io
+EOF
+stop_spinner_success
+cat "$tmpfile"
+rm -f "$tmpfile"

@@ -1,0 +1,27 @@
+#!/bin/bash
+
+exec_overridable() {
+  local OVERRIDE_PATH=""
+  local DEFAULT_PATH=""
+  local STEP=""
+
+  for arg in "$@"; do
+    case $arg in
+      --override-path=*) OVERRIDE_PATH="${arg#*=}" ;;
+      --default-path=*)  DEFAULT_PATH="${arg#*=}" ;;
+      --step=*)          STEP="${arg#*=}" ;;
+    esac
+  done
+
+  if [[ -f "$OVERRIDE_PATH" ]]; then
+    echo "Executing $OVERRIDE_PATH"
+    source "$OVERRIDE_PATH"
+  elif [[ -f "$DEFAULT_PATH" ]]; then
+    echo "Executing $DEFAULT_PATH"
+    source "$DEFAULT_PATH"
+  else
+    echo "Skipping $STEP — no override nor default script was provided"
+  fi
+}
+
+export -f exec_overridable

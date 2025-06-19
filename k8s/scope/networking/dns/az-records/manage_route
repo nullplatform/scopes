@@ -1,0 +1,96 @@
+#!/bin/bash
+
+get_azure_token() {
+    local token_response=$(curl -s -X POST \
+        "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "client_id=${AZURE_CLIENT_ID}" \
+        -d "client_secret=${AZURE_CLIENT_SECRET}" \
+        -d "scope=https://management.azure.com/.default" \
+        -d "grant_type=client_credentials")
+    
+    echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4
+}
+
+ACTION=""
+GATEWAY_NAME=""
+RESOURCE_GROUP=""
+AZURE_SUBSCRIPTION_ID=""
+HOSTED_ZONE_NAME=""
+HOSTED_ZONE_RG=""
+
+for arg in "$@"; do
+  case $arg in
+    --action=*) ACTION="${arg#*=}" ;;
+    --resource-group=*) RESOURCE_GROUP="${arg#*=}" ;;
+    --subscription-id=*) AZURE_SUBSCRIPTION_ID="${arg#*=}" ;;
+    --gateway-name=*) GATEWAY_NAME="${arg#*=}" ;;
+    --hosted-zone-name=*) HOSTED_ZONE_NAME="${arg#*=}" ;;
+    --hosted-zone-rg=*) HOSTED_ZONE_RG="${arg#*=}" ;;
+  esac
+done
+
+echo "Getting IP address for Gateway: $GATEWAY_NAME in namespace: gateways"
+
+# Get IP from Gateway resource ADDRESS column
+GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+
+if [ -z "$GATEWAY_IP" ]; then
+    echo "Error: Could not get IP address for gateway $GATEWAY_NAME"
+    exit 1
+fi
+
+echo "Gateway IP: $GATEWAY_IP"
+
+if [ -z "$SCOPE_SUBDOMAIN" ]; then
+    SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
+fi
+
+echo "Managing DNS record in zone: $HOSTED_ZONE_NAME"
+
+
+if [ "$ACTION" = "CREATE" ]; then
+    echo "Creating record for: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
+    
+    # Get access token
+    ACCESS_TOKEN=$(get_azure_token)
+    
+    # Create or update A record
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
+    
+    RECORD_BODY=$(cat <<EOF
+{
+  "properties": {
+    "TTL": 300,
+    "ARecords": [
+      {
+        "ipv4Address": "${GATEWAY_IP}"
+      }
+    ]
+  }
+}
+EOF
+)
+    
+    curl -s -X PUT \
+        "${RECORD_SET_URL}" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "${RECORD_BODY}"
+    
+    echo "Record created/updated successfully"
+    
+elif [ "$ACTION" = "DELETE" ]; then
+    echo "Deleting record for: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
+    
+    ACCESS_TOKEN=$(get_azure_token)
+    
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
+    
+    curl -s -X DELETE \
+        "${RECORD_SET_URL}" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}"
+    
+    echo "Record deleted successfully"
+fi

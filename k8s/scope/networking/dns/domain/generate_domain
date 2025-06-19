@@ -1,0 +1,27 @@
+#!/bin/bash
+
+echo "Generating domain"
+
+ACCOUNT_NAME=$(echo $CONTEXT | jq .account.slug -r)
+NAMESPACE_NAME=$(echo $CONTEXT | jq .namespace.slug -r)
+APPLICATION_NAME=$(echo $CONTEXT | jq .application.slug -r)
+SCOPE_NAME=$(echo $CONTEXT | jq .scope.slug -r)
+
+SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
+  --accountSlug="$ACCOUNT_NAME" \
+  --namespaceSlug="$NAMESPACE_NAME" \
+  --applicationSlug="$APPLICATION_NAME" \
+  --scopeSlug="$SCOPE_NAME" \
+  --domain="$DOMAIN" \
+  --useAccountSlug="$USE_ACCOUNT_SLUG")
+
+echo "Generated domain: $SCOPE_DOMAIN"
+
+np scope patch --id "$SCOPE_ID" --body "{\"domain\":\"$SCOPE_DOMAIN\"}"
+
+CONTEXT=$(echo "$CONTEXT" | jq \
+  --arg scope_domain "$SCOPE_DOMAIN" \
+  '.scope.domain = $scope_domain')
+
+
+export SCOPE_DOMAIN

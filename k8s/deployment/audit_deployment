@@ -1,0 +1,82 @@
+#!/bin/bash
+
+# audit-scope.sh
+NAMESPACE="$K8S_NAMESPACE"
+
+if [ -z "$SCOPE_ID" ]; then
+    echo "Usage: $0 <scope_id> [namespace]"
+    echo "Example: $0 1183007763 nullplatform"
+    exit 1
+fi
+
+echo "Auditing resources for scope $SCOPE_ID in namespace $NAMESPACE..."
+echo "----------------------------------------"
+
+# Check Deployments
+echo "Checking Deployments:"
+DEPLOYMENTS=$(kubectl get deployments -n $NAMESPACE | grep $SCOPE_ID)
+DEPLOYMENT_COUNT=$(echo "$DEPLOYMENTS" | grep -v "^$" | wc -l)
+echo "$DEPLOYMENTS"
+echo "Found $DEPLOYMENT_COUNT deployment(s)"
+echo "----------------------------------------"
+
+# Check Services
+echo "Checking Services:"
+SERVICES=$(kubectl get services -n $NAMESPACE | grep $SCOPE_ID)
+SERVICE_COUNT=$(echo "$SERVICES" | grep -v "^$" | wc -l)
+echo "$SERVICES"
+echo "Found $SERVICE_COUNT service(s)"
+echo "----------------------------------------"
+
+# Check ReplicaSets
+echo "Checking ReplicaSets:"
+REPLICASETS=$(kubectl get rs -n $NAMESPACE | grep $SCOPE_ID)
+REPLICASET_COUNT=$(echo "$REPLICASETS" | grep -v "^$" | wc -l)
+echo "$REPLICASETS"
+echo "Found $REPLICASET_COUNT replicaset(s)"
+echo "----------------------------------------"
+
+# Check Pods
+echo "Checking Pods:"
+PODS=$(kubectl get pods -n $NAMESPACE | grep $SCOPE_ID)
+POD_COUNT=$(echo "$PODS" | grep -v "^$" | wc -l)
+echo "$PODS"
+echo "Found $POD_COUNT pod(s)"
+echo "----------------------------------------"
+
+# Check Ingress
+echo "Checking Ingress:"
+INGRESS=$(kubectl get ingress -n $NAMESPACE | grep $SCOPE_ID)
+INGRESS_COUNT=$(echo "$INGRESS" | grep -v "^$" | wc -l)
+echo "$INGRESS"
+echo "Found $INGRESS_COUNT ingress(es)"
+echo "----------------------------------------"
+
+# Check Secrets
+echo "Checking Secrets:"
+SECRETS=$(kubectl get secrets -n $NAMESPACE | grep $SCOPE_ID)
+SECRET_COUNT=$(echo "$SECRETS" | grep -v "^$" | wc -l)
+echo "$SECRETS"
+echo "Found $SECRET_COUNT secret(s)"
+echo "----------------------------------------"
+
+# Summary and Warnings
+echo "SUMMARY:"
+if [ $DEPLOYMENT_COUNT -gt 1 ]; then
+    echo "⚠️  WARNING: Multiple deployments found!"
+fi
+if [ $SERVICE_COUNT -gt 1 ]; then
+    echo "⚠️  WARNING: Multiple services found!"
+fi
+if [ $INGRESS_COUNT -gt 1 ]; then
+    echo "⚠️  WARNING: Multiple ingresses found!"
+fi
+if [ $POD_COUNT -gt 1 ]; then
+    echo "⚠️  WARNING: Multiple pods found!"
+fi
+
+if [ $DEPLOYMENT_COUNT -eq 1 ] && [ $SERVICE_COUNT -eq 1 ] && [ $INGRESS_COUNT -le 1 ] && [ $POD_COUNT -eq 1 ]; then
+    echo "✅ All resources look good! Single instance of each type found."
+else
+    echo "❌ Some resources need attention. Please check the warnings above."
+fi

@@ -1,0 +1,9 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/metric/build_context"
+    configuration:
+      K8S_NAMESPACE: nullplatform
+  - name: logs
+    type: script
+    file: "$SERVICE_PATH/metric/metric"
