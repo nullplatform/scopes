@@ -1,10 +1,8 @@
 #!/bin/bash
 
 echo "Getting hosted zones"
-HOSTED_ZONES=$(np nrn read --nrn "organization=$ORGANIZATION_ID:account=$ACCOUNT_ID:namespace=$NAMESPACE_ID:application=$APPLICATION_ID:scope=$SCOPE_ID" --ids 'aws.hostedZoneId,aws.hostedPublicZoneId' --format json)
-HOSTED_PUBLIC_ZONE_ID=$(echo "$HOSTED_ZONES" | jq -r '.namespaces.aws.hostedPublicZoneId')
-# shellcheck disable=SC2086
-HOSTED_PRIVATE_ZONE_ID=$(echo $HOSTED_ZONES | jq -r '.namespaces.aws.hostedZoneId')
+HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id')
+HOSTED_PRIVATE_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_zone_id')
 
 echo "Public Hosted Zone ID: $HOSTED_PUBLIC_ZONE_ID"
 echo "Private Hosted Zone ID: $HOSTED_PRIVATE_ZONE_ID"
@@ -12,5 +10,5 @@ echo "Private Hosted Zone ID: $HOSTED_PRIVATE_ZONE_ID"
 export HOSTED_PUBLIC_ZONE_ID
 export HOSTED_PRIVATE_ZONE_ID
 
-mkdir -p $SERVICE_PATH/tmp/
-mkdir -p $SERVICE_PATH/output/
+mkdir -p "$SERVICE_PATH/tmp/"
+mkdir -p "$SERVICE_PATH/output/"

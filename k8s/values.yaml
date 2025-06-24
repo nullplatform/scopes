@@ -1,7 +1,10 @@
+provider_categories:
+  - container-orchestration
+  - cloud-providers
 configuration:
   K8S_NAMESPACE: nullplatform
   DOMAIN: nullapps.io
-  USE_ACCOUNT_SLUG: true
+  USE_ACCOUNT_SLUG: false
   DNS_TYPE: route53
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
@@ -12,10 +15,9 @@ configuration:
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"
   IMAGE_PULL_SECRETS:
-    ENABLED: false
+    ENABLED: true
     SECRETS:
       - ecr-secret
-      - other-secret
 #  DEPLOY_STRATEGY: rolling
 #  K8S_MODIFIERS:
 #    global:

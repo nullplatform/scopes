@@ -1,6 +1,16 @@
 #!/bin/bash
 
-CONTEXT=$(np service workflow build-context --format json --include-secrets)
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+  .providers["container-orchestration"].cluster.namespace // $default
+')
+
+DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
+  .providers["cloud-providers"].networking.domain_name // $default
+')
+
+USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
+  .providers["cloud-providers"].networking.application_domain // $default
+')
 
 SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
