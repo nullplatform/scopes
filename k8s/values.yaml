@@ -14,10 +14,37 @@ configuration:
   BASE_INGRESS_PATH: "$SERVICE_PATH/scope/templates/base-ingress.yaml.tpl"
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"
+  SERVICE_ACCOUNT_TEMPLATE: "$SERVICE_PATH/scope/templates/service-account.yaml.tpl"
   IMAGE_PULL_SECRETS:
     ENABLED: true
     SECRETS:
       - ecr-secret
+  IAM:
+    ENABLED: false
+#    PREFIX: nullplatform-scopes
+#    ROLE:
+#      POLICIES:
+#        - TYPE: arn
+#          VALUE: arn:aws:iam::aws:policy/AmazonS3FullAccess
+#        - TYPE: arn
+#          VALUE: arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+#        - TYPE: inline
+#          VALUE: |
+#            {
+#              "Version": "2012-10-17",
+#              "Statement": [
+#                {
+#                  "Effect": "Allow",
+#                  "Action": [
+#                    "sqs:GetQueueAttributes"
+#                  ],
+#                  "Resource": [
+#                    "arn:aws:sqs:*:*:myapp-*"
+#                  ]
+#                }
+#              ]
+#            }
+#      BOUNDARY_ARN: arn:aws:iam::aws:policy/AmazonS3FullAccess
 #  DEPLOY_STRATEGY: rolling
 #  K8S_MODIFIERS:
 #    global:
