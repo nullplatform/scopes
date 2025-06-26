@@ -1,0 +1,43 @@
+#!/bin/bash
+
+set -euo pipefail
+
+IAM=${IAM-"{}"}
+
+IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
+
+if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
+  echo "No IAM role configuration. Skipping role setup"
+  return
+fi
+
+ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+
+echo "Detaching managed policies..."
+# Use tr to convert tabs/spaces to newlines, then filter out empty lines
+aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[].PolicyArn' --output text | \
+tr '\t' '\n' | while read policy_arn; do
+  if [ ! -z "$policy_arn" ]; then
+    echo "Detaching policy: $policy_arn"
+    aws iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$policy_arn"
+    echo "Detached policy: $policy_arn"
+  fi
+done
+
+echo "Deleting inline policies..."
+# Use tr to convert tabs/spaces to newlines, then filter out empty lines
+aws iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames' --output text | \
+tr '\t' '\n' | while read policy_name; do
+  if [ ! -z "$policy_name" ]; then
+    echo "Deleting inline policy: $policy_name"
+    aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$policy_name"
+    echo "Deleted inline policy: $policy_name"
+  fi
+done
+
+echo "Deleting role..."
+if aws iam delete-role --role-name "$ROLE_NAME"; then
+  echo "Role $ROLE_NAME deleted successfully"
+else
+  echo "Failed to delete role $ROLE_NAME"
+fi
