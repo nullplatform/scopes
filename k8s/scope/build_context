@@ -12,6 +12,8 @@ USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
   .providers["cloud-providers"].networking.application_domain // $default
 ')
 
+REGION=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].account.region // "us-east-1"')
+
 SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
 
@@ -38,11 +40,13 @@ fi
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \
           --arg k8s_namespace "$K8S_NAMESPACE" \
+          --arg region "$REGION" \
           --arg gateway_name "$GATEWAY_NAME" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name}')
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region}')
 
 export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
 export CONTEXT
+export REGION
 
 mkdir -p "$OUTPUT_DIR"
 
