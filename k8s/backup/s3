@@ -1,0 +1,87 @@
+#!/bin/bash
+
+ACTION=""
+FILES=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --action=*)
+      ACTION="${1#*=}"
+      shift
+      ;;
+    --files)
+      shift
+      # Collect all remaining arguments as files
+      while [[ $# -gt 0 && $1 != --* ]]; do
+        FILES+=("$1")
+        shift
+      done
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+BUCKET=$(echo "$MANIFEST_BACKUP" | jq -r .BUCKET)
+PREFIX=$(echo "$MANIFEST_BACKUP" | jq -r .PREFIX)
+
+echo "[INFO] Initializing S3 manifest backup operation - Action: $ACTION | Bucket: $BUCKET | Prefix: $PREFIX | Files: ${#FILES[@]}"
+
+# Now you can iterate over the files
+for file in "${FILES[@]}"; do
+  echo "[DEBUG] Processing manifest file: $file"
+
+  # Extract the path after 'output/' and remove the action folder (apply/delete)
+  # Example: /root/.np/services/k8s/output/1862688057-34121609/apply/secret-1862688057-34121609.yaml
+  # Result: 1862688057-34121609/secret-1862688057-34121609.yaml
+
+  # Get everything after 'output/'
+  relative_path="${file#*/output/}"
+
+  # Remove the action folder (apply or delete) from the path
+  # Split by '/' and reconstruct without the action folder
+  IFS='/' read -ra path_parts <<< "$relative_path"
+
+  # Skip the action folder (second element) and reconstruct the path
+  s3_path="${path_parts[0]}/${path_parts[2]}"
+
+  # Full S3 key with prefix
+  s3_key="$PREFIX/$s3_path"
+
+  # Remove leading slash if present
+  s3_key="${s3_key#/}"
+
+
+  if [[ "$ACTION" == "apply" ]]; then
+    echo "[INFO] Uploading manifest to S3: s3://$BUCKET/$s3_key"
+
+    # Upload to S3
+    if aws s3 cp --region "$REGION" "$file" "s3://$BUCKET/$s3_key"; then
+      echo "[SUCCESS] Manifest upload completed successfully: $file"
+    else
+      echo "[ERROR] Manifest upload failed: $file" >&2
+      exit 1
+    fi
+
+  elif [[ "$ACTION" == "delete" ]]; then
+    echo "[INFO] Removing manifest from S3: s3://$BUCKET/$s3_key"
+
+    # Delete from S3 with error handling
+    aws_output=$(aws s3 rm --region "$REGION" "s3://$BUCKET/$s3_key" 2>&1)
+    aws_exit_code=$?
+
+    if [[ $aws_exit_code -eq 0 ]]; then
+      echo "[SUCCESS] Manifest deletion completed successfully: s3://$BUCKET/$s3_key"
+    elif [[ "$aws_output" == *"NoSuchKey"* ]] || [[ "$aws_output" == *"Not Found"* ]]; then
+      echo "[WARN] Manifest not found in S3, skipping deletion: s3://$BUCKET/$s3_key"
+    else
+      echo "[ERROR] Manifest deletion failed: s3://$BUCKET/$s3_key - $aws_output" >&2
+      exit 1
+    fi
+
+  else
+    echo "[ERROR] Invalid action specified: $ACTION" >&2
+    exit 1
+  fi
+done
