@@ -1,0 +1,46 @@
+#!/bin/bash
+
+MANIFEST_BACKUP=${MANIFEST_BACKUP-"{}"}
+
+BACKUP_ENABLED=$(echo "$MANIFEST_BACKUP" | jq -r .ENABLED)
+TYPE=$(echo "$MANIFEST_BACKUP" | jq -r .TYPE)
+
+if [[ "$BACKUP_ENABLED" == "false" || "$BACKUP_ENABLED" == "null" ]]; then
+  echo "No manifest backup enabled. Skipping manifest backup"
+  return
+fi
+
+
+ACTION=""
+FILES=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --action=*)
+      ACTION="${1#*=}"
+      shift
+      ;;
+    --files)
+      shift
+      # Collect all remaining arguments as files
+      while [[ $# -gt 0 && $1 != --* ]]; do
+        FILES+=("$1")
+        shift
+      done
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+
+case "$TYPE" in
+  s3)
+    source "$SERVICE_PATH/backup/s3" --action="$ACTION" --files "${FILES[@]}"
+    ;;
+  *)
+    echo "Error: Unsupported manifest backup type type '$TYPE'"
+    exit 1
+    ;;
+esac
