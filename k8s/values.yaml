@@ -18,6 +18,11 @@ configuration:
     ENABLED: true
     SECRETS:
       - ecr-secret
+#  MANIFEST_BACKUP:
+#    ENABLED: disabled
+#    TYPE: s3
+#    BUCKET: bucket-name
+#    PREFIX: path-prefix
 #  DEPLOY_STRATEGY: rolling
 #  K8S_MODIFIERS:
 #    global:
