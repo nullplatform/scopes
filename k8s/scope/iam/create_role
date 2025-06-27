@@ -50,39 +50,42 @@ ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r '.account.slug')
 ORGANIZATION_ID=$(echo "$CONTEXT" | jq -r '.account.organization_id')
 NAMESPACE_ID=$(echo "$CONTEXT" | jq -r '.namespace.id')
 NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r '.namespace.slug')
+DIMENSIONS=$(echo "$CONTEXT" | jq '.scope.dimensions')
+
+BASE_TAGS=(
+  "Key=application_id,Value=$APPLICATION_ID"
+  "Key=application,Value=$APPLICATION_SLUG"
+  "Key=scope_id,Value=$SCOPE_ID"
+  "Key=scope,Value=$SCOPE_SLUG"
+  "Key=account_id,Value=$ACCOUNT_ID"
+  "Key=account,Value=$ACCOUNT_SLUG"
+  "Key=organization_id,Value=$ORGANIZATION_ID"
+  "Key=namespace_id,Value=$NAMESPACE_ID"
+  "Key=namespace,Value=$NAMESPACE_SLUG"
+  "Key=nullplatform,Value=true"
+)
+
+if [[ -n "$DIMENSIONS" && "$DIMENSIONS" != "null" ]]; then
+  while IFS= read -r key; do
+    value=$(echo "$DIMENSIONS" | jq -r --arg k "$key" '.[$k]')
+    if [[ "$value" != "null" && -n "$value" ]]; then
+      BASE_TAGS+=("Key=$key,Value=$value")
+    fi
+  done < <(echo "$DIMENSIONS" | jq -r 'keys[]')
+fi
 
 if [[ -n "$BOUNDARY_ARN" && "$BOUNDARY_ARN" != "null" ]]; then
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --permissions-boundary "$BOUNDARY_ARN" \
-    --tags \
-      Key=application_id,Value="$APPLICATION_ID" \
-      Key=application,Value="$APPLICATION_SLUG" \
-      Key=scope_id,Value="$SCOPE_ID" \
-      Key=scope,Value="$SCOPE_SLUG" \
-      Key=account_id,Value="$ACCOUNT_ID" \
-      Key=account,Value="$ACCOUNT_SLUG" \
-      Key=organization_id,Value="$ORGANIZATION_ID" \
-      Key=namespace_id,Value="$NAMESPACE_ID" \
-      Key=namespace,Value="$NAMESPACE_SLUG" \
-      Key=nullplatform,Value=true \
+    --tags "${BASE_TAGS[@]}" \
     --no-cli-pager
 else
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
-    --tags \
-      Key=application_id,Value="$APPLICATION_ID" \
-      Key=application,Value="$APPLICATION_SLUG" \
-      Key=scope_id,Value="$SCOPE_ID" \
-      Key=scope,Value="$SCOPE_SLUG" \
-      Key=account_id,Value="$ACCOUNT_ID" \
-      Key=account,Value="$ACCOUNT_SLUG" \
-      Key=organization_id,Value="$ORGANIZATION_ID" \
-      Key=namespace_id,Value="$NAMESPACE_ID" \
-      Key=namespace,Value="$NAMESPACE_SLUG" \
-      Key=nullplatform,Value=true \
+    --tags "${BASE_TAGS[@]}" \
     --no-cli-pager
 fi
 
