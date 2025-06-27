@@ -80,13 +80,13 @@ if [[ -n "$BOUNDARY_ARN" && "$BOUNDARY_ARN" != "null" ]]; then
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --permissions-boundary "$BOUNDARY_ARN" \
     --tags "${BASE_TAGS[@]}" \
-    --no-cli-pager
+    --no-paginate
 else
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --tags "${BASE_TAGS[@]}" \
-    --no-cli-pager
+    --no-paginate
 fi
 
 rm "$TRUST_POLICY_PATH"

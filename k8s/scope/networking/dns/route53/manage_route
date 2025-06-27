@@ -14,7 +14,7 @@ read -r ELB_DNS_NAME ELB_HOSTED_ZONE_ID <<< $(aws elbv2 describe-load-balancers 
     --region us-east-1 \
     --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' \
     --output text \
-    --no-cli-pager)
+    --no-paginate)
 
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     HOSTED_ZONES=("$HOSTED_PUBLIC_ZONE_ID")
@@ -28,7 +28,7 @@ for ZONE_ID in "${HOSTED_ZONES[@]}"; do
     aws route53 change-resource-record-sets \
         --hosted-zone-id "$ZONE_ID" \
         --region us-east-1 \
-        --no-cli-pager \
+        --no-paginate \
         --change-batch "{
             \"Changes\": [
                 {
