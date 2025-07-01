@@ -15,12 +15,8 @@
     "schema": {
       "type": "object",
       "required": [
-        "scope_id"
       ],
       "properties": {
-        "scope_id": {
-          "type": "string"
-        }
       }
     },
     "values": {}
