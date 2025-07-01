@@ -1,0 +1,6 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: restart pods
+    type: script
+    file: "$SERVICE_PATH/scope/restart_pods"
