@@ -12,6 +12,7 @@ if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
 fi
 
 ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+ROLE_PATH="/nullplatform/custom-scopes/"
 NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
 OIDC_PROVIDER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -77,16 +78,18 @@ fi
 if [[ -n "$BOUNDARY_ARN" && "$BOUNDARY_ARN" != "null" ]]; then
   aws iam create-role \
     --role-name "$ROLE_NAME" \
+    --path "$ROLE_PATH" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --permissions-boundary "$BOUNDARY_ARN" \
     --tags "${BASE_TAGS[@]}" \
-    --no-cli-pager
+    --no-paginate
 else
   aws iam create-role \
     --role-name "$ROLE_NAME" \
+    --path "$ROLE_PATH" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --tags "${BASE_TAGS[@]}" \
-    --no-cli-pager
+    --no-paginate
 fi
 
 rm "$TRUST_POLICY_PATH"
