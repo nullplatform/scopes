@@ -2,5 +2,3 @@
 
 export EXTERNAL_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.external_id // empty')
 export PARAMETER_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameter_id // empty')
-export VAULT_ADDR="http://localhost:8200"
-export VAULT_TOKEN="myroot"
