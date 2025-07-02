@@ -40,13 +40,22 @@ fi
 K8S_MODIFIERS="${K8S_MODIFIERS:-{}}"
 K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
 
+ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
+
+if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.public_name // $default')
+else
+    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.private_name // $default')
+fi
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \
           --arg k8s_namespace "$K8S_NAMESPACE" \
           --arg region "$REGION" \
           --arg gateway_name "$GATEWAY_NAME" \
+          --arg alb_name "$ALB_NAME" \
           --argjson modifiers "$K8S_MODIFIERS" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers}')
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name}')
 
 export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
 export CONTEXT

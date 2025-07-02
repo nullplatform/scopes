@@ -2,14 +2,6 @@
 
 ACTION=""
 
-ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
-
-if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
-    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.public_name // $default')
-else
-    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.private_name // $default')
-fi
-
 for arg in "$@"; do
   case $arg in
     --action=*) ACTION="${arg#*=}" ;;
