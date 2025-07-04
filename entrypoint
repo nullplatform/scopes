@@ -57,6 +57,8 @@ source "$WORKING_DIRECTORY/utils"
 
 if [[ "$NOTIFICATION_ACTION" == "log:read" ]]; then
   source "$WORKING_DIRECTORY/service/log/entrypoint"
+elif [[ "$NOTIFICATION_ACTION" =~ ^parameter: ]]; then
+  source "$WORKING_DIRECTORY/service/parameter/entrypoint"
 elif [[ "$NOTIFICATION_ACTION" =~ ^metric: ]]; then
   source "$WORKING_DIRECTORY/service/metric/entrypoint"
 elif [[ "$NOTIFICATION_ACTION" == "instance:data" ]]; then
