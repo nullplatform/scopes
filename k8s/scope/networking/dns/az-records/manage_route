@@ -8,7 +8,7 @@ get_azure_token() {
         -d "client_secret=${AZURE_CLIENT_SECRET}" \
         -d "scope=https://management.azure.com/.default" \
         -d "grant_type=client_credentials")
-    
+
     echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4
 }
 
@@ -43,6 +43,7 @@ fi
 
 echo "Gateway IP: $GATEWAY_IP"
 
+SCOPE_SUBDOMAIN="${SCOPE_SUBDOMAIN:-}"
 if [ -z "$SCOPE_SUBDOMAIN" ]; then
     SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
 fi
@@ -52,13 +53,13 @@ echo "Managing DNS record in zone: $HOSTED_ZONE_NAME"
 
 if [ "$ACTION" = "CREATE" ]; then
     echo "Creating record for: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
-    
+
     # Get access token
     ACCESS_TOKEN=$(get_azure_token)
-    
+
     # Create or update A record
     RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
-    
+
     RECORD_BODY=$(cat <<EOF
 {
   "properties": {
