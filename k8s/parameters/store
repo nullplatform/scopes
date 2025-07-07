@@ -3,10 +3,13 @@
 export PARAMETER_VALUE=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.value // empty')
 export EXTERNAL_ID=$(uuidgen 2>/dev/null || echo "$(openssl rand -hex 16 | sed 's/\(.{8}\)\(.{4}\)\(.{4}\)\(.{4}\)\(.{12}\)/\1-\2-\3-\4-\5/')")
 
-curl -s -X POST \
+if ! curl -s -X POST \
     -H "X-Vault-Token: $VAULT_TOKEN" \
     "$VAULT_ADDR/v1/secret/data/parameters/$EXTERNAL_ID" \
-    -d "{\"data\":{\"parameter_id\":$PARAMETER_ID,\"value\":$(echo "$PARAMETER_VALUE" | jq -R .),\"stored_at\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\"external_id\":\"$EXTERNAL_ID\"}}" >/dev/null
+    -d "{\"data\":{\"parameter_id\":$PARAMETER_ID,\"value\":$(echo "$PARAMETER_VALUE" | jq -R .),\"stored_at\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\"external_id\":\"$EXTERNAL_ID\"}}" >/dev/null; then
+    echo "Error: Failed to store parameter in Vault at $VAULT_ADDR" >&2
+    exit 1
+fi
 
 echo '{
   "external_id": "'$EXTERNAL_ID'",
