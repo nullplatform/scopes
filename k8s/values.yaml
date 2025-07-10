@@ -47,6 +47,11 @@ configuration:
 #              ]
 #            }
 #      BOUNDARY_ARN: arn:aws:iam::aws:policy/AmazonS3FullAccess
+  MANIFEST_BACKUP:
+    ENABLED: false
+#    TYPE: s3
+#    BUCKET: bucket-name
+#    PREFIX: path-prefix
 #  DEPLOY_STRATEGY: rolling
 #  K8S_MODIFIERS:
 #    global:
