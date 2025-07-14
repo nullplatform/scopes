@@ -80,7 +80,7 @@ gomplate --file "$SERVICE_SPEC_PATH.tpl" --out "$SERVICE_SPEC_PATH"
 start_spinner "Creating the service specification in the platform."
 {
   SERVICE_SPEC_BODY=$(cat "$SERVICE_SPEC_PATH")
-  SERVICE_SPEC=$(np service-specification create --body "$SERVICE_SPEC_BODY" --format json)
+  SERVICE_SPEC=$(np service specification create --body "$SERVICE_SPEC_BODY" --format json)
   SERVICE_SPECIFICATION_ID=$(echo "$SERVICE_SPEC" | jq -r .id)
   SERVICE_SLUG=$(echo "$SERVICE_SPEC" | jq -r .slug)
 } || stop_spinner_error "Failed to create or parse the service specification."
@@ -102,7 +102,7 @@ find "$ACTION_DIR" -type f -name "*.tpl" | while read -r TEMPLATE_FILE; do
 
     start_spinner "Registering action specification: ${REL_PATH%.json.tpl}."
     {
-      ACTION_SPEC=$(np service-specification action-specification create \
+      ACTION_SPEC=$(np service specification action specification create \
         --serviceSpecificationId "$SERVICE_SPECIFICATION_ID" \
         --body "$ACTION_SPEC_BODY" \
         --format json)
