@@ -1,4 +1,4 @@
-{{- if eq .scope.capabilities.scaling_type "auto" }}
+{{if or (eq .scope.capabilities.scaling_type "autoscaling") (eq .scope.capabilities.scaling_type "auto")}}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
