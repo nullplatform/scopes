@@ -1,0 +1,199 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Constants
+DEFAULT_CONTAINER_NAME="application"
+DEFAULT_LIMIT=100
+MIN_LOGS_PER_POD=10
+
+# Input Parameters
+NAMESPACE=""
+APPLICATION_ID=""
+SCOPE_ID=""
+DEPLOYMENT_ID=""
+LIMIT=$DEFAULT_LIMIT
+NEXT_PAGE_TOKEN=""
+FILTER_PATTERN=""
+START_TIME=""
+
+usage() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+OPTIONS:
+    -n, --namespace NAMESPACE        Kubernetes namespace
+    -a, --application-id ID          Application ID
+    -s, --scope-id ID                Scope ID
+    -d, --deployment-id ID           Deployment ID
+    -l, --limit NUMBER               Maximum number of log entries (default: $DEFAULT_LIMIT)
+    -t, --next-page-token TOKEN      Token for pagination
+    -f, --filter PATTERN             Filter pattern
+    --start-time TIME                Start time for logs (RFC3339 format, e.g., 2024-01-01T12:00:00Z)
+    -h, --help                       Show this help message
+
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--namespace) NAMESPACE="$2"; shift 2 ;;
+            -a|--application-id) APPLICATION_ID="$2"; shift 2 ;;
+            -s|--scope-id) SCOPE_ID="$2"; shift 2 ;;
+            -d|--deployment-id) DEPLOYMENT_ID="$2"; shift 2 ;;
+            -l|--limit) LIMIT="$2"; shift 2 ;;
+            -t|--next-page-token) NEXT_PAGE_TOKEN="$2"; shift 2 ;;
+            -f|--filter) FILTER_PATTERN="$2"; shift 2 ;;
+            --start-time) START_TIME="$2"; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+        esac
+    done
+}
+
+build_label_selector() {
+    local labels="nullplatform=true"
+    [[ -n "$APPLICATION_ID" ]] && labels="$labels,application_id=$APPLICATION_ID"
+    [[ -n "$SCOPE_ID" ]] && labels="$labels,scope_id=$SCOPE_ID"
+    [[ -n "$DEPLOYMENT_ID" ]] && labels="$labels,deployment_id=$DEPLOYMENT_ID"
+    echo "$labels"
+}
+
+decode_token() {
+    local token="$1"
+    [[ -z "$token" ]] && echo "{}" && return
+    echo "$token" | base64 -d 2>/dev/null || echo "{}"
+}
+
+encode_token() {
+    local data="$1"
+    [[ "$data" == "{}" || -z "$data" ]] && echo "" && return
+    echo "$data" | base64 | tr -d '\n'
+}
+
+get_last_jobs() {
+    local label_selector=$(build_label_selector)
+
+    kubectl get jobs -n "$NAMESPACE" --sort-by=.metadata.creationTimestamp -l "$label_selector" -o json | jq -r \
+      --arg app "$APPLICATION_ID" \
+      --arg scope "$SCOPE_ID" \
+      --arg deploy "$DEPLOYMENT_ID" '
+      .items[]
+      | .metadata.name' | tail -n 10
+}
+
+get_pod_for_job() {
+    local job="$1"
+    kubectl get pods -n "$NAMESPACE" \
+        -l job-name="$job" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+}
+
+get_pod_uid() {
+    local pod="$1"
+    kubectl get pod "$pod" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo ""
+}
+
+calculate_pod_limit() {
+    local total="$1"; local count="$2"
+    [[ $count -eq 0 ]] && echo $MIN_LOGS_PER_POD && return
+    local pod_limit=$((total / count))
+    (( pod_limit < MIN_LOGS_PER_POD )) && pod_limit=$MIN_LOGS_PER_POD
+    echo $pod_limit
+}
+
+get_pod_logs() {
+    local pod="$1" since="$2" pod_limit="$3"
+    local args="-n $NAMESPACE logs $pod -c $DEFAULT_CONTAINER_NAME --timestamps=true"
+    [[ -n "$since" ]] && args="$args --since-time=$since"
+    local bytes=$((pod_limit * 1024))
+    args="$args --limit-bytes=$bytes"
+    kubectl $args 2>/dev/null || echo ""
+}
+
+process_log_lines() {
+    local logs="$1" filter="$2" pod_name="$3" pod_id="$4"
+    local output="" last_ts=""
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local ts=$(echo "$line" | cut -d' ' -f1)
+        local msg=$(echo "$line" | cut -d' ' -f2-)
+        [[ -n "$filter" && "$line" != *"$filter"* ]] && continue
+        local entry=$(jq -n --arg msg "$msg" --arg dt "$ts" --arg pod "$pod_name" --arg podId "$pod_id" \
+            '{message: $msg, datetime: $dt, pod: {name: $pod, id: $podId}}')
+        output="${output}${output:+,}$entry"
+        last_ts="$ts"
+    done <<< "$logs"
+    echo "{\"logs\": [${output}], \"last_timestamp\": \"${last_ts}\"}"
+}
+
+determine_since_time() {
+    local pod_id="$1" last_map="$2"
+    local ts=$(echo "$last_map" | jq -r --arg id "$pod_id" '.[$id] // empty')
+    [[ -n "$ts" && "$ts" != "null" ]] && echo "$ts" && return
+    [[ -n "$START_TIME" ]] && echo "$START_TIME" && return
+    echo ""
+}
+
+sort_and_limit_logs() {
+    local logs_json="$1"
+    echo "$logs_json" | jq --argjson limit "$LIMIT" 'sort_by(.datetime) | if length > $limit then .[:$limit] else . end'
+}
+
+main() {
+    parse_args "$@"
+
+    for cmd in kubectl jq base64; do
+        command -v "$cmd" &>/dev/null || { echo "Missing required command: $cmd" >&2; exit 1; }
+    done
+
+
+    local jobs=($(get_last_jobs))
+    [[ ${#jobs[@]} -eq 0 ]] && jq -n '{results: [], next_page_token: ""}' && exit 0
+
+    local last_read_times=$(decode_token "$NEXT_PAGE_TOKEN")
+    local pod_names=()
+    local pod_ids=()
+    local all_logs="[]"
+
+    for job in "${jobs[@]}"; do
+        local pod=$(get_pod_for_job "$job")
+        [[ -z "$pod" ]] && continue
+        local pod_id=$(get_pod_uid "$pod")
+        [[ -z "$pod_id" ]] && continue
+        pod_names+=("$pod")
+        pod_ids+=("$pod_id")
+    done
+
+    local pod_count=${#pod_names[@]}
+    [[ $pod_count -eq 0 ]] && jq -n '{results: [], next_page_token: ""}' && exit 0
+
+    local pod_limit=$(calculate_pod_limit "$LIMIT" "$pod_count")
+
+    for i in "${!pod_names[@]}"; do
+        local pod_name="${pod_names[$i]}"
+        local pod_id="${pod_ids[$i]}"
+        local since=$(determine_since_time "$pod_id" "$last_read_times")
+        local logs=$(get_pod_logs "$pod_name" "$since" "$pod_limit")
+        [[ -z "$logs" ]] && continue
+        local parsed=$(process_log_lines "$logs" "$FILTER_PATTERN" "$pod_name" "$pod_id")
+        local log_chunk=$(echo "$parsed" | jq '.logs')
+        [[ "$log_chunk" != "[]" ]] && all_logs=$(echo "$all_logs" | jq --argjson new "$log_chunk" '. + $new')
+    done
+
+    local sorted=$(sort_and_limit_logs "$all_logs" "$LIMIT")
+    local token_data="{}"
+    local count=$(echo "$sorted" | jq 'length')
+
+    for ((i=0; i<$count; i++)); do
+        local id=$(echo "$sorted" | jq -r ".[$i].pod.id")
+        local dt=$(echo "$sorted" | jq -r ".[$i].datetime")
+        token_data=$(echo "$token_data" | jq --arg id "$id" --arg dt "$dt" '.[$id] = $dt')
+    done
+
+    local next_token=$(encode_token "$token_data")
+    jq -n --argjson results "$sorted" --arg token "$next_token" '{results: $results, next_page_token: $token}'
+}
+
+main "$@"

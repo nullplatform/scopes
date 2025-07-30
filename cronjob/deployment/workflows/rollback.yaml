@@ -1,0 +1,27 @@
+steps:
+  - name: update blue deployment
+    type: script
+    action: replace
+    file: "$OVERRIDES_PATH/deployment/build_blue_deployment"
+    output:
+      - name: DEPLOYMENT_PATH
+        type: file
+        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: SECRET_PATH
+        type: file
+        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: create blue deployment
+    post:
+      name: wait deployment active
+      action: skip
+  - name: build deployment
+    type: script
+    action: replace
+    file: "$OVERRIDES_PATH/deployment/build_deployment"
+    output:
+      - name: DEPLOYMENT_PATH
+        type: file
+        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: SECRET_PATH
+        type: file
+        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"

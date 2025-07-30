@@ -13,7 +13,7 @@ export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
 # Parse the JSON properly - remove the extra quotes
 export CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
 
-export SCOPE_ID=$(echo "$CONTEXT" | jq -r '.parameters.scope_id // .tags.scope_id')
+export SCOPE_ID=$(echo "$CONTEXT" | jq -r '.parameters.scope_id // .tags.scope_id // .arguments.scope_id')
 
 # If the action has no scope_id update the original context so we can use the np service workflow build-context command
 export CONTEXT=$(echo "$CONTEXT" | jq --arg scope_id "$SCOPE_ID" '.parameters.scope_id = $scope_id')

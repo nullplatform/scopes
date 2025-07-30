@@ -1,0 +1,25 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: route traffic
+    action: skip
+  - name: create deployment
+    type: script
+    action: replace
+    file: "$OVERRIDES_PATH/deployment/build_deployment"
+    output:
+      - name: DEPLOYMENT_PATH
+        type: file
+        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: SECRET_PATH
+        type: file
+        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: apply
+    type: script
+    file: "$SERVICE_PATH/apply_templates"
+    configuration:
+      ACTION: apply
+      DRY_RUN: false
+    post:
+      name: wait deployment active
+      action: skip

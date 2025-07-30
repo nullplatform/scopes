@@ -47,6 +47,24 @@ get_metric_config() {
     "system.used_memory_kb")
       echo "gauge kilobytes"
       ;;
+    "cronjob.execution_count")
+      echo "gauge count"
+      ;;
+    "cronjob.success_count")
+      echo "gauge count"
+      ;;
+    "cronjob.failure_count")
+      echo "gauge count"
+      ;;
+    "cronjob.last_execution_start")
+      echo "gauge timestamp"
+      ;;
+    "cronjob.cpu_usage")
+      echo "gauge percent"
+      ;;
+    "cronjob.memory_usage")
+      echo "gauge bytes"
+      ;;
     *)
       echo "gauge unknown"
       ;;
@@ -122,6 +140,21 @@ build_query() {
       local base_filters="$filters"
       local ok_filters="${filters},quality=\"OK (2XX, 3XX)\""
       echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by (scope) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) by (scope) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by (scope) * 60 )) *100"
+      ;;
+    "cronjob.execution_count")
+      echo "sum by (scope_id) (label_replace(increase(kube_job_status_succeeded{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]) +increase(kube_job_status_failed{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]),\"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
+      ;;
+    "cronjob.success_count")
+      echo "sum by (scope_id) (label_replace(increase(kube_job_status_succeeded{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]), \"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
+      ;;
+    "cronjob.failure_count")
+      echo "sum by (scope_id) (label_replace(increase(kube_job_status_failed{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]), \"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
+      ;;
+    "cronjob.cpu_usage")
+      echo "avg(avg_over_time(container_cpu_usage_seconds_total{pod=~\"job-${SCOPE_ID}-.*\", container!=\"\", container!=\"POD\"}[$interval])) * 100"
+      ;;
+    "cronjob.memory_usage")
+      echo "avg by (scope_id) (label_replace(container_memory_usage_bytes{pod=~\"job-${SCOPE_ID}-.*\", container!=\"\", container!=\"POD\"} / on(pod, container) kube_pod_container_resource_limits{resource=\"memory\", unit=\"byte\", pod=~\"job-${SCOPE_ID}-.*\"}, \"scope_id\", \"\$1\", \"pod\", \"job-([0-9]+)-.*\")) * 100"
       ;;
     *)
       echo "up{$filters}"  # Default query if metric not recognized
