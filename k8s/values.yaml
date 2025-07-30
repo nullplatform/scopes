@@ -74,6 +74,15 @@ configuration:
 #        datadog-annotation: value
 #      labels:
 #        cost-center: payments
+#      tolerations:
+#        - key: "my-taint"
+#          operator: "Equal"
+#          value: "my-value"
+#          effect: "NoSchedule"
+#        - key: "my-taint2"
+#          operator: "Equal"
+#          value: "my-value2"
+#          effect: "NoSchedule"
 #    secret:
 #      labels:
 #        cost-center: payments
