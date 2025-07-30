@@ -1,0 +1,2 @@
+configuration:
+  DEPLOYMENT_TEMPLATE: "$OVERRIDES_PATH/deployment/templates/deployment.yaml.tpl"

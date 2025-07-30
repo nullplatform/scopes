@@ -1,17 +1,31 @@
 #!/bin/bash
 
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
+K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
+
+NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
+
+PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
+
+PROM_URL=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.server.url // empty')
+
+if [[ -z "$PROM_URL" ]]; then
+  echo "There is no prometheus provider configured. Please configure prometheus in Platform settings and try again." >&2
+  exit 1
+fi
+
 while read -r line; do
   eval "$line"
-done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] | 
-  if (.value | type) == "array" then 
-    "export \(.key | ascii_upcase)=\(.value | join(","))" 
-  else 
-    "export \(.key | ascii_upcase)=\(.value)" 
+done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
+  if (.value | type) == "array" then
+    "export \(.key | ascii_upcase)=\(.value | join(","))"
+  else
+    "export \(.key | ascii_upcase)=\(.value)"
   end')
-
 if [[ -n "$METRIC" ]]; then
   export METRIC_NAME="$METRIC"
 fi
 
-export PROM_URL="http://prometheus-server.default.svc.cluster.local:80"
-export K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
+export PROM_URL
+export K8S_NAMESPACE
+export SCOPE_ID

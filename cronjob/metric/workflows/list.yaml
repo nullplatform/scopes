@@ -1,0 +1,4 @@
+steps:
+  - name: metrics
+    type: script
+    file: "$OVERRIDES_PATH/metric/list"

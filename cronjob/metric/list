@@ -1,0 +1,41 @@
+#!/bin/bash
+
+echo '{
+  "results": [
+    {
+      "name": "cronjob.execution_count",
+      "title": "Execution count",
+      "unit": "count",
+      "available_filters": ["scope_id", "application_id", "deployment_id"],
+      "available_group_by": []
+    },
+    {
+      "name": "cronjob.success_count",
+      "title": "Successful executions",
+      "unit": "count",
+      "available_filters": ["scope_id", "application_id", "deployment_id"],
+      "available_group_by": []
+    },
+    {
+      "name": "cronjob.failure_count",
+      "title": "Failed executions",
+      "unit": "count",
+      "available_filters": ["scope_id", "application_id", "deployment_id"],
+      "available_group_by": []
+    },
+    {
+      "name": "cronjob.cpu_usage",
+      "title": "CPU usage",
+      "unit": "%",
+      "available_filters": ["scope_id", "application_id", "deployment_id"],
+      "available_group_by": ["pod"]
+    },
+    {
+      "name": "cronjob.memory_usage",
+      "title": "Memory usage",
+      "unit": "%",
+      "available_filters": ["scope_id", "application_id", "deployment_id"],
+      "available_group_by": ["pod"]
+    }
+  ]
+}'

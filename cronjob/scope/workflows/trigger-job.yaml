@@ -1,0 +1,7 @@
+provider_categories:
+  - container-orchestration
+  - cloud-providers
+steps:
+  - name: trigger
+    type: script
+    file: "$OVERRIDES_PATH/scope/trigger"

@@ -1,0 +1,5 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: networking
+    action: skip
