@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Default values
-DEFAULT_CONTAINER_NAME="http"
+DEFAULT_CONTAINER_NAME="application"
 MIN_LOGS_PER_POD=10
 DEFAULT_LIMIT=100
 
