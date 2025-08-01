@@ -17,6 +17,9 @@ steps:
         type: environment
       - name: BLUE_DEPLOYMENT_ID
         type: environment
+  - name: delete ingress finalizer
+    type: script
+    file: "$SERVICE_PATH/deployment/delete_ingress_finalizer"
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/scope/networking/gateway/build_gateway"
@@ -26,12 +29,6 @@ steps:
       - name: INGRESS_FILE
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-  - name: apply traffic
-    type: script
-    file: "$SERVICE_PATH/apply_templates"
-    configuration:
-      ACTION: apply
-      DRY_RUN: false
   - name: build deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"

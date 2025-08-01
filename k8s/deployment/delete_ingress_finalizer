@@ -1,0 +1,5 @@
+#!/bin/bash
+
+INGRESS_NAME=$(echo "$CONTEXT" | jq -r '"k-8-s-" + .scope.slug + "-" + (.scope.id | tostring) + "-" + .ingress_visibility')
+
+kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge
