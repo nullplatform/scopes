@@ -34,17 +34,21 @@ fi
 IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-"{}"}"
 IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
 
+TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:latest"}
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
           --arg blue_replicas "$BLUE_REPLICAS" \
           --arg green_replicas "$GREEN_REPLICAS" \
           --arg total_replicas "$REPLICAS" \
+          --arg traffic_image "$TRAFFIC_CONTAINER_IMAGE" \
           --argjson pull_secrets "$IMAGE_PULL_SECRETS" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
                 total_replicas: $total_replicas,
-                pull_secrets: $pull_secrets
+                pull_secrets: $pull_secrets,
+                traffic_image: $traffic_image
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
