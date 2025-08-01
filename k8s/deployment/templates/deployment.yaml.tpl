@@ -6,6 +6,30 @@ metadata:
   labels:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
+    nullplatform: "true"
+    account: "{{ .account.slug }}"
+    account_id: "{{ .account.id }}"
+    namespace: "{{ .namespace.slug }}"
+    namespace_id: "{{ .namespace.id }}"
+    application: "{{ .application.slug }}"
+    application_id: "{{ .application.id }}"
+    scope: "{{ .scope.slug }}"
+    scope_id: "{{ .scope.id }}"
+    deployment_id: "{{ .deployment.id }}"
+ {{- $global := index .k8s_modifiers "global" }}
+    {{- if $global }}
+      {{- $labels := index $global "labels" }}
+      {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+      {{- end }}
+    {{- end }}
+    {{- $deployment := index .k8s_modifiers "deployment" }}
+    {{- if $deployment }}
+      {{- $labels := index $deployment "labels" }}
+      {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+      {{- end }}
+    {{- end }}
 spec:
   replicas: {{ .replicas }}
   selector:
