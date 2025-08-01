@@ -37,7 +37,7 @@ else
     export GATEWAY_NAME="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
 fi
 
-K8S_MODIFIERS="${K8S_MODIFIERS:-{}}"
+K8S_MODIFIERS="${K8S_MODIFIERS:-"{}"}"
 K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
 
 ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
