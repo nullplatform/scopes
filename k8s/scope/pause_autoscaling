@@ -1,0 +1,63 @@
+#!/bin/bash
+
+set -euo pipefail
+
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+SCOPE_ID=$(echo "$CONTEXT" | jq .scope.id -r)
+
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+  .providers["container-orchestration"].cluster.namespace // $default
+')
+
+HPA_NAME="hpa-d-$SCOPE_ID-$DEPLOYMENT_ID"
+
+if ! kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    echo "HPA $HPA_NAME not found in namespace $K8S_NAMESPACE"
+    exit 1
+fi
+
+CURRENT_CONFIG=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o json)
+CURRENT_MIN=$(echo "$CURRENT_CONFIG" | jq -r '.spec.minReplicas')
+CURRENT_MAX=$(echo "$CURRENT_CONFIG" | jq -r '.spec.maxReplicas')
+
+echo "Current HPA configuration:"
+echo "  Min replicas: $CURRENT_MIN"
+echo "  Max replicas: $CURRENT_MAX"
+
+DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
+CURRENT_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
+
+echo "Current deployment replicas: $CURRENT_REPLICAS"
+echo "Pausing autoscaling at $CURRENT_REPLICAS replicas..."
+
+PATCH=$(jq -n \
+  --arg originalMin "$CURRENT_MIN" \
+  --arg originalMax "$CURRENT_MAX" \
+  --arg pausedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson currentReplicas "$CURRENT_REPLICAS" \
+  '{
+    metadata: {
+      annotations: {
+        "nullplatform.com/autoscaling-paused": (
+          {
+            originalMinReplicas: ($originalMin | tonumber),
+            originalMaxReplicas: ($originalMax | tonumber),
+            pausedAt: $pausedAt
+          } | tostring
+        )
+      }
+    },
+    spec: {
+      minReplicas: $currentReplicas,
+      maxReplicas: $currentReplicas
+    }
+  }')
+
+kubectl patch hpa "$HPA_NAME" -n "$K8S_NAMESPACE" --type='merge' -p "$PATCH"
+
+echo "Autoscaling paused successfully"
+echo "  HPA: $HPA_NAME"
+echo "  Namespace: $K8S_NAMESPACE"
+echo "  Fixed replicas: $CURRENT_REPLICAS"
+echo ""
+echo "To resume autoscaling, use the resume-autoscaling action or manually patch the HPA."
