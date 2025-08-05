@@ -14,5 +14,6 @@
   "annotations": {
     "show_on": ["performance"],
     "runs_over": "scope"
-  }
+  },
+  "enabled_when": ".service.attributes.scaling_type == \"auto\""
 }
