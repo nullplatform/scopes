@@ -2,4 +2,8 @@
 
 INGRESS_NAME=$(echo "$CONTEXT" | jq -r '"k-8-s-" + .scope.slug + "-" + (.scope.id | tostring) + "-" + .ingress_visibility')
 
-kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge
+# If the scope uses ingress, remove any finalizers attached to it
+if kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" &>/dev/null; then
+  kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge
+fi
+# Do nothing if the scope does not use ingress (e.x: uses http route or has no network component)
