@@ -64,3 +64,15 @@ spec:
                 name: response-404
                 port:
                   name: use-annotation
+{{- range .scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: response-404
+                port:
+                  name: use-annotation
+{{- end }}
