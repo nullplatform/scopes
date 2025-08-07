@@ -1,0 +1,116 @@
+#!/bin/bash
+
+set -euo pipefail
+
+echo "=== SET DESIRED INSTANCE COUNT ==="
+
+DESIRED_INSTANCES="${ACTION_PARAMETERS_DESIRED_INSTANCES:-}"
+
+if [[ -z "$DESIRED_INSTANCES" ]]; then
+    echo "ERROR: desired_instances parameter not found"
+    echo "Expected ACTION_PARAMETERS_DESIRED_INSTANCES environment variable"
+    exit 1
+fi
+
+echo "Desired instances: $DESIRED_INSTANCES"
+
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+
+SCOPE_ID=$(echo "$CONTEXT" | jq .scope.id -r)
+
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+  .providers["container-orchestration"].cluster.namespace // $default
+')
+
+DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
+
+HPA_NAME="hpa-d-$SCOPE_ID-$DEPLOYMENT_ID"
+
+echo "Deployment: $DEPLOYMENT_NAME"
+echo "Namespace: $K8S_NAMESPACE"
+
+if ! kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    echo "ERROR: Deployment $DEPLOYMENT_NAME not found in namespace $K8S_NAMESPACE"
+    exit 1
+fi
+
+CURRENT_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
+echo "Current replicas: $CURRENT_REPLICAS"
+
+HPA_EXISTS=false
+HPA_PAUSED=false
+if kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    HPA_EXISTS=true
+    echo "HPA found: $HPA_NAME"
+    
+    PAUSED_ANNOTATION=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.annotations.nullplatform\.com/autoscaling-paused}' 2>/dev/null || echo "")
+    if [[ -n "$PAUSED_ANNOTATION" && "$PAUSED_ANNOTATION" != "null" ]]; then
+        HPA_PAUSED=true
+        echo "HPA is currently PAUSED"
+    else
+        echo "HPA is currently ACTIVE"
+    fi
+else
+    echo "No HPA found for this deployment"
+fi
+
+echo ""
+
+if [[ "$HPA_EXISTS" == "true" && "$HPA_PAUSED" == "false" ]]; then
+    echo "=== UPDATING HPA FOR ACTIVE AUTOSCALING ==="
+    
+    HPA_MIN=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.minReplicas}')
+    HPA_MAX=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.maxReplicas}')
+    
+    echo "Current HPA range: $HPA_MIN - $HPA_MAX replicas"
+    echo "Setting desired instances to $DESIRED_INSTANCES by updating HPA range"
+    
+    # Strategy: Set both min and max to desired count to force that exact replica count
+    # This effectively "pins" the deployment to the desired instance count
+    PATCH=$(jq -n \
+        --argjson desired "$DESIRED_INSTANCES" \
+        '{
+          spec: {
+            minReplicas: $desired,
+            maxReplicas: $desired
+          }
+        }')
+    
+    kubectl patch hpa "$HPA_NAME" -n "$K8S_NAMESPACE" --type='merge' -p "$PATCH"
+    echo "HPA updated: min=$DESIRED_INSTANCES, max=$DESIRED_INSTANCES"
+    
+elif [[ "$HPA_EXISTS" == "true" && "$HPA_PAUSED" == "true" ]]; then
+    # HPA is paused - just update deployment replicas
+    echo "=== UPDATING DEPLOYMENT (HPA PAUSED) ==="
+    
+    kubectl scale deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$DESIRED_INSTANCES"
+    echo "Deployment scaled to $DESIRED_INSTANCES replicas"
+    
+else
+    # No HPA or fixed scaling - just update deployment replicas
+    echo "=== UPDATING DEPLOYMENT (NO HPA) ==="
+    
+    kubectl scale deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$DESIRED_INSTANCES"
+    echo "Deployment scaled to $DESIRED_INSTANCES replicas"
+fi
+
+echo ""
+echo "Waiting for deployment rollout to complete..."
+kubectl rollout status deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --timeout=300s
+
+echo ""
+echo "=== FINAL STATUS ==="
+FINAL_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
+READY_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.readyReplicas}')
+
+echo "Deployment replicas: $FINAL_REPLICAS"
+echo "Ready replicas: ${READY_REPLICAS:-0}"
+
+if [[ "$HPA_EXISTS" == "true" ]]; then
+    HPA_MIN=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.minReplicas}')
+    HPA_MAX=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.maxReplicas}')
+    echo "HPA range: $HPA_MIN - $HPA_MAX replicas"
+fi
+
+echo ""
+echo "Instance count successfully set to $DESIRED_INSTANCES"

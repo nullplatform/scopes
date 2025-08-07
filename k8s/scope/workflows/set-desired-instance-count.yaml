@@ -1,0 +1,6 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: set desired instance count
+    type: script
+    file: "$SERVICE_PATH/scope/set_desired_instance_count"
