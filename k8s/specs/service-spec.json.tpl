@@ -185,17 +185,44 @@
                            "scope":"#/properties/health_check/properties/enabled"
                         },
                         {
-                           "rule":{
-                              "effect":"SHOW",
-                              "condition":{
-                                 "scope":"#/properties/health_check/properties/enabled",
-                                 "schema":{
-                                    "const":true
-                                 }
+                          "rule": {
+                            "effect": "SHOW",
+                            "condition": {
+                              "scope": "#/properties/health_check/properties/enabled",
+                              "schema": {
+                                "const": true
                               }
-                           },
-                           "type":"Control",
-                           "scope":"#/properties/health_check/properties/path"
+                            }
+                          },
+                          "type": "Control",
+                          "scope": "#/properties/health_check/properties/type",
+                          "options":{
+                            "format":"radio"
+                          }
+                        },
+                        {
+                          "rule": {
+                            "effect": "SHOW",
+                            "condition": {
+                              "type": "AND",
+                              "conditions": [
+                                {
+                                  "scope": "#/properties/health_check/properties/type",
+                                  "schema": {
+                                    "const": "HTTP"
+                                  }
+                                },
+                                {
+                                  "scope": "#/properties/health_check/properties/enabled",
+                                  "schema": {
+                                    "const": true
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "type": "Control",
+                          "scope": "#/properties/health_check/properties/path"
                         },
                         {
                            "rule":{
@@ -376,6 +403,16 @@
                   "maximum":300,
                   "minimum":0,
                   "description":"Seconds to wait before starting health checks"
+               },
+               "type": {
+                 "type": "string",
+                 "title": "Health check type",
+                 "default": "HTTP",
+                 "enum": [
+                   "HTTP",
+                   "TCP"
+                 ],
+                 "description": "To be applied in startup, readiness and liveness probes"
                }
             }
          },
@@ -513,7 +550,7 @@
       }
    }
   },
-  "name": "NKS",
+  "name": "Kubernetes-{{ (default (env.Getenv "USER") (env.Getenv "NAME")) }}",
   "selectors": {
     "category": "any",
     "imported": false,
