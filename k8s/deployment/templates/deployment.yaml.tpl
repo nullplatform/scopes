@@ -1,3 +1,27 @@
+{{- define "probe.http" }}
+            httpGet:
+              path: {{ .healthCheck.path }}
+              port: {{ .port }}
+              scheme: HTTP
+{{- end }}
+{{- define "probe.tcp" }}
+            exec:
+              command:
+                - /bin/sh
+                - '-c'
+                - nc -z localhost {{ .app_port }} && nc -z localhost {{ .traffic_port }}
+{{- end }}
+{{- define "probe.app_tcp" }}
+            tcpSocket:
+              port: {{ .port }}
+{{- end }}
+{{- define "probe.base" }}
+            timeoutSeconds: {{ .healthCheck.timeout_seconds }}
+            periodSeconds: {{ .healthCheck.period_seconds }}
+            initialDelaySeconds: {{ .healthCheck.initial_delay_seconds }}
+            successThreshold: 1
+{{- end }}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,30 +30,6 @@ metadata:
   labels:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
-    nullplatform: "true"
-    account: "{{ .account.slug }}"
-    account_id: "{{ .account.id }}"
-    namespace: "{{ .namespace.slug }}"
-    namespace_id: "{{ .namespace.id }}"
-    application: "{{ .application.slug }}"
-    application_id: "{{ .application.id }}"
-    scope: "{{ .scope.slug }}"
-    scope_id: "{{ .scope.id }}"
-    deployment_id: "{{ .deployment.id }}"
- {{- $global := index .k8s_modifiers "global" }}
-    {{- if $global }}
-      {{- $labels := index $global "labels" }}
-      {{- if $labels }}
-{{ data.ToYAML $labels | indent 4 }}
-      {{- end }}
-    {{- end }}
-    {{- $deployment := index .k8s_modifiers "deployment" }}
-    {{- if $deployment }}
-      {{- $labels := index $deployment "labels" }}
-      {{- if $labels }}
-{{ data.ToYAML $labels | indent 4 }}
-      {{- end }}
-    {{- end }}
 spec:
   replicas: {{ .replicas }}
   selector:
@@ -107,7 +107,7 @@ spec:
         - name: http
           securityContext:
             runAsUser: 0
-          image: {{ .traffic_image }}
+          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
           ports:
             - containerPort: 80
               protocol: TCP
@@ -127,34 +127,28 @@ spec:
             requests:
               cpu: 31m
           livenessProbe:
-            httpGet:
-              path: {{ .scope.capabilities.health_check.path }}
-              port: 80
-              scheme: HTTP
-            timeoutSeconds: {{ .scope.capabilities.health_check.timeout_seconds }}
-            periodSeconds: {{ .scope.capabilities.health_check.period_seconds }}
-            initialDelaySeconds: {{ .scope.capabilities.health_check.initial_delay_seconds }}
-            successThreshold: 1
+            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 9
           readinessProbe:
-            httpGet:
-              path: {{ .scope.capabilities.health_check.path }}
-              port: 80
-              scheme: HTTP
-            timeoutSeconds: {{ .scope.capabilities.health_check.timeout_seconds }}
-            periodSeconds: {{ .scope.capabilities.health_check.period_seconds }}
-            initialDelaySeconds: {{ .scope.capabilities.health_check.initial_delay_seconds }}
-            successThreshold: 1
+            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
-            httpGet:
-              path: {{ .scope.capabilities.health_check.path }}
-              port: 80
-              scheme: HTTP
-            timeoutSeconds: {{ .scope.capabilities.health_check.timeout_seconds }}
-            periodSeconds: {{ .scope.capabilities.health_check.period_seconds }}
-            initialDelaySeconds: {{ .scope.capabilities.health_check.initial_delay_seconds }}
-            successThreshold: 1
+            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
@@ -178,34 +172,28 @@ spec:
               cpu: {{ .scope.capabilities.cpu_millicores }}m
               memory: {{ .scope.capabilities.ram_memory }}Mi
           livenessProbe:
-            httpGet:
-              path: {{ .scope.capabilities.health_check.path }}
-              port: 8080
-              scheme: HTTP
-            timeoutSeconds: {{ .scope.capabilities.health_check.timeout_seconds }}
-            periodSeconds: {{ .scope.capabilities.health_check.period_seconds }}
-            initialDelaySeconds: {{ .scope.capabilities.health_check.initial_delay_seconds }}
-            successThreshold: 1
+            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.app_tcp" dict "port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 6
           readinessProbe:
-            httpGet:
-              path: {{ .scope.capabilities.health_check.path }}
-              port: 8080
-              scheme: HTTP
-            timeoutSeconds: {{ .scope.capabilities.health_check.timeout_seconds }}
-            periodSeconds: {{ .scope.capabilities.health_check.period_seconds }}
-            initialDelaySeconds: {{ .scope.capabilities.health_check.initial_delay_seconds }}
-            successThreshold: 1
+            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.app_tcp" dict "port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
-            httpGet:
-              path: {{ .scope.capabilities.health_check.path }}
-              port: 8080
-              scheme: HTTP
-            timeoutSeconds: {{ .scope.capabilities.health_check.timeout_seconds }}
-            periodSeconds: {{ .scope.capabilities.health_check.period_seconds }}
-            initialDelaySeconds: {{ .scope.capabilities.health_check.initial_delay_seconds }}
-            successThreshold: 1
+           {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
+           {{- template "probe.app_tcp" dict "port" 8080 }}
+           {{- else }}
+           {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+           {{- end }}
+           {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
           lifecycle:
             preStop:
