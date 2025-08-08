@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
 SCOPE_ID=$(echo "$CONTEXT" | jq .scope.id -r)
 
@@ -7,8 +9,29 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-DEPLOYMENT=$(kubectl get deployment -n "$K8S_NAMESPACE" -l "name=d-$SCOPE_ID-$DEPLOYMENT_ID" -o jsonpath="{.items[0].metadata.name}" 2>/dev/null )
+echo "Looking for deployment with label: name=d-$SCOPE_ID-$DEPLOYMENT_ID"
+DEPLOYMENT=$(kubectl get deployment -n "$K8S_NAMESPACE" -l "name=d-$SCOPE_ID-$DEPLOYMENT_ID" -o jsonpath="{.items[0].metadata.name}" 2>&1) || {
+    echo "ERROR: Failed to find deployment"
+    echo "Namespace: $K8S_NAMESPACE"
+    echo "Kubectl error: $DEPLOYMENT"
+    exit 1
+}
 
-kubectl rollout restart -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT"
+if [[ -z "$DEPLOYMENT" ]]; then
+    echo "ERROR: No deployment found with label name=d-$SCOPE_ID-$DEPLOYMENT_ID"
+    exit 1
+fi
 
-kubectl rollout status -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" -w
+echo "Restarting deployment: $DEPLOYMENT"
+kubectl rollout restart -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" || {
+    echo "ERROR: Failed to restart deployment $DEPLOYMENT"
+    exit 1
+}
+
+echo "Waiting for rollout to complete..."
+kubectl rollout status -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" -w || {
+    echo "ERROR: Rollout failed or timed out"
+    exit 1
+}
+
+echo "Deployment restart completed successfully"

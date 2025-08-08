@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 ACTION=""
 
 for arg in "$@"; do
@@ -8,12 +10,28 @@ for arg in "$@"; do
   esac
 done
 
-read -r ELB_DNS_NAME ELB_HOSTED_ZONE_ID <<< $(aws elbv2 describe-load-balancers \
+echo "Looking for load balancer: $ALB_NAME in region $REGION"
+
+# Get load balancer info and check if it exists
+LB_OUTPUT=$(aws elbv2 describe-load-balancers \
     --names "$ALB_NAME" \
     --region "$REGION" \
     --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' \
     --output text \
-    --no-paginate)
+    --no-paginate 2>&1) || {
+    echo "ERROR: Failed to find load balancer '$ALB_NAME' in region '$REGION'"
+    echo "AWS Error: $LB_OUTPUT"
+    exit 1
+}
+
+read -r ELB_DNS_NAME ELB_HOSTED_ZONE_ID <<< "$LB_OUTPUT"
+
+if [[ -z "$ELB_DNS_NAME" ]] || [[ "$ELB_DNS_NAME" == "None" ]]; then
+    echo "ERROR: Load balancer '$ALB_NAME' exists but has no DNS name"
+    exit 1
+fi
+
+echo "Found load balancer DNS: $ELB_DNS_NAME"
 
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     HOSTED_ZONES=("$HOSTED_PUBLIC_ZONE_ID")
@@ -23,8 +41,9 @@ fi
 
 for ZONE_ID in "${HOSTED_ZONES[@]}"; do
     echo "Creating Route53 record in hosted zone: $ZONE_ID"
+    echo "Domain: $SCOPE_DOMAIN -> $ELB_DNS_NAME"
 
-    aws route53 change-resource-record-sets \
+    ROUTE53_OUTPUT=$(aws route53 change-resource-record-sets \
         --hosted-zone-id "$ZONE_ID" \
         --region "$REGION" \
         --no-paginate \
@@ -43,5 +62,13 @@ for ZONE_ID in "${HOSTED_ZONES[@]}"; do
                     }
                 }
             ]
-        }"
+        }" 2>&1) || {
+        echo "ERROR: Failed to create Route53 record"
+        echo "Zone ID: $ZONE_ID"
+        echo "AWS Error: $ROUTE53_OUTPUT"
+        echo "This often happens when the agent lacks Route53 permissions"
+        exit 1
+    }
+    
+    echo "Successfully created Route53 record"
 done

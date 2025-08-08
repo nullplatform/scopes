@@ -1,15 +1,30 @@
 #!/bin/bash
 
+set -euo pipefail
+
 get_azure_token() {
+    echo "Getting Azure access token..."
     local token_response=$(curl -s -X POST \
         "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "client_id=${AZURE_CLIENT_ID}" \
         -d "client_secret=${AZURE_CLIENT_SECRET}" \
         -d "scope=https://management.azure.com/.default" \
-        -d "grant_type=client_credentials")
-
-    echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4
+        -d "grant_type=client_credentials" 2>&1) || {
+        echo "ERROR: Failed to get Azure access token"
+        echo "Curl error: $token_response"
+        return 1
+    }
+    
+    local access_token=$(echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+    
+    if [[ -z "$access_token" ]]; then
+        echo "ERROR: No access token in response"
+        echo "Response: $token_response"
+        return 1
+    fi
+    
+    echo "$access_token"
 }
 
 ACTION=""
@@ -74,11 +89,24 @@ if [ "$ACTION" = "CREATE" ]; then
 EOF
 )
     
-    curl -s -X PUT \
+    echo "Creating Azure DNS record: ${SCOPE_SUBDOMAIN} -> ${GATEWAY_IP}"
+    
+    AZURE_RESPONSE=$(curl -s -X PUT \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "${RECORD_BODY}"
+        -d "${RECORD_BODY}" 2>&1) || {
+        echo "ERROR: Failed to create/update Azure DNS record"
+        echo "Curl error: $AZURE_RESPONSE"
+        exit 1
+    }
+    
+    # Check if response contains error
+    if echo "$AZURE_RESPONSE" | grep -q '"error"'; then
+        echo "ERROR: Azure API returned error"
+        echo "Response: $AZURE_RESPONSE"
+        exit 1
+    fi
     
     echo "Record created/updated successfully"
     
