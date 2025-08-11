@@ -23,6 +23,9 @@ case "$SERVICE_ACTION" in
   "delete-deployment")
     ACTION_TO_EXECUTE="delete"
     ;;
+  "kill-instances")
+    ACTION_TO_EXECUTE="kill_instances"
+    ;;
   *)
     echo "Unknown action: $SERVICE_ACTION"
     exit 1

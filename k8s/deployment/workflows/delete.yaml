@@ -24,7 +24,7 @@ steps:
     type: script
     file: "$SERVICE_PATH/scope/networking/gateway/build_gateway"
     configuration:
-      TEMPLATE: "$BASE_INGRESS_PATH"
+      TEMPLATE: "$INITIAL_INGRESS_PATH"
     output:
       - name: INGRESS_FILE
         type: file
