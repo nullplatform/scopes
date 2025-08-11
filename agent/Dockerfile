@@ -4,7 +4,7 @@ FROM alpine
 RUN apk add --no-cache curl ca-certificates bash openssl aws-cli gettext gomplate jq yq go
 
 # Install Nullplatform tools
-RUN curl https://cli.nullplatform.com/install.sh | VERSION=alpha sh
+RUN curl https://cli.nullplatform.com/install.sh | sh
 RUN curl https://cli.nullplatform.com/agent/install.sh | sh
 RUN mkdir -p /root/.np
 
