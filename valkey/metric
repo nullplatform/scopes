@@ -1,0 +1,292 @@
+#!/bin/bash
+
+# ElastiCache CloudWatch Metrics Script
+# Mimics Prometheus interface but uses AWS CloudWatch
+
+# Validate required parameters
+if [[ -z "$METRIC_NAME" ]]; then
+  echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
+  exit 1
+fi
+
+if [[ -z "$CACHE_CLUSTER_ID" ]]; then
+  echo '{"error":"CACHE_CLUSTER_ID is required for ElastiCache Serverless"}'
+  exit 1
+fi
+
+# Default settings
+AWS_REGION=${AWS_REGION:-"us-east-1"}
+TIME_RANGE=${TIME_RANGE:-"1h"}
+INTERVAL=${INTERVAL:-"1m"}
+
+# Get metric configuration for ElastiCache
+get_metric_config() {
+  case "$METRIC_NAME" in
+    "elasticache.cpu_utilization")
+      echo "gauge percent"
+      ;;
+    "elasticache.engine_cpu_utilization")
+      echo "gauge percent"
+      ;;
+    "elasticache.database_memory_usage_percentage")
+      echo "gauge bytes"
+      ;;
+    "elasticache.network_bytes_in")
+      echo "counter bytes"
+      ;;
+    "elasticache.network_bytes_out")
+      echo "counter bytes"
+      ;;
+    "elasticache.curr_connections")
+      echo "gauge count"
+      ;;
+    "elasticache.new_connections")
+      echo "counter count"
+      ;;
+    "elasticache.cache_hits")
+      echo "counter count"
+      ;;
+    "elasticache.cache_misses")
+      echo "counter count"
+      ;;
+    "elasticache.cache_hit_rate")
+      echo "gauge percent"
+      ;;
+    "elasticache.evictions")
+      echo "counter count"
+      ;;
+    "elasticache.reclaimed")
+      echo "counter count"
+      ;;
+    "elasticache.successful_read_request_latency")
+      echo "gauge microseconds"
+      ;;
+    "elasticache.successful_write_request_latency")
+      echo "gauge microseconds"
+      ;;
+    "elasticache.processing_units")
+      echo "gauge count"
+      ;;
+    "elasticache.data_storage")
+      echo "gauge bytes"
+      ;;
+    *)
+      echo "gauge unknown"
+      ;;
+  esac
+}
+
+# Map internal metric names to CloudWatch metric names
+get_cloudwatch_metric_name() {
+  case "$METRIC_NAME" in
+    "elasticache.cpu_utilization")
+      echo "CPUUtilization"
+      ;;
+    "elasticache.engine_cpu_utilization")
+      echo "EngineCPUUtilization"
+      ;;
+    "elasticache.database_memory_usage_percentage")
+      echo "BytesUsedForCache"
+      ;;
+    "elasticache.network_bytes_in")
+      echo "NetworkBytesIn"
+      ;;
+    "elasticache.network_bytes_out")
+      echo "NetworkBytesOut"
+      ;;
+    "elasticache.curr_connections")
+      echo "CurrConnections"
+      ;;
+    "elasticache.new_connections")
+      echo "NewConnections"
+      ;;
+    "elasticache.cache_hits")
+      echo "CacheHits"
+      ;;
+    "elasticache.cache_misses")
+      echo "CacheMisses"
+      ;;
+    "elasticache.cache_hit_rate")
+      echo "CacheHitRate"
+      ;;
+    "elasticache.evictions")
+      echo "Evictions"
+      ;;
+    "elasticache.reclaimed")
+      echo "Reclaimed"
+      ;;
+    "elasticache.successful_read_request_latency")
+      echo "SuccessfulReadRequestLatency" 
+      ;;
+    "elasticache.successful_write_request_latency")
+      echo "SuccessfulWriteRequestLatency"
+      ;;
+    "elasticache.processing_units")
+      echo "ElastiCacheProcessingUnits"
+      ;;
+    "elasticache.data_storage")
+      echo "BytesUsedForCache"
+      ;;
+    "elasticache.curr_items")
+      echo "CurrItems"
+      ;;
+    "elasticache.get_type_cmds")
+      echo "GetTypeCmds"
+      ;;
+    "elasticache.set_type_cmds")
+      echo "SetTypeCmds"
+      ;;
+    *)
+      echo "CurrConnections"  # Default fallback
+      ;;
+  esac
+}
+
+# Parse time range to get start time  
+parse_time_range() {
+  local now=$(date -u +%s)
+  case "$TIME_RANGE" in
+    *h)
+      local hours=${TIME_RANGE%h}
+      echo $((now - hours * 3600))
+      ;;
+    *m)
+      local minutes=${TIME_RANGE%m}
+      echo $((now - minutes * 60))
+      ;;
+    *d)
+      local days=${TIME_RANGE%d}
+      echo $((now - days * 86400))
+      ;;
+    *)
+      echo $((now - 3600))
+      ;;
+  esac
+}
+
+# Parse interval to seconds
+parse_interval() {
+  case "$INTERVAL" in
+    *h)
+      local hours=${INTERVAL%h}
+      echo $((hours * 3600))
+      ;;
+    *m)
+      local minutes=${INTERVAL%m}
+      echo $((minutes * 60))
+      ;;
+    *s)
+      echo ${INTERVAL%s}
+      ;;
+    *)
+      echo 60
+      ;;
+  esac
+}
+
+# Query CloudWatch for metrics
+query_cloudwatch() {
+  local metric_name="$1"
+  local start_time="$2"
+  local end_time="$3"
+  local period="$4"
+  
+  # Determine if it's serverless or cluster based on identifier pattern
+  if [[ "$CACHE_CLUSTER_ID" == *"serverless"* ]] || [[ -n "$SERVERLESS_CACHE_NAME" ]]; then
+    # Serverless cache - use ClusterName dimension
+    local cache_name="${SERVERLESS_CACHE_NAME:-$CACHE_CLUSTER_ID}"
+    aws cloudwatch get-metric-statistics \
+      --namespace "AWS/ElastiCache" \
+      --metric-name "$metric_name" \
+      --dimensions Name=clusterId,Value="$cache_name" \
+      --start-time "$(date -u -r $start_time +%Y-%m-%dT%H:%M:%S)" \
+      --end-time "$(date -u -r $end_time +%Y-%m-%dT%H:%M:%S)" \
+      --period "$period" \
+      --statistics Average \
+      --region "$AWS_REGION" \
+      --output json
+  else
+    # Node-based cache - use CacheClusterId dimension  
+    aws cloudwatch get-metric-statistics \
+      --namespace "AWS/ElastiCache" \
+      --metric-name "$metric_name" \
+      --dimensions Name=CacheClusterId,Value="$CACHE_CLUSTER_ID" \
+      --start-time "$(date -u -r $start_time +%Y-%m-%dT%H:%M:%S)" \
+      --end-time "$(date -u -r $end_time +%Y-%m-%dT%H:%M:%S)" \
+      --period "$period" \
+      --statistics Average \
+      --region "$AWS_REGION" \
+      --output json
+  fi
+}
+
+# Transform CloudWatch response to match Prometheus format
+transform_cloudwatch_response() {
+  local response="$1"
+  
+  # Check if response is valid JSON and has Datapoints
+  if ! echo "$response" | jq -e '.Datapoints' >/dev/null 2>&1; then
+    echo "[]"
+    return
+  fi
+  
+  # Extract datapoints and transform to our format
+  local datapoints=$(echo "$response" | jq -r '.Datapoints')
+  
+  if [[ "$datapoints" == "[]" || "$datapoints" == "null" ]]; then
+    echo "[]"
+    return
+  fi
+  
+  # Transform with simpler timestamp handling (CloudWatch already gives us ISO format)
+  # Special handling for cache hit rate - multiply by 100 to get percentage scale 1-100
+  if [[ "$METRIC_NAME" == "elasticache.cache_hit_rate" ]]; then
+    echo "$response" | jq -r '.Datapoints | sort_by(.Timestamp) | map({
+      timestamp: .Timestamp,
+      value: ((.Average // .Sum // .Maximum // 0) * 100)
+    })'
+  else
+    echo "$response" | jq -r '.Datapoints | sort_by(.Timestamp) | map({
+      timestamp: .Timestamp,
+      value: (.Average // .Sum // .Maximum // 0)
+    })'
+  fi
+}
+
+# Main execution
+now=$(date -u +%s)
+start_time=$(parse_time_range)
+period=$(parse_interval)
+
+config=$(get_metric_config)
+metric_type=$(echo $config | cut -d' ' -f1)
+unit=$(echo $config | cut -d' ' -f2)
+
+cloudwatch_metric=$(get_cloudwatch_metric_name)
+
+# Query CloudWatch
+response=$(query_cloudwatch "$cloudwatch_metric" "$start_time" "$now" "$period")
+
+if [[ $? -ne 0 ]]; then
+  echo '{"error":"Failed to query CloudWatch metrics. Check AWS credentials and permissions."}'
+  exit 1
+fi
+
+# Transform response
+transformed_data=$(transform_cloudwatch_response "$response")
+
+# Output in same format as Prometheus script
+cat << EOF
+{
+  "metric": "$METRIC_NAME",
+  "type": "$metric_type",
+  "period_in_seconds": $period,
+  "unit": "$unit", 
+  "results": [
+    {
+      "selector": {"cache_cluster_id": "$CACHE_CLUSTER_ID"},
+      "data": $transformed_data
+    }
+  ]
+}
+EOF

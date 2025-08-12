@@ -1,0 +1,41 @@
+#!/bin/bash
+
+echo '{
+    "results": [
+        {
+            "name": "elasticache.processing_units",
+            "title": "Processing units",
+            "unit": "count",
+            "available_filters": ["cache_cluster_id"],
+            "available_group_by": ["cache_cluster_id"]
+        },
+        {
+            "name": "elasticache.database_memory_usage_percentage",
+            "title": "Memory usage",
+            "unit": "bytes",
+            "available_filters": ["cache_cluster_id"],
+            "available_group_by": ["cache_cluster_id"]
+        },
+        {
+            "name": "elasticache.curr_connections",
+            "title": "Current connections",
+            "unit": "count",
+            "available_filters": ["cache_cluster_id"],
+            "available_group_by": ["cache_cluster_id"]
+        },
+        {
+            "name": "elasticache.cache_hit_rate",
+            "title": "Cache hit rate",
+            "unit": "%",
+            "available_filters": ["cache_cluster_id"],
+            "available_group_by": ["cache_cluster_id"]
+        },
+        {
+            "name": "elasticache.successful_read_request_latency",
+            "title": "Read request latency",
+            "unit": "microseconds",
+            "available_filters": ["cache_cluster_id"],
+            "available_group_by": ["cache_cluster_id"]
+        }
+    ]
+}'

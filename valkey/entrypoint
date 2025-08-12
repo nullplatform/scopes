@@ -1,0 +1,51 @@
+#!/bin/bash
+
+if [ -z "$NP_ACTION_CONTEXT" ]; then
+  echo "NP_ACTION_CONTEXT is not set. Exiting."
+  exit 1
+fi
+
+CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
+
+export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
+
+export CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
+
+export NOTIFICATION_ACTION=$(echo "$CONTEXT" | jq -r '.action')
+
+export WORKING_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SERVICE=$(echo "$CONTEXT" | jq '.arguments.service // empty')
+
+while read -r line; do
+  eval "$line"
+done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
+  if (.value | type) == "array" then
+    "export \(.key | ascii_upcase)=\(.value | join(","))"
+  else
+    "export \(.key | ascii_upcase)=\(.value)"
+  end')
+
+if [[ -n "$METRIC" ]]; then
+  export METRIC_NAME="$METRIC"
+fi
+
+if [[ "$NOTIFICATION_ACTION" == "metric:list" ]]; then
+  "$WORKING_DIRECTORY/list"
+else
+  # Extract service attributes directly from the context
+  CACHE_NAME=$(echo "$CONTEXT" | jq -r '.arguments.service.name // empty')
+  CACHE_ENDPOINT=$(echo "$CONTEXT" | jq -r '.arguments.service.attributes.endpoint // empty')
+  CACHE_ARN=$(echo "$CONTEXT" | jq -r '.arguments.service.attributes.valkey_arn // empty')
+
+  if [[ -n "$CACHE_ARN" ]]; then
+    export CACHE_CLUSTER_ID=$(echo "$CACHE_ARN" | cut -d: -f7)
+    export AWS_REGION=$(echo "$CACHE_ARN" | cut -d: -f4)
+    export SERVERLESS_CACHE_NAME="$CACHE_CLUSTER_ID"
+  else
+    echo '{"error":"valkey_arn not found in service attributes"}'
+    exit 1
+  fi
+
+  "$WORKING_DIRECTORY/metric"
+fi
