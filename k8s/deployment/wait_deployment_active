@@ -1,11 +1,5 @@
 #!/bin/bash
 
-set -euo pipefail
-
-echo "Waiting for deployment to become active"
-echo "Scope ID: $SCOPE_ID"
-echo "Deployment ID: $DEPLOYMENT_ID"
-
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
 K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0

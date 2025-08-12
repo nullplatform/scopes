@@ -2,8 +2,6 @@
 
 set -euo pipefail
 
-echo "Creating IAM role for service account: $ROLE_NAME"
-
 IAM=${IAM-"{}"}
 
 IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
