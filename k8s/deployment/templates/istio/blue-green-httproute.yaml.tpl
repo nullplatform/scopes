@@ -45,6 +45,9 @@ metadata:
 spec:
   hostnames:
     - {{ .scope.domain }}
+{{- range .scope.domains }}
+    - {{ .name }}
+{{- end }}
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway
