@@ -7,6 +7,12 @@ HOSTED_PRIVATE_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].
 echo "Public Hosted Zone ID: $HOSTED_PUBLIC_ZONE_ID"
 echo "Private Hosted Zone ID: $HOSTED_PRIVATE_ZONE_ID"
 
+# Check if both hosted zones are empty or null
+if [[ -z "$HOSTED_PUBLIC_ZONE_ID" || "$HOSTED_PUBLIC_ZONE_ID" == "null" ]] && [[ -z "$HOSTED_PRIVATE_ZONE_ID" || "$HOSTED_PRIVATE_ZONE_ID" == "null" ]]; then
+    echo "Unable to find any hosted zones (neither public nor private)" >&2
+    exit 0
+fi
+
 export HOSTED_PUBLIC_ZONE_ID
 export HOSTED_PRIVATE_ZONE_ID
 
