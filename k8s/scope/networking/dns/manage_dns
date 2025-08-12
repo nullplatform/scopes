@@ -1,8 +1,18 @@
 #!/bin/bash
 
+set -euo pipefail
+
+echo "Managing DNS records"
+echo "DNS Type: $DNS_TYPE"
+echo "Action: $ACTION"
+
 case "$DNS_TYPE" in
   route53)
-    source "$SERVICE_PATH/scope/networking/dns/route53/manage_route" --action="$ACTION"
+    echo "Using Route53 DNS provider"
+    source "$SERVICE_PATH/scope/networking/dns/route53/manage_route" --action="$ACTION" || {
+        echo "ERROR: Route53 DNS management failed"
+        exit 1
+    }
     ;;
   azure)
     if [ "$SCOPE_VISIBILITY" = "public" ]; then
