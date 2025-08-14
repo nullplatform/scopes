@@ -63,3 +63,6 @@ export REGION
 
 mkdir -p "$OUTPUT_DIR"
 
+
+
+
