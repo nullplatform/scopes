@@ -10,6 +10,8 @@ echo "This is a test commit3"
 
 echo "this is a test commit 4"
 
+echo "this is a test commit 5"
+
 K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
