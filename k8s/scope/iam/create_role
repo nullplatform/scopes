@@ -14,8 +14,19 @@ fi
 ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 ROLE_PATH="/nullplatform/custom-scopes/"
 NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
-OIDC_PROVIDER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Getting EKS OIDC provider for cluster: $CLUSTER_NAME"
+OIDC_PROVIDER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.identity.oidc.issuer" --output text 2>&1 | sed -e "s/^https:\/\///") || {
+  echo "ERROR: Failed to get OIDC provider for EKS cluster '$CLUSTER_NAME'"
+  echo "AWS Error: $OIDC_PROVIDER"
+  exit 1
+}
+
+echo "Getting AWS account ID"
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1) || {
+  echo "ERROR: Failed to get AWS account ID"
+  echo "AWS Error: $AWS_ACCOUNT_ID"
+  exit 1
+}
 TRUST_POLICY_PATH="$OUTPUT_DIR/trust-policy.json"
 
 # Step 1: Create the IAM trust policy

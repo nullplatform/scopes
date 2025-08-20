@@ -1,8 +1,5 @@
 #!/bin/bash
 
-echo $SCOPE_ID
-echo $DEPLOYMENT_ID
-
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
 K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0
@@ -12,12 +9,19 @@ SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 while true; do
     ((iteration++))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
-        echo "Error: Maximum number of iterations (${MAX_ITERATIONS}) reached. Not all pods are available."
+        echo "ERROR: Timeout waiting for deployment. Maximum iterations (${MAX_ITERATIONS}) reached."
         exit 1
     fi
-    D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status)
-    if [[ -n $CHECK_DEPLOYMENT_STATUS ]]; then
-        echo "Error: Deployment status not found"
+    
+    echo "Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
+    D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status 2>&1) || {
+        echo "ERROR: Failed to read deployment status"
+        echo "NP CLI error: $D_STATUS"
+        exit 1
+    }
+    
+    if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
+        echo "ERROR: Deployment status not found for ID $DEPLOYMENT_ID"
         exit 1
     fi
 
