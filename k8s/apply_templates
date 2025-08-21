@@ -2,8 +2,10 @@
 
 echo "TEMPLATE DIR: $OUTPUT_DIR, ACTION: $ACTION, DRY_RUN: $DRY_RUN"
 
+APPLIED_FILES=()
+
 # Find all .yaml files that were not yet applied / deleted
-find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print | while read -r TEMPLATE_FILE; do
+while IFS= read -r TEMPLATE_FILE; do
    echo "kubectl $ACTION $TEMPLATE_FILE"
 
    if [[ "$DRY_RUN" == "false" ]]; then
@@ -15,9 +17,15 @@ find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -
    DEST_DIR="${BASE_DIR}/$ACTION"
 
    mkdir -p "$DEST_DIR"
+
    mv "$TEMPLATE_FILE" "$DEST_DIR/$FILENAME"
-done
+
+   # Add the moved file path to our array
+   APPLIED_FILES+=("$DEST_DIR/$FILENAME")
+done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print)
 
 if [[ "$DRY_RUN" == "true" ]]; then
   exit 1
 fi
+
+source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"

@@ -106,7 +106,7 @@ fi
 rm "$TRUST_POLICY_PATH"
 
 # Step 3: Attach policies
-POLICIES_COUNT=$(echo "$IAM" | jq '.ROLE.POLICIES | length')
+POLICIES_COUNT=$(echo "$IAM" | jq '.ROLE.POLICIES | length // 0')
 for ((i=0; i<$POLICIES_COUNT; i++)); do
   POLICY_TYPE=$(echo "$IAM" | jq -r ".ROLE.POLICIES[$i].TYPE")
   POLICY_VALUE=$(echo "$IAM" | jq -r ".ROLE.POLICIES[$i].VALUE")
