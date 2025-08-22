@@ -29,6 +29,7 @@ fi
 echo ""
 echo "PODS:"
 echo "====="
+kubectl get pods -l "$LABEL_SELECTOR" -o wide --all-namespaces
 PODS=$(kubectl get pods -l "$LABEL_SELECTOR" -o json --all-namespaces 2>/dev/null)
 if [ "$(echo "$PODS" | jq -r '.items | length')" -gt 0 ]; then
     echo "$PODS" | jq '.'
