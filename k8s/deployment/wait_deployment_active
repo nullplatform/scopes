@@ -92,54 +92,6 @@ while true; do
         # Store the newest timestamp for next iteration
         LATEST_TIMESTAMP="$NEWEST_TIMESTAMP"
         echo "Updated timestamp to: $LATEST_TIMESTAMP"
-        
-        # Check for BackOff or failure events and get more details
-        if echo "$NEW_EVENTS" | grep -E "(BackOff|Failed|Error|CrashLoopBackOff|Unhealthy)" > /dev/null 2>&1; then
-            # Wrap all enhanced logging in a subshell to catch any errors
-            (
-                set +e  # Don't exit on error for this section
-                echo ""
-                echo "=== DETECTED CONTAINER ISSUES - GATHERING ADDITIONAL CONTEXT ==="
-                
-                for POD in $POD_NAMES; do
-                    # Get pod status details
-                    POD_STATUS=$(kubectl get pod "$POD" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
-                    if [ $? -eq 0 ] && [ ! -z "$POD_STATUS" ]; then
-                        # Check container statuses with error handling
-                        CONTAINER_STATUSES=$(echo "$POD_STATUS" 2>/dev/null | jq -r '.status.containerStatuses[]? | 
-                            select(.state.waiting or .state.terminated) | 
-                            "Container: \(.name) - State: \(if .state.waiting then "Waiting (\(.state.waiting.reason)): \(.state.waiting.message // "No message")" elif .state.terminated then "Terminated (Exit Code: \(.state.terminated.exitCode)): \(.state.terminated.reason // "Unknown reason")" else "Unknown" end) - RestartCount: \(.restartCount)"' 2>/dev/null || echo "")
-                        
-                        if [ ! -z "$CONTAINER_STATUSES" ]; then
-                            echo ""
-                            echo "Pod: $POD - Container Status Issues:"
-                            echo "$CONTAINER_STATUSES"
-                            
-                            # Get last termination info if available
-                            LAST_TERMINATION=$(echo "$POD_STATUS" 2>/dev/null | jq -r '.status.containerStatuses[]? | 
-                                select(.lastState.terminated) | 
-                                "Container: \(.name) - Last Termination: Exit Code: \(.lastState.terminated.exitCode), Reason: \(.lastState.terminated.reason // "Unknown"), Message: \(.lastState.terminated.message // "No message")"' 2>/dev/null || echo "")
-                            
-                            if [ ! -z "$LAST_TERMINATION" ]; then
-                                echo ""
-                                echo "Previous Termination Details:"
-                                echo "$LAST_TERMINATION"
-                            fi
-                            
-                            
-                            # Get pod describe output for more details
-                            echo ""
-                            echo "=== Pod Describe Output (Events and Conditions) ==="
-                            kubectl describe pod "$POD" -n "$K8S_NAMESPACE" 2>/dev/null | grep -A 20 -E "(Events:|Conditions:)" 2>/dev/null || echo "Unable to describe pod"
-                        fi
-                    else
-                        echo "Unable to get status for pod: $POD"
-                    fi
-                done
-                echo "=== END OF ADDITIONAL CONTEXT ==="
-                echo ""
-            ) 2>&1 || echo "Warning: Error occurred while gathering additional context, but continuing..."
-        fi
     fi
 
     sleep 10
