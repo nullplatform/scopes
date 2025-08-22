@@ -92,37 +92,6 @@ while true; do
         # Store the newest timestamp for next iteration
         LATEST_TIMESTAMP="$NEWEST_TIMESTAMP"
         echo "Updated timestamp to: $LATEST_TIMESTAMP"
-        
-        # Check for container issues and get pod status
-        if echo "$NEW_EVENTS" | grep -q "BackOff\|Failed\|Error\|CrashLoopBackOff\|Unhealthy"; then
-            echo ""
-            echo "=== Container failure detected - checking pod status ==="
-            for POD in $POD_NAMES; do
-                # Get pod status in a simple format
-                kubectl get pod "$POD" -n "$K8S_NAMESPACE" -o wide 2>/dev/null || true
-                
-                # Get container statuses
-                echo ""
-                echo "Container statuses for $POD:"
-                kubectl get pod "$POD" -n "$K8S_NAMESPACE" -o jsonpath='{range .status.containerStatuses[*]}Container: {.name} RestartCount: {.restartCount} Ready: {.ready}{"\n"}{end}' 2>/dev/null || true
-                
-                # Check for waiting state
-                WAITING_INFO=$(kubectl get pod "$POD" -n "$K8S_NAMESPACE" -o jsonpath='{range .status.containerStatuses[*]}{.name}: {.state.waiting.reason} - {.state.waiting.message}{"\n"}{end}' 2>/dev/null | grep -v ": -" || true)
-                if [ ! -z "$WAITING_INFO" ]; then
-                    echo "Waiting reasons:"
-                    echo "$WAITING_INFO"
-                fi
-                
-                # Check for terminated state
-                TERMINATED_INFO=$(kubectl get pod "$POD" -n "$K8S_NAMESPACE" -o jsonpath='{range .status.containerStatuses[*]}{.name}: ExitCode={.lastState.terminated.exitCode} Reason={.lastState.terminated.reason}{"\n"}{end}' 2>/dev/null | grep -v "ExitCode= " || true)
-                if [ ! -z "$TERMINATED_INFO" ]; then
-                    echo "Last termination info:"
-                    echo "$TERMINATED_INFO"
-                fi
-            done
-            echo "=== End of pod status check ==="
-            echo ""
-        fi
     fi
 
     sleep 10
