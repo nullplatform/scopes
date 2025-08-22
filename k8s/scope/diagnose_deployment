@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Script to find Kubernetes deployments and pods by deployment_id label
+# Usage: ./find_by_deployment_id.sh <deployment_id>
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <deployment_id>"
+    echo "Example: $0 my-app-123"
+    exit 1
+fi
+
+DEPLOYMENT_ID="$1"
+LABEL_SELECTOR="deployment_id=$DEPLOYMENT_ID"
+
+echo "Searching for resources with label: $LABEL_SELECTOR"
+echo "=================================================="
+
+# Find deployments with the specified deployment_id label
+echo ""
+echo "DEPLOYMENTS:"
+echo "============"
+DEPLOYMENTS=$(kubectl get deployments -l "$LABEL_SELECTOR" -o json --all-namespaces 2>/dev/null)
+if [ "$(echo "$DEPLOYMENTS" | jq -r '.items | length')" -gt 0 ]; then
+    echo "$DEPLOYMENTS" | jq '.'
+else
+    echo "No deployments found with label deployment_id=$DEPLOYMENT_ID"
+fi
+
+echo ""
+echo "PODS:"
+echo "====="
+PODS=$(kubectl get pods -l "$LABEL_SELECTOR" -o json --all-namespaces 2>/dev/null)
+if [ "$(echo "$PODS" | jq -r '.items | length')" -gt 0 ]; then
+    echo "$PODS" | jq '.'
+else
+    echo "No pods found with label deployment_id=$DEPLOYMENT_ID"
+fi
