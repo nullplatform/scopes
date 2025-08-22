@@ -546,6 +546,18 @@
                }
             },
             "description":"Configure automatic deployment from Git branches"
+         },
+         "custom_domains": {
+            "type": "object",
+            "required": [
+               "enabled"
+            ],
+            "properties": {
+               "enabled": {
+               "type": "boolean",
+               "default": true
+               }
+            }
          }
       }
    }
