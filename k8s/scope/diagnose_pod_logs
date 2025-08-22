@@ -1,6 +1,42 @@
 #!/bin/bash
-POD_NAME=$1
-NAMESPACE=$2
+
+# Script to read the last 100KB of logs from a Kubernetes pod (including crashed/dead pods)
+# Usage: ./diagnose_pod_logs <pod_name> [namespace]
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <pod_name> [namespace]"
+    echo "Example: $0 my-app-pod-123"
+    echo "Example: $0 my-app-pod-123 my-namespace"
+    exit 1
+fi
+
+POD_NAME="$1"
+NAMESPACE="${2:-default}"
+
+echo "Reading last 100KB of logs from pod: $POD_NAME in namespace: $NAMESPACE"
+echo "======================================================================"
+
+# Check if pod exists
+if ! kubectl get pod "$POD_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+    echo "Error: Pod '$POD_NAME' not found in namespace '$NAMESPACE'"
+    exit 1
+fi
+
+# Get pod info
+echo ""
+echo "POD INFO:"
+echo "========="
+kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o wide
+
+# Get pod status
+POD_STATUS=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+RESTART_COUNT=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null)
+
+echo ""
+echo "POD STATUS: $POD_STATUS"
+echo "RESTART COUNT: $RESTART_COUNT"
+
+# Check if pod has multiple containers
 CONTAINERS=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null)
 CONTAINER_COUNT=$(echo $CONTAINERS | wc -w)
 
