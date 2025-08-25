@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Trap to log exit codes
-trap 'LAST_EXIT_CODE=$?; if [ $LAST_EXIT_CODE -ne 0 ]; then echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Script exiting with code $LAST_EXIT_CODE at line $LINENO" >&2; fi' EXIT
+trap 'LAST_EXIT_CODE=$?; if [ $LAST_EXIT_CODE -ne 0 ]; then echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ERROR: Script exiting with code $LAST_EXIT_CODE at line $LINENO" >&2; fi' EXIT
 
 # Enable debug mode if DEBUG env var is set
 if [ "${DEBUG:-false}" = "true" ]; then
