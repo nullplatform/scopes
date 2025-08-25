@@ -269,7 +269,7 @@ EOF
         error_log "Curl command failed with exit code: $curl_exit_code"
         error_log "Response: $AZURE_RESPONSE"
         exit 1
-    }
+    fi
     
     # Extract HTTP code
     http_code=$(echo "$AZURE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
