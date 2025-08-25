@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Trap to log exit codes
+trap 'LAST_EXIT_CODE=$?; if [ $LAST_EXIT_CODE -ne 0 ]; then echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Script exiting with code $LAST_EXIT_CODE at line $LINENO" >&2; fi' EXIT
+
 # Enable debug mode if DEBUG env var is set
 if [ "${DEBUG:-false}" = "true" ]; then
     set -x
@@ -256,14 +259,19 @@ EOF
 )
     
     log "Creating Azure DNS A record: ${SCOPE_SUBDOMAIN} -> ${GATEWAY_IP}"
+    log "Request body: $RECORD_BODY"
     
     # Make API request with detailed error handling
+    log "Executing curl command..."
     AZURE_RESPONSE=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
         -d "${RECORD_BODY}" 2>&1)
     curl_exit_code=$?
+    
+    log "Curl exit code: $curl_exit_code"
+    log "Raw response (first 500 chars): ${AZURE_RESPONSE:0:500}"
     
     if [ $curl_exit_code -ne 0 ]; then
         error_log "Curl command failed with exit code: $curl_exit_code"
