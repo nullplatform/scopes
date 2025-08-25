@@ -80,12 +80,12 @@ validate_arguments() {
 }
 
 get_azure_token() {
-    log "Getting Azure access token..."
-    log "Tenant ID: ${AZURE_TENANT_ID}"
-    log "Client ID: ${AZURE_CLIENT_ID}"
+    log "Getting Azure access token..." >&2
+    log "Tenant ID: ${AZURE_TENANT_ID}" >&2
+    log "Client ID: ${AZURE_CLIENT_ID}" >&2
     
     local token_url="https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token"
-    log "Token URL: $token_url"
+    log "Token URL: $token_url" >&2
     
     # Make token request with detailed error handling
     local token_response
@@ -110,7 +110,7 @@ get_azure_token() {
     local http_code=$(echo "$token_response" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
     token_response=$(echo "$token_response" | sed 's/__HTTP_CODE__:[0-9]*//')
     
-    log "HTTP response code: ${http_code:-unknown}"
+    log "HTTP response code: ${http_code:-unknown}" >&2
     
     if [ "${http_code:-0}" -ne 200 ]; then
         error_log "Failed to get Azure access token. HTTP code: ${http_code:-unknown}"
@@ -134,7 +134,7 @@ get_azure_token() {
         return 1
     fi
     
-    log "Successfully obtained access token (length: ${#access_token})"
+    log "Successfully obtained access token (length: ${#access_token})" >&2
     echo "$access_token"
 }
 
@@ -264,7 +264,7 @@ EOF
     # Make API request with detailed error handling
     log "Executing curl command..."
     # Force HTTP/1.1 to avoid HTTP/2 framing errors
-    AZURE_RESPONSE=$(curl --http1.1 -v -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
+    AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
