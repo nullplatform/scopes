@@ -13,6 +13,6 @@
   },
   "annotations": {
     "show_on": ["performance"],
-    "runs_over": "deployment"
+    "runs_over": "scope"
   }
 }
