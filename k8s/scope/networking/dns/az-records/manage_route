@@ -2,143 +2,38 @@
 
 set -euo pipefail
 
-# Trap to log exit codes
-trap 'LAST_EXIT_CODE=$?; if [ $LAST_EXIT_CODE -ne 0 ]; then echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ERROR: Script exiting with code $LAST_EXIT_CODE at line $LINENO" >&2; fi' EXIT
-
-# Enable debug mode if DEBUG env var is set
-if [ "${DEBUG:-false}" = "true" ]; then
-    set -x
-fi
-
-# Function to log with timestamp
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
-}
-
-# Function to log errors
-error_log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
-}
-
-# Function to validate required environment variables
-validate_env_vars() {
-    local required_vars=("AZURE_TENANT_ID" "AZURE_CLIENT_ID" "AZURE_CLIENT_SECRET")
-    local missing_vars=()
-    
-    for var in "${required_vars[@]}"; do
-        if [ -z "${!var:-}" ]; then
-            missing_vars+=("$var")
-        fi
-    done
-    
-    if [ ${#missing_vars[@]} -ne 0 ]; then
-        error_log "Missing required environment variables: ${missing_vars[*]}"
-        error_log "Please ensure the following are set:"
-        for var in "${missing_vars[@]}"; do
-            error_log "  - $var"
-        done
-        exit 1
-    fi
-    
-    log "All required environment variables are set"
-}
-
-# Function to validate command line arguments
-validate_arguments() {
-    local errors=()
-    
-    if [ -z "$ACTION" ]; then
-        errors+=("--action is required (CREATE or DELETE)")
-    elif [ "$ACTION" != "CREATE" ] && [ "$ACTION" != "DELETE" ]; then
-        errors+=("--action must be CREATE or DELETE, got: $ACTION")
-    fi
-    
-    if [ -z "$GATEWAY_NAME" ]; then
-        errors+=("--gateway-name is required")
-    fi
-    
-    if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
-        errors+=("--subscription-id is required")
-    fi
-    
-    if [ -z "$HOSTED_ZONE_NAME" ]; then
-        errors+=("--hosted-zone-name is required")
-    fi
-    
-    if [ -z "$HOSTED_ZONE_RG" ]; then
-        errors+=("--hosted-zone-rg is required")
-    fi
-    
-    if [ ${#errors[@]} -ne 0 ]; then
-        error_log "Invalid arguments:"
-        for error in "${errors[@]}"; do
-            error_log "  - $error"
-        done
-        error_log "Usage: $0 --action=CREATE|DELETE --gateway-name=NAME --subscription-id=ID --hosted-zone-name=ZONE --hosted-zone-rg=RG [--resource-group=RG]"
-        exit 1
-    fi
-}
-
 get_azure_token() {
-    log "Getting Azure access token..." >&2
-    log "Tenant ID: ${AZURE_TENANT_ID}" >&2
-    log "Client ID: ${AZURE_CLIENT_ID}" >&2
-    
-    local token_url="https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token"
-    log "Token URL: $token_url" >&2
-    
-    # Make token request with detailed error handling
-    local token_response
-    local curl_exit_code
-    
-    token_response=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X POST \
-        "$token_url" \
+    local token_response=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X POST \
+        "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "client_id=${AZURE_CLIENT_ID}" \
         -d "client_secret=${AZURE_CLIENT_SECRET}" \
         -d "scope=https://management.azure.com/.default" \
-        -d "grant_type=client_credentials" 2>&1)
-    curl_exit_code=$?
-    
-    if [ $curl_exit_code -ne 0 ]; then
-        error_log "Curl command failed with exit code: $curl_exit_code"
-        error_log "Response: $token_response"
+        -d "grant_type=client_credentials" 2>&1) || {
+        echo "ERROR: Failed to get Azure access token" >&2
         return 1
-    fi
+    }
     
-    # Extract HTTP code
     local http_code=$(echo "$token_response" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
     token_response=$(echo "$token_response" | sed 's/__HTTP_CODE__:[0-9]*//')
     
-    log "HTTP response code: ${http_code:-unknown}" >&2
-    
     if [ "${http_code:-0}" -ne 200 ]; then
-        error_log "Failed to get Azure access token. HTTP code: ${http_code:-unknown}"
-        error_log "Response body: $token_response"
-        
-        # Try to parse error details
-        local error_desc=$(echo "$token_response" | grep -o '"error_description":"[^"]*' | cut -d'"' -f4)
-        if [ -n "$error_desc" ]; then
-            error_log "Error description: $error_desc"
-        fi
-        
+        echo "ERROR: Failed to get Azure access token. HTTP code: ${http_code:-unknown}" >&2
+        echo "Response: $token_response" >&2
         return 1
     fi
     
-    # Extract access token
     local access_token=$(echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
     
     if [[ -z "$access_token" ]]; then
-        error_log "No access token found in response"
-        error_log "Response: $token_response"
+        echo "ERROR: No access token in response" >&2
+        echo "Response: $token_response" >&2
         return 1
     fi
     
-    log "Successfully obtained access token (length: ${#access_token})" >&2
     echo "$access_token"
 }
 
-# Parse command line arguments
 ACTION=""
 GATEWAY_NAME=""
 RESOURCE_GROUP=""
@@ -154,95 +49,29 @@ for arg in "$@"; do
     --gateway-name=*) GATEWAY_NAME="${arg#*=}" ;;
     --hosted-zone-name=*) HOSTED_ZONE_NAME="${arg#*=}" ;;
     --hosted-zone-rg=*) HOSTED_ZONE_RG="${arg#*=}" ;;
-    *)
-      error_log "Unknown argument: $arg"
-      exit 1
-      ;;
   esac
 done
 
-# Validate environment and arguments
-validate_env_vars
-validate_arguments
-
-log "Starting DNS management for action: $ACTION"
-log "Gateway name: $GATEWAY_NAME"
-log "Subscription ID: $AZURE_SUBSCRIPTION_ID"
-log "Hosted zone: $HOSTED_ZONE_NAME"
-log "Hosted zone resource group: $HOSTED_ZONE_RG"
-
-# Check kubectl availability
-if ! command -v kubectl &> /dev/null; then
-    error_log "kubectl command not found. Please ensure kubectl is installed and in PATH"
-    exit 1
-fi
-
-log "Getting IP address for Gateway: $GATEWAY_NAME in namespace: gateways"
-
-# Get IP from Gateway resource with error handling
+# Get IP from Gateway resource
 GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>&1)
-kubectl_exit_code=$?
-
-if [ $kubectl_exit_code -ne 0 ]; then
-    error_log "kubectl command failed with exit code: $kubectl_exit_code"
-    error_log "kubectl output: $GATEWAY_IP"
-    
-    # Check if gateway exists
-    if kubectl get gateway "$GATEWAY_NAME" -n gateways &> /dev/null; then
-        error_log "Gateway exists but has no IP address assigned yet"
-        error_log "Gateway status:"
-        kubectl describe gateway "$GATEWAY_NAME" -n gateways | grep -A 10 "Status:" || true
-    else
-        error_log "Gateway '$GATEWAY_NAME' not found in namespace 'gateways'"
-        error_log "Available gateways:"
-        kubectl get gateways -n gateways || true
-    fi
-    exit 1
-fi
+    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
 
 if [ -z "$GATEWAY_IP" ]; then
-    error_log "Could not get IP address for gateway $GATEWAY_NAME"
-    error_log "Gateway might not have an IP assigned yet. Check gateway status:"
-    kubectl describe gateway "$GATEWAY_NAME" -n gateways | grep -A 10 "Status:" || true
-    exit 1
-fi
-
-log "Gateway IP: $GATEWAY_IP"
-
-# Handle SCOPE_DOMAIN and SCOPE_SUBDOMAIN
-if [ -z "${SCOPE_DOMAIN:-}" ] && [ -z "${SCOPE_SUBDOMAIN:-}" ]; then
-    error_log "Either SCOPE_DOMAIN or SCOPE_SUBDOMAIN environment variable must be set"
+    echo "Error: Could not get IP address for gateway $GATEWAY_NAME" >&2
     exit 1
 fi
 
 SCOPE_SUBDOMAIN="${SCOPE_SUBDOMAIN:-}"
 if [ -z "$SCOPE_SUBDOMAIN" ]; then
-    if [ -z "${SCOPE_DOMAIN:-}" ]; then
-        error_log "SCOPE_DOMAIN is not set"
-        exit 1
-    fi
     SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
-    log "Extracted subdomain from SCOPE_DOMAIN: $SCOPE_SUBDOMAIN"
 fi
 
-log "Managing DNS record in zone: $HOSTED_ZONE_NAME"
-log "Subdomain: $SCOPE_SUBDOMAIN"
-log "Full domain: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
-
 if [ "$ACTION" = "CREATE" ]; then
-    log "Creating/updating DNS record for: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
-
     # Get access token
-    ACCESS_TOKEN=$(get_azure_token) || {
-        error_log "Failed to obtain Azure access token"
-        exit 1
-    }
+    ACCESS_TOKEN=$(get_azure_token) || exit 1
 
     # Create or update A record
     RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
-    
-    log "Azure DNS API URL: $RECORD_SET_URL"
 
     RECORD_BODY=$(cat <<EOF
 {
@@ -258,108 +87,44 @@ if [ "$ACTION" = "CREATE" ]; then
 EOF
 )
     
-    log "Creating Azure DNS A record: ${SCOPE_SUBDOMAIN} -> ${GATEWAY_IP}"
-    log "Request body: $RECORD_BODY"
-    
-    # Make API request with detailed error handling
-    log "Executing curl command..."
-    # Force HTTP/1.1 to avoid HTTP/2 framing errors
     AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "${RECORD_BODY}" 2>&1)
-    curl_exit_code=$?
-    
-    log "Curl exit code: $curl_exit_code"
-    if [ $curl_exit_code -eq 92 ]; then
-        error_log "Curl failed with code 92 (HTTP/2 stream error). Full output:"
-        error_log "$AZURE_RESPONSE"
-    else
-        log "Raw response (first 500 chars): ${AZURE_RESPONSE:0:500}"
-    fi
-    
-    if [ $curl_exit_code -ne 0 ]; then
-        error_log "Curl command failed with exit code: $curl_exit_code"
-        error_log "Response: $AZURE_RESPONSE"
+        -d "${RECORD_BODY}" 2>&1) || {
+        echo "ERROR: Failed to create/update Azure DNS record" >&2
         exit 1
-    fi
+    }
     
     # Extract HTTP code
     http_code=$(echo "$AZURE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
     AZURE_RESPONSE=$(echo "$AZURE_RESPONSE" | sed 's/__HTTP_CODE__:[0-9]*//')
-    
-    log "Azure API HTTP response code: ${http_code:-unknown}"
 
     # Check if response contains error
     if echo "$AZURE_RESPONSE" | grep -q '"error"'; then
-        error_log "Azure API returned error response"
-        error_log "Full response: $AZURE_RESPONSE"
-        
-        # Try to extract specific error details
-        error_code=$(echo "$AZURE_RESPONSE" | grep -o '"code":"[^"]*' | head -1 | cut -d'"' -f4)
-        error_message=$(echo "$AZURE_RESPONSE" | grep -o '"message":"[^"]*' | head -1 | cut -d'"' -f4)
-        
-        if [ -n "$error_code" ]; then
-            error_log "Error code: $error_code"
-        fi
-        if [ -n "$error_message" ]; then
-            error_log "Error message: $error_message"
-        fi
-        
+        echo "ERROR: Azure API returned error" >&2
+        echo "Response: $AZURE_RESPONSE" >&2
         exit 1
     fi
     
     # Check HTTP status code
     if [ "${http_code:-0}" -lt 200 ] || [ "${http_code:-0}" -gt 299 ]; then
-        error_log "Azure API returned non-success HTTP code: ${http_code:-unknown}"
-        error_log "Response: $AZURE_RESPONSE"
+        echo "ERROR: Azure API returned HTTP code: ${http_code:-unknown}" >&2
+        echo "Response: $AZURE_RESPONSE" >&2
         exit 1
     fi
     
-    log "DNS record created/updated successfully"
-    log "Response: $AZURE_RESPONSE"
+    echo "DNS record created: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME -> $GATEWAY_IP"
     
 elif [ "$ACTION" = "DELETE" ]; then
-    log "Deleting DNS record for: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
     
-    ACCESS_TOKEN=$(get_azure_token) || {
-        error_log "Failed to obtain Azure access token"
-        exit 1
-    }
+    ACCESS_TOKEN=$(get_azure_token) || exit 1
     
     RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
     
-    log "Azure DNS API URL: $RECORD_SET_URL"
-    
-    # Make delete request with error handling
-    AZURE_RESPONSE=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" -X DELETE \
+    curl --http1.1 -s -X DELETE \
         "${RECORD_SET_URL}" \
-        -H "Authorization: Bearer ${ACCESS_TOKEN}" 2>&1)
-    curl_exit_code=$?
+        -H "Authorization: Bearer ${ACCESS_TOKEN}"
     
-    if [ $curl_exit_code -ne 0 ]; then
-        error_log "Curl command failed with exit code: $curl_exit_code"
-        error_log "Response: $AZURE_RESPONSE"
-        exit 1
-    fi
-    
-    # Extract HTTP code
-    http_code=$(echo "$AZURE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
-    AZURE_RESPONSE=$(echo "$AZURE_RESPONSE" | sed 's/__HTTP_CODE__:[0-9]*//')
-    
-    log "Azure API HTTP response code: ${http_code:-unknown}"
-    
-    # 204 No Content is success for DELETE
-    if [ "${http_code:-0}" -eq 204 ] || [ "${http_code:-0}" -eq 200 ]; then
-        log "DNS record deleted successfully"
-    elif [ "${http_code:-0}" -eq 404 ]; then
-        log "DNS record not found (already deleted)"
-    else
-        error_log "Failed to delete DNS record. HTTP code: ${http_code:-unknown}"
-        error_log "Response: $AZURE_RESPONSE"
-        exit 1
-    fi
+    echo "DNS record deleted: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
 fi
-
-log "DNS management completed successfully"
