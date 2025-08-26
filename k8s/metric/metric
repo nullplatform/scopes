@@ -111,35 +111,67 @@ build_query() {
   case "$metric" in
     "http.healthcheck_count")
       local healthcheck_filters="${filters},is_healthcheck=\"yes\""
-      echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
+      if [[ -n "$groupBy" ]]; then
+        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
+      else
+        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval]))"
+      fi
       ;;
     "http.healthcheck_fail")
       local healthcheck_filters="${filters},is_healthcheck=\"yes\""
       local ok_filters="${filters},is_healthcheck=\"yes\",quality=\"OK (2XX, 3XX)\""
-      echo "sum(rate(http_request_count_total{$healthcheck_filters}[$interval])) by ($groupBy) - sum(rate(http_request_count_total{$ok_filters}[$interval])) by ($groupBy)"
+      if [[ -n "$groupBy" ]]; then
+        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy) - sum(rate(nullplatform_http_response_time_count{$ok_filters}[$interval])) by ($groupBy)"
+      else
+        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) - sum(rate(nullplatform_http_response_time_count{$ok_filters}[$interval]))"
+      fi
       ;;
     "system.cpu_usage_percentage_by_instance")
       echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by (instance_id)"
       ;;
     "system.memory_usage_percentage")
-      echo "avg(nullplatform_system_memory_usage_percentage{$filters}) by ($groupBy)"
+      if [[ -n "$groupBy" ]]; then
+        echo "avg(nullplatform_system_memory_usage_percentage{$filters}) by ($groupBy)"
+      else
+        echo "avg(nullplatform_system_memory_usage_percentage{$filters})"
+      fi
       ;;
     "system.cpu_usage_percentage")
-      echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by ($groupBy)"
+      if [[ -n "$groupBy" ]]; then
+        echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by ($groupBy)"
+      else
+        echo "avg(nullplatform_system_cpu_usage_percentage{$filters})"
+      fi
       ;;
     "system.used_memory_kb")
-      echo "avg(nullplatform_system_used_memory_kb{$filters}) by ($groupBy)"
+      if [[ -n "$groupBy" ]]; then
+        echo "avg(nullplatform_system_used_memory_kb{$filters}) by ($groupBy)"
+      else
+        echo "avg(nullplatform_system_used_memory_kb{$filters})"
+      fi
       ;;
     "http.response_time")
-      echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
+      if [[ -n "$groupBy" ]]; then
+        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
+      else
+        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval]))/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval]))"
+      fi
       ;;
     "http.rpm")
-      echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy) * 60"
+      if [[ -n "$groupBy" ]]; then
+        echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy) * 60"
+      else
+        echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) * 60"
+      fi
       ;;
     "http.error_rate")
       local base_filters="$filters"
       local ok_filters="${filters},quality=\"OK (2XX, 3XX)\""
-      echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by (scope) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) by (scope) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by (scope) * 60 )) *100"
+      if [[ -n "$groupBy" ]]; then
+        echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by ($groupBy) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) by ($groupBy) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by ($groupBy) * 60 )) *100"
+      else
+        echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) * 60 )) *100"
+      fi
       ;;
     "cronjob.execution_count")
       echo "sum by (scope_id) (label_replace(increase(kube_job_status_succeeded{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]) +increase(kube_job_status_failed{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]),\"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
@@ -204,9 +236,17 @@ if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
     if [[ $interval_minutes -lt 1 ]]; then
       interval_minutes=1
     fi
+    # Use minimum 5m interval for HTTP metrics to ensure sufficient data points
+    case "$METRIC_NAME" in
+      "http.error_rate"|"http.response_time"|"http.rpm"|"http.healthcheck_count"|"http.healthcheck_fail")
+        if [[ $interval_minutes -lt 5 ]]; then
+          interval_minutes=5
+        fi
+        ;;
+    esac
     INTERVAL="${interval_minutes}m"
   else
-    INTERVAL="1m"
+    INTERVAL="5m"
   fi
 else
   # Fallback to TIME_RANGE logic
