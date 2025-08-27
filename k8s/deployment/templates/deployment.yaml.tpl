@@ -102,6 +102,11 @@ spec:
       tolerations:
 {{ data.ToYAML $tolerations | indent 8 }}
       {{- end }}
+      {{- $nodeSelector := index $deployment "nodeselector" }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+{{ data.ToYAML $nodeSelector | indent 8 }}
+      {{- end }}
       {{- end }}
       containers:
         - name: http
