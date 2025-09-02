@@ -63,3 +63,15 @@ spec:
                 name: d-{{ .scope.id }}-{{ .deployment.id }}
                 port:
                   number: 8080
+{{- range .scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-{{ $.scope.id }}-{{ $.deployment.id }}
+                port:
+                  number: 8080
+{{- end }}

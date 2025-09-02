@@ -68,3 +68,15 @@ spec:
                 name: bg-deployment
                 port:
                   name: use-annotation
+{{- range .scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment
+                port:
+                  name: use-annotation
+{{- end }}
