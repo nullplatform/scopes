@@ -7,7 +7,7 @@ if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then
     exit 1
 fi
 
-K8S_NAMESPACE="nullplatform"
+K8S_NAMESPACE="${NAMESPACE_OVERRIDE:-nullplatform}"
 
 # Build the command with required parameters
 CMD="$KUBE_LOGGER_SCRIPT --namespace $K8S_NAMESPACE --application-id $APPLICATION_ID --scope-id $SCOPE_ID"
