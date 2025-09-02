@@ -17,7 +17,7 @@ fi
 WORKFLOW_PATH="$SERVICE_PATH/instance/workflows/list.yaml"
 OVERRIDES_WORKFLOW_PATH="$OVERRIDES_WORKFLOW_PATH/instance/workflows/list.yaml"
 
-CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
+CMD="np service workflow exec --no-output --build-context --workflow $WORKFLOW_PATH"
 
 if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
   CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"

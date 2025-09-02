@@ -1,13 +1,19 @@
 #!/bin/bash
 
-K8S_NAMESPACE="nullplatform"
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+  .providers["container-orchestration"].cluster.namespace // $default
+' 2>/dev/null || echo "nullplatform")
+
 LABEL_SELECTOR="nullplatform=true"
+
 if [[ -n "$APPLICATION_ID" && "$APPLICATION_ID" != "null" ]]; then
  LABEL_SELECTOR="$LABEL_SELECTOR,application_id=$APPLICATION_ID"
 fi
+
 if [[ -n "$SCOPE_ID" && "$SCOPE_ID" != "null" ]]; then
  LABEL_SELECTOR="$LABEL_SELECTOR,scope_id=$SCOPE_ID"
 fi
+
 if [[ -n "$DEPLOYMENT_ID" && "$DEPLOYMENT_ID" != "null" ]]; then
  LABEL_SELECTOR="$LABEL_SELECTOR,deployment_id=$DEPLOYMENT_ID"
 fi
