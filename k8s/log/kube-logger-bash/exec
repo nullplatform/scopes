@@ -16,6 +16,7 @@ LIMIT=$DEFAULT_LIMIT
 NEXT_PAGE_TOKEN=""
 FILTER_PATTERN=""
 START_TIME=""
+PREVIOUS=true
 
 # Function to show usage
 usage() {
@@ -31,6 +32,7 @@ OPTIONS:
     -t, --next-page-token TOKEN      Token for pagination
     -f, --filter PATTERN             Filter pattern
     --start-time TIME                Start time for logs (RFC3339 format, e.g., 2024-01-01T12:00:00Z)
+    -p, --previous                   Get logs from previous terminated container instances
     -h, --help                       Show this help message
 
 EOF
@@ -71,6 +73,10 @@ parse_args() {
             --start-time)
                 START_TIME="$2"
                 shift 2
+                ;;
+            -p|--previous)
+                PREVIOUS=true
+                shift
                 ;;
             -h|--help)
                 usage
@@ -170,6 +176,11 @@ get_pod_logs() {
     fi
     
     local kubectl_args="$namespace_arg logs $pod_name -c $DEFAULT_CONTAINER_NAME --timestamps=true"
+    
+    # Add --previous flag if requested
+    if [[ "$PREVIOUS" == "true" ]]; then
+        kubectl_args="$kubectl_args --previous"
+    fi
     
     # Add since-time if provided
     if [[ -n "$since_time" ]]; then
