@@ -1,0 +1,124 @@
+#!/bin/bash
+
+ENABLE_INGRESS_READINESS_CHECK="${ENABLE_INGRESS_READINESS_CHECK:-false}"
+
+VISIBILITY=$(echo "$CONTEXT" | jq -r '.ingress_visibility')
+
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug' 2>/dev/null) || {
+    echo "ERROR: Failed to parse CONTEXT for scope.slug"
+    echo "CONTEXT: $CONTEXT"
+    exit 1
+}
+
+MAX_ITERATIONS=$(( ${INGRESS_TIMEOUT:-300} / 10 ))
+K8S_INGRESS_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-${INGRESS_VISIBILITY:-internal}"
+iteration=0
+LATEST_TIMESTAMP=""
+
+while [[ "$ENABLE_INGRESS_READINESS_CHECK" == "true" ]]; do
+    ((iteration++))
+    if [ $iteration -gt $MAX_ITERATIONS ]; then
+        echo "ERROR: Timeout waiting for ingress. Maximum iterations (${MAX_ITERATIONS}) reached."
+        exit 1
+    fi
+    
+    echo "Checking ingress status (attempt $iteration/$MAX_ITERATIONS)..."
+    
+    if [[ -z "${NP_API_KEY:-}" ]]; then
+        echo "WARNING: NP_API_KEY not set, skipping deployment status check"
+    else
+        D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status 2>&1) || {
+            echo "ERROR: Failed to read deployment status"
+            echo "NP CLI error: $D_STATUS"
+            exit 1
+        }
+        
+        if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
+            echo "ERROR: Deployment status not found for ID $DEPLOYMENT_ID"
+            exit 1
+        fi
+        
+        if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
+            echo "Deployment is not running anymore [$D_STATUS]"
+            exit 1
+        fi
+    fi
+    
+    ingress_status=$(kubectl get ingress "$K8S_INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>&1)
+    kubectl_exit_code=$?
+    
+    if [ $kubectl_exit_code -ne 0 ]; then
+        echo "Warning: kubectl command failed with exit code $kubectl_exit_code"
+        echo "kubectl output: $ingress_status"
+        echo "Retrying in 10 seconds..."
+        sleep 10
+        continue
+    fi
+    
+    # Check if ingress has a load balancer hostname/IP
+    lb_hostname=$(echo "$ingress_status" | jq -r '.status.loadBalancer.ingress[0].hostname // empty')
+    lb_ip=$(echo "$ingress_status" | jq -r '.status.loadBalancer.ingress[0].ip // empty')
+    
+    # Get ingress class
+    ingress_class=$(echo "$ingress_status" | jq -r '.spec.ingressClassName // .metadata.annotations["kubernetes.io/ingress.class"] // "unknown"')
+    
+    echo "LB Hostname: ${lb_hostname:-'not assigned yet'}"
+    
+    if [[ "$ingress_class" == "alb" ]]; then
+        # Check ALB controller events for success indicators
+        ALB_SUCCESS=$(kubectl get events -n $K8S_NAMESPACE --field-selector involvedObject.kind=Ingress,involvedObject.name=$K8S_INGRESS_NAME -o json | jq -r '.items[] | select(.reason == "SuccessfullyReconciled" or .reason == "LoadBalancerProvisioned" or .reason == "IngressReconciled") | .message' | tail -1)
+        
+        if [[ -n "$ALB_SUCCESS" ]] && [[ "$ALB_SUCCESS" != "null" ]]; then
+            echo "ALB Controller Status: $ALB_SUCCESS"
+            
+            # Also check if hostname is assigned as final confirmation
+            if [[ -n "$lb_hostname" ]]; then
+                echo "ALB hostname assigned: $lb_hostname"
+                echo "Success: Ingress '$K8S_INGRESS_NAME' is ready!"
+                break
+            else
+                echo "ALB controller reports success but hostname not yet assigned, waiting..."
+            fi
+        else
+            echo "Waiting for ALB controller to provision load balancer..."
+        fi
+    else
+        if [[ -n "$lb_hostname" ]] || [[ -n "$lb_ip" ]]; then
+            echo "Success: Ingress '$K8S_INGRESS_NAME' is ready!"
+            echo "Load Balancer: ${lb_hostname:-$lb_ip}"
+            break
+        fi
+    fi
+    
+    INGRESS_EVENTS=$(kubectl get events -n $K8S_NAMESPACE --field-selector involvedObject.kind=Ingress,involvedObject.name=$K8S_INGRESS_NAME -o json)
+    
+    PROCESSED_EVENTS=$(echo "$INGRESS_EVENTS" | jq '.items = (.items | map(. + {
+        effectiveTimestamp: (
+        if .eventTime then .eventTime 
+        elif .lastTimestamp then .lastTimestamp 
+        elif .firstTimestamp then .firstTimestamp
+        else .metadata.creationTimestamp
+        end
+        )
+    }))')
+    
+    # Find the newest timestamp in all events
+    NEWEST_TIMESTAMP=$(echo "$PROCESSED_EVENTS" | jq -r '.items | map(.effectiveTimestamp) | max // empty')
+    
+    # Process events with jq, showing only events newer than what we've seen
+    NEW_EVENTS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
+        .items | 
+        sort_by(.effectiveTimestamp) | 
+        .[] | 
+        select($timestamp == "" or (.effectiveTimestamp > $timestamp)) | 
+        "\(.effectiveTimestamp) [\(.type)] \(.involvedObject.kind)/\(.involvedObject.name): \(.reason) - \(.message)"
+    ')
+    
+    # If we have new events, show them and update the timestamp
+    if [ ! -z "$NEW_EVENTS" ]; then
+        echo "$NEW_EVENTS"
+        LATEST_TIMESTAMP="$NEWEST_TIMESTAMP"
+    fi
+    
+    sleep 10
+done
