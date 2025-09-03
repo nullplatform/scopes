@@ -3,11 +3,15 @@
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
 
-NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
+if [[ -z "$PROMETHEUS_URL" ]]; then
+  NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
 
-PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
+  PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
 
-PROM_URL=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.server.url // empty')
+  PROM_URL=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.server.url // empty')
+else
+  PROM_URL="$PROMETHEUS_URL"
+fi
 
 if [[ -z "$PROM_URL" ]]; then
   echo "There is no prometheus provider configured. Please configure prometheus in Platform settings and try again." >&2
