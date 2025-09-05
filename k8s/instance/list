@@ -18,7 +18,20 @@ echo "$PODS" | jq --argjson limit ${LIMIT:-10} '{
  results: .items[:$limit] | map({
    id: .metadata.name,
    selector: .metadata.labels,
-   details: .spec.containers[0] | {name, image, ports},
+   details: {
+     namespace: .metadata.namespace,
+     ip: (.status.podIP // "pending"),
+     dns: (if .status.podIP then "\(.status.podIP).\(.metadata.namespace).pod.cluster.local" else "pending" end),
+     cpu: {
+       requested: (if .spec.containers[0].resources.requests.cpu then (.spec.containers[0].resources.requests.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end),
+       limit: (if .spec.containers[0].resources.limits.cpu then (.spec.containers[0].resources.limits.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end)
+     },
+     memory: {
+       requested: (.spec.containers[0].resources.requests.memory // "0Mi"),
+       limit: (.spec.containers[0].resources.limits.memory // "0Mi")
+     },
+     architecture: (.status.containerStatuses[0].image | if test("arm64|aarch64") then "arm64" else "x86" end)
+   },
    state: .status.phase,
    launch_time: .metadata.creationTimestamp,
    spot: (.spec.nodeName // "" | test("spot"; "i"))
