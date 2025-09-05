@@ -1,0 +1,7 @@
+steps:
+  - name: build context
+    type: script
+    file: "$OVERRIDES_PATH/metric/build_context"
+  - name: metric
+    type: script
+    file: "$OVERRIDES_PATH/metric/metric"
