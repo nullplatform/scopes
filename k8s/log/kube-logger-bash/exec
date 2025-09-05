@@ -199,6 +199,7 @@ process_log_lines() {
     local filter_pattern="$2"
     local pod_name="$3"
     local pod_id="$4"
+    local last_read_time="$5"
     
     local processed_logs=""
     local last_timestamp=""
@@ -213,6 +214,19 @@ process_log_lines() {
         # Validate timestamp format - skip lines with invalid timestamps
         if ! is_valid_timestamp "$timestamp"; then
             continue
+        fi
+        
+        # Duplicate detection logic (simplified to match JS service behavior)
+        if [[ -n "$last_read_time" && "$last_read_time" != "null" && "$last_read_time" != "empty" ]]; then
+            # Simple string comparison - if timestamp is exactly the same, skip it
+            if [[ "$timestamp" == "$last_read_time" ]]; then
+                continue
+            fi
+            
+            # If timestamp is older than last read time, skip it
+            if [[ "$timestamp" < "$last_read_time" ]]; then
+                continue
+            fi
         fi
         
         # Apply filter if specified
@@ -324,7 +338,8 @@ main() {
         local logs=$(get_pod_logs "$pod_name" "$since_time" "$pod_limit")
         
         if [[ -n "$logs" ]]; then
-            local result=$(process_log_lines "$logs" "$FILTER_PATTERN" "$pod_name" "$pod_id")
+            local pod_last_read_time=$(echo "$last_read_times" | jq -r --arg podId "$pod_id" '.[$podId] // empty' 2>/dev/null)
+            local result=$(process_log_lines "$logs" "$FILTER_PATTERN" "$pod_name" "$pod_id" "$pod_last_read_time")
             local processed_logs=$(echo "$result" | jq ".logs")
             local last_timestamp=$(echo "$result" | jq -r ".last_timestamp")
 
@@ -337,20 +352,25 @@ main() {
     
     local sorted_logs=$(sort_and_limit_logs "$all_logs" "$LIMIT")
 
-    local new_token_data="{}"
-
     local log_count=$(echo "$sorted_logs" | jq 'length')
-
-    for ((i=0; i<$log_count; i++)); do
-        local pod_id=$(echo "$sorted_logs" | jq -r ".[$i].pod.id")
-        local datetime=$(echo "$sorted_logs" | jq -r ".[$i].datetime")
-        
-        new_token_data=$(echo "$new_token_data" | jq --arg podId "$pod_id" --arg dt "$datetime" '.[$podId] = $dt')
-    done
-
     local next_page_token=""
-    if [[ "$new_token_data" != "{}" ]]; then
-        next_page_token=$(encode_token "$new_token_data")
+
+    if [[ $log_count -gt 0 ]]; then
+        # We have logs - create new token from latest timestamps
+        local new_token_data="{}"
+        for ((i=0; i<$log_count; i++)); do
+            local pod_id=$(echo "$sorted_logs" | jq -r ".[$i].pod.id")
+            local datetime=$(echo "$sorted_logs" | jq -r ".[$i].datetime")
+            
+            new_token_data=$(echo "$new_token_data" | jq --arg podId "$pod_id" --arg dt "$datetime" '.[$podId] = $dt')
+        done
+
+        if [[ "$new_token_data" != "{}" ]]; then
+            next_page_token=$(encode_token "$new_token_data")
+        fi
+    else
+        # No logs found - return the same token that was sent to us
+        next_page_token="$NEXT_PAGE_TOKEN"
     fi
 
     jq -n \
