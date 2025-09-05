@@ -11,9 +11,9 @@ if [[ -z "$DATADOG_API_KEY" ]] || [[ -z "$DATADOG_APP_KEY" ]]; then
   
   PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
   
-  DATADOG_API_KEY=${DATADOG_API_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.api_key // empty')}
-  DATADOG_APP_KEY=${DATADOG_APP_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.app_key // empty')}
-  DATADOG_SITE=${DATADOG_SITE:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.site // "datadoghq.com"')}
+  DATADOG_API_KEY=${DATADOG_API_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.credentials.api_key // empty')}
+  DATADOG_APP_KEY=${DATADOG_APP_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.credentials.app_key // empty')}
+  DATADOG_SITE=${DATADOG_SITE:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.setup.site // "datadoghq.com"')}
 else
   DATADOG_SITE=${DATADOG_SITE:-"datadoghq.com"}
 fi
