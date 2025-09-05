@@ -32,15 +32,8 @@ echo '{
 		},
 		{
 			"name": "system.memory_usage_percentage",
-			"title": "Memory usage percentage",
+			"title": "Memory usage",
 			"unit": "%",
-			"available_filters": ["scope_id", "instance_id"],
-			"available_group_by": ["scope_id", "instance_id"]
-		},
-		{
-			"name": "system.used_memory_kb",
-			"title": "Memory usage in kb",
-			"unit": "kb",
 			"available_filters": ["scope_id", "instance_id"],
 			"available_group_by": ["scope_id", "instance_id"]
 		},
@@ -57,13 +50,6 @@ echo '{
 			"unit": "count",
 			"available_filters": ["scope_id", "instance_id"],
 			"available_group_by": ["instance_id"]
-		},
-		{
-			"name": "trace.http.request.p99",
-			"title": "HTTP Request P99",
-			"unit": "ms",
-			"available_filters": ["scope_id"],
-			"available_group_by": []
 		}
 	]
 }'
