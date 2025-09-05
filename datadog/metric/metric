@@ -1,0 +1,322 @@
+#!/bin/bash
+
+GROUP_BY=${GROUP_BY:-""}
+
+
+# Validate required parameters
+if [[ -z "$METRIC_NAME" ]]; then
+  echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
+  exit 1
+fi
+
+if [[ -z "$APPLICATION_ID" ]]; then
+  echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
+  exit 1
+fi
+
+if [[ -z "$DATADOG_API_KEY" ]]; then
+  echo '{"error":"DATADOG_API_KEY is required. Please specify with DATADOG_API_KEY environment variable"}'
+  exit 1
+fi
+
+if [[ -z "$DATADOG_APP_KEY" ]]; then
+  echo '{"error":"DATADOG_APP_KEY is required. Please specify with DATADOG_APP_KEY environment variable"}'
+  exit 1
+fi
+
+get_metric_config() {
+  case "$METRIC_NAME" in
+    "http.error_rate")
+      echo "gauge percent"
+      ;;
+    "http.response_time")
+      echo "gauge seconds"
+      ;;
+    "http.rpm")
+      echo "gauge count_per_minute"
+      ;;
+    "http.healthcheck_count")
+      echo "gauge count"
+      ;;
+    "http.healthcheck_fail")
+      echo "gauge count"
+      ;;
+    "trace.http.request.p99")
+      echo "gauge milliseconds"
+      ;;
+    "system.cpu_usage_percentage")
+      echo "gauge percent"
+      ;;
+    "system.memory_usage_percentage")
+      echo "gauge percent"
+      ;;
+    "system.used_memory_kb")
+      echo "gauge kilobytes"
+      ;;
+    *)
+      echo "gauge unknown"
+      ;;
+  esac
+}
+
+build_filters() {
+  local filters=""
+
+  if [[ -n "$APPLICATION_ID" ]]; then
+    filters="application_id:$APPLICATION_ID"
+  fi
+
+  if [[ -n "$SCOPE_ID" ]]; then
+    if [[ -n "$filters" ]]; then
+      filters="$filters,scope_id:$SCOPE_ID"
+    else
+      filters="scope_id:$SCOPE_ID"
+    fi
+  fi
+
+  if [[ -n "$DEPLOYMENT_ID" && "$DEPLOYMENT_ID" != "null" ]]; then
+    if [[ -n "$filters" ]]; then
+      filters="$filters,deployment_id:$DEPLOYMENT_ID"
+    else
+      filters="deployment_id:$DEPLOYMENT_ID"
+    fi
+  fi
+
+  echo "$filters"
+}
+
+build_datadog_query() {
+  local metric="$1"
+  local filters="$2"
+  local rollup_step="$3"
+  local groupBy="$GROUP_BY"
+
+  if [[ "$groupBy" == "[]" || "$groupBy" == "" ]]; then
+    groupBy=""
+  fi
+
+  local group_clause=""
+  if [[ -n "$groupBy" ]]; then
+    group_clause=" by {$(echo "$groupBy" | tr ',' ' ' | xargs | tr ' ' ',')}"
+  fi
+
+  case "$metric" in
+    # Custom nullplatform metrics with specific logic
+    "http.healthcheck_count")
+      echo "sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step)"
+      ;;
+    "http.healthcheck_fail")
+      echo "sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step) - sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes,quality:ok_2xx_3xx} by {instance_id}.rollup(sum, $rollup_step)"
+      ;;
+    "system.memory_usage_percentage")
+      echo "avg:nullplatform.scope.memory_usage_percentage{$filters}$group_clause"
+      ;;
+    "system.cpu_usage_percentage")
+      echo "avg:nullplatform.scope.cpu_usage_percentage{$filters}$group_clause"
+      ;;
+    "system.used_memory_kb")
+      echo "avg:nullplatform.scope.memory_usage_kb{$filters}$group_clause"
+      ;;
+    "http.response_time")
+      echo "sum:nullplatform.scope.response_time{$filters}$group_clause.rollup(sum, 60) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)"
+      ;;
+    "http.rpm")
+      echo "sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)"
+      ;;
+    "http.error_rate")
+      echo "((sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60) - sum:nullplatform.scope.request_count{$filters,quality:ok_2xx_3xx}$group_clause.rollup(sum, 60)) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)) * 100"
+      ;;
+    "trace.http.request.p99")
+      # Use context from $CONTEXT environment variable
+      local env_name=""
+      local service_name=""
+      
+      # Extract environment from service.dimensions.environment if available
+      if [[ -n "$CONTEXT" ]]; then
+        env_name=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment // empty' 2>/dev/null)
+        service_name=$(echo "$CONTEXT" | jq -r '.scope.slug // empty' 2>/dev/null)
+      fi
+      
+      echo "p99:trace.http.request{service:$service_name,env:$env_name}.rollup(avg, 60)"
+      ;;
+    
+    # Generic handler for any other Datadog metric
+    *)
+      echo "avg:$metric{$filters}$group_clause"
+      ;;
+  esac
+}
+
+# Query Datadog API
+query_datadog() {
+  local query="$1"
+  local start_time="$2"
+  local end_time="$3"
+
+  local base_url="https://api.${DATADOG_SITE:-datadoghq.com}"
+  local url="${base_url}/api/v2/query/timeseries"
+  
+  # Build JSON payload for v2 API
+  local payload=$(jq -n \
+    --arg query "$query" \
+    --arg from "$start_time" \
+    --arg to "$end_time" \
+    '{
+      data: {
+        type: "timeseries_request",
+        attributes: {
+          formulas: [{
+            formula: "a"
+          }],
+          queries: [{
+            name: "a",
+            query: $query,
+            data_source: "metrics"
+          }],
+          from: ($from | tonumber * 1000),
+          to: ($to | tonumber * 1000),
+          interval: 60000
+        }
+      }
+    }')
+
+  curl -s -X POST "$url" \
+    -H "DD-API-KEY: $DATADOG_API_KEY" \
+    -H "DD-APPLICATION-KEY: $DATADOG_APP_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$payload"
+}
+
+# Handle START_TIME/END_TIME
+if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
+  # For macOS compatibility, use a different date parsing approach
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS date command
+    start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -j -f "%Y-%m-%d %H:%M:%S" "{}" +%s 2>/dev/null || echo "0")
+    end_time=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -j -f "%Y-%m-%d %H:%M:%S" "{}" +%s 2>/dev/null || echo "0")
+  else
+    # Linux date command
+    start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+    end_time=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+  fi
+  # Use 30 second intervals for queries 6 minutes or less
+  time_diff=$((end_time - start_time))
+  if [[ $time_diff -le 360 ]]; then
+    step=${PERIOD:-30}
+  else
+    step=${PERIOD:-60}
+  fi
+else
+  # Fallback to TIME_RANGE logic
+  end_time=$(date +%s)
+  case "$TIME_RANGE" in
+    *h)
+      hours=${TIME_RANGE%h}
+      start_time=$((end_time - hours * 3600))
+      ;;
+    *m)
+      minutes=${TIME_RANGE%m}
+      start_time=$((end_time - minutes * 60))
+      ;;
+    *d)
+      days=${TIME_RANGE%d}
+      start_time=$((end_time - days * 86400))
+      ;;
+    *)
+      start_time=$((end_time - 3600))
+      ;;
+  esac
+  # Use 30 second intervals for queries 6 minutes or less
+  time_diff=$((end_time - start_time))
+  if [[ $time_diff -le 360 ]]; then
+    step=${PERIOD:-30}
+  else
+    step=${PERIOD:-60}
+  fi
+fi
+
+config=$(get_metric_config)
+metric_type=$(echo $config | cut -d' ' -f1)
+unit=$(echo $config | cut -d' ' -f2)
+
+filters=$(build_filters)
+query=$(build_datadog_query "$METRIC_NAME" "$filters" "$step")
+
+response=$(query_datadog "$query" "$start_time" "$end_time")
+
+
+transform_response() {
+  local response="$1"
+  
+  # Check if response contains error
+  local error=$(echo "$response" | jq -r '.errors // empty')
+  if [[ -n "$error" ]]; then
+    echo "[]"
+    return
+  fi
+
+  # Extract timeseries data from v2 API response
+  local series=$(echo "$response" | jq -r '.data.attributes.series // []')
+  
+  if [[ "$series" == "[]" || "$series" == "null" ]]; then
+    echo "[]"
+    return
+  fi
+
+  # Transform v2 API response - combine times and values arrays into data points
+  echo "$response" | jq '
+    (.data.attributes.times // []) as $times |
+    (.data.attributes.values // [[]]) as $values |
+    (.data.attributes.series // []) | map({
+      selector: (
+        if .group_tags then
+          if (.group_tags | type) == "array" then
+            if (.group_tags | length) == 0 then
+              {}
+            else
+              # Convert array of "key:value" strings to object
+              .group_tags | map(split(":") | {(.[0]): .[1]}) | add
+            end
+          else
+            .group_tags
+          end
+        elif .scope then
+          if (.scope | type) == "string" then
+            .scope | split(",") | map(split(":") | {(.[0]): .[1]}) | add
+          else
+            .scope
+          end
+        else
+          {}
+        end
+      )
+    } + {
+      data: (
+        if ($values | length) > 0 and ($times | length) > 0 then
+          [range($times | length)] | map({
+            timestamp: ($times[.] / 1000 | todate),
+            value: $values[0][.]
+          })
+        else
+          []
+        end
+      )
+    })'
+}
+
+transformed_results=$(transform_response "$response")
+
+# Output compact JSON without formatting
+jq -c -n \
+  --arg metric "$METRIC_NAME" \
+  --arg type "$metric_type" \
+  --arg period "$step" \
+  --arg unit "$unit" \
+  --argjson results "$transformed_results" \
+  '{
+    metric: $metric,
+    type: $type,
+    period_in_seconds: ($period | tonumber),
+    unit: $unit,
+    results: $results
+  }'
