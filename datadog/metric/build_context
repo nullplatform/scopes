@@ -8,6 +8,7 @@ else
   SERVICE_NAME=$(echo "$CONTEXT" | jq -r '.scope.slug // empty')
 fi
 
+
 ENVIRONMENT=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment // empty')
 
 if [[ -z "$DATADOG_API_KEY" ]] || [[ -z "$DATADOG_APP_KEY" ]]; then
