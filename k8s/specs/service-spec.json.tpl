@@ -550,7 +550,7 @@
       }
    }
   },
-  "name": "Kubernetes-{{ (default (env.Getenv "USER") (env.Getenv "NAME")) }}",
+  "name": "Containers",
   "selectors": {
     "category": "any",
     "imported": false,
