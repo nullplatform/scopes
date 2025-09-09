@@ -1,0 +1,37 @@
+#!/bin/bash
+NS="${1:-nullplatform-tools}"
+
+kubectl get pods -n "$NS" -o json \
+| jq '
+[ .items[]
+  | select(.metadata.labels["helm.sh/chart"])
+  | {
+      namespace: .metadata.namespace,
+      name: .metadata.name,
+      chart: .metadata.labels["helm.sh/chart"],
+      status: .status.phase,
+      node: .spec.nodeName,
+      createdAt: .metadata.creationTimestamp,
+      ageSeconds: (now - (.metadata.creationTimestamp | fromdateiso8601) | floor),
+      restarts: ([.status.containerStatuses[]?.restartCount] | add // 0),
+      containers: (
+        [ range(0; (.spec.containers | length)) as $i
+          | {
+              name: .spec.containers[$i].name,
+              image: (.status.containerStatuses[$i].image // .spec.containers[$i].image // null),
+              resources: {
+                cpu: {
+                  request: (.spec.containers[$i].resources.requests.cpu // null),
+                  limit:   (.spec.containers[$i].resources.limits.cpu // null)
+                },
+                memory: {
+                  request: (.spec.containers[$i].resources.requests.memory // null),
+                  limit:   (.spec.containers[$i].resources.limits.memory // null)
+                }
+              }
+            }
+        ]
+      )
+    }
+]'
+
