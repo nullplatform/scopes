@@ -76,7 +76,7 @@ for ZONE_ID in "${HOSTED_ZONES[@]}"; do
         }" 2>&1) || {
 
             if [[ "$ACTION" == "DELETE" ]] && [[ "$ROUTE53_OUTPUT" == *"InvalidChangeBatch"* ]] && [[ "$ROUTE53_OUTPUT" == *"but it was not found"* ]]; then
-          echo "Route53 record for $SCOPE_DOMAIN was already deleted or never created in zone $ZONE_ID"
+          echo "Route53 record for $SCOPE_DOMAIN does not exist in zone $ZONE_ID, skipping deletion"
           continue
         fi
 
