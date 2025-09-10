@@ -89,6 +89,8 @@ build_datadog_query() {
   local metric="$1"
   local filters="$2"
   local rollup_step="$3"
+  local start_time="$4"
+  local end_time="$5"
   local groupBy="$GROUP_BY"
 
   if [[ "$groupBy" == "[]" || "$groupBy" == "" ]]; then
@@ -127,17 +129,11 @@ build_datadog_query() {
       echo "((sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60) - sum:nullplatform.scope.request_count{$filters,quality:ok_2xx_3xx}$group_clause.rollup(sum, 60)) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)) * 100"
       ;;
     "trace.http.request.p99")
-      # Use context from $CONTEXT environment variable
-      local env_name=""
-      local service_name=""
-      
-      # Extract environment from service.dimensions.environment if available
-      if [[ -n "$CONTEXT" ]]; then
-        env_name=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment // empty' 2>/dev/null)
-        service_name=$(echo "$CONTEXT" | jq -r '.scope.slug // empty' 2>/dev/null)
-      fi
-      
-      echo "p99:trace.http.request{service:$service_name,env:$env_name}.rollup(avg, 60)"
+      local env_name=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment')
+      local service_name=$(basename $(echo "$CONTEXT" | jq -r '.tags.repository_url'))-kubernetes
+
+      local p99_interval=$((end_time - start_time))
+      echo "p99:trace.http.request{service:$service_name,env:$env_name}.rollup(avg, $p99_interval) * 1000"
       ;;
     
     # Generic handler for any other Datadog metric
@@ -240,7 +236,7 @@ metric_type=$(echo $config | cut -d' ' -f1)
 unit=$(echo $config | cut -d' ' -f2)
 
 filters=$(build_filters)
-query=$(build_datadog_query "$METRIC_NAME" "$filters" "$step")
+query=$(build_datadog_query "$METRIC_NAME" "$filters" "$step" "$start_time" "$end_time")
 
 response=$(query_datadog "$query" "$start_time" "$end_time")
 

@@ -2,23 +2,16 @@
 
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
 
-if [[ -n "$(echo "$CONTEXT" | jq -r '.tags.repository_url // empty')" ]]; then
-  SERVICE_NAME=$(basename $(echo "$CONTEXT" | jq -r '.tags.repository_url'))-kubernetes
-else
-  SERVICE_NAME=$(echo "$CONTEXT" | jq -r '.scope.slug // empty')
-fi
-
-
-ENVIRONMENT=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment // empty')
-
 if [[ -z "$DATADOG_API_KEY" ]] || [[ -z "$DATADOG_APP_KEY" ]]; then
   NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
   
   PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
   
+
   DATADOG_API_KEY=${DATADOG_API_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.credentials.api_key // empty')}
   DATADOG_APP_KEY=${DATADOG_APP_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.credentials.app_key // empty')}
-  DATADOG_SITE=${DATADOG_SITE:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.setup.site // "datadoghq.com"')}
+  DATADOG_SITE=${DATADOG_SITE:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.settings.site // "datadoghq.com"')}
+
 else
   DATADOG_SITE=${DATADOG_SITE:-"datadoghq.com"}
 fi
