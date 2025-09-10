@@ -22,7 +22,7 @@ configuration:
   # VAULT_ADDR: "http://localhost:8200"
   # VAULT_TOKEN: "myroot"
   IAM:
-    ENABLED: false
+    ENABLED: true
 #    PREFIX: nullplatform-scopes
 #    ROLE:
 #      POLICIES:
