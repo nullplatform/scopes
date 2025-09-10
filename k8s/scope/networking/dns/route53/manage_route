@@ -74,12 +74,12 @@ for ZONE_ID in "${HOSTED_ZONES[@]}"; do
                 }
             ]
         }" 2>&1) || {
-        echo "ERROR: Failed to create Route53 record"
+        echo "ERROR: Failed to $ACTION Route53 record"
         echo "Zone ID: $ZONE_ID"
         echo "AWS Error: $ROUTE53_OUTPUT"
         echo "This often happens when the agent lacks Route53 permissions"
         exit 1
     }
     
-    echo "Successfully created Route53 record"
+    echo "Successfully $ACTION Route53 record"
 done
