@@ -1,0 +1,47 @@
+#!/bin/bash
+
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
+
+if [[ -z "$DATADOG_API_KEY" ]] || [[ -z "$DATADOG_APP_KEY" ]]; then
+  NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
+  
+  PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
+  
+
+  DATADOG_API_KEY=${DATADOG_API_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.credentials.api_key // empty')}
+  DATADOG_APP_KEY=${DATADOG_APP_KEY:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.credentials.app_key // empty')}
+  DATADOG_SITE=${DATADOG_SITE:-$(echo "$PROVIDERS" | jq -r '.results[0].attributes.settings.site // "datadoghq.com"')}
+
+else
+  DATADOG_SITE=${DATADOG_SITE:-"datadoghq.com"}
+fi
+
+if [[ -z "$DATADOG_API_KEY" ]]; then
+  echo "There is no Datadog provider configured. Please configure Datadog in Platform settings and try again." >&2
+  exit 1
+fi
+
+if [[ -z "$DATADOG_APP_KEY" ]]; then
+  echo "Datadog App Key is required. Please configure App Key in Platform settings and try again." >&2
+  exit 1
+fi
+
+while read -r line; do
+  eval "$line"
+done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
+  if (.value | type) == "array" then
+    "export \(.key | ascii_upcase)=\(.value | join(","))"
+  else
+    "export \(.key | ascii_upcase)=\(.value)"
+  end')
+
+if [[ -n "$METRIC" ]]; then
+  export METRIC_NAME="$METRIC"
+fi
+
+export DATADOG_API_KEY
+export DATADOG_APP_KEY
+export DATADOG_SITE
+export SCOPE_ID
+export SERVICE_NAME
+export ENVIRONMENT
