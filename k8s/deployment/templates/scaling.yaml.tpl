@@ -18,4 +18,12 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .scope.capabilities.autoscaling.target_cpu_utilization }}
+    {{- if and (has .scope.capabilities.autoscaling "target_memory_enabled") (eq .scope.capabilities.autoscaling.target_memory_enabled true) }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .scope.capabilities.autoscaling.target_memory_utilization }}
+    {{- end }}
 {{- end }}

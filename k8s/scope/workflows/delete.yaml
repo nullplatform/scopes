@@ -36,6 +36,8 @@ steps:
       - name: build service account
         type: script
         file: "$SERVICE_PATH/scope/iam/build_service_account"
+        configuration:
+          ACTION: delete
         output:
           - name: SERVICE_ACCOUNT_TEMPLATE_PATH
             type: file

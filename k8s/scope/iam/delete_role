@@ -11,6 +11,18 @@ if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
   return
 fi
 
+ROLE_ARN=$(aws iam get-role --role-name "$SERVICE_ACCOUNT_NAME" --query 'Role.Arn' --output text 2>&1) || {
+  if [[ "$ROLE_ARN" == *"NoSuchEntity"* ]] && [[ "$ROLE_ARN" == *"cannot be found"* ]]; then
+    echo "IAM role '$SERVICE_ACCOUNT_NAME' does not exist, skipping role deletion"
+    return 0
+  fi
+
+  echo "ERROR: Failed to find IAM role '$SERVICE_ACCOUNT_NAME'"
+  echo "AWS Error: $ROLE_ARN"
+  echo "Make sure the role exists and you have IAM permissions"
+  exit 1
+}
+
 ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 
 echo "Detaching managed policies..."
