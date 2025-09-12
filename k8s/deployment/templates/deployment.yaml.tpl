@@ -158,6 +158,113 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+        {{ if .scope.capabilities.additional_ports }}
+        {{ range .scope.capabilities.additional_ports }}
+        {{ if eq .type "HTTP" }}
+        - name: http-{{ .port }}
+          securityContext:
+            runAsUser: 0
+          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          ports:
+            - containerPort: {{ .port }}
+              protocol: TCP
+          env:
+            - name: HEALTH_CHECK_TYPE
+              value: http
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: http
+            - name: HEALTH_CHECK_PATH
+              value: {{ $.scope.capabilities.health_check.path }}
+            - name: LISTENER_PORT
+              value: '{{ .port }}'
+          resources:
+            limits:
+              cpu: 93m
+              memory: 64Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            {{- if and (has $.scope.capabilities.health_check "type") (eq $.scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.tcp" dict "healthCheck" $.scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" $.scope.capabilities.health_check "port" 80 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" $.scope.capabilities.health_check }}
+            failureThreshold: 9
+          readinessProbe:
+            {{- if and (has $.scope.capabilities.health_check "type") (eq $.scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.tcp" dict "healthCheck" $.scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" $.scope.capabilities.health_check "port" 80 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" $.scope.capabilities.health_check }}
+            failureThreshold: 3
+          startupProbe:
+            {{- if and (has $.scope.capabilities.health_check "type") (eq $.scope.capabilities.health_check.type "TCP") }}
+            {{- template "probe.tcp" dict "healthCheck" $.scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- else }}
+            {{- template "probe.http" dict "healthCheck" $.scope.capabilities.health_check "port" 80 }}
+            {{- end }}
+            {{- template "probe.base" dict "healthCheck" $.scope.capabilities.health_check }}
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+        {{ else if eq .type "GRPC" }}
+        - name: grpc-{{ .port }}
+          securityContext:
+            runAsUser: 0
+          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          ports:
+            - containerPort: {{ .port }}
+              protocol: TCP
+          env:
+            - name: HEALTH_CHECK_TYPE
+              value: grpc
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: grpc
+            - name: LISTENER_PORT
+              value: '{{ .port }}'
+          resources:
+            limits:
+              cpu: 93m
+              memory: 64Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            grpc:
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            grpc:
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            grpc:
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+        {{ end }}
+        {{ end }}
+        {{ end }}
         - name: application
           envFrom:
             - secretRef:
@@ -169,6 +276,12 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
+            {{ if .scope.capabilities.additional_ports }}
+            {{ range .scope.capabilities.additional_ports }}
+            - containerPort: {{ .port }}
+              protocol: TCP
+            {{ end }}
+            {{ end }}
           resources:
             limits:
               cpu: {{ .scope.capabilities.cpu_millicores }}m

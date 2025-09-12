@@ -84,14 +84,14 @@ metadata:
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ $.scope.slug }}
     app.kubernetes.io/name: {{ $.scope.slug }}
-{{- $global := index .k8s_modifiers "global" }}
+{{- $global := index $.k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}
   {{- if $labels }}
 {{ data.ToYAML $labels | indent 4 }}
   {{- end }}
 {{- end }}
-{{- $service := index .k8s_modifiers "service" }}
+{{- $service := index $.k8s_modifiers "service" }}
 {{- if $service }}
   {{- $labels := index $service "labels" }}
   {{- if $labels }}
@@ -107,14 +107,14 @@ metadata:
     alb.ingress.kubernetes.io/success-codes: 200-299
     alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
     alb.ingress.kubernetes.io/backend-protocol: HTTP
-{{- $global := index .k8s_modifiers "global" }}
+{{- $global := index $.k8s_modifiers "global" }}
 {{- if $global }}
   {{- $annotations := index $global "annotations" }}
   {{- if $annotations }}
 {{ data.ToYAML $annotations | indent 4 }}
   {{- end }}
 {{- end }}
-{{- $service := index .k8s_modifiers "service" }}
+{{- $service := index $.k8s_modifiers "service" }}
 {{- if $service }}
   {{- $annotations := index $service "annotations" }}
   {{- if $annotations }}
@@ -156,14 +156,14 @@ metadata:
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ $.scope.slug }}
     app.kubernetes.io/name: {{ $.scope.slug }}
-{{- $global := index .k8s_modifiers "global" }}
+{{- $global := index $.k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}
   {{- if $labels }}
 {{ data.ToYAML $labels | indent 4 }}
   {{- end }}
 {{- end }}
-{{- $service := index .k8s_modifiers "service" }}
+{{- $service := index $.k8s_modifiers "service" }}
 {{- if $service }}
   {{- $labels := index $service "labels" }}
   {{- if $labels }}
@@ -180,14 +180,14 @@ metadata:
     alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC
     alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true
-{{- $global := index .k8s_modifiers "global" }}
+{{- $global := index $.k8s_modifiers "global" }}
 {{- if $global }}
   {{- $annotations := index $global "annotations" }}
   {{- if $annotations }}
 {{ data.ToYAML $annotations | indent 4 }}
   {{- end }}
 {{- end }}
-{{- $service := index .k8s_modifiers "service" }}
+{{- $service := index $.k8s_modifiers "service" }}
 {{- if $service }}
   {{- $annotations := index $service "annotations" }}
   {{- if $annotations }}
