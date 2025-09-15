@@ -263,41 +263,43 @@ transform_response() {
   echo "$response" | jq '
     (.data.attributes.times // []) as $times |
     (.data.attributes.values // [[]]) as $values |
-    (.data.attributes.series // []) | map({
-      selector: (
-        if .group_tags then
-          if (.group_tags | type) == "array" then
-            if (.group_tags | length) == 0 then
-              {}
+    (.data.attributes.series // []) | to_entries | map(
+      .key as $idx |
+      .value | {
+        selector: (
+          if .group_tags then
+            if (.group_tags | type) == "array" then
+              if (.group_tags | length) == 0 then
+                {}
+              else
+                # Convert array of "key:value" strings to object
+                .group_tags | map(split(":") | {(.[0]): .[1]}) | add
+              end
             else
-              # Convert array of "key:value" strings to object
-              .group_tags | map(split(":") | {(.[0]): .[1]}) | add
+              .group_tags
+            end
+          elif .scope then
+            if (.scope | type) == "string" then
+              .scope | split(",") | map(split(":") | {(.[0]): .[1]}) | add
+            else
+              .scope
             end
           else
-            .group_tags
+            {}
           end
-        elif .scope then
-          if (.scope | type) == "string" then
-            .scope | split(",") | map(split(":") | {(.[0]): .[1]}) | add
+        ),
+        data: (
+          if ($values | length) > 0 and ($times | length) > 0 then
+            [range($times | length)] | map({
+              timestamp: ($times[.] / 1000 | todate),
+              value: ($values[$idx][.] // 0)
+            })
           else
-            .scope
+            []
           end
-        else
-          {}
-        end
-      )
-    } + {
-      data: (
-        if ($values | length) > 0 and ($times | length) > 0 then
-          [range($times | length)] | map({
-            timestamp: ($times[.] / 1000 | todate),
-            value: $values[0][.]
-          })
-        else
-          []
-        end
-      )
-    })'
+        )
+      }
+    )'
 }
 
 transformed_results=$(transform_response "$response")
