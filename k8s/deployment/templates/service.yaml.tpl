@@ -198,7 +198,7 @@ spec:
   ports:
     - protocol: TCP
       port: {{ .port }}
-      targetPort: {{ .port }}
+      targetPort: {{ 50052 }}
   selector:
     nullplatform: "true"
     account: {{ $.account.slug }}

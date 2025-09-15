@@ -213,13 +213,12 @@ spec:
           terminationMessagePolicy: File
           imagePullPolicy: Always
         {{ else if eq .type "GRPC" }}
-        - name: grpc-{{ .port }}
-          args: ["--listen=:50051", "--upstream=127.0.0.1:50052"]
+        - name: grpc-{{ 50052 }}
           securityContext:
             runAsUser: 0
           image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
           ports:
-            - containerPort: {{ .port }}
+            - containerPort: {{ 50052 }}
               protocol: TCP
           env:
             - name: HEALTH_CHECK_TYPE
@@ -229,7 +228,7 @@ spec:
             - name: LISTENER_PROTOCOL
               value: grpc
             - name: LISTENER_PORT
-              value: '{{ .port }}'
+              value: '{{ 50052 }}'
           resources:
             limits:
               cpu: 93m
@@ -238,7 +237,7 @@ spec:
               cpu: 31m
           livenessProbe:
             grpc:
-              port: {{ .port }}
+              port: {{ 50052 }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -246,7 +245,7 @@ spec:
             failureThreshold: 9
           readinessProbe:
             grpc:
-              port: {{ .port }}
+              port: {{ 50052 }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -254,7 +253,7 @@ spec:
             failureThreshold: 3
           startupProbe:
             grpc:
-              port: {{ .port }}
+              port: {{ 50052 }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
