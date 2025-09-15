@@ -2,6 +2,7 @@
 
 GROUP_BY=${GROUP_BY:-""}
 
+
 # Validate required parameters
 if [[ -z "$METRIC_NAME" ]]; then
   echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
@@ -13,8 +14,13 @@ if [[ -z "$APPLICATION_ID" ]]; then
   exit 1
 fi
 
-if [[ -z "$PROM_URL" ]]; then
-  echo '{"error":"PROM_URL is required. Please specify with PROM_URL environment variable"}'
+if [[ -z "$DATADOG_API_KEY" ]]; then
+  echo '{"error":"DATADOG_API_KEY is required. Please specify with DATADOG_API_KEY environment variable"}'
+  exit 1
+fi
+
+if [[ -z "$DATADOG_APP_KEY" ]]; then
+  echo '{"error":"DATADOG_APP_KEY is required. Please specify with DATADOG_APP_KEY environment variable"}'
   exit 1
 fi
 
@@ -35,10 +41,10 @@ get_metric_config() {
     "http.healthcheck_fail")
       echo "gauge count"
       ;;
-    "system.cpu_usage_percentage")
-      echo "gauge percent"
+    "trace.http.request.p99")
+      echo "gauge milliseconds"
       ;;
-    "system.cpu_usage_percentage_by_instance")
+    "system.cpu_usage_percentage")
       echo "gauge percent"
       ;;
     "system.memory_usage_percentage")
@@ -46,24 +52,6 @@ get_metric_config() {
       ;;
     "system.used_memory_kb")
       echo "gauge kilobytes"
-      ;;
-    "cronjob.execution_count")
-      echo "gauge count"
-      ;;
-    "cronjob.success_count")
-      echo "gauge count"
-      ;;
-    "cronjob.failure_count")
-      echo "gauge count"
-      ;;
-    "cronjob.last_execution_start")
-      echo "gauge timestamp"
-      ;;
-    "cronjob.cpu_usage")
-      echo "gauge percent"
-      ;;
-    "cronjob.memory_usage")
-      echo "gauge bytes"
       ;;
     *)
       echo "gauge unknown"
@@ -74,217 +62,173 @@ get_metric_config() {
 build_filters() {
   local filters=""
 
-  # Add application_id filter
   if [[ -n "$APPLICATION_ID" ]]; then
-    filters="application_id=\"$APPLICATION_ID\""
+    filters="application_id:$APPLICATION_ID"
   fi
 
-  # Add scope_id filter
   if [[ -n "$SCOPE_ID" ]]; then
     if [[ -n "$filters" ]]; then
-      filters="$filters,"
+      filters="$filters,scope_id:$SCOPE_ID"
+    else
+      filters="scope_id:$SCOPE_ID"
     fi
-    filters="${filters}scope_id=\"$SCOPE_ID\""
   fi
 
   if [[ -n "$DEPLOYMENT_ID" && "$DEPLOYMENT_ID" != "null" ]]; then
     if [[ -n "$filters" ]]; then
-      filters="$filters,"
+      filters="$filters,deployment_id:$DEPLOYMENT_ID"
+    else
+      filters="deployment_id:$DEPLOYMENT_ID"
     fi
-    filters="${filters}deployment_id=\"$DEPLOYMENT_ID\""
   fi
 
   echo "$filters"
 }
 
-# Build Prometheus query based on metric type
-build_query() {
+build_datadog_query() {
   local metric="$1"
   local filters="$2"
-  local interval="$3"
+  local rollup_step="$3"
+  local start_time="$4"
+  local end_time="$5"
   local groupBy="$GROUP_BY"
 
   if [[ "$groupBy" == "[]" || "$groupBy" == "" ]]; then
     groupBy=""
   fi
 
+  local group_clause=""
+  if [[ -n "$groupBy" ]]; then
+    group_clause=" by {$(echo "$groupBy" | tr ',' ' ' | xargs | tr ' ' ',')}"
+  fi
+
   case "$metric" in
+    # Custom nullplatform metrics with specific logic
     "http.healthcheck_count")
-      local healthcheck_filters="${filters},is_healthcheck=\"yes\""
-      if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
-      else
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval]))"
-      fi
+      echo "sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step)"
       ;;
     "http.healthcheck_fail")
-      local healthcheck_filters="${filters},is_healthcheck=\"yes\""
-      local ok_filters="${filters},is_healthcheck=\"yes\",quality=\"OK (2XX, 3XX)\""
-      if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy) - sum(rate(nullplatform_http_response_time_count{$ok_filters}[$interval])) by ($groupBy)"
-      else
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) - sum(rate(nullplatform_http_response_time_count{$ok_filters}[$interval]))"
-      fi
-      ;;
-    "system.cpu_usage_percentage_by_instance")
-      echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by (instance_id)"
+      echo "sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step) - sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes,quality:ok_2xx_3xx} by {instance_id}.rollup(sum, $rollup_step)"
       ;;
     "system.memory_usage_percentage")
-      if [[ -n "$groupBy" ]]; then
-        echo "avg(nullplatform_system_memory_usage_percentage{$filters}) by ($groupBy)"
-      else
-        echo "avg(nullplatform_system_memory_usage_percentage{$filters})"
-      fi
+      echo "avg:nullplatform.scope.memory_usage_percentage{$filters}$group_clause"
       ;;
     "system.cpu_usage_percentage")
-      if [[ -n "$groupBy" ]]; then
-        echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by ($groupBy)"
-      else
-        echo "avg(nullplatform_system_cpu_usage_percentage{$filters})"
-      fi
+      echo "avg:nullplatform.scope.cpu_usage_percentage{$filters}$group_clause"
       ;;
     "system.used_memory_kb")
-      if [[ -n "$groupBy" ]]; then
-        echo "avg(nullplatform_system_used_memory_kb{$filters}) by ($groupBy)"
-      else
-        echo "avg(nullplatform_system_used_memory_kb{$filters})"
-      fi
+      echo "avg:nullplatform.scope.memory_usage_kb{$filters}$group_clause"
       ;;
     "http.response_time")
-      if [[ -n "$groupBy" ]]; then
-        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
-      else
-        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval]))/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval]))"
-      fi
+      echo "sum:nullplatform.scope.response_time{$filters}$group_clause.rollup(sum, 60) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)"
       ;;
     "http.rpm")
-      if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy) * 60"
-      else
-        echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) * 60"
-      fi
+      echo "sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)"
       ;;
     "http.error_rate")
-      local base_filters="$filters"
-      local ok_filters="${filters},quality=\"OK (2XX, 3XX)\""
-      if [[ -n "$groupBy" ]]; then
-        echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by ($groupBy) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) by ($groupBy) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by ($groupBy) * 60 )) *100"
-      else
-        echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) * 60 )) *100"
-      fi
+      echo "((sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60) - sum:nullplatform.scope.request_count{$filters,quality:ok_2xx_3xx}$group_clause.rollup(sum, 60)) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)) * 100"
       ;;
-    "cronjob.execution_count")
-      echo "sum by (scope_id) (label_replace(increase(kube_job_status_succeeded{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]) +increase(kube_job_status_failed{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]),\"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
+    "trace.http.request.p99")
+      local env_name=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment')
+      local service_name=$(basename $(echo "$CONTEXT" | jq -r '.tags.repository_url'))-kubernetes
+
+      local p99_interval=$((end_time - start_time))
+      echo "p99:trace.http.request{service:$service_name,env:$env_name}.rollup(avg, $p99_interval) * 1000"
       ;;
-    "cronjob.success_count")
-      echo "sum by (scope_id) (label_replace(increase(kube_job_status_succeeded{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]), \"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
-      ;;
-    "cronjob.failure_count")
-      echo "sum by (scope_id) (label_replace(increase(kube_job_status_failed{job_name=~\"job-${SCOPE_ID}-.*\"}[$interval]), \"scope_id\", \"\$1\", \"job_name\", \"job-([0-9]+)-.*\"))"
-      ;;
-    "cronjob.cpu_usage")
-      echo "avg(avg_over_time(container_cpu_usage_seconds_total{pod=~\"job-${SCOPE_ID}-.*\", container!=\"\", container!=\"POD\"}[$interval])) * 100"
-      ;;
-    "cronjob.memory_usage")
-      echo "avg by (scope_id) (label_replace(container_memory_usage_bytes{pod=~\"job-${SCOPE_ID}-.*\", container!=\"\", container!=\"POD\"} / on(pod, container) kube_pod_container_resource_limits{resource=\"memory\", unit=\"byte\", pod=~\"job-${SCOPE_ID}-.*\"}, \"scope_id\", \"\$1\", \"pod\", \"job-([0-9]+)-.*\")) * 100"
-      ;;
+    
+    # Generic handler for any other Datadog metric
     *)
-      echo "up{$filters}"  # Default query if metric not recognized
+      echo "avg:$metric{$filters}$group_clause"
       ;;
   esac
 }
 
-# Query Prometheus and return the result
-query_prometheus() {
+# Query Datadog API
+query_datadog() {
   local query="$1"
   local start_time="$2"
   local end_time="$3"
-  local step="$4"
 
-  local url="${PROM_URL}/api/v1/query_range"
-  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+  local base_url="https://api.${DATADOG_SITE:-datadoghq.com}"
+  local url="${base_url}/api/v2/query/timeseries"
+  
+  # Build JSON payload for v2 API
+  local payload=$(jq -n \
+    --arg query "$query" \
+    --arg from "$start_time" \
+    --arg to "$end_time" \
+    '{
+      data: {
+        type: "timeseries_request",
+        attributes: {
+          formulas: [{
+            formula: "a"
+          }],
+          queries: [{
+            name: "a",
+            query: $query,
+            data_source: "metrics"
+          }],
+          from: ($from | tonumber * 1000),
+          to: ($to | tonumber * 1000),
+          interval: 60000
+        }
+      }
+    }')
 
-  curl -s -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
+  curl -s -X POST "$url" \
+    -H "DD-API-KEY: $DATADOG_API_KEY" \
+    -H "DD-APPLICATION-KEY: $DATADOG_APP_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$payload"
 }
 
-urlencode() {
-  local string="${1}"
-  local strlen=${#string}
-  local encoded=""
-  local pos c o
-
-  for (( pos=0 ; pos<strlen ; pos++ )); do
-    c=${string:$pos:1}
-    case "$c" in
-      [-_.~a-zA-Z0-9] ) o="${c}" ;;
-      * )               printf -v o '%%%02x' "'$c"
-    esac
-    encoded+="${o}"
-  done
-  echo "${encoded}"
-}
-
-# Handle START_TIME/END_TIME for Alpine compatibility
+# Handle START_TIME/END_TIME
 if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
-  # Convert ISO dates to Unix timestamps (Alpine compatible - remove milliseconds)
-  start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
-  now=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
-  step=${PERIOD:-60}
-  # Calculate interval like JavaScript service: period/60 + "m"
-  if [[ -n "$PERIOD" && "$PERIOD" -gt 0 ]]; then
-    interval_minutes=$((PERIOD / 60))
-    if [[ $interval_minutes -lt 1 ]]; then
-      interval_minutes=1
-    fi
-    # Use minimum 5m interval for HTTP metrics to ensure sufficient data points
-    case "$METRIC_NAME" in
-      "http.error_rate"|"http.response_time"|"http.rpm"|"http.healthcheck_count"|"http.healthcheck_fail")
-        if [[ $interval_minutes -lt 5 ]]; then
-          interval_minutes=5
-        fi
-        ;;
-    esac
-    INTERVAL="${interval_minutes}m"
+  # For macOS compatibility, use a different date parsing approach
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS date command
+    start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -j -f "%Y-%m-%d %H:%M:%S" "{}" +%s 2>/dev/null || echo "0")
+    end_time=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -j -f "%Y-%m-%d %H:%M:%S" "{}" +%s 2>/dev/null || echo "0")
   else
-    INTERVAL="5m"
+    # Linux date command
+    start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+    end_time=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+  fi
+  # Use 30 second intervals for queries 6 minutes or less
+  time_diff=$((end_time - start_time))
+  if [[ $time_diff -le 360 ]]; then
+    step=${PERIOD:-30}
+  else
+    step=${PERIOD:-60}
   fi
 else
   # Fallback to TIME_RANGE logic
-  now=$(date +%s)
+  end_time=$(date +%s)
   case "$TIME_RANGE" in
     *h)
       hours=${TIME_RANGE%h}
-      start_time=$((now - hours * 3600))
+      start_time=$((end_time - hours * 3600))
       ;;
     *m)
       minutes=${TIME_RANGE%m}
-      start_time=$((now - minutes * 60))
+      start_time=$((end_time - minutes * 60))
       ;;
     *d)
       days=${TIME_RANGE%d}
-      start_time=$((now - days * 86400))
+      start_time=$((end_time - days * 86400))
       ;;
     *)
-      start_time=$((now - 3600))
+      start_time=$((end_time - 3600))
       ;;
   esac
-
-  case "$INTERVAL" in
-    *h)
-      hours=${INTERVAL%h}
-      step=$((hours * 3600))
-      ;;
-    *m)
-      minutes=${INTERVAL%m}
-      step=$((minutes * 60))
-      ;;
-    *s)
-      step=${INTERVAL%s}
-      ;;
-    *)
-      step=60
-      ;;
-  esac
+  # Use 30 second intervals for queries 6 minutes or less
+  time_diff=$((end_time - start_time))
+  if [[ $time_diff -le 360 ]]; then
+    step=${PERIOD:-30}
+  else
+    step=${PERIOD:-60}
+  fi
 fi
 
 config=$(get_metric_config)
@@ -292,35 +236,85 @@ metric_type=$(echo $config | cut -d' ' -f1)
 unit=$(echo $config | cut -d' ' -f2)
 
 filters=$(build_filters)
-query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
+query=$(build_datadog_query "$METRIC_NAME" "$filters" "$step" "$start_time" "$end_time")
 
-response=$(query_prometheus "$query" "$start_time" "$now" "$step")
+response=$(query_datadog "$query" "$start_time" "$end_time")
+
 
 transform_response() {
   local response="$1"
-  local status=$(echo "$response" | jq -r '.status')
-
-  if [[ "$status" != "success" ]]; then
+  
+  # Check if response contains error
+  local error=$(echo "$response" | jq -r '.errors // empty')
+  if [[ -n "$error" ]]; then
     echo "[]"
     return
   fi
 
-  local results=$(echo "$response" | jq '.data.result')
-
-  if [[ "$results" == "[]" || "$results" == "null" ]]; then
+  # Extract timeseries data from v2 API response
+  local series=$(echo "$response" | jq -r '.data.attributes.series // []')
+  
+  if [[ "$series" == "[]" || "$series" == "null" ]]; then
     echo "[]"
     return
   fi
 
-  echo "$results" | jq 'map({
-    selector: .metric,
-    data: .values | map({
-      timestamp: (.[0] | tonumber | todate),
-      value: (.[1] | tonumber)
-    })
-  })'
+  # Transform v2 API response - combine times and values arrays into data points
+  echo "$response" | jq '
+    (.data.attributes.times // []) as $times |
+    (.data.attributes.values // [[]]) as $values |
+    (.data.attributes.series // []) | to_entries | map(
+      .key as $idx |
+      .value | {
+        selector: (
+          if .group_tags then
+            if (.group_tags | type) == "array" then
+              if (.group_tags | length) == 0 then
+                {}
+              else
+                # Convert array of "key:value" strings to object
+                .group_tags | map(split(":") | {(.[0]): .[1]}) | add
+              end
+            else
+              .group_tags
+            end
+          elif .scope then
+            if (.scope | type) == "string" then
+              .scope | split(",") | map(split(":") | {(.[0]): .[1]}) | add
+            else
+              .scope
+            end
+          else
+            {}
+          end
+        ),
+        data: (
+          if ($values | length) > 0 and ($times | length) > 0 then
+            [range($times | length)] | map({
+              timestamp: ($times[.] / 1000 | todate),
+              value: ($values[$idx][.] // 0)
+            })
+          else
+            []
+          end
+        )
+      }
+    )'
 }
 
 transformed_results=$(transform_response "$response")
 
-echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"
+# Output compact JSON without formatting
+jq -c -n \
+  --arg metric "$METRIC_NAME" \
+  --arg type "$metric_type" \
+  --arg period "$step" \
+  --arg unit "$unit" \
+  --argjson results "$transformed_results" \
+  '{
+    metric: $metric,
+    type: $type,
+    period_in_seconds: ($period | tonumber),
+    unit: $unit,
+    results: $results
+  }'
