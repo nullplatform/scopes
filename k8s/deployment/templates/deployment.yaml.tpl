@@ -214,6 +214,7 @@ spec:
           imagePullPolicy: Always
         {{ else if eq .type "GRPC" }}
         - name: grpc-{{ .port }}
+          args: ["--listen=:50051", "--upstream=127.0.0.1:50052"]
           securityContext:
             runAsUser: 0
           image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
@@ -278,7 +279,7 @@ spec:
               protocol: TCP
             {{ if .scope.capabilities.additional_ports }}
             {{ range .scope.capabilities.additional_ports }}
-            - containerPort: {{ .port }}
+            - containerPort: 50052
               protocol: TCP
             {{ end }}
             {{ end }}
