@@ -1,5 +1,29 @@
 {
   "assignable_to": "any",
+  "available_actions":[
+    "create-scope",
+    "delete-scope",
+    "start-initial",
+    "start-blue-green",
+    "finalize-blue-green",
+    "rollback-deployment",
+    "delete-deployment",
+    "switch-traffic",
+    "set-desired-instance-count",
+    "pause-autoscaling",
+    "resume-autoscaling",
+    "restart-pods",
+    "kill-instances"
+  ],
+  "agent_command":{
+    "data": {
+      "cmdline": "nullplatform/scopes/entrypoint --service-path=nullplatform/scopes/k8s",
+      "environment": {
+        "NP_ACTION_CONTEXT": "'${NOTIFICATION_CONTEXT}'"
+       }
+     },
+    "type": "exec"
+  },
   "attributes": {
    "schema":{
       "type":"object",
