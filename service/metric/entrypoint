@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd $WORKING_DIRECTORY
 WORKFLOW_PATH="$SERVICE_PATH/metric/workflows/metric.yaml"
 OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/metric/workflows/metric.yaml"
 
