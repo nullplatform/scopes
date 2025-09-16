@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd $WORKING_DIRECTORY
 echo "Executing deployment action=$SERVICE_ACTION for scope=$SCOPE_ID and deployment=$DEPLOYMENT_ID"
 
 ACTION_TO_EXECUTE=""

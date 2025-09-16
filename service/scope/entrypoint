@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd $WORKING_DIRECTORY
 echo "Executing scope action=$SERVICE_ACTION, type=$SERVICE_ACTION_TYPE for scope=$SCOPE_ID"
 
 ACTION_TO_EXECUTE="$SERVICE_ACTION_TYPE"
