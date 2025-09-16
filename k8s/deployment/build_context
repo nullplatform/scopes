@@ -59,3 +59,20 @@ export BLUE_DEPLOYMENT_ID
 export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID-$DEPLOYMENT_ID"
 
 mkdir -p "$OUTPUT_DIR"
+
+# Check if Datadog is enabled from environment variable
+if [[ "$DATADOG_ENABLED" == "true" ]]; then
+  DATADOG_LOGS_URL="${DATADOG_LOGS_URL:-https://http-intake.logs.datadoghq.com}"
+  
+  CONTEXT=$(echo "$CONTEXT" | jq \
+            --arg np_logs_provider "datadog" \
+            --arg np_datadog_apikey "${DATADOG_API_KEY:-}" \
+            --arg np_datadog_logs_url "$DATADOG_LOGS_URL" \
+            '. + {
+              datadog_config: {
+                np_logs_provider: $np_logs_provider,
+                np_datadog_apikey: $np_datadog_apikey,
+                np_datadog_logs_url: $np_datadog_logs_url
+              }
+            }')
+fi

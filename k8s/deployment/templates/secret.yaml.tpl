@@ -54,4 +54,11 @@ data:
   NP_NAMESPACE: {{ .namespace.slug | base64.Encode }}
   NP_RELEASE_SEMVER: {{ .release.semver | base64.Encode }}
   NP_SCOPE: {{ .scope.slug | base64.Encode }}
+  {{- if .datadog_config }}
+  NP_LOGS_PROVIDER: {{ .datadog_config.np_logs_provider | base64.Encode }}
+  NP_DATADOG_APIKEY: {{ .datadog_config.np_datadog_apikey | base64.Encode }}
+  NP_DATADOG_LOGS_URL: {{ .datadog_config.np_datadog_logs_url | base64.Encode }}
+  NP_DATADOG_SERVICE: {{ printf "%s-%s-%s-%s" .account.slug .namespace.slug .application.slug .scope.slug | base64.Encode }}
+  NP_DATADOG_TAGS: {{ printf "account:%s,namespace:%s,application:%s,scope:%s,scope_id:%s,deployment_id:%s,account_id:%s,namespace_id:%s,application_id:%s" .account.slug .namespace.slug .application.slug .scope.slug .scope.id .deployment.id .account.id .namespace.id .application.id | base64.Encode }}
+  {{- end }}
 type: Opaque
