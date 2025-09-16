@@ -17,7 +17,7 @@
   ],
   "agent_command":{
     "data": {
-      "cmdline": "nullplatform/scopes/entrypoint --service-path=nullplatform/scopes/k8s",
+      "cmdline": "nullplatform/scopes/entrypoint --service-path=k8s",
       "environment": {
         "NP_ACTION_CONTEXT": "'${NOTIFICATION_CONTEXT}'"
        }
