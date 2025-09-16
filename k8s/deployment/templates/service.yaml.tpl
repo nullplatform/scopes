@@ -197,8 +197,8 @@ metadata:
 spec:
   ports:
     - protocol: TCP
-      port: {{ .port }}
-      targetPort: {{ 50052 }}
+      port: {{ 50052 }}
+      targetPort: {{ .port }}
   selector:
     nullplatform: "true"
     account: {{ $.account.slug }}

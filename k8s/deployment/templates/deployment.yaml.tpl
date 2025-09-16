@@ -278,7 +278,7 @@ spec:
               protocol: TCP
             {{ if .scope.capabilities.additional_ports }}
             {{ range .scope.capabilities.additional_ports }}
-            - containerPort: {{ .port }}
+            - containerPort: {{ 50052 }}
               protocol: TCP
             {{ end }}
             {{ end }}
