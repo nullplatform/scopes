@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd $WORKING_DIRECTORY
 if ! command -v jq &> /dev/null; then
     exit 1
 fi
