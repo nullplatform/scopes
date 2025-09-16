@@ -1,3 +1,4 @@
+# Blue/Green Ingress (merged): keep main's resource names and modifiers; add sebas' additional_ports logic
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -13,20 +14,48 @@ metadata:
     application_id: "{{ .application.id }}"
     scope: {{ .scope.slug }}
     scope_id: "{{ .scope.id }}"
+{{- $global := index .k8s_modifiers "global" }}
+{{- if $global }}
+  {{- $labels := index $global "labels" }}
+  {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- $ingress := index .k8s_modifiers "ingress" }}
+{{- if $ingress }}
+  {{- $labels := index $ingress "labels" }}
+  {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+  {{- end }}
+{{- end }}
   annotations:
     alb.ingress.kubernetes.io/actions.bg-deployment: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
-        {"serviceName":"d-{{ .scope.id }}-{{ .blue_deployment_id }}-http","servicePort":8080,"weight":{{ sub 100 .deployment.strategy_data.desired_switched_traffic }}},
-        {"serviceName":"d-{{ .scope.id }}-{{ .deployment.id }}-http","servicePort":8080,"weight":{{ .deployment.strategy_data.desired_switched_traffic }}}
+        {"serviceName":"d-{{ .scope.id }}-{{ .blue_deployment_id }}","servicePort":8080,"weight":{{ sub 100 .deployment.strategy_data.desired_switched_traffic }}},
+        {"serviceName":"d-{{ .scope.id }}-{{ .deployment.id }}","servicePort":8080,"weight":{{ .deployment.strategy_data.desired_switched_traffic }}}
       ]}}
     alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
-    alb.ingress.kubernetes.io/group.name: k8s-nullplatform-{{ .ingress_visibility }}
+    alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/load-balancer-name: k8s-nullplatform-{{ .ingress_visibility }}
+    alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
     alb.ingress.kubernetes.io/scheme: {{ .ingress_visibility }}
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     alb.ingress.kubernetes.io/target-node-labels: account={{ .account.slug }},namespace={{ .namespace.slug }},application={{ .application.slug }},account_id={{ .account.id }},namespace_id={{ .namespace.id }},application_id={{ .application.id }},scope={{ .scope.slug }},scope_id={{ .scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
+{{- $global := index .k8s_modifiers "global" }}
+{{- if $global }}
+  {{- $annotations := index $global "annotations" }}
+  {{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- $ingress := index .k8s_modifiers "ingress" }}
+{{- if $ingress }}
+  {{- $annotations := index $ingress "annotations" }}
+  {{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+  {{- end }}
+{{- end }}
 spec:
   ingressClassName: alb
   rules:
@@ -40,6 +69,18 @@ spec:
                 name: bg-deployment
                 port:
                   name: use-annotation
+{{- range .scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment
+                port:
+                  name: use-annotation
+{{- end }}
 
 {{ if .scope.capabilities.additional_ports }}
 {{ range .scope.capabilities.additional_ports }}
@@ -66,8 +107,8 @@ metadata:
         {"serviceName":"d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":{{ $.deployment.strategy_data.desired_switched_traffic }}}
       ]}}
     alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
-    alb.ingress.kubernetes.io/group.name: k8s-nullplatform-{{ $.ingress_visibility }}
-    alb.ingress.kubernetes.io/load-balancer-name: k8s-nullplatform-{{ $.ingress_visibility }}
+    alb.ingress.kubernetes.io/group.name: {{ $.alb_name }}
+    alb.ingress.kubernetes.io/load-balancer-name: {{ $.alb_name }}
     alb.ingress.kubernetes.io/scheme: {{ $.ingress_visibility }}
     alb.ingress.kubernetes.io/target-node-labels: account={{ $.account.slug }},namespace={{ $.namespace.slug }},application={{ $.application.slug }},account_id={{ $.account.id }},namespace_id={{ $.namespace.id }},application_id={{ $.application.id }},scope={{ $.scope.slug }},scope_id={{ $.scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
@@ -102,5 +143,27 @@ spec:
                 port:
                   name: use-annotation
           {{ end }}
+{{- range $.scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          {{ if eq $.type "HTTP" }}
+          - path: /{{ $.port }}
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment-{{ if eq $.type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $.port }}
+                port:
+                  name: use-annotation
+          {{ else if eq $.type "GRPC" }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment-{{ if eq $.type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $.port }}
+                port:
+                  name: use-annotation
+          {{ end }}
+{{- end }}
 {{ end }}
 {{ end }}
