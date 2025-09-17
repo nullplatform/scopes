@@ -5,6 +5,12 @@ set -euo pipefail
 echo "Managing DNS records"
 echo "DNS Type: $DNS_TYPE"
 echo "Action: $ACTION"
+echo "Scope Domain: $SCOPE_DOMAIN"
+
+if [[ "$ACTION" == "DELETE" ]] && [[ -z "${SCOPE_DOMAIN:-}" || "${SCOPE_DOMAIN:-}" == "To be defined" ]]; then
+    echo "Skipping route53 action as the scope has no domain"
+    return 0
+fi
 
 case "$DNS_TYPE" in
   route53)

@@ -100,6 +100,19 @@
                               {
                                  "type":"Control",
                                  "scope":"#/properties/autoscaling/properties/target_cpu_utilization"
+                              },
+                              {
+                                 "rule": {
+                                   "effect": "SHOW",
+                                   "condition": {
+                                     "scope": "#/properties/autoscaling/properties/target_memory_enabled",
+                                     "schema": {
+                                       "const": true
+                                     }
+                                   }
+                                 },
+                                 "type": "Control",
+                                 "scope": "#/properties/autoscaling/properties/target_memory_utilization"
                               }
                            ]
                         }
@@ -363,6 +376,19 @@
                   "maximum":90,
                   "minimum":50,
                   "description":"CPU utilization threshold that triggers scaling"
+               },
+               "target_memory_enabled": {
+                 "type": "boolean",
+                 "title": "Scale by memory",
+                 "default": false
+               },
+               "target_memory_utilization": {
+                 "type": "integer",
+                 "title": "Target memory utilization (%)",
+                 "default": 70,
+                 "maximum": 90,
+                 "minimum": 50,
+                 "description": "Memory utilization threshold that triggers scaling"
                }
             }
          },
@@ -546,6 +572,18 @@
                }
             },
             "description":"Configure automatic deployment from Git branches"
+         },
+         "custom_domains": {
+            "type": "object",
+            "required": [
+               "enabled"
+            ],
+            "properties": {
+               "enabled": {
+               "type": "boolean",
+               "default": true
+               }
+            }
          }
       }
    }
