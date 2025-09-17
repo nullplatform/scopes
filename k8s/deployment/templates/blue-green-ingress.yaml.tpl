@@ -1,4 +1,3 @@
-# Blue/Green Ingress (merged): keep main's resource names and modifiers; add sebas' additional_ports logic
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
