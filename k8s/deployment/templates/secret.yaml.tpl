@@ -48,7 +48,7 @@ data:
   NP_APPLICATION: {{ .application.slug | base64.Encode }}
   NP_DEPLOYMENT_ID: {{ .deployment.id | base64.Encode }}
   {{- range $name, $value := .scope.dimensions }}
-    NP_DIMENSION_{{- strings.ToUpper $name }}: {{ $value | base64.Encode }}
+  NP_DIMENSION_{{- strings.ToUpper $name }}: {{ $value | base64.Encode }}
   {{- end }}
   NP_DOMAIN: {{ .scope.domain | base64.Encode }}
   NP_NAMESPACE: {{ .namespace.slug | base64.Encode }}
