@@ -1,4 +1,3 @@
-# Default HTTP ingress from main, with sebas' background 503 action included
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -29,12 +28,15 @@ metadata:
   {{- end }}
 {{- end }}
   annotations:
-    alb.ingress.kubernetes.io/actions.bg-deployment: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"application/json","statusCode":"503","messageBody":"{\"status\":503}"}}'
-    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
+
+   alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
     alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
     alb.ingress.kubernetes.io/group.order: '{{ .alb_order }}'
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/scheme: {{ .alb_scheme }}
+    alb.ingress.kubernetes.io/scheme: {{ .ingress_visibility }}
+    alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/target-node-labels: account={{ .account.slug }},namespace={{ .namespace.slug }},application={{ .application.slug }},account_id={{ .account.id }},namespace_id={{ .namespace.id }},application_id={{ .application.id }},scope={{ .scope.slug }},scope_id={{ .scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
