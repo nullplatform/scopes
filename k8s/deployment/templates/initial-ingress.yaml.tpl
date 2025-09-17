@@ -28,16 +28,15 @@ metadata:
   {{- end }}
 {{- end }}
   annotations:
-
    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
-    alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
-    alb.ingress.kubernetes.io/group.order: '{{ .alb_order }}'
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/scheme: {{ .ingress_visibility }}
-    alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/target-node-labels: account={{ .account.slug }},namespace={{ .namespace.slug }},application={{ .application.slug }},account_id={{ .account.id }},namespace_id={{ .namespace.id }},application_id={{ .application.id }},scope={{ .scope.slug }},scope_id={{ .scope.id }},nullplatform=true
-    alb.ingress.kubernetes.io/target-type: ip
+   alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
+   alb.ingress.kubernetes.io/group.order: '{{ .alb_order }}'
+   alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+   alb.ingress.kubernetes.io/scheme: {{ .ingress_visibility }}
+   alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
+   alb.ingress.kubernetes.io/ssl-redirect: "443"
+   alb.ingress.kubernetes.io/target-node-labels: account={{ .account.slug }},namespace={{ .namespace.slug }},application={{ .application.slug }},account_id={{ .account.id }},namespace_id={{ .namespace.id }},application_id={{ .application.id }},scope={{ .scope.slug }},scope_id={{ .scope.id }},nullplatform=true
+   alb.ingress.kubernetes.io/target-type: ip
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $annotations := index $global "annotations" }}
@@ -53,7 +52,9 @@ metadata:
   {{- end }}
 {{- end }}
 spec:
+  ingressClassName: alb
   rules:
+    - host: {{ .scope.domain }}
     - http:
         paths:
           - path: /
@@ -63,7 +64,18 @@ spec:
                 name: d-{{ .scope.id }}-{{ .deployment.id }}
                 port:
                   number: 8080
-
+{{- range .scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-{{ $.scope.id }}-{{ $.deployment.id }}
+                port:
+                  number: 8080
+{{- end }}
 {{ if .scope.capabilities.additional_ports }}
 {{ range .scope.capabilities.additional_ports }}
 ---
@@ -105,7 +117,9 @@ metadata:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC
     {{ end }}
-    alb.ingress.kubernetes.io/scheme: {{ $.alb_scheme }}
+    alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
+    alb.ingress.kubernetes.io/scheme: {{ $.ingress_visibility }}
+    alb.ingress.kubernetes.io/target-node-labels: account={{ .account.slug }},namespace={{ .namespace.slug }},application={{ .application.slug }},account_id={{ .account.id }},namespace_id={{ .namespace.id }},application_id={{ .application.id }},scope={{ .scope.slug }},scope_id={{ .scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
@@ -123,6 +137,7 @@ metadata:
 {{- end }}
 spec:
   rules:
+    - host: {{ $.scope.domain }}
     - http:
         paths:
           - path: /
@@ -132,5 +147,17 @@ spec:
                 name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}
                 port:
                   number: {{ .port }}
+{{- range .scope.domains }}
+    - host: {{ .name }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}
+                port:
+                  number: {{ .port }}
+{{- end }}
 {{ end }}
 {{ end }}
