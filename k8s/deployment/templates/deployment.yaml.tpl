@@ -165,7 +165,7 @@ spec:
         - name: grpc-{{ .port }}
           securityContext:
             runAsUser: 0
-          image: {{ .traffic_image }}
+          image: {{ $.traffic_image }}
           ports:
             - containerPort: {{ .port }}
               protocol: TCP
