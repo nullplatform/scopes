@@ -54,7 +54,7 @@ spec:
   ingressClassName: alb
   rules:
     - host: {{ .scope.domain }}
-    - http:
+      http:
         paths:
           - path: /
             pathType: Prefix
