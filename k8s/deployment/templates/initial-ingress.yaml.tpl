@@ -92,8 +92,8 @@ metadata:
     application: {{ $.application.slug }}
     application_id: "{{ $.application.id }}"
     scope: {{ $.scope.slug }}
-    scope_id: "{{ $.scope.id }}
-{{- $global := index .k8s_modifiers "global" }}
+    scope_id: "{{ $.scope.id }}"
+{{- $global := index $.k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}
   {{- if $labels }}
@@ -145,7 +145,7 @@ spec:
                 name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}
                 port:
                   number: {{ .port }}
-{{- range .scope.domains }}
+{{- range $.scope.domains }}
     - host: {{ .name }}
       http:
         paths:

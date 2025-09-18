@@ -99,6 +99,20 @@ metadata:
     application_id: "{{ $.application.id }}"
     scope: {{ $.scope.slug }}
     scope_id: "{{ $.scope.id }}"
+{{- $global := index $.k8s_modifiers "global" }}
+{{- if $global }}
+  {{- $labels := index $global "labels" }}
+  {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- $ingress := index $.k8s_modifiers "ingress" }}
+{{- if $ingress }}
+  {{- $labels := index $ingress "labels" }}
+  {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+  {{- end }}
+{{- end }}
   annotations:
     alb.ingress.kubernetes.io/actions.bg-deployment-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
@@ -118,6 +132,20 @@ metadata:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC
     alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true
+{{- $global := index $.k8s_modifiers "global" }}
+{{- if $global }}
+  {{- $annotations := index $global "annotations" }}
+  {{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- $ingress := index $.k8s_modifiers "ingress" }}
+{{- if $ingress }}
+  {{- $annotations := index $ingress "annotations" }}
+  {{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+  {{- end }}
+{{- end }}
     {{ end }}
 spec:
   ingressClassName: alb
