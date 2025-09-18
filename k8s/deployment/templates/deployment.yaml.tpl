@@ -112,7 +112,7 @@ spec:
         - name: http
           securityContext:
             runAsUser: 0
-          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          image: {{ .traffic_image }}
           ports:
             - containerPort: 80
               protocol: TCP
@@ -165,7 +165,7 @@ spec:
         - name: grpc-{{ .port }}
           securityContext:
             runAsUser: 0
-          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          image: {{ .traffic_image }}
           ports:
             - containerPort: {{ .port }}
               protocol: TCP
