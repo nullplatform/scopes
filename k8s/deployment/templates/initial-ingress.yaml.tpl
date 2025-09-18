@@ -100,7 +100,7 @@ metadata:
 {{ data.ToYAML $labels | indent 4 }}
   {{- end }}
 {{- end }}
-{{- $ingress := index .k8s_modifiers "ingress" }}
+{{- $ingress := index $.k8s_modifiers "ingress" }}
 {{- if $ingress }}
   {{- $labels := index $ingress "labels" }}
   {{- if $labels }}
@@ -119,14 +119,14 @@ metadata:
     alb.ingress.kubernetes.io/scheme: {{ $.ingress_visibility }}
     alb.ingress.kubernetes.io/target-node-labels: account={{ $.account.slug }},namespace={{ $.namespace.slug }},application={{ $.application.slug }},account_id={{ $.account.id }},namespace_id={{ $.namespace.id }},application_id={{ $.application.id }},scope={{ $.scope.slug }},scope_id={{ $.scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
-{{- $global := index .k8s_modifiers "global" }}
+{{- $global := index $.k8s_modifiers "global" }}
 {{- if $global }}
   {{- $annotations := index $global "annotations" }}
   {{- if $annotations }}
 {{ data.ToYAML $annotations | indent 4 }}
   {{- end }}
 {{- end }}
-{{- $ingress := index .k8s_modifiers "ingress" }}
+{{- $ingress := index $.k8s_modifiers "ingress" }}
 {{- if $ingress }}
   {{- $annotations := index $ingress "annotations" }}
   {{- if $annotations }}
