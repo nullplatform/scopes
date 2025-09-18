@@ -114,6 +114,7 @@ metadata:
     {{ else if eq .type "GRPC" }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true
     {{ end }}
     alb.ingress.kubernetes.io/load-balancer-name: {{ $.alb_name }}
     alb.ingress.kubernetes.io/scheme: {{ $.ingress_visibility }}
@@ -137,7 +138,7 @@ spec:
   ingressClassName: alb
   rules:
     - host: {{ $.scope.domain }}
-    - http:
+      http:
         paths:
           - path: /
             pathType: Prefix
