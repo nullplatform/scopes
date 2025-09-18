@@ -1,5 +1,4 @@
 #!/bin/bash
-
 GROUP_BY=${GROUP_BY:-""}
 
 # Validate required parameters
@@ -17,6 +16,27 @@ if [[ -z "$PROM_URL" ]]; then
   echo '{"error":"PROM_URL is required. Please specify with PROM_URL environment variable"}'
   exit 1
 fi
+
+# Cross-platform date parsing function
+parse_iso_date() {
+  local iso_date="$1"
+  
+  # Remove T and milliseconds/Z for parsing
+  local formatted_date=$(echo "$iso_date" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//')
+  
+  # Try GNU date (Linux) first - test if -d flag works
+  if date -u -d "$formatted_date" +%s 2>/dev/null; then
+    return
+  fi
+  
+  # Fall back to BSD date (macOS) - use -j -f format
+  if date -j -u -f "%Y-%m-%d %H:%M:%S" "$formatted_date" +%s 2>/dev/null; then
+    return
+  fi
+  
+  # Final fallback
+  echo "0"
+}
 
 get_metric_config() {
   case "$METRIC_NAME" in
@@ -200,10 +220,8 @@ query_prometheus() {
   local start_time="$2"
   local end_time="$3"
   local step="$4"
-
   local url="${PROM_URL}/api/v1/query_range"
   local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
-
   curl -s -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
 }
 
@@ -224,12 +242,13 @@ urlencode() {
   echo "${encoded}"
 }
 
-# Handle START_TIME/END_TIME for Alpine compatibility
+# Handle START_TIME/END_TIME for cross-platform compatibility
 if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
-  # Convert ISO dates to Unix timestamps (Alpine compatible - remove milliseconds)
-  start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
-  now=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
+  # Convert ISO dates to Unix timestamps (cross-platform compatible)
+  start_time=$(parse_iso_date "$START_TIME")
+  now=$(parse_iso_date "$END_TIME")
   step=${PERIOD:-60}
+  
   # Calculate interval like JavaScript service: period/60 + "m"
   if [[ -n "$PERIOD" && "$PERIOD" -gt 0 ]]; then
     interval_minutes=$((PERIOD / 60))
