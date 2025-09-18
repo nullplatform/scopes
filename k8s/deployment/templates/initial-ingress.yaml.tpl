@@ -134,6 +134,7 @@ metadata:
   {{- end }}
 {{- end }}
 spec:
+  ingressClassName: alb
   rules:
     - host: {{ $.scope.domain }}
     - http:
