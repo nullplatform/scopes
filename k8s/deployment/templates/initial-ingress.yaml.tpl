@@ -117,9 +117,9 @@ metadata:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC
     {{ end }}
-    alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
+    alb.ingress.kubernetes.io/load-balancer-name: {{ $.alb_name }}
     alb.ingress.kubernetes.io/scheme: {{ $.ingress_visibility }}
-    alb.ingress.kubernetes.io/target-node-labels: account={{ .account.slug }},namespace={{ .namespace.slug }},application={{ .application.slug }},account_id={{ .account.id }},namespace_id={{ .namespace.id }},application_id={{ .application.id }},scope={{ .scope.slug }},scope_id={{ .scope.id }},nullplatform=true
+    alb.ingress.kubernetes.io/target-node-labels: account={{ $.account.slug }},namespace={{ $.namespace.slug }},application={{ $.application.slug }},account_id={{ $.account.id }},namespace_id={{ $.namespace.id }},application_id={{ $.application.id }},scope={{ $.scope.slug }},scope_id={{ $.scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
