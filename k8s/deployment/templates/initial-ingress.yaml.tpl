@@ -30,7 +30,6 @@ metadata:
   annotations:
    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
    alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
-   alb.ingress.kubernetes.io/group.order: '{{ .alb_order }}'
    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
    alb.ingress.kubernetes.io/scheme: {{ .ingress_visibility }}
    alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
@@ -110,7 +109,6 @@ metadata:
 {{- end }}
   annotations:
     alb.ingress.kubernetes.io/group.name: {{ $.alb_name }}
-    alb.ingress.kubernetes.io/group.order: '{{ $.alb_order }}'
     {{ if eq .type "HTTP" }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     {{ else if eq .type "GRPC" }}
