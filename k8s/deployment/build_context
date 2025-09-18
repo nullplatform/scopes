@@ -3,8 +3,6 @@
 # Build scope and tags env variables
 source "$SERVICE_PATH/scope/build_context"
 
-echo $CONTEXT
-
 BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq '.scope.current_active_deployment // empty' -r)
 SCALING_TYPE=$(echo "$CONTEXT" | jq -r .scope.capabilities.scaling_type)
 
