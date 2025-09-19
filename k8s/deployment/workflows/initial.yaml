@@ -51,8 +51,14 @@ steps:
       ACTION: apply
       DRY_RUN: false
     post:
-      name: wait deployment active
-      type: script
-      file: "$SERVICE_PATH/deployment/wait_deployment_active"
-      configuration:
-        TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
+      name: deployment_checks
+      type: workflow
+      steps:
+        - name: notify_active_domains
+          type: script
+          file: "$SERVICE_PATH/deployment/notify_active_domains"
+        - name: wait deployment active
+          type: script
+          file: "$SERVICE_PATH/deployment/wait_deployment_active"
+          configuration:
+            TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
