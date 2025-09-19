@@ -28,4 +28,6 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 1
 fi
 
-source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"
+if [[ ${#APPLIED_FILES[@]} -gt 0 ]]; then
+  source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"
+fi
