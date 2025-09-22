@@ -1,0 +1,80 @@
+#!/bin/bash
+
+echo "Waiting for balancer/DNS setup to complete..."
+
+MAX_ITERATIONS=${MAX_ITERATIONS:-30}
+iteration=0
+SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
+
+case "$DNS_TYPE" in
+  ExternalDNS)
+    SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
+    SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
+    SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+    
+    echo "Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
+    
+    while true; do
+        ((iteration++))
+        if [ $iteration -gt $MAX_ITERATIONS ]; then
+            echo "⚠️  DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
+            echo "ExternalDNS may still be processing the DNSEndpoint resource"
+            echo "You can check manually with: kubectl get dnsendpoint -A"
+            exit 1
+        fi
+        
+        echo "Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
+        
+        D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status 2>&1) || {
+            echo "ERROR: Failed to read deployment status"
+            echo "NP CLI error: $D_STATUS"
+            exit 1
+        }
+        
+        if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
+            echo "ERROR: Deployment status not found for ID $DEPLOYMENT_ID"
+            exit 1
+        fi
+
+        if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
+            if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
+                echo "Deployment it's not running anymore [$D_STATUS]"
+                exit 1
+            fi
+        fi
+        
+        echo "Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
+        
+        DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
+        echo "Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
+        
+        DNS_STATUS=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || echo "not found")
+
+        if [ "$DNS_STATUS" != "not found" ] && [ -n "$DNS_STATUS" ]; then
+            echo "DNSEndpoint status: $DNS_STATUS"
+        fi
+        
+        if nslookup "$SCOPE_DOMAIN" >/dev/null 2>&1; then
+            echo "✓ DNS record for $SCOPE_DOMAIN is now resolvable"
+            
+            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
+            echo "✓ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
+            
+            break
+        fi
+        
+        echo "DNS record not yet available, waiting 10s..."
+        sleep 10
+    done
+    
+    echo "✓ ExternalDNS setup completed successfully"
+    ;;
+  route53|azure)
+    echo "DNS Type $DNS_TYPE - DNS should already be configured"
+    echo "Skipping DNS wait check"
+    ;;
+  *)
+    echo "Unknown DNS type: $DNS_TYPE"
+    echo "Skipping DNS wait check"
+    ;;
+esac

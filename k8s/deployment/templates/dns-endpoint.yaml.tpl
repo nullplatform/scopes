@@ -15,7 +15,7 @@ metadata:
     scope_id: "{{ .scope.id }}"
 spec:
   endpoints:
-  - dnsName: {{ .scope_domain }}
+  - dnsName: {{ .scope.domain }}
     recordTTL: 300
     recordType: A
     targets:
