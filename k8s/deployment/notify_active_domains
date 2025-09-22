@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -euo pipefail
-
 DOMAINS=$(echo "$CONTEXT" | jq .scope.domains)
 
 if [[ "$DOMAINS" == "null" || "$DOMAINS" == "[]" ]]; then
