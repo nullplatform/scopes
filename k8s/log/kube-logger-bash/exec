@@ -158,6 +158,26 @@ calculate_pod_limit() {
     echo $pod_limit
 }
 
+# Fetch logs for all matching pods at once
+get_all_pod_logs() {
+    local label_selector="$1"
+    local since_time="$2"
+    local namespace_arg=""
+
+    if [[ -n "$NAMESPACE" ]]; then
+        namespace_arg="-n $NAMESPACE"
+    fi
+
+    local kubectl_args="$namespace_arg logs -l $label_selector -c $DEFAULT_CONTAINER_NAME --timestamps=true"
+
+    if [[ -n "$since_time" ]]; then
+        kubectl_args="$kubectl_args --since-time=$since_time"
+    fi
+
+    kubectl $kubectl_args 2>/dev/null || echo ""
+}
+
+
 # Function to get logs from a single pod
 get_pod_logs() {
     local pod_name="$1"
@@ -169,7 +189,7 @@ get_pod_logs() {
         namespace_arg="-n $NAMESPACE"
     fi
     
-    local kubectl_args="$namespace_arg logs $pod_name -c $DEFAULT_CONTAINER_NAME --timestamps=true"
+    local kubectl_args="$namespace_arg logs $pod_name -c $DEFAULT_CONTAINER_NAME --timestamps=true --prefix=true"
     
     # Add since-time if provided
     if [[ -n "$since_time" ]]; then
@@ -258,6 +278,72 @@ process_log_lines() {
     }"
 }
 
+# Function to process all pod logs at once
+process_all_pod_log_lines() {
+    local logs="$1"
+    local filter_pattern="$2"
+    local last_read_times="$3"
+
+    local processed_logs=""
+    local last_timestamp=""
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+
+        # Extract prefix: [pod/<pod_name>/<container_name>]
+        if [[ "$line" =~ ^\[pod/([^\]/]+)/([^\]]+)\]\ ([^ ]+)\ (.*)$ ]]; then
+            local pod_name="${BASH_REMATCH[1]}"
+            local container_name="${BASH_REMATCH[2]}"
+            local timestamp="${BASH_REMATCH[3]}"
+            local content="${BASH_REMATCH[4]}"
+        else
+            continue
+        fi
+
+        # Validate timestamp format
+        if ! is_valid_timestamp "$timestamp"; then
+            continue
+        fi
+
+        local pod_id="unknown"
+
+        # Duplicate detection logic
+        local last_read_time=$(echo "$last_read_times" | jq -r --arg podId "$pod_id" '.[$podId] // empty')
+        if [[ -n "$last_read_time" && "$last_read_time" != "null" && "$last_read_time" != "empty" ]]; then
+            if [[ "$timestamp" == "$last_read_time" || "$timestamp" < "$last_read_time" ]]; then
+                continue
+            fi
+        fi
+
+        # Apply filter if specified
+        if [[ -n "$filter_pattern" ]] && ! echo "$line" | grep -Fq -- "$filter_pattern"; then
+            continue
+        fi
+
+        # Create log entry JSON
+        local log_entry=$(jq -n \
+            --arg msg "$content" \
+            --arg dt "$timestamp" \
+            --arg pod "$pod_name" \
+            --arg podId "$pod_id" \
+            --arg container "$container_name" \
+            '{message: $msg, datetime: $dt, pod: {name: $pod, id: $podId, container: $container}}')
+
+        if [[ -n "$processed_logs" ]]; then
+            processed_logs="$processed_logs,$log_entry"
+        else
+            processed_logs="$log_entry"
+        fi
+
+        last_timestamp="$timestamp"
+    done <<< "$logs"
+
+    echo "{
+        \"logs\": [$processed_logs],
+        \"last_timestamp\": \"$last_timestamp\"
+    }"
+}
+
 # Function to determine since time for a pod
 determine_since_time() {
     local pod_id="$1"
@@ -295,60 +381,30 @@ main() {
     
     # Build label selector
     local label_selector=$(build_label_selector)
-    
-    local pods_data=$(get_pods "$label_selector")
-    
-    if [[ -z "$pods_data" ]]; then
-        # No pods found, return empty result
-        jq -n '{results: [], next_page_token: ""}'
-        return 0
-    fi
-    
-    declare -a pod_names=()
-    declare -a pod_ids=()
-    
-    while IFS='|' read -r name id; do
-        [[ -n "$name" && -n "$id" ]] || continue
-        pod_names+=("$name")
-        pod_ids+=("$id")
-    done <<< "$pods_data"
-    
-    local pod_count=${#pod_names[@]}
-    
-    if [[ $pod_count -eq 0 ]]; then
-        jq -n '{results: [], next_page_token: ""}'
-        return 0
-    fi
-    
+
     # Decode pagination token
     local last_read_times=$(decode_token "$NEXT_PAGE_TOKEN")
     
     # Calculate pod limit
-    local pod_limit=$(calculate_pod_limit "$LIMIT" "$pod_count")
+    local pod_limit=$LIMIT
     
     # Process all pods
     local all_logs="[]"
+
+    local since_time=$last_read_times
     
-    for i in "${!pod_names[@]}"; do
-        local pod_name="${pod_names[$i]}"
-        local pod_id="${pod_ids[$i]}"
+    local logs=$(get_all_pod_logs "$label_selector" "$since_time")
         
-        local since_time=$(determine_since_time "$pod_id" "$last_read_times")
-        
-        local logs=$(get_pod_logs "$pod_name" "$since_time" "$pod_limit")
-        
-        if [[ -n "$logs" ]]; then
-            local pod_last_read_time=$(echo "$last_read_times" | jq -r --arg podId "$pod_id" '.[$podId] // empty' 2>/dev/null)
-            local result=$(process_log_lines "$logs" "$FILTER_PATTERN" "$pod_name" "$pod_id" "$pod_last_read_time")
-            local processed_logs=$(echo "$result" | jq ".logs")
-            local last_timestamp=$(echo "$result" | jq -r ".last_timestamp")
+    if [[ -n "$logs" ]]; then
+        local result=$(process_all_pod_log_lines "$logs" "$FILTER_PATTERN" "$since_time")
+        local processed_logs=$(echo "$result" | jq ".logs")
+        local last_timestamp=$(echo "$result" | jq -r ".last_timestamp")
 
-            if [[ -n "$processed_logs" && "$processed_logs" != "null" && "$processed_logs" != "[]" ]]; then
-                all_logs=$(echo "$all_logs" | jq --argjson new_logs "$processed_logs" '. + $new_logs')
-            fi
-
+        if [[ -n "$processed_logs" && "$processed_logs" != "null" && "$processed_logs" != "[]" ]]; then
+            all_logs=$(echo "$all_logs" | jq --argjson new_logs "$processed_logs" '. + $new_logs')
         fi
-    done
+
+    fi
     
     local sorted_logs=$(sort_and_limit_logs "$all_logs" "$LIMIT")
 
