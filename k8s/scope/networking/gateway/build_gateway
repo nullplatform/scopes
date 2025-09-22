@@ -7,12 +7,56 @@ echo "Creating $INGRESS_VISIBILITY ingress..."
 INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$INGRESS_VISIBILITY.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
-echo "$CONTEXT" > "$CONTEXT_PATH"
+# Build DNSEndpoint manifest if using ExternalDNS
+if [ "$DNS_TYPE" = "ExternalDNS" ]; then
+  echo "Building DNSEndpoint manifest for ExternalDNS..."
+  
+  echo "Getting IP for gateway: $GATEWAY_NAME"
+
+  GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+
+  if [ -z "$GATEWAY_IP" ]; then
+    echo "Warning: Could not get gateway IP for $GATEWAY_NAME"
+
+    GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+  fi
+  
+  if [ -z "$GATEWAY_IP" ]; then
+    echo "Warning: Could not determine gateway IP address yet, DNSEndpoint will be created later"
+  else
+    echo "Gateway IP: $GATEWAY_IP"
+    # Add gateway_ip to context
+    echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
+  fi
+else
+  echo "$CONTEXT" > "$CONTEXT_PATH"
+fi
 
 echo "Building Template: $TEMPLATE to $INGRESS_FILE"
 
 gomplate -c .="$CONTEXT_PATH" \
   --file "$TEMPLATE" \
   --out "$INGRESS_FILE"
+
+# Build DNSEndpoint manifest if using ExternalDNS and we have gateway IP
+if [ "$DNS_TYPE" = "ExternalDNS" ] && [ -n "${GATEWAY_IP:-}" ]; then
+  DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
+  
+  if [ -f "$DNS_ENDPOINT_TEMPLATE" ]; then
+    DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID-$INGRESS_VISIBILITY.yaml"
+    
+    echo "Building DNSEndpoint Template: $DNS_ENDPOINT_TEMPLATE to $DNS_ENDPOINT_FILE"
+    
+    gomplate -c .="$CONTEXT_PATH" \
+      --file "$DNS_ENDPOINT_TEMPLATE" \
+      --out "$DNS_ENDPOINT_FILE"
+    
+    echo "DNSEndpoint manifest created at: $DNS_ENDPOINT_FILE"
+  else
+    echo "Warning: DNSEndpoint template not found at $DNS_ENDPOINT_TEMPLATE"
+  fi
+fi
 
 rm "$CONTEXT_PATH"
