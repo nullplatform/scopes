@@ -112,7 +112,7 @@ spec:
         - name: http
           securityContext:
             runAsUser: 0
-          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          image: {{ .traffic_image }}
           ports:
             - containerPort: 80
               protocol: TCP
@@ -158,6 +158,63 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+
+        {{ if .scope.capabilities.additional_ports }}
+        {{ range .scope.capabilities.additional_ports }}
+        {{ if eq .type "GRPC" }}
+        - name: grpc-{{ .port }}
+          securityContext:
+            runAsUser: 0
+          image: {{ $.traffic_image }}
+          ports:
+            - containerPort: {{ .port }}
+              protocol: TCP
+          env:
+            - name: HEALTH_CHECK_TYPE
+              value: grpc
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: grpc
+            - name: LISTENER_PORT
+              value: '{{ .port }}'
+          resources:
+            limits:
+              cpu: 93m
+              memory: 64Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            grpc:
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            grpc:
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            grpc:
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+        {{ end }}
+        {{ end }}
+        {{ end }}
+
         - name: application
           envFrom:
             - secretRef:
@@ -169,6 +226,12 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
+            {{ if .scope.capabilities.additional_ports }}
+            {{ range .scope.capabilities.additional_ports }}
+            - containerPort: {{ .port }}
+              protocol: TCP
+            {{ end }}
+            {{ end }}
           resources:
             limits:
               cpu: {{ .scope.capabilities.cpu_millicores }}m

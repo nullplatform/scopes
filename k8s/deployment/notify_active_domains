@@ -1,0 +1,15 @@
+#!/bin/bash
+
+DOMAINS=$(echo "$CONTEXT" | jq .scope.domains)
+
+if [[ "$DOMAINS" == "null" || "$DOMAINS" == "[]" ]]; then
+    return
+fi
+
+echo "$DOMAINS" | jq -r '.[] | "\(.id)|\(.name)"' | while IFS='|' read -r domain_id domain_name; do
+    echo "Configuring domain: $domain_name"
+
+    np scope domain patch --id "$domain_id" --body '{"status": "active"}'
+
+    echo "Successfully configured domain: $domain_name"
+done
