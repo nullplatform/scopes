@@ -7,7 +7,7 @@ iteration=0
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 
 case "$DNS_TYPE" in
-  ExternalDNS)
+  external_dns)
     SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
     SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')

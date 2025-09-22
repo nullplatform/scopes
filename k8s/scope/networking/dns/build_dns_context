@@ -18,8 +18,8 @@ case "$DNS_TYPE" in
     echo "PUBLIC_GATEWAY_NAME: $PUBLIC_GATEWAY_NAME"
     echo "PRIVATE_GATEWAY_NAME: $PRIVATE_GATEWAY_NAME"
     ;;
-  ExternalDNS)
-    echo "ExternalDNS context ready"
+  external_dns)
+    echo "external_dns context ready"
     echo "DNS records will be managed automatically by External DNS operator"
     ;;
   *)

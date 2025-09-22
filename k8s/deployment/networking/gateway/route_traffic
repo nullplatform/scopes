@@ -5,7 +5,7 @@ echo "Creating $INGRESS_VISIBILITY ingress..."
 INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-$DEPLOYMENT_ID.json"
 
-if [ "$DNS_TYPE" = "ExternalDNS" ]; then
+if [ "$DNS_TYPE" = "external_dns" ]; then
   echo "Building DNSEndpoint manifest for ExternalDNS..."
   
   echo "Getting IP for gateway: $GATEWAY_NAME"
@@ -37,7 +37,7 @@ gomplate -c .="$CONTEXT_PATH" \
   --file "$TEMPLATE" \
   --out "$INGRESS_FILE"
 
-if [ "$DNS_TYPE" = "ExternalDNS" ] && [ -n "${GATEWAY_IP:-}" ]; then
+if [ "$DNS_TYPE" = "external_dns" ] && [ -n "${GATEWAY_IP:-}" ]; then
   DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
   
   if [ -f "$DNS_ENDPOINT_TEMPLATE" ]; then
