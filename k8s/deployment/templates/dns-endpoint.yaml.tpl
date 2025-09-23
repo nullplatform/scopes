@@ -16,7 +16,7 @@ metadata:
 spec:
   endpoints:
   - dnsName: {{ .scope.domain }}
-    recordTTL: 300
+    recordTTL: 60
     recordType: A
     targets:
     - "{{ .gateway_ip }}"

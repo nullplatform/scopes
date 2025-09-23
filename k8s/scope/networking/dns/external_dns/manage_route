@@ -1,0 +1,66 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [ "$ACTION" = "CREATE" ]; then
+    echo "Building DNSEndpoint manifest for ExternalDNS..."
+    
+    echo "Getting IP for gateway: $GATEWAY_NAME"
+
+    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+      -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+
+    if [ -z "$GATEWAY_IP" ]; then
+      echo "Warning: Could not get gateway IP for $GATEWAY_NAME"
+
+      GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+    fi
+    
+    if [ -z "$GATEWAY_IP" ]; then
+      echo "Warning: Could not determine gateway IP address yet, DNSEndpoint will be created later"
+      exit 0
+    fi
+    
+    echo "Gateway IP: $GATEWAY_IP"
+    
+    DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
+    
+    if [ -f "$DNS_ENDPOINT_TEMPLATE" ]; then
+      DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
+      CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
+      
+      echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
+      
+      echo "Building DNSEndpoint Template: $DNS_ENDPOINT_TEMPLATE to $DNS_ENDPOINT_FILE"
+      
+      gomplate -c .="$CONTEXT_PATH" \
+        --file "$DNS_ENDPOINT_TEMPLATE" \
+        --out "$DNS_ENDPOINT_FILE"
+      
+      echo "DNSEndpoint manifest created at: $DNS_ENDPOINT_FILE"
+      
+      rm "$CONTEXT_PATH"
+      
+    else
+      echo "Error: DNSEndpoint template not found at $DNS_ENDPOINT_TEMPLATE"
+      exit 1
+    fi
+
+elif [ "$ACTION" = "DELETE" ]; then
+    echo "Deleting DNSEndpoint for external_dns..."
+    
+    DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
+    
+    if [ -f "$DNS_ENDPOINT_FILE" ]; then
+        echo "Deleting DNSEndpoint manifest..."
+        kubectl delete -f "$DNS_ENDPOINT_FILE" || echo "DNSEndpoint may already be deleted"
+    else
+        SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
+        DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
+        echo "Attempting to delete DNSEndpoint by name: $DNS_ENDPOINT_NAME"
+        kubectl delete dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" || echo "DNSEndpoint may already be deleted"
+    fi
+    
+    echo "DNSEndpoint deletion completed"
+fi

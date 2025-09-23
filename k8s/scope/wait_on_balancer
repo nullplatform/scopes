@@ -4,7 +4,6 @@ echo "Waiting for balancer/DNS setup to complete..."
 
 MAX_ITERATIONS=${MAX_ITERATIONS:-30}
 iteration=0
-SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 
 case "$DNS_TYPE" in
   external_dns)
@@ -15,32 +14,12 @@ case "$DNS_TYPE" in
     echo "Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
     
     while true; do
-        ((iteration++))
+        iteration=$((iteration + 1))
         if [ $iteration -gt $MAX_ITERATIONS ]; then
             echo "⚠️  DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
             echo "ExternalDNS may still be processing the DNSEndpoint resource"
             echo "You can check manually with: kubectl get dnsendpoint -A"
             exit 1
-        fi
-        
-        echo "Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
-        
-        D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status 2>&1) || {
-            echo "ERROR: Failed to read deployment status"
-            echo "NP CLI error: $D_STATUS"
-            exit 1
-        }
-        
-        if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
-            echo "ERROR: Deployment status not found for ID $DEPLOYMENT_ID"
-            exit 1
-        fi
-
-        if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
-            if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
-                echo "Deployment it's not running anymore [$D_STATUS]"
-                exit 1
-            fi
         fi
         
         echo "Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
@@ -54,10 +33,10 @@ case "$DNS_TYPE" in
             echo "DNSEndpoint status: $DNS_STATUS"
         fi
         
-        if nslookup "$SCOPE_DOMAIN" >/dev/null 2>&1; then
+        if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
             echo "✓ DNS record for $SCOPE_DOMAIN is now resolvable"
             
-            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
+            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
             echo "✓ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
             
             break

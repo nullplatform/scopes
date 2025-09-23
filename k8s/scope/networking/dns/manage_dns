@@ -37,6 +37,10 @@ case "$DNS_TYPE" in
     ;;
   external_dns)
     echo "Using external_dns provider"
+    source "$SERVICE_PATH/scope/networking/dns/external_dns/manage_route" || {
+        echo "ERROR: External DNS management failed"
+        exit 1
+    }
     ;;
   *)
     echo "Error: Unsupported dns type '$DNS_TYPE'"
