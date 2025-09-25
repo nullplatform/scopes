@@ -320,10 +320,20 @@ func processLogLines(logs, filterPattern, podName, podUID, lastReadTime string) 
 			}
 		}
 
-		// Apply filter if specified
-		if filterPattern != "" && !strings.Contains(line, filterPattern) {
-			continue
-		}
+        // Apply filter if specified (all terms in filterPattern must be present)
+        if filterPattern != "" {
+            terms := strings.Fields(filterPattern)
+            matches := true
+            for _, term := range terms {
+                if !strings.Contains(line, term) {
+                    matches = false
+                    break
+                }
+            }
+            if !matches {
+                continue
+            }
+        }
 
 		entry := LogEntry{
 			Message:  message,
