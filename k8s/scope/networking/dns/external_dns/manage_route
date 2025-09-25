@@ -49,18 +49,11 @@ if [ "$ACTION" = "CREATE" ]; then
 
 elif [ "$ACTION" = "DELETE" ]; then
     echo "Deleting DNSEndpoint for external_dns..."
-    
-    DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
-    
-    if [ -f "$DNS_ENDPOINT_FILE" ]; then
-        echo "Deleting DNSEndpoint manifest..."
-        kubectl delete -f "$DNS_ENDPOINT_FILE" || echo "DNSEndpoint may already be deleted"
-    else
-        SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
-        DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
-        echo "Attempting to delete DNSEndpoint by name: $DNS_ENDPOINT_NAME"
-        kubectl delete dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" || echo "DNSEndpoint may already be deleted"
-    fi
-    
+
+    SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
+    DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
+    echo "Attempting to delete DNSEndpoint by name: $DNS_ENDPOINT_NAME"
+    kubectl delete dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" || echo "DNSEndpoint may already be deleted"
+
     echo "DNSEndpoint deletion completed"
 fi
