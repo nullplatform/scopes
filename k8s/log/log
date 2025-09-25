@@ -31,6 +31,11 @@ if [ -n "$INSTANCE_ID" ]; then
     CMD="$CMD --instance-id $INSTANCE_ID"
 fi
 
+# Add optional limit
+if [ -n "$LIMIT" ]; then
+    CMD="$CMD --limit $LIMIT"
+fi
+
 # Add optional start time (convert from milliseconds to ISO format)
 if [ -n "$START_TIME" ]; then
     SECONDS=$(echo "$START_TIME/1000" | bc)
