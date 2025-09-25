@@ -19,24 +19,15 @@ steps:
         type: environment
       - name: BLUE_DEPLOYMENT_ID
         type: environment
-  - name: scale_deployments
+  - name: create deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
     post:
-      name: wait_deployments
-      type: workflow
-      steps:
-        - name: wait_green_deployment
-          type: script
-          file: "$SERVICE_PATH/deployment/wait_deployment_active"
-          configuration:
-            TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
-        - name: wait_blue_deployment
-          type: script
-          file: "$SERVICE_PATH/deployment/wait_blue_deployment_active"
-          configuration:
-            TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
-            SKIP_DEPLOYMENT_STATUS_CHECK: true
+      name: wait deployment active
+      type: script
+      file: "$SERVICE_PATH/deployment/wait_deployment_active"
+      configuration:
+        TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
@@ -47,6 +38,16 @@ steps:
       - name: INGRESS_FILE
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: update blue deployment
+    type: script
+    file: "$SERVICE_PATH/deployment/scale_deployments"
+    post:
+      name: wait deployment active
+      type: script
+      file: "$SERVICE_PATH/deployment/wait_blue_deployment_active"
+      configuration:
+        TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
+        SKIP_DEPLOYMENT_STATUS_CHECK: true
   - name: apply traffic
     type: script
     file: "$SERVICE_PATH/apply_templates"

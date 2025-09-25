@@ -19,11 +19,11 @@ steps:
         type: environment
       - name: BLUE_DEPLOYMENT_ID
         type: environment
-  - name: scale_deployments
+  - name: build green deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
     post:
-      name: wait_deployments
+      name: wait deployment active
       type: script
       file: "$SERVICE_PATH/deployment/wait_deployment_active"
       configuration:

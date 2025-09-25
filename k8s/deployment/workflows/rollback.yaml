@@ -19,7 +19,7 @@ steps:
         type: environment
       - name: BLUE_DEPLOYMENT_ID
         type: environment
-  - name: scale_deployments
+  - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
     post:

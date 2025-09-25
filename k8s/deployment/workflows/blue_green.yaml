@@ -6,7 +6,7 @@ steps:
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
-    after: apply
+    after: create deployment
     post:
       name: wait deployment active
       type: script
