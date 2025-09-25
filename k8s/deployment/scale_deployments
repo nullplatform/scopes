@@ -1,0 +1,17 @@
+#!/bin/bash
+
+GREEN_REPLICAS=$(echo "$CONTEXT" | jq -r .green_replicas)
+GREEN_DEPLOYMENT_ID=$DEPLOYMENT_ID
+
+BLUE_REPLICAS=$(echo "$CONTEXT" | jq -r .blue_replicas)
+BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+
+if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
+  GREEN_DEPLOYMENT_NAME="d-$SCOPE_ID-$GREEN_DEPLOYMENT_ID"
+
+  kubectl scale deployment "$GREEN_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$GREEN_REPLICAS"
+
+  BLUE_DEPLOYMENT_NAME="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
+
+  kubectl scale deployment "$BLUE_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$BLUE_REPLICAS"
+fi
