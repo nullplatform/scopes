@@ -5,6 +5,8 @@ export NEXT_PAGE_TOKEN=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.argume
 export START_TIME=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.start_time // empty')
 export APPLICATION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.application_id // empty')
 export DEPLOYMENT_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.deployment_id // .notification.arguments.deploy_id // empty')
+export FILTER_PATTERN=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.filter_pattern // empty')
+export INSTANCE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.instance_id // empty')
 
 if [ -z "$APPLICATION_ID" ]; then
     echo "Error: Missing required parameters: APPLICATION_ID" >&2

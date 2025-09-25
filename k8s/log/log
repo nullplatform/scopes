@@ -21,6 +21,16 @@ if [ -n "$NEXT_PAGE_TOKEN" ]; then
     CMD="$CMD --next-page-token $NEXT_PAGE_TOKEN"
 fi
 
+# Add optional filter pattern
+if [ -n "$FILTER_PATTERN" ]; then
+    CMD="$CMD --filter \"$FILTER_PATTERN\""
+fi
+
+# Add optional instance ID
+if [ -n "$INSTANCE_ID" ]; then
+    CMD="$CMD --instance-id $INSTANCE_ID"
+fi
+
 # Add optional start time (convert from milliseconds to ISO format)
 if [ -n "$START_TIME" ]; then
     SECONDS=$(echo "$START_TIME/1000" | bc)
