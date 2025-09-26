@@ -1,4 +1,4 @@
-module kube-logger
+module kube-logger-go
 
 go 1.21
 

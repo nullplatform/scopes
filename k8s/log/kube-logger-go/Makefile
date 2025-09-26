@@ -5,6 +5,6 @@ build:
 	go mod tidy && $(foreach platform,$(PLATFORMS), \
 		rm -fr $(BUILD_DIR)/$(platform);\
 		mkdir -p $(BUILD_DIR)/$(platform); \
-		GOARCH=amd64 GOOS=$(platform) go build -ldflags "-s -w" -tags full -o $(BUILD_DIR)/$(platform)/log-amd64; \
-		GOARCH=arm64 GOOS=$(platform) go build -ldflags "-s -w" -tags full  -o $(BUILD_DIR)/$(platform)/log-arm64; \
+		GOARCH=amd64 GOOS=$(platform) go build -ldflags "-s -w" -tags full -o $(BUILD_DIR)/$(platform)/exec-amd64 ./cmd; \
+		GOARCH=arm64 GOOS=$(platform) go build -ldflags "-s -w" -tags full  -o $(BUILD_DIR)/$(platform)/exec-arm64 ./cmd; \
 	)
