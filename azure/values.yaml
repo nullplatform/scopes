@@ -10,9 +10,9 @@ configuration:
   DNS_TYPE: disabled
   USE_ACCOUNT_SLUG: true
   IMAGE_PULL_SECRETS:
-    ENABLED: false
+    ENABLED: true
     SECRETS:
-      - jfrog-secret
+      - image-pull-secret
   DOMAIN: $OVERRIDE_DOMAIN
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
