@@ -48,14 +48,19 @@ else
     ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.private_name // $default')
 fi
 
+NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
+APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r .application.slug)
+COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | cut -c1-63)
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \
           --arg k8s_namespace "$K8S_NAMESPACE" \
           --arg region "$REGION" \
           --arg gateway_name "$GATEWAY_NAME" \
           --arg alb_name "$ALB_NAME" \
+          --arg component "$COMPONENT" \
           --argjson modifiers "$K8S_MODIFIERS" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name}')
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component}')
 
 export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
 export CONTEXT
