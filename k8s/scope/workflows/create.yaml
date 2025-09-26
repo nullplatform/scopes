@@ -57,3 +57,16 @@ steps:
               type: environment
             - name: HOSTED_PRIVATE_ZONE_ID
               type: environment
+        post:
+          name: apply_and_wait
+          type: workflow
+          steps:
+            - name: apply dns templates
+              type: script
+              file: "$SERVICE_PATH/apply_templates"
+              configuration:
+                ACTION: apply
+                DRY_RUN: false
+            - name: wait on balancer
+              type: script
+              file: "$SERVICE_PATH/scope/wait_on_balancer"
