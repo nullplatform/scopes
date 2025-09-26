@@ -4,11 +4,6 @@ steps:
     file: "$SERVICE_PATH/metric/build_context"
     configuration:
       K8S_NAMESPACE: nullplatform
-    output:
-      - name: METRIC_PROVIDER
-        type: environment
   - name: metric
     type: script
-    file: "$SERVICE_PATH/metric/execute"
-    configuration:
-      ACTION: metric
+    file: "$SERVICE_PATH/metric/metric"
