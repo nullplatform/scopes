@@ -21,25 +21,7 @@ steps:
         type: environment
   - name: update blue deployment
     type: script
-    file: "$SERVICE_PATH/deployment/build_blue_deployment"
-    configuration:
-      DESIRED_TRAFFIC: 100
-    output:
-      - name: DEPLOYMENT_PATH
-        type: file
-        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
-      - name: SECRET_PATH
-        type: file
-        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
-      - name: SCALING_PATH
-        type: file
-        file: "$OUTPUT_DIR/scaling-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
-      - name: SERVICE_TEMPLATE_PATH
-        type: file
-        file: "$OUTPUT_DIR/service-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
-  - name: create blue deployment
-    type: script
-    file: "$SERVICE_PATH/apply_templates"
+    file: "$SERVICE_PATH/deployment/scale_deployments"
     post:
       name: wait deployment active
       type: script
@@ -47,9 +29,6 @@ steps:
       configuration:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
         SKIP_DEPLOYMENT_STATUS_CHECK: true
-    configuration:
-      ACTION: apply
-      DRY_RUN: false
   - name: rollback traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/rollback_traffic"

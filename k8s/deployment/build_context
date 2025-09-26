@@ -20,7 +20,9 @@ SWITCH_TRAFFIC=$(echo "$CONTEXT" | jq -r ".deployment.strategy_data.desired_swit
 MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
 MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
 
-if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
+DEPLOYMENT_STATUS=$(echo $CONTEXT | jq -r ".deployment.status")
+
+if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; then
   GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
   GREEN_REPLICAS=$(echo "$GREEN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
 
