@@ -1,8 +1,18 @@
+steps:
+  - name: networking
+    type: workflow
+    steps:
+      - name: create dns
+        action: skip
+      - name: delete dns
+        action: skip
 configuration:
-  DNS_TYPE: azure
-  USE_ACCOUNT_SLUG: false
+  DNS_TYPE: disabled
+  USE_ACCOUNT_SLUG: true
   IMAGE_PULL_SECRETS:
     ENABLED: false
+    SECRETS:
+      - jfrog-secret
   DOMAIN: $OVERRIDE_DOMAIN
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
