@@ -5,7 +5,7 @@ set -euo pipefail
 # Default values
 DEFAULT_CONTAINER_NAME="application"
 MIN_LOGS_PER_POD=10
-DEFAULT_LIMIT=40
+DEFAULT_LIMIT=20
 
 # Configuration variables
 NAMESPACE=""
@@ -164,22 +164,22 @@ get_pod_logs() {
     local since_time="$2"
     local pod_limit="$3"
     local namespace_arg=""
-
+    
     if [[ -n "$NAMESPACE" ]]; then
         namespace_arg="-n $NAMESPACE"
     fi
-
+    
     local kubectl_args="$namespace_arg logs $pod_name -c $DEFAULT_CONTAINER_NAME --timestamps=true"
-
+    
     # Add since-time if provided
     if [[ -n "$since_time" ]]; then
         kubectl_args="$kubectl_args --since-time=$since_time"
     fi
-
+    
     # Add limit bytes (approximate)
     local limit_bytes=$((pod_limit * 3072))
     kubectl_args="$kubectl_args --limit-bytes=$limit_bytes"
-
+    
     kubectl $kubectl_args 2>/dev/null || echo ""
 }
 
@@ -190,7 +190,7 @@ is_valid_timestamp() {
     if [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z?$ ]]; then
         return 0
     fi
-    return 1
+    return 1 
 }
 
 # Function to process log lines and apply filtering
@@ -200,40 +200,40 @@ process_log_lines() {
     local pod_name="$3"
     local pod_id="$4"
     local last_read_time="$5"
-
+    
     local processed_logs=""
     local last_timestamp=""
-
+    
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-
+        
         # Extract timestamp and content
         local timestamp=$(echo "$line" | cut -d' ' -f1)
         local content=$(echo "$line" | cut -d' ' -f2-)
-
+        
         # Validate timestamp format - skip lines with invalid timestamps
         if ! is_valid_timestamp "$timestamp"; then
             continue
         fi
-
+        
         # Duplicate detection logic (simplified to match JS service behavior)
         if [[ -n "$last_read_time" && "$last_read_time" != "null" && "$last_read_time" != "empty" ]]; then
             # Simple string comparison - if timestamp is exactly the same, skip it
             if [[ "$timestamp" == "$last_read_time" ]]; then
                 continue
             fi
-
+            
             # If timestamp is older than last read time, skip it
             if [[ "$timestamp" < "$last_read_time" ]]; then
                 continue
             fi
         fi
-
+        
         # Apply filter if specified
         if [[ -n "$filter_pattern" ]] && [[ "$line" != *"$filter_pattern"* ]]; then
             continue
         fi
-
+        
         # Create log entry JSON with pod info
         local log_entry=$(jq -n \
             --arg msg "$content" \
@@ -241,17 +241,17 @@ process_log_lines() {
             --arg pod "$pod_name" \
             --arg podId "$pod_id" \
             '{message: $msg, datetime: $dt, pod: {name: $pod, id: $podId}}')
-
+        
         if [[ -n "$processed_logs" ]]; then
             processed_logs="$processed_logs,$log_entry"
         else
             processed_logs="$log_entry"
         fi
-
+        
         last_timestamp="$timestamp"
-
+        
     done <<< "$logs"
-
+    
     echo "{
         \"logs\": [$processed_logs],
         \"last_timestamp\": \"$last_timestamp\"
@@ -262,21 +262,21 @@ process_log_lines() {
 determine_since_time() {
     local pod_id="$1"
     local last_read_times="$2"
-
+    
     # Try to get last read time for this pod from token
     local last_time=$(echo "$last_read_times" | jq -r --arg podId "$pod_id" '.[$podId] // empty' 2>/dev/null)
-
+    
     if [[ -n "$last_time" && "$last_time" != "null" ]]; then
         echo "$last_time"
         return
     fi
-
+    
     # Fall back to config start time
     if [[ -n "$START_TIME" ]]; then
         echo "$START_TIME"
         return
     fi
-
+    
     echo ""
 }
 
@@ -284,7 +284,7 @@ determine_since_time() {
 sort_and_limit_logs() {
     local logs_json="$1"
     local limit="$2"
-
+    
     echo "$logs_json" | jq --argjson limit "$limit" \
         'sort_by(.datetime) | if length > $limit then .[:$limit] else . end'
 }
@@ -292,73 +292,62 @@ sort_and_limit_logs() {
 # Main function
 main() {
     parse_args "$@"
-
+    
     # Build label selector
     local label_selector=$(build_label_selector)
-
+    
     local pods_data=$(get_pods "$label_selector")
-
+    
     if [[ -z "$pods_data" ]]; then
         # No pods found, return empty result
         jq -n '{results: [], next_page_token: ""}'
         return 0
     fi
-
+    
     declare -a pod_names=()
     declare -a pod_ids=()
-
+    
     while IFS='|' read -r name id; do
         [[ -n "$name" && -n "$id" ]] || continue
         pod_names+=("$name")
         pod_ids+=("$id")
     done <<< "$pods_data"
-
+    
     local pod_count=${#pod_names[@]}
-
+    
     if [[ $pod_count -eq 0 ]]; then
         jq -n '{results: [], next_page_token: ""}'
         return 0
     fi
-
+    
     # Decode pagination token
     local last_read_times=$(decode_token "$NEXT_PAGE_TOKEN")
-
+    
     # Calculate pod limit
     local pod_limit=$(calculate_pod_limit "$LIMIT" "$pod_count")
-
+    
     # Process all pods
     local all_logs="[]"
-
-    # Parallel log fetching for all pods
-    declare -a temp_files=()
+    
     for i in "${!pod_names[@]}"; do
-        pod_name="${pod_names[$i]}"
-        pod_id="${pod_ids[$i]}"
-        since_time=$(determine_since_time "$pod_id" "$last_read_times")
-        temp_file=$(mktemp)
-        temp_files+=("$temp_file")
-        (
-            logs=$(get_pod_logs "$pod_name" "$since_time" "$pod_limit")
-            if [[ -n "$logs" ]]; then
-                pod_last_read_time=$(echo "$last_read_times" | jq -r --arg podId "$pod_id" '.[$podId] // empty' 2>/dev/null)
-                result=$(process_log_lines "$logs" "$FILTER_PATTERN" "$pod_name" "$pod_id" "$pod_last_read_time")
-                echo "$result" > "$temp_file"
-            fi
-        ) &
-    done
+        local pod_name="${pod_names[$i]}"
+        local pod_id="${pod_ids[$i]}"
+        
+        local since_time=$(determine_since_time "$pod_id" "$last_read_times")
+        
+        local logs=$(get_pod_logs "$pod_name" "$since_time" "$pod_limit")
+        
+        if [[ -n "$logs" ]]; then
+            local pod_last_read_time=$(echo "$last_read_times" | jq -r --arg podId "$pod_id" '.[$podId] // empty' 2>/dev/null)
+            local result=$(process_log_lines "$logs" "$FILTER_PATTERN" "$pod_name" "$pod_id" "$pod_last_read_time")
+            local processed_logs=$(echo "$result" | jq ".logs")
+            local last_timestamp=$(echo "$result" | jq -r ".last_timestamp")
 
-    wait
-
-    # Collect and merge logs from temp files
-    all_logs="[]"
-    for temp_file in "${temp_files[@]}"; do
-        if [[ -s "$temp_file" ]]; then
-            processed_logs=$(jq ".logs" < "$temp_file")
             if [[ -n "$processed_logs" && "$processed_logs" != "null" && "$processed_logs" != "[]" ]]; then
                 all_logs=$(echo "$all_logs" | jq --argjson new_logs "$processed_logs" '. + $new_logs')
             fi
+
         fi
-        rm -f "$temp_file"
     done
     
     local sorted_logs=$(sort_and_limit_logs "$all_logs" "$LIMIT")
