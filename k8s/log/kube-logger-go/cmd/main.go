@@ -31,23 +31,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get pods
-	pods, err := kubernetes.GetPods(clientset, cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to get pods: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Filter pods by instanceID if provided
-	if cfg.InstanceID != "" {
-		filteredPods := make([]corev1.Pod, 0, len(pods))
-		for _, pod := range pods {
-			if pod.Name == cfg.InstanceID || string(pod.UID) == cfg.InstanceID {
-				filteredPods = append(filteredPods, pod)
-			}
-		}
-		pods = filteredPods
-	}
+	// Get all pods or a specific pod
+	var pods []corev1.Pod
+    if cfg.InstanceID != "" {
+    	pod, err := kubernetes.GetPod(clientset, cfg.Namespace, cfg.InstanceID)
+    	if err != nil {
+    		fmt.Fprintf(os.Stderr, "Failed to get pod: %v\n", err)
+    		os.Exit(1)
+    	}
+    	if pod != nil {
+    		pods = []corev1.Pod{*pod}
+    	} else {
+    		pods = []corev1.Pod{}
+    	}
+    } else {
+    	var err error
+    	pods, err = kubernetes.GetPods(clientset, cfg)
+    	if err != nil {
+    		fmt.Fprintf(os.Stderr, "Failed to get pods: %v\n", err)
+    		os.Exit(1)
+    	}
+    }
 
 	if len(pods) == 0 {
 		outputEmptyResponse()

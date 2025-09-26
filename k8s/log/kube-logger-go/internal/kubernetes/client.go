@@ -60,3 +60,12 @@ func GetPods(clientset *kubernetes.Clientset, config types.Config) ([]corev1.Pod
 
 	return podList.Items, nil
 }
+
+func GetPod(clientset *kubernetes.Clientset, namespace, podName string) (*corev1.Pod, error) {
+    ctx := context.Background()
+    pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+    if err != nil {
+        return nil, fmt.Errorf("failed to get pod %s in namespace %s: %v", podName, namespace, err)
+    }
+    return pod, nil
+}
