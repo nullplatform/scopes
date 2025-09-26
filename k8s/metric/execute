@@ -1,0 +1,6 @@
+#!/bin/bash
+
+source "$SERVICE_PATH/metric/$METRIC_PROVIDER/$ACTION" || {
+  echo "ERROR: Failed to get metrics from $METRIC_PROVIDER"
+  exit 1
+}
