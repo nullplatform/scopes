@@ -121,6 +121,8 @@ spec:
           env:
             - name: HEALTH_CHECK_TYPE
               value: http
+            - name: PORT
+              value: 8888
             - name: GRACE_PERIOD
               value: '15'
             - name: LISTENER_PROTOCOL
