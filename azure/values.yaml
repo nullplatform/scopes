@@ -8,6 +8,7 @@ steps:
         action: skip
 configuration:
   DNS_TYPE: disabled
+  K8S_NAMESPACE: test
   USE_ACCOUNT_SLUG: false
   IMAGE_PULL_SECRETS:
     ENABLED: true
