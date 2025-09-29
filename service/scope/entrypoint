@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x 
 cd $WORKING_DIRECTORY
 echo "Executing scope action=$SERVICE_ACTION, type=$SERVICE_ACTION_TYPE for scope=$SCOPE_ID"
 
