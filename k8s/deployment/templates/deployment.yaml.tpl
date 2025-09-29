@@ -111,6 +111,10 @@ spec:
       containers:
         - name: http
           image: {{ .traffic_image }}
+          securityContext:
+            capabilities:
+              add:
+                - NET_BIND_SERVICE
           ports:
             - containerPort: 80
               protocol: TCP
@@ -162,6 +166,10 @@ spec:
         {{ if eq .type "GRPC" }}
         - name: grpc-{{ .port }}
           image: {{ $.traffic_image }}
+          securityContext:
+            capabilities:
+              add:
+                - NET_BIND_SERVICE
           ports:
             - containerPort: {{ .port }}
               protocol: TCP
