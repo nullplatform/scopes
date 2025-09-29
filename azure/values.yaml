@@ -8,7 +8,7 @@ steps:
         action: skip
 configuration:
   DNS_TYPE: disabled
-  USE_ACCOUNT_SLUG: true
+  USE_ACCOUNT_SLUG: false
   IMAGE_PULL_SECRETS:
     ENABLED: true
     SECRETS:
