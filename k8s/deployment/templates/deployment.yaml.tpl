@@ -116,7 +116,7 @@ spec:
               add:
                 - NET_BIND_SERVICE
           ports:
-            - containerPort: 80
+            - containerPort: 8888
               protocol: TCP
           env:
             - name: HEALTH_CHECK_TYPE
@@ -137,25 +137,25 @@ spec:
               cpu: 31m
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 8888 "app_port" 8080 }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8888 }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 9
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 8888 "app_port" 8080 }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8888 }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 8888 "app_port" 8080 }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8888 }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
