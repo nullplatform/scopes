@@ -14,7 +14,7 @@ configuration:
     ENABLED: true
     SECRETS:
       - image-pull-secret
-  DOMAIN: $OVERRIDE_DOMAIN
+  DOMAIN: dev.fabric.sbp.eyclienthub.com
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/blue-green-httproute.yaml.tpl"
