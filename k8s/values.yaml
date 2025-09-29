@@ -11,6 +11,7 @@ configuration:
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
   SCALING_TEMPLATE: "$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/service.yaml.tpl"
+  PDB_TEMPLATE: "$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"
   SERVICE_ACCOUNT_TEMPLATE: "$SERVICE_PATH/scope/templates/service-account.yaml.tpl"
@@ -53,6 +54,9 @@ configuration:
 #    BUCKET: bucket-name
 #    PREFIX: path-prefix
 #  DEPLOY_STRATEGY: rolling
+#  POD_DISRUPTION_BUDGET:
+#    ENABLED: false
+#    MAX_UNAVAILABLE: "25%"  # Can be percentage or number (e.g., "2")
 #  K8S_MODIFIERS:
 #    global:
 #      annotations:
