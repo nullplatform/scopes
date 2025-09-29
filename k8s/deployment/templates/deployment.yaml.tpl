@@ -110,8 +110,6 @@ spec:
       {{- end }}
       containers:
         - name: http
-          securityContext:
-            runAsUser: 0
           image: {{ .traffic_image }}
           ports:
             - containerPort: 80
@@ -163,8 +161,6 @@ spec:
         {{ range .scope.capabilities.additional_ports }}
         {{ if eq .type "GRPC" }}
         - name: grpc-{{ .port }}
-          securityContext:
-            runAsUser: 0
           image: {{ $.traffic_image }}
           ports:
             - containerPort: {{ .port }}
@@ -221,8 +217,6 @@ spec:
                 name: s-{{ .scope.id }}-d-{{ .deployment.id }}
           image: >-
             {{ .asset.url }}
-          securityContext:
-            runAsUser: 0
           ports:
             - containerPort: 8080
               protocol: TCP
