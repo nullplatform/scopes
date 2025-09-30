@@ -4,6 +4,7 @@ provider_categories:
 configuration:
   K8S_NAMESPACE: nullplatform
   DOMAIN: nullapps.io
+#  PRIVATE_DOMAIN: nullapps.io
   USE_ACCOUNT_SLUG: false
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600

@@ -4,10 +4,6 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
-  .providers["cloud-providers"].networking.domain_name // $default
-')
-
 USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
   .providers["cloud-providers"].networking.application_domain // $default
 ')
@@ -15,6 +11,16 @@ USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
 REGION=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].account.region // "us-east-1"')
 
 SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
+
+if [ "$SCOPE_VISIBILITY" = "public" ]; then
+    DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
+      .providers["cloud-providers"].networking.domain_name // $default
+    ')
+else
+    DOMAIN=$(echo "$CONTEXT" | jq -r --arg private_default "$PRIVATE_DOMAIN" --arg default "$DOMAIN" '
+      .providers["cloud-providers"].networking.private_domain_name // $private_default // .providers["cloud-providers"].networking.domain_name // $default
+    ')
+fi
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
 
 eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
