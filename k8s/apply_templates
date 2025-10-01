@@ -9,7 +9,13 @@ while IFS= read -r TEMPLATE_FILE; do
    echo "kubectl $ACTION $TEMPLATE_FILE"
 
    if [[ "$DRY_RUN" == "false" ]]; then
-     kubectl "$ACTION" -f "$TEMPLATE_FILE"
+     IGNORE_NOT_FOUND=""
+
+     if [[ "$ACTION" == "delete" ]]; then
+       IGNORE_NOT_FOUND="--ignore-not-found=true"
+     fi
+
+     kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND
    fi
 
    BASE_DIR="$(dirname "$TEMPLATE_FILE")"
