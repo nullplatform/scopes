@@ -42,7 +42,7 @@ spec:
   ports:
     - protocol: TCP
       port: 8080
-      targetPort: 8888
+      targetPort: 80
   selector:
     nullplatform: "true"
     account: {{ .account.slug }}
