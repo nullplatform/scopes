@@ -115,8 +115,7 @@ spec:
             capabilities:
               add:
                 - NET_BIND_SERVICE
-            allowPrivilegeEscalation: "false"
-            
+            allowPrivilegeEscalation: false
           ports:
             - containerPort: 80
               protocol: TCP
