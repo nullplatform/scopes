@@ -329,7 +329,7 @@
                }
             ],
             "title":"RAM Memory",
-            "default":64,
+            "default":128,
             "description":"Amount of RAM memory to allocate to the container (in MB)"
          },
          "visibility":{
