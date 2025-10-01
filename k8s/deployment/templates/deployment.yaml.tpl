@@ -116,6 +116,11 @@ spec:
               add:
                 - NET_BIND_SERVICE
             allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001  # "nobody" user, commonly available
+            fsGroup: 1
+            supplementalGroups:
+              - 1
           ports:
             - containerPort: 80
               protocol: TCP
