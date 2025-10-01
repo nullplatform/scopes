@@ -1,5 +1,5 @@
 configuration:
-  DNS_TYPE: azure
+  DNS_TYPE: external_dns
   USE_ACCOUNT_SLUG: false
   IMAGE_PULL_SECRETS:
     ENABLED: false
