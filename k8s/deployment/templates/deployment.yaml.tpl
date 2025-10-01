@@ -31,6 +31,11 @@ metadata:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
 spec:
+  securityContext:
+    runAsNonRoot: true      # Applies to all containers
+    fsGroup: 1              # Must be at pod level
+    supplementalGroups:     # Must be at pod level
+      - 1
   replicas: {{ .replicas }}
   selector:
     matchLabels:
@@ -112,13 +117,10 @@ spec:
         - name: http
           image: {{ .traffic_image }}
           securityContext:
+            runAsUser: 1001
             capabilities:
               add:
                 - NET_BIND_SERVICE
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            runAsUser: 1001  # "nobody" user, commonly available
-            fsGroup: 1
 
           ports:
             - containerPort: 80
