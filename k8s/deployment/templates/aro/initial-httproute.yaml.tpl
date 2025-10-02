@@ -1,7 +1,7 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: aro-payments-route-{{ .scope.slug }}-{{ .scope.id }}
+  name: k-8-s-{{ .scope.slug }}-{{ .scope.id }}-{{ .ingress_visibility }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -48,4 +48,4 @@ spec:
     kind: Service
     name: d-{{ .scope.id }}-{{ .deployment.id }}
   port:
-    targetPort: 8080
+    targetPort: 80
