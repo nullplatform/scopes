@@ -33,12 +33,12 @@ case "$DNS_TYPE" in
             echo "DNSEndpoint status: $DNS_STATUS"
         fi
         
-        if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
+        if nslookup "$SCOPE_DOMAIN" 1.1.1.1 >/dev/null 2>&1; then
             echo "✓ DNS record for $SCOPE_DOMAIN is now resolvable"
             
-            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
+            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 1.1.1.1 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
             echo "✓ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
-            
+
             break
         fi
         
