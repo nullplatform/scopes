@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -euo pipefail
+
+echo "Managing DNS records"
+echo "DNS Type: $DNS_TYPE"
+echo "Action: $ACTION"
+echo "Scope Domain: $SCOPE_DOMAIN"
+
+if [[ "$ACTION" == "DELETE" ]] && [[ -z "${SCOPE_DOMAIN:-}" || "${SCOPE_DOMAIN:-}" == "To be defined" ]]; then
+    echo "Skipping route53 action as the scope has no domain"
+    return 0
+fi
+
+case "$DNS_TYPE" in
+  route53)
+    echo "Using Route53 DNS provider"
+    source "$SERVICE_PATH/scope/networking/dns/route53/manage_route" --action="$ACTION" || {
+        echo "ERROR: Route53 DNS management failed"
+        exit 1
+    }
+    ;;
+  azure)
+    if [ "$SCOPE_VISIBILITY" = "public" ]; then
+      GATEWAY_NAME="$PUBLIC_GATEWAY_NAME"
+    else
+      GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
+    fi
+    
+    source "$OVERRIDES_PATH/scope/networking/dns/az-records/manage_route" \
+      --action="$ACTION" \
+      --subscription-id="$AZURE_SUBSCRIPTION_ID" \
+      --hosted-zone-name="$HOSTED_ZONE_NAME" \
+      --hosted-zone-rg="$HOSTED_ZONE_RG"
+    ;;
+  external_dns)
+    echo "Using external_dns provider"
+    source "$SERVICE_PATH/scope/networking/dns/external_dns/manage_route" || {
+        echo "ERROR: External DNS management failed"
+        exit 1
+    }
+    ;;
+  *)
+    echo "Error: Unsupported dns type '$DNS_TYPE'"
+    exit 1
+    ;;
+esac
+

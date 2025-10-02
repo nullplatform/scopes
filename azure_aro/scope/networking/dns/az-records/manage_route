@@ -1,0 +1,130 @@
+#!/bin/bash
+
+set -euo pipefail
+
+get_azure_token() {
+    local token_response=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X POST \
+        "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "client_id=${AZURE_CLIENT_ID}" \
+        -d "client_secret=${AZURE_CLIENT_SECRET}" \
+        -d "scope=https://management.azure.com/.default" \
+        -d "grant_type=client_credentials" 2>&1) || {
+        echo "ERROR: Failed to get Azure access token" >&2
+        return 1
+    }
+    
+    local http_code=$(echo "$token_response" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
+    token_response=$(echo "$token_response" | sed 's/__HTTP_CODE__:[0-9]*//')
+    
+    if [ "${http_code:-0}" -ne 200 ]; then
+        echo "ERROR: Failed to get Azure access token. HTTP code: ${http_code:-unknown}" >&2
+        echo "Response: $token_response" >&2
+        return 1
+    fi
+    
+    local access_token=$(echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+    
+    if [[ -z "$access_token" ]]; then
+        echo "ERROR: No access token in response" >&2
+        echo "Response: $token_response" >&2
+        return 1
+    fi
+    
+    echo "$access_token"
+}
+
+ACTION=""
+GATEWAY_NAME=""
+RESOURCE_GROUP=""
+AZURE_SUBSCRIPTION_ID=""
+HOSTED_ZONE_NAME=""
+HOSTED_ZONE_RG=""
+
+for arg in "$@"; do
+  case $arg in
+    --action=*) ACTION="${arg#*=}" ;;
+    --resource-group=*) RESOURCE_GROUP="${arg#*=}" ;;
+    --subscription-id=*) AZURE_SUBSCRIPTION_ID="${arg#*=}" ;;
+    --gateway-name=*) GATEWAY_NAME="${arg#*=}" ;;
+    --hosted-zone-name=*) HOSTED_ZONE_NAME="${arg#*=}" ;;
+    --hosted-zone-rg=*) HOSTED_ZONE_RG="${arg#*=}" ;;
+  esac
+done
+
+# Get IP from OpenShift router service
+GATEWAY_IP=$(kubectl get svc router-default -n openshift-ingress \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+
+if [ -z "$GATEWAY_IP" ]; then
+    echo "Error: Could not get IP address from OpenShift router service" >&2
+    exit 1
+fi
+
+SCOPE_SUBDOMAIN="${SCOPE_SUBDOMAIN:-}"
+if [ -z "$SCOPE_SUBDOMAIN" ]; then
+    SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
+fi
+
+if [ "$ACTION" = "CREATE" ]; then
+    # Get access token
+    ACCESS_TOKEN=$(get_azure_token) || exit 1
+
+    # Create or update A record
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
+
+    RECORD_BODY=$(cat <<EOF
+{
+  "properties": {
+    "TTL": 300,
+    "ARecords": [
+      {
+        "ipv4Address": "${GATEWAY_IP}"
+      }
+    ]
+  }
+}
+EOF
+)
+    
+    AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
+        "${RECORD_SET_URL}" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "${RECORD_BODY}" 2>&1) || {
+        echo "ERROR: Failed to create/update Azure DNS record" >&2
+        exit 1
+    }
+    
+    # Extract HTTP code
+    http_code=$(echo "$AZURE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
+    AZURE_RESPONSE=$(echo "$AZURE_RESPONSE" | sed 's/__HTTP_CODE__:[0-9]*//')
+
+    # Check if response contains error
+    if echo "$AZURE_RESPONSE" | grep -q '"error"'; then
+        echo "ERROR: Azure API returned error" >&2
+        echo "Response: $AZURE_RESPONSE" >&2
+        exit 1
+    fi
+    
+    # Check HTTP status code
+    if [ "${http_code:-0}" -lt 200 ] || [ "${http_code:-0}" -gt 299 ]; then
+        echo "ERROR: Azure API returned HTTP code: ${http_code:-unknown}" >&2
+        echo "Response: $AZURE_RESPONSE" >&2
+        exit 1
+    fi
+    
+    echo "DNS record created: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME -> $GATEWAY_IP"
+    
+elif [ "$ACTION" = "DELETE" ]; then
+    
+    ACCESS_TOKEN=$(get_azure_token) || exit 1
+    
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
+    
+    curl --http1.1 -s -X DELETE \
+        "${RECORD_SET_URL}" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}"
+    
+    echo "DNS record deleted: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
+fi

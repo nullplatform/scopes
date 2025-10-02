@@ -1,0 +1,18 @@
+steps:
+    - name: networking
+      type: workflow
+      steps:
+        - name: create dns
+          type: script
+          file: "$OVERRIDES_PATH/scope/networking/dns/manage_dns"
+          configuration:
+            ACTION: CREATE
+          pre:
+            name: build dns context
+            type: script
+            file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
+            output:
+              - name: HOSTED_PUBLIC_ZONE_ID
+                type: environment
+              - name: HOSTED_PRIVATE_ZONE_ID
+                type: environment
