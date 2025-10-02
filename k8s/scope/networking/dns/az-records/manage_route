@@ -52,9 +52,24 @@ for arg in "$@"; do
   esac
 done
 
-# Get IP from Gateway resource
-GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+# Get IP based on gateway type
+if [ "${GATEWAY_TYPE:-istio}" = "aro_cluster" ]; then
+    # Get IP from OpenShift router service
+    GATEWAY_IP=$(kubectl get svc router-default -n openshift-ingress \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+    
+    if [ -z "$GATEWAY_IP" ]; then
+        echo "Error: Could not get IP address from ARO router service" >&2
+        echo "Falling back to istio gateway..." >&2
+        # Fall back to istio gateway
+        GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+            -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+    fi
+else
+    # Default: Get IP from Gateway resource (istio)
+    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+fi
 
 if [ -z "$GATEWAY_IP" ]; then
     echo "Error: Could not get IP address for gateway $GATEWAY_NAME" >&2
