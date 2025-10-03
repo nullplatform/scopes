@@ -39,7 +39,7 @@ spec:
     metadata:
       labels:
         name: d-{{ .scope.id }}-{{ .deployment.id }}
-        app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
+        app.kubernetes.io/part-of: {{ .component }}
         nullplatform: "true"
         account: "{{ .account.slug }}"
         account_id: "{{ .account.id }}"
