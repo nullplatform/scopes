@@ -1,0 +1,11 @@
+steps:
+  - name: scale_deployments
+    type: script
+    file: "$SERVICE_PATH/deployment/scale_deployments"
+    post:
+      name: deployment_checks
+      type: script
+      file: "$SERVICE_PATH/deployment/wait_deployment_active"
+      configuration:
+        TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
+        SKIP_DEPLOYMENT_STATUS_CHECK: true

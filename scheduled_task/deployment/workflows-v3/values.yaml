@@ -1,0 +1,19 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+
+configuration:
+  stages:
+    context:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/context.yaml"
+    build:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/build.yaml"
+    apply:
+      file: "$OVERRIDES_PATH/deployment/workflow-v2/stages/apply.yaml"
+    scale:
+      file: "$OVERRIDES_PATH/deployment/workflow-v2/stages/scale.yaml"
+    delete:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/delete.yaml"
+
+  templates:
+    job: "$OVERRIDES_PATH/deployment/templates/deployment.yaml.tpl"
+    secret: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"

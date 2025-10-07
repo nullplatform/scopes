@@ -1,0 +1,7 @@
+steps:
+  - name: delete ingress finalizer
+    type: script
+    file: "$SERVICE_PATH/deployment/delete_ingress_finalizer"
+  - name: delete_cluster_objects
+    type: script
+    file: "$SERVICE_PATH/deployment/delete_cluster_objects"

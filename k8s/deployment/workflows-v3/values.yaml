@@ -1,0 +1,36 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+
+configuration:
+  stages:
+    context:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/context.yaml"
+      pre: ...
+      post: ...
+    build:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/build.yaml"
+      pre: ...
+      post: ...
+    apply:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/apply.yaml"
+      pre: ...
+      post: ...
+    scale:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/scale.yaml"
+      pre: ...
+      post: ...
+    delete:
+      file: "$SERVICE_PATH/deployment/workflow-v2/stages/delete.yaml"
+      pre: ...
+      post: ...
+
+  templates:
+    application:
+      deployment: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
+      secret: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
+      scaling: "$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
+      service: "$SERVICE_PATH/deployment/templates/service.yaml.tpl"
+      pdb: "$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
+    traffic:
+      ingress: "$SERVICE_PATH/deployment/templates/ingress.yaml.tpl"
+      # httpRoute: ...

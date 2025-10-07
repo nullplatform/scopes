@@ -1,0 +1,24 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows-v2/values.yaml"
+steps:
+  - name: build_context
+    type: workflow
+    source: "$stages.context"
+  - name: scale_deployments
+    type: workflow
+    source: "$stages.scale"
+  - name: build_templates
+    type: workflow
+    source: "$stages.build"
+    configuration:
+      build: traffic
+  - name: apply
+    type: workflow
+    source: "$stages.apply"
+    configuration:
+      dry_run: false
+  - name: delete
+    type: script
+    source: "$stages.delete"
+    configuration:
+      delete_traffic_layer: false

@@ -1,0 +1,4 @@
+steps:
+  - name: build_templates
+    type: script
+    file: "$SERVICE_PATH/deployment/build_templates"

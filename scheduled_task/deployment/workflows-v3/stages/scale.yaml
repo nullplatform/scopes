@@ -1,0 +1,4 @@
+steps:
+  - name: no-op
+    type: command
+    command: "echo 'Scheduled task have no scaling.'"

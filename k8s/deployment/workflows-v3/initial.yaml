@@ -1,0 +1,16 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows-v2/values.yaml"
+steps:
+  - name: build_context
+    type: workflow
+    source: "$stages.context"
+  - name: build_templates
+    type: workflow
+    source: "$stages.build"
+    configuration:
+      build: all
+  - name: apply
+    type: script
+    source: "$stages.apply"
+    configuration:
+      dry_run: false

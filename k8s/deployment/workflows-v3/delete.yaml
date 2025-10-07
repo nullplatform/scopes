@@ -1,0 +1,11 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows-v2/values.yaml"
+steps:
+  - name: build_context
+    type: workflow
+    source: "$stages.build"
+  - name: delete
+    type: script
+    source: "$stages.delete"
+    configuration:
+      delete_traffic_layer: true
