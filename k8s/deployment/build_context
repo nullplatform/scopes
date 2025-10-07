@@ -36,7 +36,15 @@ fi
 IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-"{}"}"
 IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
 
-TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:latest"}
+SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
+
+TRAFFIC_CONTAINER_VERSION="latest"
+
+if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
+  TRAFFIC_CONTAINER_VERSION="websocket2"
+fi
+
+TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"}
 
 # Pod Disruption Budget configuration
 PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
