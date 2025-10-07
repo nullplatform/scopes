@@ -70,9 +70,12 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson modifiers "$K8S_MODIFIERS" \
           '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component}')
 
-export OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
+OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
+if [ -n "${NP_OUTPUT_DIR:-}" ]; then
+    OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
+fi
+export OUTPUT_DIR
 export CONTEXT
 export REGION
 
 mkdir -p "$OUTPUT_DIR"
-
