@@ -36,12 +36,30 @@ fi
 IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-"{}"}"
 IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
 
+# Non-root configuration with defaults
+NON_ROOT="${NON_ROOT:-"{}"}"
+NON_ROOT=$(echo "$NON_ROOT" | jq '{
+  enabled: .ENABLED // false,
+  user_id: .USER_ID // 1000,
+  group_id: .GROUP_ID // 1000,
+  fs_group: .FS_GROUP // 1000
+}')
+
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
 
 TRAFFIC_CONTAINER_VERSION="latest"
 
 if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
   TRAFFIC_CONTAINER_VERSION="websocket2"
+fi
+
+NON_ROOT_ENABLED=$(echo "$NON_ROOT" | jq -r '.enabled')
+if [[ "$NON_ROOT_ENABLED" == "true" ]]; then
+  if [[ "$TRAFFIC_CONTAINER_VERSION" == "websocket2" ]]; then
+    TRAFFIC_CONTAINER_VERSION="websocket2-non-root"
+  else
+    TRAFFIC_CONTAINER_VERSION="latest-non-root"
+  fi
 fi
 
 TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"}
@@ -59,6 +77,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson pull_secrets "$IMAGE_PULL_SECRETS" \
           --arg pdb_enabled "$PDB_ENABLED" \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
+          --argjson non_root "$NON_ROOT" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -66,7 +85,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 pull_secrets: $pull_secrets,
                 traffic_image: $traffic_image,
                 pdb_enabled: $pdb_enabled,
-                pdb_max_unavailable: $pdb_max_unavailable
+                pdb_max_unavailable: $pdb_max_unavailable,
+                non_root: $non_root
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
