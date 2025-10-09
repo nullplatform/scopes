@@ -71,13 +71,13 @@ CONTEXT=$(echo "$CONTEXT" | jq \
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
 
-export DEPLOYMENT_ID
-export BLUE_DEPLOYMENT_ID
-
 OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID-$DEPLOYMENT_ID"
 if [ -n "${NP_OUTPUT_DIR:-}" ]; then
     OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID-$DEPLOYMENT_ID"
 fi
+
 export OUTPUT_DIR
+export DEPLOYMENT_ID
+export BLUE_DEPLOYMENT_ID
 
 mkdir -p "$OUTPUT_DIR"

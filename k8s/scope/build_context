@@ -74,6 +74,7 @@ OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
 if [ -n "${NP_OUTPUT_DIR:-}" ]; then
     OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
 fi
+
 export OUTPUT_DIR
 export CONTEXT
 export REGION
