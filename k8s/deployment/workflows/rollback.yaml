@@ -66,9 +66,3 @@ steps:
     configuration:
       ACTION: delete
       DRY_RUN: false
-    post:
-      name: delete_cluster_objects
-      type: script
-      file: "$SERVICE_PATH/deployment/delete_cluster_objects"
-      configuration:
-        DEPLOYMENT: green

@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .k8s_namespace }}
   labels:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
-    app.kubernetes.io/part-of: {{ .component }}
+    app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}
     app.kubernetes.io/name: {{ .scope.slug }}

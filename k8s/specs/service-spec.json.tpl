@@ -13,7 +13,6 @@
          "fixed_instances",
          "scheduled_stop",
          "additional_ports",
-         "protocol",
          "continuous_delivery"
       ],
       "uiSchema":{
@@ -166,19 +165,6 @@
                            "scope":"#/properties/scheduled_stop/properties/timer"
                         }
                      ]
-                  },
-                  {
-                    "type": "Category",
-                    "label": "Protocol",
-                    "elements": [
-                      {
-                        "type": "Control",
-                        "scope": "#/properties/protocol",
-                        "options": {
-                          "format": "radio"
-                        }
-                      }
-                    ]
                   },
                   {
                      "type":"Category",
@@ -343,7 +329,7 @@
                }
             ],
             "title":"RAM Memory",
-            "default":128,
+            "default":64,
             "description":"Amount of RAM memory to allocate to the container (in MB)"
          },
          "visibility":{
@@ -549,7 +535,6 @@
                      ],
                      "type":"string",
                      "title":"Port Type",
-                     "default": "GRPC",
                      "description":"The protocol type for this port"
                   }
                }
@@ -599,24 +584,6 @@
                "default": true
                }
             }
-         },
-         "protocol": {
-           "type": "string",
-           "oneOf": [
-             {
-               "const": "http",
-               "title": "HTTP connections",
-               "description": "Enable http web server"
-             },
-             {
-               "const": "web_sockets",
-               "title": "Web sockets",
-               "description": "Enable web sockets connections"
-             }
-           ],
-           "title": "Protocol",
-           "default": "http",
-           "description": "Define the inbound traffic the application will accept"
          }
       }
    }

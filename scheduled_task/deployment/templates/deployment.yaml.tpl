@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .k8s_namespace }}
   labels:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
-    app.kubernetes.io/part-of: {{ .component }}
+    app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
     nullplatform: "true"
     account: "{{ .account.slug }}"
     account_id: "{{ .account.id }}"
@@ -39,7 +39,7 @@ spec:
     metadata:
       labels:
         name: d-{{ .scope.id }}-{{ .deployment.id }}
-        app.kubernetes.io/part-of: {{ .component }}
+        app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
         nullplatform: "true"
         account: "{{ .account.slug }}"
         account_id: "{{ .account.id }}"
@@ -70,7 +70,7 @@ spec:
         metadata:
           labels:
             name: d-{{ .scope.id }}-{{ .deployment.id }}
-            app.kubernetes.io/part-of: {{ .component }}
+            app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
             nullplatform: "true"
             account: "{{ .account.slug }}"
             account_id: "{{ .account.id }}"
