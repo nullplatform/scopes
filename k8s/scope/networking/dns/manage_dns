@@ -35,6 +35,13 @@ case "$DNS_TYPE" in
       --hosted-zone-name="$HOSTED_ZONE_NAME" \
       --hosted-zone-rg="$HOSTED_ZONE_RG"
     ;;
+  external_dns)
+    echo "Using external_dns provider"
+    source "$SERVICE_PATH/scope/networking/dns/external_dns/manage_route" || {
+        echo "ERROR: External DNS management failed"
+        exit 1
+    }
+    ;;
   *)
     echo "Error: Unsupported dns type '$DNS_TYPE'"
     exit 1

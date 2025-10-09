@@ -1,0 +1,10 @@
+#!/bin/bash
+
+DEPLOYMENT_TO_CLEAN="$DEPLOYMENT_ID"
+
+if [ "$DEPLOYMENT" = "blue" ]; then
+    DEPLOYMENT_TO_CLEAN=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+fi
+
+kubectl delete deployment,service,hpa,ingress,pdb,secret,configmap \
+  -l deployment_id="$DEPLOYMENT_TO_CLEAN" -n "$K8S_NAMESPACE" --cascade=foreground --wait=true

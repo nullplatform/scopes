@@ -33,20 +33,16 @@ fi
 
 echo "Found load balancer DNS: $ELB_DNS_NAME"
 
-if [ "$SCOPE_VISIBILITY" = "public" ]; then
-    HOSTED_ZONES=("$HOSTED_PUBLIC_ZONE_ID")
-else
-    HOSTED_ZONES=()
-    
-    if [[ -n "$HOSTED_PRIVATE_ZONE_ID" ]] && [[ "$HOSTED_PRIVATE_ZONE_ID" != "null" ]]; then
-        HOSTED_ZONES+=("$HOSTED_PRIVATE_ZONE_ID")
-    fi
-    
-    if [[ -n "$HOSTED_PUBLIC_ZONE_ID" ]] && [[ "$HOSTED_PUBLIC_ZONE_ID" != "null" ]]; then
-        if [[ "$HOSTED_PUBLIC_ZONE_ID" != "$HOSTED_PRIVATE_ZONE_ID" ]]; then
-            HOSTED_ZONES+=("$HOSTED_PUBLIC_ZONE_ID")
-            echo "Will create records in both public and private zones"
-        fi
+HOSTED_ZONES=()
+
+if [[ -n "$HOSTED_PRIVATE_ZONE_ID" ]] && [[ "$HOSTED_PRIVATE_ZONE_ID" != "null" ]]; then
+    HOSTED_ZONES+=("$HOSTED_PRIVATE_ZONE_ID")
+fi
+
+if [[ -n "$HOSTED_PUBLIC_ZONE_ID" ]] && [[ "$HOSTED_PUBLIC_ZONE_ID" != "null" ]]; then
+    if [[ "$HOSTED_PUBLIC_ZONE_ID" != "$HOSTED_PRIVATE_ZONE_ID" ]]; then
+        HOSTED_ZONES+=("$HOSTED_PUBLIC_ZONE_ID")
+        echo "Will create records in both public and private zones"
     fi
 fi
 
