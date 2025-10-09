@@ -15,5 +15,4 @@ gomplate -c .="$CONTEXT_PATH" \
   --file "$TEMPLATE" \
   --out "$INGRESS_FILE"
 
-
 rm "$CONTEXT_PATH"

@@ -1,9 +1,6 @@
 #!/bin/bash
 
-PLATFORM=$(uname | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m)
-
-KUBE_LOGGER_SCRIPT="$SERVICE_PATH/log/kube-logger-go/bin/$PLATFORM/exec-$ARCH"
+KUBE_LOGGER_SCRIPT="$SERVICE_PATH/log/kube-logger-bash/exec"
 
 if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then
     echo "Error: kube-logger bash script not found at $KUBE_LOGGER_SCRIPT" >&2
@@ -22,21 +19,6 @@ fi
 # Add optional next page token
 if [ -n "$NEXT_PAGE_TOKEN" ]; then
     CMD="$CMD --next-page-token $NEXT_PAGE_TOKEN"
-fi
-
-# Add optional filter pattern
-if [ -n "$FILTER_PATTERN" ]; then
-    CMD="$CMD --filter \"$FILTER_PATTERN\""
-fi
-
-# Add optional instance ID
-if [ -n "$INSTANCE_ID" ]; then
-    CMD="$CMD --instance-id $INSTANCE_ID"
-fi
-
-# Add optional limit
-if [ -n "$LIMIT" ]; then
-    CMD="$CMD --limit $LIMIT"
 fi
 
 # Add optional start time (convert from milliseconds to ISO format)

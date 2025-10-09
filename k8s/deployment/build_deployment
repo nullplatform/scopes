@@ -42,7 +42,6 @@ DEPLOYMENT_PATH="$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SECRET_PATH="$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SCALING_PATH="$OUTPUT_DIR/scaling-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SERVICE_TEMPLATE_PATH="$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-PDB_PATH="$OUTPUT_DIR/pdb-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
 echo "$CONTEXT" | jq --arg replicas "$REPLICAS" --arg service_account_name "$SERVICE_ACCOUNT_NAME" '. + {replicas: $replicas, service_account_name: $service_account_name}' > "$CONTEXT_PATH"
@@ -95,20 +94,7 @@ gomplate -c .="$CONTEXT_PATH" \
 TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building service template"
-    exit 1
-fi
-
-echo "Building Template: $PDB_TEMPLATE to $PDB_PATH"
-
-gomplate -c .="$CONTEXT_PATH" \
-  --file "$PDB_TEMPLATE" \
-  --out "$PDB_PATH"
-
-TEMPLATE_GENERATION_STATUS=$?
-
-if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building PDB template"
+    echo "Error building scaling template"
     exit 1
 fi
 

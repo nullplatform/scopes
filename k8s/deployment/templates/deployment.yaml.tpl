@@ -30,15 +30,6 @@ metadata:
   labels:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
-    account: {{ .account.slug }}
-    account_id: "{{ .account.id }}"
-    namespace: {{ .namespace.slug }}
-    namespace_id: "{{ .namespace.id }}"
-    application: {{ .application.slug }}
-    application_id: "{{ .application.id }}"
-    scope: {{ .scope.slug }}
-    scope_id: "{{ .scope.id }}"
-    deployment_id: "{{ .deployment.id }}"
 spec:
   replicas: {{ .replicas }}
   selector:
@@ -48,7 +39,7 @@ spec:
     metadata:
       labels:
         name: d-{{ .scope.id }}-{{ .deployment.id }}
-        app.kubernetes.io/part-of: {{ .component }}
+        app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
         nullplatform: "true"
         account: "{{ .account.slug }}"
         account_id: "{{ .account.id }}"
