@@ -13,6 +13,7 @@
          "fixed_instances",
          "scheduled_stop",
          "additional_ports",
+         "protocol",
          "continuous_delivery"
       ],
       "uiSchema":{
@@ -102,10 +103,6 @@
                                  "scope":"#/properties/autoscaling/properties/target_cpu_utilization"
                               },
                               {
-                                 "type": "Control",
-                                 "scope": "#/properties/autoscaling/properties/target_memory_enabled"
-                              },
-                              {
                                  "rule": {
                                    "effect": "SHOW",
                                    "condition": {
@@ -169,6 +166,19 @@
                            "scope":"#/properties/scheduled_stop/properties/timer"
                         }
                      ]
+                  },
+                  {
+                    "type": "Category",
+                    "label": "Protocol",
+                    "elements": [
+                      {
+                        "type": "Control",
+                        "scope": "#/properties/protocol",
+                        "options": {
+                          "format": "radio"
+                        }
+                      }
+                    ]
                   },
                   {
                      "type":"Category",
@@ -333,7 +343,7 @@
                }
             ],
             "title":"RAM Memory",
-            "default":64,
+            "default":128,
             "description":"Amount of RAM memory to allocate to the container (in MB)"
          },
          "visibility":{
@@ -382,17 +392,17 @@
                   "description":"CPU utilization threshold that triggers scaling"
                },
                "target_memory_enabled": {
-                  "type": "boolean",
-                  "title": "Scale by memory",
-                  "default": false
+                 "type": "boolean",
+                 "title": "Scale by memory",
+                 "default": false
                },
                "target_memory_utilization": {
-                  "type": "integer",
-                  "title": "Target memory utilization (%)",
-                  "default": 70,
-                  "maximum": 90,
-                  "minimum": 30,
-                  "description": "Memory utilization threshold that triggers scaling"
+                 "type": "integer",
+                 "title": "Target memory utilization (%)",
+                 "default": 70,
+                 "maximum": 90,
+                 "minimum": 50,
+                 "description": "Memory utilization threshold that triggers scaling"
                }
             }
          },
@@ -539,6 +549,7 @@
                      ],
                      "type":"string",
                      "title":"Port Type",
+                     "default": "GRPC",
                      "description":"The protocol type for this port"
                   }
                }
@@ -576,6 +587,36 @@
                }
             },
             "description":"Configure automatic deployment from Git branches"
+         },
+         "custom_domains": {
+            "type": "object",
+            "required": [
+               "enabled"
+            ],
+            "properties": {
+               "enabled": {
+               "type": "boolean",
+               "default": true
+               }
+            }
+         },
+         "protocol": {
+           "type": "string",
+           "oneOf": [
+             {
+               "const": "http",
+               "title": "HTTP connections",
+               "description": "Enable http web server"
+             },
+             {
+               "const": "web_sockets",
+               "title": "Web sockets",
+               "description": "Enable web sockets connections"
+             }
+           ],
+           "title": "Protocol",
+           "default": "http",
+           "description": "Define the inbound traffic the application will accept"
          }
       }
    }
