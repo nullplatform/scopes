@@ -223,7 +223,6 @@ spec:
         {{ end }}
         {{ end }}
         {{ end }}
-
         - name: application
           envFrom:
             - secretRef:
@@ -281,6 +280,34 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
+          volumeMounts:
+{{- if .parameters.results }}
+  {{- range .parameters.results }}
+    {{- if and (eq .type "file") }}
+      {{- if gt (len .values) 0 }}
+        - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
+          mountPath: {{ .destination_path }}
+          subPath: {{ filepath.Base .destination_path }}
+          readOnly: true
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+      volumes:
+{{- if .parameters.results }}
+  {{- range .parameters.results }}
+    {{- if and (eq .type "file") }}
+      {{- if gt (len .values) 0 }}
+      - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
+        secret:
+          secretName: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+          items:
+          - key: {{ filepath.Base .destination_path }}
+            path: {{ filepath.Base .destination_path }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst
