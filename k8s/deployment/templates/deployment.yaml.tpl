@@ -300,9 +300,9 @@ spec:
       {{- if gt (len .values) 0 }}
       - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
         secret:
-          secretName: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
           items:
-          - key: {{ filepath.Base .destination_path }}
+          - key: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
             path: {{ filepath.Base .destination_path }}
       {{- end }}
     {{- end }}
