@@ -39,13 +39,7 @@ data:
     {{- end }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-        {{- $value := index .values 0 "value" }}
-        {{- $base64Value := $value }}
-        {{- if strings.Contains $value ";base64," }}
-          {{- $parts := strings.Split $value ";base64," }}
-          {{- $base64Value = index $parts 1 }}
-        {{- end }}
-  {{ printf "app-data-%s" (filepath.Base .destination_path) }}: {{ $base64Value }}
+  {{ printf "app-data-%s" (filepath.Base .destination_path) }}: {{ index .values 0 "value" | strings.TrimPrefix "data:text/plain;base64," | strings.TrimPrefix "data:application/json;base64," }}
       {{- end }}
     {{- end }}
   {{- end }}
