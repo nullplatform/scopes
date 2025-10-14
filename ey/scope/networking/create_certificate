@@ -235,39 +235,42 @@ else
     
     echo "TLS secret created successfully"
     
-    # Attach certificate to Gateway API gateway (commented out for now)
-    # GATEWAY_NAME="${GATEWAY_NAME:-gateway-public}"
-    # 
-    # echo "Adding certificate to gateway: ${GATEWAY_NAME} in namespace: ${GATEWAY_NAMESPACE}"
-    # 
-    # if kubectl get gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" >/dev/null 2>&1; then
-    #     # Get current certificateRefs
-    #     CURRENT_REFS=$(kubectl get gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" -o jsonpath='{.spec.listeners[0].tls.certificateRefs}')
-    #     
-    #     # Create a patch to add our certificate to the existing certificateRefs array
-    #     PATCH_FILE="${TEMP_DIR}/gateway-patch-${DEPLOYMENT_ID}.json"
-    #     cat > "${PATCH_FILE}" <<EOF
-    # [
-    #   {
-    #     "op": "add",
-    #     "path": "/spec/listeners/0/tls/certificateRefs/-",
-    #     "value": {
-    #       "group": "",
-    #       "kind": "Secret",
-    #       "name": "${SECRET_NAME}"
-    #     }
-    #   }
-    # ]
-    # EOF
-    #     
-    #     # Apply the JSON patch to add our certificate without removing existing ones
-    #     kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch-file="${PATCH_FILE}"
-    #     echo "Gateway updated with additional certificate: ${SECRET_NAME}"
-    # else
-    #     echo "WARNING: Gateway '${GATEWAY_NAME}' not found in namespace '${GATEWAY_NAMESPACE}'"
-    # fi
-    
-    # Cleanup temporary files
+    LISTENER_NAME="listener-${DEPLOYMENT_ID}"
+
+        PATCH_FILE="${TEMP_DIR}/gateway-patch-${DEPLOYMENT_ID}.json"
+    cat > "${PATCH_FILE}" <<EOF
+[
+  {
+    "op": "add",
+    "path": "/spec/listeners/-",
+    "value": {
+      "name": "${LISTENER_NAME}",
+      "port": 443,
+      "protocol": "HTTPS",
+      "hostname": "${CERTIFICATE_NAME}",
+      "allowedRoutes": {
+        "namespaces": {
+          "from": "All"
+        }
+      },
+      "tls": {
+        "mode": "Terminate",
+        "certificateRefs": [
+          {
+            "group": "",
+            "kind": "Secret",
+            "name": "${SECRET_NAME}",
+            "namespace": "${SECRET_NAMESPACE}"
+          }
+        ]
+      }
+    }
+  }
+]
+EOF
+
+    kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch-file="${PATCH_FILE}"
+
     # rm -rf "${TEMP_DIR}"
     
     echo "Certificate workflow completed successfully!"
