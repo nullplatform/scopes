@@ -198,16 +198,13 @@ else
     echo "${CERT_DATA}" | base64 -d > "${PKCS12_FILE}"
     
     # Extract private key
-    openssl pkcs12 -in "${PKCS12_FILE}" -nocerts -nodes -passin pass: -out "${KEY_FILE}" -legacy 2>/dev/null
+    openssl pkcs12 -in "${PKCS12_FILE}" -nocerts -nodes -out "${KEY_FILE}" -password pass: -legacy
     
     # Extract certificate
-    openssl pkcs12 -in "${PKCS12_FILE}" -clcerts -nokeys -passin pass: -out "${CERT_FILE}" -legacy 2>/dev/null
+    openssl pkcs12 -in "${PKCS12_FILE}" -clcerts -nokeys -out "${CERT_FILE}" -password pass: -legacy
     
     # Extract certificate chain (intermediate certificates)
-    openssl pkcs12 -in "${PKCS12_FILE}" -cacerts -nokeys -passin pass: -out "${CHAIN_FILE}" -legacy 2>/dev/null
-    
-    # Clean up the PEM files (remove extra text, keep only PEM blocks)
-    grep -A 100 "BEGIN PRIVATE KEY\|BEGIN RSA PRIVATE KEY" "${KEY_FILE}" | grep -B 100 "END PRIVATE KEY\|END RSA PRIVATE KEY" > "${KEY_FILE}.clean" || true
+    openssl pkcs12 -in "${PKCS12_FILE}" -cacerts -nokeys -out "${CHAIN_FILE}" -password pass: -legacy
     
     # Create fullchain by combining server certificate and chain
     cat "${CERT_FILE}" "${CHAIN_FILE}" > "${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem"
@@ -225,7 +222,7 @@ else
     # Create new TLS secret
     kubectl create secret tls "${SECRET_NAME}" \
         --cert="${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem" \
-        --key="${KEY_FILE}.clean" \
+        --key="${KEY_FILE}" \
         -n "${SECRET_NAMESPACE}"
     
     # Add annotations to the secret
