@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Skip certificate creation if DEPLOYMENT_ID env variable is set and not empty
-if [ -n "${DEPLOYMENT_ID:-}" ] && [ "${DEPLOYMENT_ID}" != "" ]; then
+if [[ -n "${DEPLOYMENT_ID:-}" && "${DEPLOYMENT_ID}" != "" && "${DEPLOYMENT_ID}" != "null" ]]; then
     echo "DEPLOYMENT_ID env variable is set and not empty, skipping certificate creation"
     # Do nothing and finish successfully
     echo "Certificate workflow skipped"
