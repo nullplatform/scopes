@@ -7,7 +7,9 @@ DEPLOYMENT_ID_FROM_CONTEXT=$(echo "$CONTEXT" | jq -r '.scope.id')
 CERTIFICATE_NAME=$(echo "$CONTEXT" | jq -r '.scope.domain')
 
 # Skip certificate creation if DEPLOYMENT_ID env variable is set
-if [ -z "${DEPLOYMENT_ID:-}" ]; then
+if [ -n "${DEPLOYMENT_ID:-}" ]; then
+    echo "DEPLOYMENT_ID env variable is set, skipping certificate creation"
+else
     # Use the deployment ID from context
     DEPLOYMENT_ID="$DEPLOYMENT_ID_FROM_CONTEXT"
 
@@ -275,6 +277,4 @@ else
     # rm -rf "${TEMP_DIR}"
     
     echo "Certificate workflow completed successfully!"
-else
-    echo "DEPLOYMENT_ID env variable is set, skipping certificate creation"
 fi
