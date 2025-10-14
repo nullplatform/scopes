@@ -198,23 +198,19 @@ else
     echo "${CERT_DATA}" | base64 -d > "${PKCS12_FILE}"
     
     # Extract private key
-    openssl pkcs12 -in "${PKCS12_FILE}" -nocerts -nodes -passin pass: -out "${KEY_FILE}" 2>/dev/null
+    openssl pkcs12 -in "${PKCS12_FILE}" -nocerts -nodes -passin pass: -out "${KEY_FILE}" -legacy 2>/dev/null
     
     # Extract certificate
-    openssl pkcs12 -in "${PKCS12_FILE}" -clcerts -nokeys -passin pass: -out "${CERT_FILE}" 2>/dev/null
+    openssl pkcs12 -in "${PKCS12_FILE}" -clcerts -nokeys -passin pass: -out "${CERT_FILE}" -legacy 2>/dev/null
     
-    # Extract certificate chain
-    openssl pkcs12 -in "${PKCS12_FILE}" -cacerts -nokeys -passin pass: -out "${CHAIN_FILE}" 2>/dev/null
+    # Extract certificate chain (intermediate certificates)
+    openssl pkcs12 -in "${PKCS12_FILE}" -cacerts -nokeys -passin pass: -out "${CHAIN_FILE}" -legacy 2>/dev/null
     
     # Clean up the PEM files (remove extra text, keep only PEM blocks)
-    grep -A 100 "BEGIN CERTIFICATE" "${CERT_FILE}" | grep -B 100 "END CERTIFICATE" > "${CERT_FILE}.clean" || true
     grep -A 100 "BEGIN PRIVATE KEY\|BEGIN RSA PRIVATE KEY" "${KEY_FILE}" | grep -B 100 "END PRIVATE KEY\|END RSA PRIVATE KEY" > "${KEY_FILE}.clean" || true
     
-    # Combine certificate with chain for full certificate
-    cat "${CERT_FILE}.clean" > "${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem"
-    if [ -s "${CHAIN_FILE}" ]; then
-        grep -A 100 "BEGIN CERTIFICATE" "${CHAIN_FILE}" | grep -B 100 "END CERTIFICATE" >> "${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem" || true
-    fi
+    # Create fullchain by combining server certificate and chain
+    cat "${CERT_FILE}" "${CHAIN_FILE}" > "${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem"
     
     # Create Kubernetes TLS secret
     SECRET_NAME="tls-${DEPLOYMENT_ID}"
