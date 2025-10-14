@@ -3,8 +3,13 @@
 set -euo pipefail
 
 # Extract variables from CONTEXT
-DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+DEPLOYMENT_ID_FROM_CONTEXT=$(echo "$CONTEXT" | jq -r '.scope.id')
 CERTIFICATE_NAME=$(echo "$CONTEXT" | jq -r '.scope.domain')
+
+# Skip certificate creation if DEPLOYMENT_ID env variable is set
+if [ -z "${DEPLOYMENT_ID:-}" ]; then
+    # Use the deployment ID from context
+    DEPLOYMENT_ID="$DEPLOYMENT_ID_FROM_CONTEXT"
 
 # Required environment variables
 : "${KEYVAULT_NAME:?Environment variable KEYVAULT_NAME not set}"
@@ -270,4 +275,6 @@ else
     # rm -rf "${TEMP_DIR}"
     
     echo "Certificate workflow completed successfully!"
+else
+    echo "DEPLOYMENT_ID env variable is set, skipping certificate creation"
 fi
