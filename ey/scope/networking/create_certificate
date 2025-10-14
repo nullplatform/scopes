@@ -271,7 +271,5 @@ EOF
 
     kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch-file="${PATCH_FILE}"
 
-    # rm -rf "${TEMP_DIR}"
-    
     echo "Certificate workflow completed successfully!"
 fi

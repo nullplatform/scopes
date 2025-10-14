@@ -142,6 +142,16 @@ if [[ -n "$DOMAIN_LIMIT_SIZE" ]]; then
         trim_amount=$((${#final_domain} - $DOMAIN_LIMIT_SIZE))
         # Trim from the left to keep the right side (including TLD)
         final_domain="${final_domain:$trim_amount}"
+        
+        # Remove any leading hyphens, dots, or partial words from the trimmed domain
+        # This regex removes everything up to and including the first complete subdomain separator
+        final_domain=$(echo "$final_domain" | sed 's/^[^a-zA-Z0-9]*//')
+        
+        # If we still have a leading character that's not alphanumeric, 
+        # trim until we hit a dot and remove up to that dot
+        if [[ "$final_domain" =~ ^[^a-zA-Z0-9] ]] || [[ ! "$final_domain" =~ ^[a-zA-Z0-9] ]]; then
+            final_domain=$(echo "$final_domain" | sed 's/^[^.]*\.//')
+        fi
     fi
 fi
 
