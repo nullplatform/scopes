@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Parse inputs
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id' 2>/dev/null || echo "")
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.active_deployment' 2>/dev/null || echo "")
+NAMESPACE="${K8S_NAMESPACE}"
+
+if [ -z "$SCOPE_ID" ] || [ -z "$NAMESPACE" ]; then
+    echo '{"error": "Missing SCOPE_ID or K8S_NAMESPACE", "success": false}'
+    exit 1
+fi
+
+# Helper function to safely get kubectl output
+safe_kubectl() {
+    eval "$@" -n "$NAMESPACE" -l deployment_id="$DEPLOYMENT_ID" -l scope_id="$SCOPE_ID" 2>/dev/null || echo ""
+}
+
+# Find pods by label and print summary
+STATUS_PODS_JSON=$(safe_kubectl kubectl get pod -o jsonpath='{.items[*].metadata.name}:{.items[*].status.phase}')
+TOTAL=$(jq -r '.items | length' <<<"$STATUS_PODS_JSON")
+
+if [[ "$TOTAL" -eq 0 ]]; then
+  jq -cn \
+    --arg scope_id "$SCOPE_ID" \
+    --arg namespace "$NAMESPACE" \
+    '{
+      error: "No pod found with label scope_id=\($scope_id) in namespace \($namespace)",
+      success: false,
+      scope_id: $scope_id,
+      namespace: $namespace
+    }'
+  exit 1
+fi
+
+jq -Rn '
+  (input | split(" ")) as $pairs |
+  [$pairs[] | select(length>0) |
+    (split(":") | {name: .[0], phase: .[1]})] as $items |
+  ($items | length) as $total |
+  ($items | group_by(.phase) |
+    map({phase: .[0].phase, count: length}) |
+    sort_by([(.phase=="Running")|not, .phase]) |
+    map("\(.phase) \(.count) (\(((.count/$total)*100)|round)%)") |
+    join(", ")) as $summary |
+  "Pods Summary (\($total) total): \($summary)"
+' <<<"$STATUS_PODS_JSON"
