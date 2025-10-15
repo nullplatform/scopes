@@ -142,6 +142,10 @@ if [[ -n "$DOMAIN_LIMIT_SIZE" ]]; then
         trim_amount=$((${#final_domain} - $DOMAIN_LIMIT_SIZE))
         # Trim from the left to keep the right side (including TLD)
         final_domain="${final_domain:$trim_amount}"
+
+        if [[ "$final_domain" =~ ^[^a-zA-Z0-9] ]] || [[ ! "$final_domain" =~ ^[a-zA-Z0-9] ]]; then
+            final_domain=$(echo "$final_domain" | sed 's/^[^.]*\.//')
+        fi
     fi
 fi
 

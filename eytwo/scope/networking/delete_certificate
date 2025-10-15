@@ -1,0 +1,24 @@
+#!/bin/bash
+
+set -euo pipefail
+
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+CERTIFICATE_NAME=$(echo "$CONTEXT" | jq -r '.scope.domain')
+
+: "${GATEWAY_NAMESPACE:?Environment variable GATEWAY_NAMESPACE not set}"
+: "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set}"
+
+SECRET_NAME="tls-${DEPLOYMENT_ID}"
+LISTENER_NAME="listener-${DEPLOYMENT_ID}"
+SECRET_NAMESPACE="${SECRET_NAMESPACE:-${GATEWAY_NAMESPACE}}"
+
+LISTENER_INDEX=$(kubectl get gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" -o json | jq ".spec.listeners | map(.name) | index(\"${LISTENER_NAME}\")")
+
+if [[ "${LISTENER_INDEX}" != "null" ]]; then
+    kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch="[{\"op\":\"remove\",\"path\": \"/spec/listeners/${LISTENER_INDEX}\"}]"
+    echo "Listener removed from gateway"
+fi
+
+kubectl delete secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" 2>/dev/null || true
+
+echo "Certificate deletion completed"
