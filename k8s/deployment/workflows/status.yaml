@@ -1,0 +1,6 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: get deployment status
+    type: script
+    file: "$SERVICE_PATH/deployment/deployment_status"
