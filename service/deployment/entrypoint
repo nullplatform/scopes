@@ -23,6 +23,9 @@ case "$SERVICE_ACTION" in
   "delete-deployment")
     ACTION_TO_EXECUTE="delete"
     ;;
+  "status-deployment")
+    ACTION_TO_EXECUTE="status"
+    ;;
   "kill-instances")
     ACTION_TO_EXECUTE="kill_instances"
     ;;

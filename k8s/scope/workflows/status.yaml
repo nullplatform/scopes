@@ -1,0 +1,6 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: get pod status
+    type: script
+    file: "$SERVICE_PATH/scope/pod_status"
