@@ -1,5 +1,7 @@
 include:
   - "$SERVICE_PATH/values.yaml"
+configuration:
+  INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
 steps:
   - name: build context
     type: script
@@ -24,7 +26,7 @@ steps:
     type: script
     file: "$SERVICE_PATH/scope/networking/gateway/build_gateway"
     configuration:
-      TEMPLATE: "$INITIAL_INGRESS_PATH"
+      TEMPLATE: "$INGRESS_TEMPLATE"
     output:
       - name: INGRESS_FILE
         type: file
