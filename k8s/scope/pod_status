@@ -5,6 +5,8 @@ set -euo pipefail
 # Parse inputs
 NAMESPACE="${K8S_NAMESPACE}"
 
+echo "Executing status for SCOPE_ID=$SCOPE_ID, DEPLOYMENT_ID=$DEPLOYMENT_ID for NAMESPACE=$NAMESPACE"
+
 if [ -z "$SCOPE_ID" ] || [ -z "$NAMESPACE" ]; then
     echo '{"error": "Missing SCOPE_ID or K8S_NAMESPACE", "success": false}'
     exit 1
