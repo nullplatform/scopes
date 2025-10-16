@@ -1,5 +1,5 @@
 steps:
-  - name: create green deployment
+  - name: build green deployment
     post:
       name: wait deployment active
       action: skip
