@@ -14,17 +14,6 @@ steps:
       - name: SECRET_PATH
         type: file
         file: "$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-  - name: update blue deployment
-    type: script
-    file: "$OVERRIDES_PATH/deployment/build_blue_deployment"
-    action: replace
-    output:
-      - name: DEPLOYMENT_PATH
-        type: file
-        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
-      - name: SECRET_PATH
-        type: file
-        file: "$OUTPUT_DIR/secret-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
   - name: apply
     type: script
     file: "$SERVICE_PATH/apply_templates"
