@@ -38,6 +38,13 @@ fi
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 CERTIFICATE_NAME=$(echo "$CONTEXT" | jq -r '.scope.domain')
 
+SCOPE_ENV=$(echo "$CONTEXT" | jq -r '.scope.dimensions.environment // empty' | tr '[:lower:]' '[:upper:]')
+if [[ -z "${SCOPE_ENV}" || "${SCOPE_ENV}" == "null" || "${SCOPE_ENV}" == "NULL" ]]; then
+    ENVIRONMENT="${ENVIRONMENT}"
+else
+    ENVIRONMENT="${SCOPE_ENV}"
+fi
+
 # Required environment variables
 : "${KEYVAULT_NAME:?Environment variable KEYVAULT_NAME not set}"
 : "${ANSIBLE_TOWER_URL:?Environment variable ANSIBLE_TOWER_URL not set}"
