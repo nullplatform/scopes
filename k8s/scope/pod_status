@@ -39,7 +39,6 @@ jq -Rn '
   ($phases
     | group_by(.)
     | map({phase: .[0], count: length})
-    | sort_by([(.phase=="Running")|not, .phase])
     | map("\(.phase) \(.count) (\(((.count/$total)*100)|round)%)")
     | join(", ")) as $summary |
   "Pods Summary (\($total) total): \($summary)"
