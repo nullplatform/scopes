@@ -3,8 +3,6 @@
 set -euo pipefail
 
 # Parse inputs
-SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id' 2>/dev/null || echo "")
-DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.active_deployment' 2>/dev/null || echo "")
 NAMESPACE="${K8S_NAMESPACE}"
 
 if [ -z "$SCOPE_ID" ] || [ -z "$NAMESPACE" ]; then
@@ -14,7 +12,7 @@ fi
 
 # Helper function to safely get kubectl output
 filtered_kubectl() {
-    eval kubectl "$@" -n "$NAMESPACE" -l deployment_id="$DEPLOYMENT_ID" -l scope_id="$SCOPE_ID" 2>/dev/null || echo ""
+    eval kubectl "$@" -n "$NAMESPACE" -l deployment_id="$DEPLOYMENT_ID",scope_id="$SCOPE_ID" 2>/dev/null || echo ""
 }
 
 POD_PHASES=$(filtered_kubectl get pods -o jsonpath='{.items[*].status.phase}')
