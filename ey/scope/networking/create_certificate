@@ -5,9 +5,33 @@ set -euo pipefail
 # Skip certificate creation if DEPLOYMENT_ID env variable is set and not empty
 if [[ -n "${DEPLOYMENT_ID:-}" && "${DEPLOYMENT_ID}" != "" && "${DEPLOYMENT_ID}" != "null" ]]; then
     echo "DEPLOYMENT_ID env variable is set and not empty, skipping certificate creation"
-    # Do nothing and finish successfully
     echo "Certificate workflow skipped"
     exit 0
+fi
+
+# Check if logged into Azure CLI
+echo "Checking Azure CLI login status..."
+if ! az account show &>/dev/null; then
+    echo "Not logged into Azure CLI. Logging in..."
+    # Login using service principal with output suppressed
+    az login --service-principal \
+        -u "${AZURE_CLIENT_ID}" \
+        -p "${AZURE_CLIENT_SECRET}" \
+        --tenant "${AZURE_TENANT_ID}" \
+        --output none 2>/dev/null
+    
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Azure login failed"
+        exit 1
+    fi
+    echo "Azure login successful"
+fi
+
+# Set the subscription with output suppressed
+az account set --subscription "${AZURE_SUBSCRIPTION_ID}" --output none 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to set Azure subscription"
+    exit 1
 fi
 
 # Extract variables from CONTEXT
@@ -26,6 +50,7 @@ CERTIFICATE_NAME=$(echo "$CONTEXT" | jq -r '.scope.domain')
 : "${SMU_CHARGECODE:?Environment variable SMU_CHARGECODE not set}"
 : "${TENANT_NAME:?Environment variable TENANT_NAME not set}"
 : "${GATEWAY_NAMESPACE:?Environment variable GATEWAY_NAMESPACE not set}"
+: "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set}"
 
 # Optional environment variables with defaults
 DRY_RUN="${DRY_RUN:-false}"
@@ -36,18 +61,28 @@ CERT_WAIT_TIMEOUT="${CERT_WAIT_TIMEOUT:-60}"
 # Set domain name
 DOMAIN_NAME="${CERTIFICATE_DOMAIN_NAME}"
 
-# Retrieve Ansible credentials from KeyVault
-echo "Retrieving Ansible credentials from KeyVault..."
-ANSIBLE_TOWER_USERNAME=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "ansibleUser" --query "value" -o tsv)
-ANSIBLE_TOWER_PASSWORD=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "ansiblePassword" --query "value" -o tsv)
+# Check if certificate already exists in KeyVault
+echo "Checking if certificate already exists in KeyVault..."
+KV_CERT_NAME=$(echo "${CERTIFICATE_NAME}" | sed 's/\./-/g')
 
-if [ -z "${ANSIBLE_TOWER_USERNAME}" ] || [ -z "${ANSIBLE_TOWER_PASSWORD}" ]; then
-    echo "ERROR: Failed to retrieve Ansible credentials from KeyVault"
-    exit 1
-fi
+if az keyvault certificate show --vault-name "${KEYVAULT_NAME}" --name "${KV_CERT_NAME}" >/dev/null 2>&1; then
+    echo "Certificate already exists in KeyVault: ${KV_CERT_NAME}"
+    echo "Skipping Ansible job creation"
+else
+    echo "Certificate not found in KeyVault, creating via Ansible..."
+    
+    # Retrieve Ansible credentials from KeyVault
+    echo "Retrieving Ansible credentials from KeyVault..."
+    ANSIBLE_TOWER_USERNAME=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "ansibleUser" --query "value" -o tsv)
+    ANSIBLE_TOWER_PASSWORD=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "ansiblePassword" --query "value" -o tsv)
 
-# Build EXTRA_VARS
-EXTRA_VARS=$(cat <<EOF
+    if [ -z "${ANSIBLE_TOWER_USERNAME}" ] || [ -z "${ANSIBLE_TOWER_PASSWORD}" ]; then
+        echo "ERROR: Failed to retrieve Ansible credentials from KeyVault"
+        exit 1
+    fi
+
+    # Build EXTRA_VARS
+    EXTRA_VARS=$(cat <<EOF
 {
   "var_application_contact": "${APPLICATION_CONTACT}",
   "var_certificate_authority": 1,
@@ -76,169 +111,168 @@ EXTRA_VARS=$(cat <<EOF
 EOF
 )
 
-echo "Generated EXTRA_VARS:"
-echo "${EXTRA_VARS}"
-echo ""
+    echo "Generated EXTRA_VARS:"
+    echo "${EXTRA_VARS}"
+    echo ""
 
-if [ "$DRY_RUN" = "true" ]; then
-    echo "DRY RUN: Would execute the following curl command:"
-    echo "curl -s -k \\"
-    echo "  -u [USERNAME]:[PASSWORD] \\"
-    echo "  -H \"Content-Type: application/json\" \\"
-    echo "  -X POST \\"
-    echo "  \"${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/\" \\"
-    echo "  -d '{\"extra_vars\": ${EXTRA_VARS}}'"
-else
-    auth_header="Authorization: Basic $(echo -n "${ANSIBLE_TOWER_USERNAME}:${ANSIBLE_TOWER_PASSWORD}" | base64)"
-    
-    LAUNCH_RESPONSE=$(curl -s -k \
-      -H "${auth_header}" \
-      -H "Content-Type: application/json" \
-      -X POST \
-      "${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/" \
-      -d "{\"extra_vars\": ${EXTRA_VARS}}")
-
-    JOB_ID=$(echo "${LAUNCH_RESPONSE}" | jq -r '.id')
-
-    if [ "${JOB_ID}" = "null" ] || [ -z "${JOB_ID}" ]; then
-        echo "ERROR: Failed to launch job"
-        echo "${LAUNCH_RESPONSE}"
-        exit 1
-    fi
-
-    echo "Job launched successfully. Job ID: ${JOB_ID}"
-    
-    POLL_INTERVAL="${POLL_INTERVAL:-10}"
-    TIMEOUT="${TIMEOUT:-1800}"
-    START_TIME=$(date +%s)
-
-    echo "Monitoring job status..."
-    while true; do
-        CURRENT_TIME=$(date +%s)
-        ELAPSED=$((CURRENT_TIME - START_TIME))
+    if [ "$DRY_RUN" = "true" ]; then
+        echo "DRY RUN: Would execute the following curl command:"
+        echo "curl -s -k \\"
+        echo "  -u [USERNAME]:[PASSWORD] \\"
+        echo "  -H \"Content-Type: application/json\" \\"
+        echo "  -X POST \\"
+        echo "  \"${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/\" \\"
+        echo "  -d '{\"extra_vars\": ${EXTRA_VARS}}'"
+    else
+        auth_header="Authorization: Basic $(echo -n "${ANSIBLE_TOWER_USERNAME}:${ANSIBLE_TOWER_PASSWORD}" | base64)"
         
-        if [ ${ELAPSED} -gt ${TIMEOUT} ]; then
-            echo "ERROR: Job timed out after ${TIMEOUT} seconds"
+        LAUNCH_RESPONSE=$(curl -s -k \
+          -H "${auth_header}" \
+          -H "Content-Type: application/json" \
+          -X POST \
+          "${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/" \
+          -d "{\"extra_vars\": ${EXTRA_VARS}}")
+
+        JOB_ID=$(echo "${LAUNCH_RESPONSE}" | jq -r '.id')
+
+        if [ "${JOB_ID}" = "null" ] || [ -z "${JOB_ID}" ]; then
+            echo "ERROR: Failed to launch job"
+            echo "${LAUNCH_RESPONSE}"
             exit 1
         fi
-        
-        STATUS_RESPONSE=$(curl -s -k \
-            -H "${auth_header}" \
-            "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/")
-        
-        STATUS=$(echo "${STATUS_RESPONSE}" | jq -r '.status')
-        
-        echo "Job ${JOB_ID} status: ${STATUS} (elapsed: ${ELAPSED}s)"
-        
-        case "${STATUS}" in
-            "successful")
-                echo "Job completed successfully!"
-                break
-                ;;
-            "failed"|"error"|"canceled")
-                echo "ERROR: Job failed with status: ${STATUS}"
-                echo "Getting job output..."
-                curl -s -k \
-                    -H "${auth_header}" \
-                    "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/stdout/?format=txt_download" \
-                    | tail -50
-                exit 1
-                ;;
-            "pending"|"waiting"|"running")
-                sleep ${POLL_INTERVAL}
-                ;;
-            *)
-                echo "Unknown job status: ${STATUS}"
-                sleep ${POLL_INTERVAL}
-                ;;
-        esac
-    done
-    
-    # Wait for certificate to be available in KeyVault
-    echo "Waiting for certificate to be available in KeyVault..."
-    KV_CERT_NAME=$(echo "${CERTIFICATE_NAME}" | sed 's/\./-/g')
-    WAIT_COUNT=0
-    MAX_WAIT="${CERT_WAIT_TIMEOUT:-60}"
-    
-    while [ ${WAIT_COUNT} -lt ${MAX_WAIT} ]; do
-        if az keyvault certificate show --vault-name "${KEYVAULT_NAME}" --name "${KV_CERT_NAME}" >/dev/null 2>&1; then
-            echo "Certificate found in KeyVault: ${KV_CERT_NAME}"
-            break
-        fi
-        echo "Waiting for certificate... (attempt $((WAIT_COUNT + 1))/${MAX_WAIT})"
-        sleep 10
-        WAIT_COUNT=$((WAIT_COUNT + 1))
-    done
-    
-    if [ ${WAIT_COUNT} -ge ${MAX_WAIT} ]; then
-        echo "ERROR: Certificate not found in KeyVault after waiting"
-        exit 1
-    fi
-    
-    # Retrieve certificate data
-    echo "Downloading certificate data from KeyVault..."
-    CERT_DATA=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "${KV_CERT_NAME}" --query "value" -o tsv)
-    
-    if [ -z "${CERT_DATA}" ]; then
-        echo "ERROR: Failed to retrieve certificate data from KeyVault"
-        exit 1
-    fi
-    
-    echo "Certificate retrieved successfully from KeyVault"
-    
-    # Extract certificate and private key from PKCS#12 data
-    echo "Extracting certificate and private key..."
-    TEMP_DIR=$(mktemp -d)
-    PKCS12_FILE="${TEMP_DIR}/cert-${DEPLOYMENT_ID}.p12"
-    CERT_FILE="${TEMP_DIR}/cert-${DEPLOYMENT_ID}.pem"
-    KEY_FILE="${TEMP_DIR}/key-${DEPLOYMENT_ID}.pem"
-    CHAIN_FILE="${TEMP_DIR}/chain-${DEPLOYMENT_ID}.pem"
-    
-    # Decode base64 and save as PKCS#12
-    echo "${CERT_DATA}" | base64 -d > "${PKCS12_FILE}"
-    
-    # Extract private key
-    openssl pkcs12 -in "${PKCS12_FILE}" -nocerts -nodes -out "${KEY_FILE}" -password pass: -legacy
-    
-    # Extract certificate
-    openssl pkcs12 -in "${PKCS12_FILE}" -clcerts -nokeys -out "${CERT_FILE}" -password pass: -legacy
-    
-    # Extract certificate chain (intermediate certificates)
-    openssl pkcs12 -in "${PKCS12_FILE}" -cacerts -nokeys -out "${CHAIN_FILE}" -password pass: -legacy
-    
-    # Create fullchain by combining server certificate and chain
-    cat "${CERT_FILE}" "${CHAIN_FILE}" > "${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem"
-    
-    # Create Kubernetes TLS secret
-    SECRET_NAME="tls-${DEPLOYMENT_ID}"
-    GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE}"
-    SECRET_NAMESPACE="${SECRET_NAMESPACE:-${GATEWAY_NAMESPACE}}"
-    
-    echo "Creating Kubernetes TLS secret: ${SECRET_NAME} in namespace: ${SECRET_NAMESPACE}"
-    
-    # Delete existing secret if it exists
-    kubectl delete secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" 2>/dev/null || true
-    
-    # Create new TLS secret
-    kubectl create secret tls "${SECRET_NAME}" \
-        --cert="${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem" \
-        --key="${KEY_FILE}" \
-        -n "${SECRET_NAMESPACE}"
-    
-    # Add annotations to the secret
-    kubectl annotate secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" \
-        "cert-manager.io/certificate-name=${CERTIFICATE_NAME}" \
-        "cert-manager.io/issuer-kind=AnsibleTowerIssuer" \
-        "cert-manager.io/issuer-group=pki.ey.com" \
-        "pki.ey.com/certificate-name=${CERTIFICATE_NAME}" \
-        "pki.ey.com/keyvault-name=${KEYVAULT_NAME}"
-    
-    echo "TLS secret created successfully"
-    
-    LISTENER_NAME="listener-${DEPLOYMENT_ID}"
 
-        PATCH_FILE="${TEMP_DIR}/gateway-patch-${DEPLOYMENT_ID}.json"
-    cat > "${PATCH_FILE}" <<EOF
+        echo "Job launched successfully. Job ID: ${JOB_ID}"
+        
+        START_TIME=$(date +%s)
+
+        echo "Monitoring job status..."
+        while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            
+            if [ ${ELAPSED} -gt ${TIMEOUT} ]; then
+                echo "ERROR: Job timed out after ${TIMEOUT} seconds"
+                exit 1
+            fi
+            
+            STATUS_RESPONSE=$(curl -s -k \
+                -H "${auth_header}" \
+                "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/")
+            
+            STATUS=$(echo "${STATUS_RESPONSE}" | jq -r '.status')
+            
+            echo "Job ${JOB_ID} status: ${STATUS} (elapsed: ${ELAPSED}s)"
+            
+            case "${STATUS}" in
+                "successful")
+                    echo "Job completed successfully!"
+                    break
+                    ;;
+                "failed"|"error"|"canceled")
+                    echo "ERROR: Job failed with status: ${STATUS}"
+                    echo "Getting job output..."
+                    curl -s -k \
+                        -H "${auth_header}" \
+                        "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/stdout/?format=txt_download" \
+                        | tail -50
+                    exit 1
+                    ;;
+                "pending"|"waiting"|"running")
+                    sleep ${POLL_INTERVAL}
+                    ;;
+                *)
+                    echo "Unknown job status: ${STATUS}"
+                    sleep ${POLL_INTERVAL}
+                    ;;
+            esac
+        done
+        
+        # Wait for certificate to appear in KeyVault after job completes
+        echo "Waiting for certificate to be available in KeyVault..."
+        WAIT_COUNT=0
+        MAX_WAIT="${CERT_WAIT_TIMEOUT:-60}"
+        
+        while [ ${WAIT_COUNT} -lt ${MAX_WAIT} ]; do
+            if az keyvault certificate show --vault-name "${KEYVAULT_NAME}" --name "${KV_CERT_NAME}" >/dev/null 2>&1; then
+                echo "Certificate found in KeyVault: ${KV_CERT_NAME}"
+                break
+            fi
+            echo "Waiting for certificate... (attempt $((WAIT_COUNT + 1))/${MAX_WAIT})"
+            sleep 10
+            WAIT_COUNT=$((WAIT_COUNT + 1))
+        done
+        
+        if [ ${WAIT_COUNT} -ge ${MAX_WAIT} ]; then
+            echo "ERROR: Certificate not found in KeyVault after waiting"
+            exit 1
+        fi
+    fi
+fi
+
+# Retrieve certificate data (whether it was just created or already existed)
+echo "Downloading certificate data from KeyVault..."
+CERT_DATA=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "${KV_CERT_NAME}" --query "value" -o tsv)
+
+if [ -z "${CERT_DATA}" ]; then
+    echo "ERROR: Failed to retrieve certificate data from KeyVault"
+    exit 1
+fi
+
+echo "Certificate retrieved successfully from KeyVault"
+
+# Extract certificate and private key from PKCS#12 data
+echo "Extracting certificate and private key..."
+TEMP_DIR=$(mktemp -d)
+PKCS12_FILE="${TEMP_DIR}/cert-${DEPLOYMENT_ID}.p12"
+CERT_FILE="${TEMP_DIR}/cert-${DEPLOYMENT_ID}.pem"
+KEY_FILE="${TEMP_DIR}/key-${DEPLOYMENT_ID}.pem"
+CHAIN_FILE="${TEMP_DIR}/chain-${DEPLOYMENT_ID}.pem"
+
+# Decode base64 and save as PKCS#12
+echo "${CERT_DATA}" | base64 -d > "${PKCS12_FILE}"
+
+# Extract private key
+openssl pkcs12 -in "${PKCS12_FILE}" -nocerts -nodes -out "${KEY_FILE}" -password pass: -legacy
+
+# Extract certificate
+openssl pkcs12 -in "${PKCS12_FILE}" -clcerts -nokeys -out "${CERT_FILE}" -password pass: -legacy
+
+# Extract certificate chain (intermediate certificates)
+openssl pkcs12 -in "${PKCS12_FILE}" -cacerts -nokeys -out "${CHAIN_FILE}" -password pass: -legacy
+
+# Create fullchain by combining server certificate and chain
+cat "${CERT_FILE}" "${CHAIN_FILE}" > "${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem"
+
+# Create Kubernetes TLS secret
+SECRET_NAME="tls-${DEPLOYMENT_ID}"
+SECRET_NAMESPACE="${SECRET_NAMESPACE:-${GATEWAY_NAMESPACE}}"
+
+echo "Creating Kubernetes TLS secret: ${SECRET_NAME} in namespace: ${SECRET_NAMESPACE}"
+
+# Delete existing secret if it exists
+kubectl delete secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" 2>/dev/null || true
+
+# Create new TLS secret
+kubectl create secret tls "${SECRET_NAME}" \
+    --cert="${TEMP_DIR}/fullchain-${DEPLOYMENT_ID}.pem" \
+    --key="${KEY_FILE}" \
+    -n "${SECRET_NAMESPACE}"
+
+# Add annotations to the secret
+kubectl annotate secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" \
+    "cert-manager.io/certificate-name=${CERTIFICATE_NAME}" \
+    "cert-manager.io/issuer-kind=AnsibleTowerIssuer" \
+    "cert-manager.io/issuer-group=pki.ey.com" \
+    "pki.ey.com/certificate-name=${CERTIFICATE_NAME}" \
+    "pki.ey.com/keyvault-name=${KEYVAULT_NAME}"
+
+echo "TLS secret created successfully"
+
+# Add listener to gateway
+LISTENER_NAME="listener-${DEPLOYMENT_ID}"
+PATCH_FILE="${TEMP_DIR}/gateway-patch-${DEPLOYMENT_ID}.json"
+
+cat > "${PATCH_FILE}" <<EOF
 [
   {
     "op": "add",
@@ -269,9 +303,6 @@ else
 ]
 EOF
 
-    kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch-file="${PATCH_FILE}"
+kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch-file="${PATCH_FILE}"
 
-    # rm -rf "${TEMP_DIR}"
-    
-    echo "Certificate workflow completed successfully!"
-fi
+echo "Certificate workflow completed successfully!"

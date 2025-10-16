@@ -6,11 +6,6 @@ steps:
         action: skip
       - name: delete dns
         action: skip
-      - name: generate certificate
-        after: generate domain
-        type: script
-        file: "$OVERRIDES_PATH/scope/networking/create_certificate"
-
 configuration:
   DNS_TYPE: disabled
   K8S_NAMESPACE: test
