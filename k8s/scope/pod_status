@@ -13,12 +13,11 @@ if [ -z "$SCOPE_ID" ] || [ -z "$NAMESPACE" ]; then
 fi
 
 # Helper function to safely get kubectl output
-safe_kubectl() {
-    eval "$@" -n "$NAMESPACE" -l deployment_id="$DEPLOYMENT_ID" -l scope_id="$SCOPE_ID" 2>/dev/null || echo ""
+filtered_kubectl() {
+    eval kubectl "$@" -n "$NAMESPACE" -l deployment_id="$DEPLOYMENT_ID" -l scope_id="$SCOPE_ID" 2>/dev/null || echo ""
 }
 
-POD_PHASES=$(kubectl get pods -n "$NAMESPACE" -l scope_id="$SCOPE_ID" \
-  -o jsonpath='{.items[*].status.phase}' 2>/dev/null)
+POD_PHASES=$(filtered_kubectl get pods -o jsonpath='{.items[*].status.phase}')
 
 if [[ -z "$POD_PHASES" ]]; then
   jq -cn \
