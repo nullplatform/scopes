@@ -17,11 +17,10 @@ safe_kubectl() {
     eval "$@" -n "$NAMESPACE" -l deployment_id="$DEPLOYMENT_ID" -l scope_id="$SCOPE_ID" 2>/dev/null || echo ""
 }
 
-# Find pods by label and print summary
-STATUS_PODS_JSON=$(safe_kubectl kubectl get pod -o jsonpath='{.items[*].metadata.name}:{.items[*].status.phase}')
-TOTAL=$(jq -r '.items | length' <<<"$STATUS_PODS_JSON")
+POD_PHASES=$(kubectl get pods -n "$NAMESPACE" -l scope_id="$SCOPE_ID" \
+  -o jsonpath='{.items[*].status.phase}' 2>/dev/null)
 
-if [[ "$TOTAL" -eq 0 ]]; then
+if [[ -z "$POD_PHASES" ]]; then
   jq -cn \
     --arg scope_id "$SCOPE_ID" \
     --arg namespace "$NAMESPACE" \
@@ -35,14 +34,13 @@ if [[ "$TOTAL" -eq 0 ]]; then
 fi
 
 jq -Rn '
-  (input | split(" ")) as $pairs |
-  [$pairs[] | select(length>0) |
-    (split(":") | {name: .[0], phase: .[1]})] as $items |
-  ($items | length) as $total |
-  ($items | group_by(.phase) |
-    map({phase: .[0].phase, count: length}) |
-    sort_by([(.phase=="Running")|not, .phase]) |
-    map("\(.phase) \(.count) (\(((.count/$total)*100)|round)%)") |
-    join(", ")) as $summary |
+  (input | split(" ")) as $phases |
+  ($phases | length) as $total |
+  ($phases
+    | group_by(.)
+    | map({phase: .[0], count: length})
+    | sort_by([(.phase=="Running")|not, .phase])
+    | map("\(.phase) \(.count) (\(((.count/$total)*100)|round)%)")
+    | join(", ")) as $summary |
   "Pods Summary (\($total) total): \($summary)"
-' <<<"$STATUS_PODS_JSON"
+' <<<"$POD_PHASES"
