@@ -34,7 +34,7 @@ if [[ -z "$POD_PHASES" ]]; then
 fi
 
 jq -Rn '
-  (input | split(" ")) as $phases |
+  (input | split(" ") | map(select(length>0))) as $phases |
   ($phases | length) as $total |
   ($phases
     | group_by(.)
