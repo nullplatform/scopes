@@ -13,7 +13,8 @@ SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
   --applicationSlug="$APPLICATION_NAME" \
   --scopeSlug="$SCOPE_NAME" \
   --domain="$DOMAIN" \
-  --useAccountSlug="$USE_ACCOUNT_SLUG")
+  --useAccountSlug="$USE_ACCOUNT_SLUG" \
+  --useNamespaceSlug="$USE_NAMESPACE_SLUG")
 
 echo "Generated domain: $SCOPE_DOMAIN"
 

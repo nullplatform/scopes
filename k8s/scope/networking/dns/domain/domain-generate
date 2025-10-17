@@ -37,8 +37,14 @@ build_scope_domain() {
     local scope_slug="$4"
     local domain="$5"
     local use_account_slug="$6"
+    local use_namespace_slug="$7"
     
-    local first_part="${namespace_slug}-${application_slug}-${scope_slug}"
+    local first_part
+    if [[ "$use_namespace_slug" == "true" ]]; then
+        first_part="${namespace_slug}-${application_slug}-${scope_slug}"
+    else
+        first_part="${application_slug}-${scope_slug}"
+    fi
     
     local second_part
     if [[ "$use_account_slug" == "true" ]]; then
@@ -73,6 +79,7 @@ Required options:
 Optional options:
   --domain=VALUE           Domain suffix (default: nullapps.io)
   --useAccountSlug=BOOL    Whether to use account slug (default: true)
+  --useNamespaceSlug=BOOL  Whether to use namespace slug (default: false)
   --help                   Show this help message
 
 Examples:
@@ -87,6 +94,7 @@ application_slug=""
 scope_slug=""
 domain="nullapps.io"
 use_account_slug="true"
+use_namespace_slug="false"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -114,6 +122,10 @@ while [[ $# -gt 0 ]]; do
             use_account_slug="${1#*=}"
             shift
             ;;
+        --useNamespaceSlug=*)
+            use_namespace_slug="${1#*=}"
+            shift
+            ;;
         --help|-h)
             show_usage
             exit 0
@@ -133,7 +145,7 @@ if [[ -z "$account_slug" || -z "$namespace_slug" || -z "$application_slug" || -z
     exit 1
 fi
 
-final_domain=$(build_scope_domain "$account_slug" "$namespace_slug" "$application_slug" "$scope_slug" "$domain" "$use_account_slug")
+final_domain=$(build_scope_domain "$account_slug" "$namespace_slug" "$application_slug" "$scope_slug" "$domain" "$use_account_slug" "$use_namespace_slug")
 
 # Apply domain size limit if DOMAIN_LIMIT_SIZE is set
 if [[ -n "$DOMAIN_LIMIT_SIZE" ]]; then
