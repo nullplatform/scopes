@@ -58,7 +58,7 @@ spec:
   ports:
     - protocol: TCP
       port: 8080
-      targetPort: 80
+      targetPort: {{ if .non_root.enabled }}8888{{ else }}80{{ end }}
   selector:
     nullplatform: "true"
     account: {{ .account.slug }}
