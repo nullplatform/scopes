@@ -11,7 +11,6 @@ NETWORK_CHECK="${NETWORK_CHECK:-true}"  # Set to true to enable network diagnost
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
@@ -39,7 +38,7 @@ if [ -z "$SCOPE_ID" ] || [ -z "$NAMESPACE" ]; then
     exit 1
 fi
 
-print_status "$BLUE" "🔍 Checking pods with scope_id=$SCOPE_ID in namespace=$NAMESPACE"
+print_status "$CYAN" "🔍 Checking pods with scope_id=$SCOPE_ID in namespace=$NAMESPACE"
 echo ""
 
 # Check if namespace exists
@@ -102,7 +101,7 @@ PHASE_SUMMARY=$(echo "$PODS_JSON" | jq -r '
 # Display summary
 print_header "📊 PODS SUMMARY"
 echo "$PHASE_SUMMARY" | jq -r '.[] | "  \(.phase): \(.count) pod(s)"'
-print_status "$BLUE" "Total pods found: $POD_COUNT"
+print_status "$CYAN" "Total pods found: $POD_COUNT"
 
 # Display detailed pod status
 print_header "📋 DETAILED POD STATUS"
@@ -153,11 +152,6 @@ if [ -n "$PROBLEMATIC_PODS" ]; then
     done <<< "$PROBLEMATIC_PODS"
 fi
 
-
-
-echo ""
-print_status "$CYAN" "🌐 NETWORK DIAGNOSTICS ENABLED"
-echo ""
 
 # Function to check networking for a specific pod
 check_pod_networking() {
@@ -356,5 +350,5 @@ JSON_OUTPUT=$(echo "$PODS_JSON" | jq \
     }')
 
 print_status "$GREEN" "✅ Status check completed"
-print_status "$BLUE" "JSON Output:"
+print_status "$CYAN" "JSON Output:"
 echo "$JSON_OUTPUT" | jq -c '.'
