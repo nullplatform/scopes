@@ -24,9 +24,7 @@ print_status() {
 
 print_header() {
     local title=$1
-    print_status "$GREEN" "═══════════════════════════════════════"
     print_status "$GREEN" "$title"
-    print_status "$GREEN" "═══════════════════════════════════════"
 }
 
 # Validate inputs
@@ -104,9 +102,7 @@ PHASE_SUMMARY=$(echo "$PODS_JSON" | jq -r '
 # Display summary
 print_header "📊 PODS SUMMARY"
 echo "$PHASE_SUMMARY" | jq -r '.[] | "  \(.phase): \(.count) pod(s)"'
-echo ""
 print_status "$BLUE" "Total pods found: $POD_COUNT"
-echo ""
 
 # Display detailed pod status
 print_header "📋 DETAILED POD STATUS"
@@ -126,7 +122,6 @@ while IFS=$'\t' read -r name phase ready restarts condition; do
     echo -e "${color}$(printf "%-50s %-12s %-12s %-10s %-10s" "$name" "$phase" "$ready" "$restarts" "$condition")${NC}"
 done <<< "$POD_DATA"
 
-echo ""
 
 # Check for pods with issues
 PROBLEMATIC_PODS=$(echo "$PODS_JSON" | jq -r '
@@ -154,206 +149,186 @@ if [ -n "$PROBLEMATIC_PODS" ]; then
             if [ -n "$EVENTS" ]; then
                 echo "$EVENTS"
             fi
-            echo ""
         fi
     done <<< "$PROBLEMATIC_PODS"
 fi
 
-# ============================================================================
-# NETWORKING DIAGNOSTICS (optional)
-# ============================================================================
 
-if [ "$NETWORK_CHECK" == "true" ]; then
-    echo ""
-    print_status "$CYAN" "🌐 NETWORK DIAGNOSTICS ENABLED"
-    echo ""
 
-    # Function to check networking for a specific pod
-    check_pod_networking() {
-        local pod_name=$1
-        local pod_ip=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.status.podIP}' 2>/dev/null)
-        local pod_phase=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+echo ""
+print_status "$CYAN" "🌐 NETWORK DIAGNOSTICS ENABLED"
+echo ""
 
-        print_header "🔍 NETWORK CHECK: $pod_name"
+# Function to check networking for a specific pod
+check_pod_networking() {
+    local pod_name=$1
+    local pod_ip=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.status.podIP}' 2>/dev/null)
+    local pod_phase=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
 
-        # 1. POD IP AND PORTS
-        print_status "$CYAN" "📍 Pod IP: ${pod_ip:-N/A}"
-        echo ""
+    print_header "🔍 NETWORK CHECK: $pod_name"
 
-        print_status "$CYAN" "🔌 Container Ports:"
-        kubectl get pod "$pod_name" -n "$NAMESPACE" -o json | jq -r '
-          .spec.containers[] |
-          "  Container: \(.name)" +
-          (if .ports then
-            "\n" + (.ports | map("    - Port: \(.containerPort) Protocol: \(.protocol) Name: \(.name // "unnamed")") | join("\n"))
-          else
-            "\n    No ports defined"
-          end)
-        ' 2>/dev/null || echo "  No port information available"
-        echo ""
+    # 1. POD IP AND PORTS
+    print_status "$CYAN" "📍 Pod IP: ${pod_ip:-N/A}"
 
-        # 2. SERVICES EXPOSING THIS POD
-        print_status "$CYAN" "🔗 Services:"
-        local pod_labels=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o json | jq -c '.metadata.labels' 2>/dev/null)
+    print_status "$CYAN" "🔌 Container Ports:"
+    kubectl get pod "$pod_name" -n "$NAMESPACE" -o json | jq -r '
+      .spec.containers[] |
+      "  Container: \(.name)" +
+      (if .ports then
+        "\n" + (.ports | map("    - Port: \(.containerPort) Protocol: \(.protocol) Name: \(.name // "unnamed")") | join("\n"))
+      else
+        "\n    No ports defined"
+      end)
+    ' 2>/dev/null || echo "  No port information available"
 
-        local services_found=false
-        kubectl get svc -n "$NAMESPACE" -o json 2>/dev/null | jq -r --argjson pod_labels "$pod_labels" '
-          .items[] |
-          select(.spec.selector != null) |
-          select(
-            (.spec.selector | to_entries | all(.key as $k | .value as $v | $pod_labels[$k] == $v))
-          ) |
-          "  ✓ Service: \(.metadata.name) (Type: \(.spec.type))\n    ClusterIP: \(.spec.clusterIP)\n    Ports: \(.spec.ports | map("\(.port):\(.targetPort)/\(.protocol)") | join(", "))"
-        ' | while read -r line; do
-            services_found=true
-            echo "$line"
-        done
+    # 2. SERVICES EXPOSING THIS POD
+    print_status "$CYAN" "🔗 Services:"
+    local pod_labels=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o json | jq -c '.metadata.labels' 2>/dev/null)
 
-        if [ "$services_found" = false ]; then
-            print_status "$YELLOW" "  ⚠️  No services found matching this pod's labels"
-        fi
-        echo ""
+    local services_found=false
+    kubectl get svc -n "$NAMESPACE" -o json 2>/dev/null | jq -r --argjson pod_labels "$pod_labels" '
+      .items[] |
+      select(.spec.selector != null) |
+      select(
+        (.spec.selector | to_entries | all(.key as $k | .value as $v | $pod_labels[$k] == $v))
+      ) |
+      "  ✓ Service: \(.metadata.name) (Type: \(.spec.type))\n    ClusterIP: \(.spec.clusterIP)\n    Ports: \(.spec.ports | map("\(.port):\(.targetPort)/\(.protocol)") | join(", "))"
+    ' | while read -r line; do
+        services_found=true
+        echo "$line"
+    done
 
-        # 3. ENDPOINT REGISTRATION
-        print_status "$CYAN" "📡 Endpoint Registration:"
-        local found_in_ep=false
-        kubectl get endpoints -n "$NAMESPACE" -o json 2>/dev/null | jq -r --arg ip "$pod_ip" '
-          .items[] |
-          select(.subsets != null) |
-          select(.subsets[].addresses != null) |
-          select(.subsets[].addresses[].ip == $ip) |
-          "  ✓ Registered in endpoint: \(.metadata.name)"
-        ' | while read -r line; do
-            if [ -n "$line" ]; then
-                found_in_ep=true
-                echo "$line"
-            fi
-        done
-
-        if [ "$found_in_ep" = false ]; then
-            print_status "$YELLOW" "  ⚠️  Pod IP not found in any endpoints (not receiving service traffic)"
-        fi
-        echo ""
-
-        # 4. INGRESS RESOURCES
-        print_status "$CYAN" "🌍 Ingress Resources:"
-        local ingress_count=$(kubectl get ingress -n "$NAMESPACE" -o json 2>/dev/null | jq '.items | length')
-
-        if [ "$ingress_count" -gt 0 ]; then
-            kubectl get ingress -n "$NAMESPACE" -o json 2>/dev/null | jq -r '
-              .items[] |
-              "  Ingress: \(.metadata.name)\n    Class: \(.spec.ingressClassName // "default")\n    Hosts: \(.spec.rules | map(.host) | join(", "))\n" +
-              (.spec.rules[]? | .http.paths[]? | "    Path: \(.path) → \(.backend.service.name):\(.backend.service.port.number // .backend.service.port.name)") +
-              (if .spec.tls then "\n    TLS: \(.spec.tls | map(.hosts | join(", ")) | join(", "))" else "" end)
-            ' | sed 's/^/  /'
-        else
-            echo "  No ingress resources in namespace"
-        fi
-        echo ""
-
-        # 5. DNS CONFIGURATION
-        print_status "$CYAN" "🔎 DNS Configuration:"
-        local dns_policy=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.spec.dnsPolicy}' 2>/dev/null)
-        echo "  DNS Policy: ${dns_policy:-Default}"
-
-        # Check cluster DNS
-        print_status "$CYAN" "  Cluster DNS Service:"
-        kubectl get svc -n kube-system -l k8s-app=kube-dns -o wide 2>/dev/null | tail -n +2 | sed 's/^/    /' || \
-        kubectl get svc -n kube-system -l k8s-app=coredns -o wide 2>/dev/null | tail -n +2 | sed 's/^/    /' || \
-        echo "    ⚠️  Could not find DNS service"
-
-        # Test DNS from running pod
-        if [ "$pod_phase" == "Running" ]; then
-            local first_container=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null)
-
-            echo ""
-            print_status "$CYAN" "  DNS Resolution Test (from pod):"
-            if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$first_container" -- nslookup kubernetes.default.svc.cluster.local &>/dev/null; then
-                print_status "$GREEN" "    ✓ DNS resolution working (kubernetes.default.svc.cluster.local)"
-            else
-                print_status "$YELLOW" "    ⚠️  DNS resolution failed or nslookup not available"
-            fi
-        fi
-        echo ""
-
-        # 6. NETWORK POLICIES
-        print_status "$CYAN" "🛡️  Network Policies:"
-        local netpol_count=$(kubectl get networkpolicy -n "$NAMESPACE" -o json 2>/dev/null | jq '.items | length')
-
-        if [ "$netpol_count" -gt 0 ]; then
-            kubectl get networkpolicy -n "$NAMESPACE" -o json 2>/dev/null | jq -r '
-              .items[] |
-              "  Policy: \(.metadata.name)\n    Pod Selector: \(.spec.podSelector | if . == {} then "All pods" else (to_entries | map("\(.key)=\(.value)") | join(", ")) end)\n    Policy Types: \(.spec.policyTypes | join(", "))\n    Ingress Rules: \(if .spec.ingress then (.spec.ingress | length) else 0 end)\n    Egress Rules: \(if .spec.egress then (.spec.egress | length) else 0 end)"
-            '
-        else
-            echo "  No network policies (all traffic allowed)"
-        fi
-        echo ""
-
-        # 7. HEALTH PROBES
-        print_status "$CYAN" "❤️  Health Probes:"
-        kubectl get pod "$pod_name" -n "$NAMESPACE" -o json | jq -r '
-          .spec.containers[] |
-          "  Container: \(.name)\n" +
-          "    Readiness: \(if .readinessProbe then
-            (if .readinessProbe.httpGet then "HTTP \(.readinessProbe.httpGet.path):\(.readinessProbe.httpGet.port)"
-            elif .readinessProbe.tcpSocket then "TCP :\(.readinessProbe.tcpSocket.port)"
-            elif .readinessProbe.exec then "Exec command"
-            else "Custom" end)
-          else "None" end)\n" +
-          "    Liveness: \(if .livenessProbe then
-            (if .livenessProbe.httpGet then "HTTP \(.livenessProbe.httpGet.path):\(.livenessProbe.httpGet.port)"
-            elif .livenessProbe.tcpSocket then "TCP :\(.livenessProbe.tcpSocket.port)"
-            elif .livenessProbe.exec then "Exec command"
-            else "Custom" end)
-          else "None" end)"
-        ' 2>/dev/null
-        echo ""
-
-        # 8. CONNECTIVITY TESTS (only for running pods)
-        if [ "$pod_phase" == "Running" ]; then
-            print_status "$CYAN" "🌐 Connectivity Tests:"
-            local first_container=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null)
-
-            # Test kubernetes API
-            if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$first_container" -- timeout 3 sh -c 'echo > /dev/tcp/kubernetes.default.svc.cluster.local/443' &>/dev/null; then
-                print_status "$GREEN" "  ✓ Kubernetes API reachable"
-            else
-                print_status "$YELLOW" "  ⚠️  Kubernetes API not reachable"
-            fi
-
-            # Test external connectivity
-            if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$first_container" -- timeout 3 sh -c 'echo > /dev/tcp/8.8.8.8/53' &>/dev/null; then
-                print_status "$GREEN" "  ✓ External connectivity OK (8.8.8.8:53)"
-            else
-                print_status "$YELLOW" "  ⚠️  External connectivity failed (may be restricted)"
-            fi
-        else
-            print_status "$YELLOW" "  ⚠️  Pod not running - skipping connectivity tests"
-        fi
-
-        echo ""
-        echo "────────────────────────────────────────────────────────────────────────────────"
-        echo ""
-    }
-
-    # Run network checks for problematic pods
-    if [ -n "$PROBLEMATIC_PODS" ]; then
-        print_status "$CYAN" "Running network diagnostics for problematic pods..."
-        echo ""
-
-        while IFS= read -r pod; do
-            if [ -n "$pod" ]; then
-                check_pod_networking "$pod"
-            fi
-        done <<< "$PROBLEMATIC_PODS"
-    else
-        print_status "$GREEN" "✓ All pods healthy - skipping detailed network checks"
-        echo ""
-        print_status "$BLUE" "💡 Tip: Set NETWORK_CHECK=true to see network info for all pods"
-        echo ""
+    if [ "$services_found" = false ]; then
+        print_status "$YELLOW" "  ⚠️  No services found matching this pod's labels"
     fi
+
+    # 3. ENDPOINT REGISTRATION
+    print_status "$CYAN" "📡 Endpoint Registration:"
+    local found_in_ep=false
+    kubectl get endpoints -n "$NAMESPACE" -o json 2>/dev/null | jq -r --arg ip "$pod_ip" '
+      .items[] |
+      select(.subsets != null) |
+      select(.subsets[].addresses != null) |
+      select(.subsets[].addresses[].ip == $ip) |
+      "  ✓ Registered in endpoint: \(.metadata.name)"
+    ' | while read -r line; do
+        if [ -n "$line" ]; then
+            found_in_ep=true
+            echo "$line"
+        fi
+    done
+
+    if [ "$found_in_ep" = false ]; then
+        print_status "$YELLOW" "  ⚠️  Pod IP not found in any endpoints (not receiving service traffic)"
+    fi
+
+    # 4. INGRESS RESOURCES
+    print_status "$CYAN" "🌍 Ingress Resources:"
+    local ingress_count=$(kubectl get ingress -n "$NAMESPACE" -o json 2>/dev/null | jq '.items | length')
+
+    if [ "$ingress_count" -gt 0 ]; then
+        kubectl get ingress -n "$NAMESPACE" -o json 2>/dev/null | jq -r '
+          .items[] |
+          "  Ingress: \(.metadata.name)\n    Class: \(.spec.ingressClassName // "default")\n    Hosts: \(.spec.rules | map(.host) | join(", "))\n" +
+          (.spec.rules[]? | .http.paths[]? | "    Path: \(.path) → \(.backend.service.name):\(.backend.service.port.number // .backend.service.port.name)") +
+          (if .spec.tls then "\n    TLS: \(.spec.tls | map(.hosts | join(", ")) | join(", "))" else "" end)
+        ' | sed 's/^/  /'
+    else
+        echo "  No ingress resources in namespace"
+    fi
+
+    # 5. DNS CONFIGURATION
+    print_status "$CYAN" "🔎 DNS Configuration:"
+    local dns_policy=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.spec.dnsPolicy}' 2>/dev/null)
+    echo "  DNS Policy: ${dns_policy:-Default}"
+
+    # Check cluster DNS
+    print_status "$CYAN" "  Cluster DNS Service:"
+    kubectl get svc -n kube-system -l k8s-app=kube-dns -o wide 2>/dev/null | tail -n +2 | sed 's/^/    /' || \
+    kubectl get svc -n kube-system -l k8s-app=coredns -o wide 2>/dev/null | tail -n +2 | sed 's/^/    /' || \
+    echo "    ⚠️  Could not find DNS service"
+
+    # Test DNS from running pod
+    if [ "$pod_phase" == "Running" ]; then
+        local first_container=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null)
+
+        print_status "$CYAN" "  DNS Resolution Test (from pod):"
+        if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$first_container" -- nslookup kubernetes.default.svc.cluster.local &>/dev/null; then
+            print_status "$GREEN" "    ✓ DNS resolution working (kubernetes.default.svc.cluster.local)"
+        else
+            print_status "$YELLOW" "    ⚠️  DNS resolution failed or nslookup not available"
+        fi
+    fi
+
+    # 6. NETWORK POLICIES
+    print_status "$CYAN" "🛡️  Network Policies:"
+    local netpol_count=$(kubectl get networkpolicy -n "$NAMESPACE" -o json 2>/dev/null | jq '.items | length')
+
+    if [ "$netpol_count" -gt 0 ]; then
+        kubectl get networkpolicy -n "$NAMESPACE" -o json 2>/dev/null | jq -r '
+          .items[] |
+          "  Policy: \(.metadata.name)\n    Pod Selector: \(.spec.podSelector | if . == {} then "All pods" else (to_entries | map("\(.key)=\(.value)") | join(", ")) end)\n    Policy Types: \(.spec.policyTypes | join(", "))\n    Ingress Rules: \(if .spec.ingress then (.spec.ingress | length) else 0 end)\n    Egress Rules: \(if .spec.egress then (.spec.egress | length) else 0 end)"
+        '
+    else
+        echo "  No network policies (all traffic allowed)"
+    fi
+
+    # 7. HEALTH PROBES
+    print_status "$CYAN" "❤️  Health Probes:"
+    kubectl get pod "$pod_name" -n "$NAMESPACE" -o json | jq -r '
+      .spec.containers[] |
+      "  Container: \(.name)\n" +
+      "    Readiness: \(if .readinessProbe then
+        (if .readinessProbe.httpGet then "HTTP \(.readinessProbe.httpGet.path):\(.readinessProbe.httpGet.port)"
+        elif .readinessProbe.tcpSocket then "TCP :\(.readinessProbe.tcpSocket.port)"
+        elif .readinessProbe.exec then "Exec command"
+        else "Custom" end)
+      else "None" end)\n" +
+      "    Liveness: \(if .livenessProbe then
+        (if .livenessProbe.httpGet then "HTTP \(.livenessProbe.httpGet.path):\(.livenessProbe.httpGet.port)"
+        elif .livenessProbe.tcpSocket then "TCP :\(.livenessProbe.tcpSocket.port)"
+        elif .livenessProbe.exec then "Exec command"
+        else "Custom" end)
+      else "None" end)"
+    ' 2>/dev/null
+
+    # 8. CONNECTIVITY TESTS (only for running pods)
+    if [ "$pod_phase" == "Running" ]; then
+        print_status "$CYAN" "🌐 Connectivity Tests:"
+        local first_container=$(kubectl get pod "$pod_name" -n "$NAMESPACE" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null)
+
+        # Test kubernetes API
+        if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$first_container" -- timeout 3 sh -c 'echo > /dev/tcp/kubernetes.default.svc.cluster.local/443' &>/dev/null; then
+            print_status "$GREEN" "  ✓ Kubernetes API reachable"
+        else
+            print_status "$YELLOW" "  ⚠️  Kubernetes API not reachable"
+        fi
+
+        # Test external connectivity
+        if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$first_container" -- timeout 3 sh -c 'echo > /dev/tcp/8.8.8.8/53' &>/dev/null; then
+            print_status "$GREEN" "  ✓ External connectivity OK (8.8.8.8:53)"
+        else
+            print_status "$YELLOW" "  ⚠️  External connectivity failed (may be restricted)"
+        fi
+    else
+        print_status "$YELLOW" "  ⚠️  Pod not running - skipping connectivity tests"
+    fi
+
+    echo "────────────────────────────────────────────────────────────────────────────────"
+}
+
+# Run network checks for problematic pods
+if [ -n "$PROBLEMATIC_PODS" ]; then
+    print_status "$CYAN" "Running network diagnostics for problematic pods..."
+    while IFS= read -r pod; do
+        if [ -n "$pod" ]; then
+            check_pod_networking "$pod"
+        fi
+    done <<< "$PROBLEMATIC_PODS"
+else
+    print_status "$GREEN" "✓ All pods healthy - skipping detailed network checks"
 fi
+
 
 # Generate JSON output
 JSON_OUTPUT=$(echo "$PODS_JSON" | jq \
@@ -380,8 +355,6 @@ JSON_OUTPUT=$(echo "$PODS_JSON" | jq \
       }]
     }')
 
-echo ""
 print_status "$GREEN" "✅ Status check completed"
-echo ""
 print_status "$BLUE" "JSON Output:"
 echo "$JSON_OUTPUT" | jq -c '.'
