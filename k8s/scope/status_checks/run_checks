@@ -10,6 +10,8 @@ CHECKS_DIR="$STATUS_CHECK_DIR/checks"
 STATUS_OUTPUT_DIR="$OUTPUT_DIR/checks"
 OUTPUT_FILE="${OUTPUT_FILE:-status_report.json}"
 
+mkdir -p "$STATUS_OUTPUT_DIR"
+
 # Source utilities
 source "$STATUS_CHECK_DIR/utils/echo_messages"
 source "$STATUS_CHECK_DIR/utils/json_builder"
@@ -90,12 +92,11 @@ CURRENT_CHECK=0
 while IFS= read -r check_script; do
     CURRENT_CHECK=$((CURRENT_CHECK + 1))
     CHECK_NAME=$(basename "$check_script")
+    CHECK_OUTPUT_FILE="$STATUS_OUTPUT_DIR/$CHECK_NAME"
 
-    print_info "═══════════════════════════════════════════════════════════════════════════════"
+    export CHECK_OUTPUT_FILE
+
     print_info "Running Check [$CURRENT_CHECK/$CHECK_COUNT]: $CHECK_NAME"
-    print_info "═══════════════════════════════════════════════════════════════════════════════"
-
-    export CHECK_OUTPUT_FILE="$STATUS_OUTPUT_DIR/$CHECK_NAME"
 
     # Run check and capture result
     if CHECK_RESULT=$(bash "$check_script" 2>&1); then
