@@ -88,7 +88,7 @@ print_info "Found $CHECK_COUNT check(s) to run"
 CURRENT_CHECK=0
 while IFS= read -r check_script; do
     CURRENT_CHECK=$((CURRENT_CHECK + 1))
-    CHECK_NAME="$check_script"
+    CHECK_NAME=$(basename "$check_script")
 
     print_info "═══════════════════════════════════════════════════════════════════════════════"
     print_info "Running Check [$CURRENT_CHECK/$CHECK_COUNT]: $CHECK_NAME"
@@ -131,7 +131,6 @@ while IFS= read -r check_script; do
         CHECKS_RESULTS=$(echo "$CHECKS_RESULTS" | jq --argjson result "$ERROR_RESULT" '. + [$result]')
     fi
 
-    echo ""
 done <<< "$CHECK_SCRIPTS"
 
 # Generate final report
@@ -164,19 +163,16 @@ echo "$FINAL_REPORT" | jq '.' > "$OUTPUT_FILE"
 print_success "Report saved to: $OUTPUT_FILE"
 
 # Display summary
-echo ""
 print_info "📊 CHECKS SUMMARY"
 echo "$FINAL_REPORT" | jq -r '.summary | "  ✓ Passed: \(.passed)\n  ✗ Failed: \(.failed)\n  ⚠ Warnings: \(.warning)"'
 
 # Display individual check results
-echo ""
 print_info "📋 CHECK RESULTS"
 echo "$FINAL_REPORT" | jq -r '.checks[] |
   "  " + (if .status == "passed" then "✓" elif .status == "warning" then "⚠" else "✗" end) +
   " \(.checkName) - \(.status)"'
 
 # Output JSON to stdout
-echo ""
 print_info "JSON Output:"
 echo "$FINAL_REPORT" | jq -c '.'
 
