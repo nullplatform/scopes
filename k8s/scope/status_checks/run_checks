@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-echo "$CONTEXT" | jq -c '.'
+echo "$NP_ACTION_CONTEXT" | jq -c '.'
 
 # Configuration
 STATUS_CHECK_DIR="$SERVICE_PATH/scope/status_checks"
@@ -144,37 +144,23 @@ done <<< "$CHECK_SCRIPTS"
 print_success "✅ All checks completed"
 
 FINAL_REPORT=$(jq -n \
-    --arg scope_id "$SCOPE_ID" \
-    --arg namespace "$K8S_NAMESPACE" \
     --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --argjson checks "$CHECKS_RESULTS" \
     '{
-      metadata: {
-        scope_id: $scope_id,
-        namespace: $namespace,
-        timestamp: $timestamp,
-        total_checks: ($checks | length)
-      },
       summary: {
         passed: ($checks | map(select(.status == "passed")) | length),
         failed: ($checks | map(select(.status == "failed")) | length),
         warning: ($checks | map(select(.status == "warning")) | length)
       },
+      total_checks: ($checks | length),
+      timestamp: $timestamp,
       checks: $checks
     }')
 
 # Display summary
 echo "$FINAL_REPORT" | jq -r '.summary | "📊 CHECKS SUMMARY ✓ Passed: \(.passed) ✗ Failed: \(.failed) ⚠ Warnings: \(.warning)"'
 
-# Display individual check results
-print_info "📋 CHECK RESULTS"
-echo "$FINAL_REPORT" | jq -r '.checks[] |
-  "  " + (if .status == "passed" then "✓" elif .status == "warning" then "⚠" else "✗" end) +
-  " \(.checkName) - \(.status)"'
 
-# Output JSON to stdout
-print_info "JSON Output:"
-echo "$FINAL_REPORT" | jq -c '.'
 
 # Exit with error if any checks failed
 FAILED_COUNT=$(echo "$FINAL_REPORT" | jq '.summary.failed')
