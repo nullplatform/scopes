@@ -139,9 +139,7 @@ while IFS= read -r check_script; do
 done <<< "$CHECK_SCRIPTS"
 
 # Generate final report
-print_info "═══════════════════════════════════════════════════════════════════════════════"
 print_success "✅ All checks completed"
-print_info "═══════════════════════════════════════════════════════════════════════════════"
 
 FINAL_REPORT=$(jq -n \
     --arg scope_id "$SCOPE_ID" \
@@ -164,8 +162,7 @@ FINAL_REPORT=$(jq -n \
     }')
 
 # Display summary
-print_info "📊 CHECKS SUMMARY"
-echo "$FINAL_REPORT" | jq -r '.summary | "  ✓ Passed: \(.passed)\n  ✗ Failed: \(.failed)\n  ⚠ Warnings: \(.warning)"'
+echo "$FINAL_REPORT" | jq -r '.summary | "📊 CHECKS SUMMARY ✓ Passed: \(.passed) ✗ Failed: \(.failed) ⚠ Warnings: \(.warning)"'
 
 # Display individual check results
 print_info "📋 CHECK RESULTS"
