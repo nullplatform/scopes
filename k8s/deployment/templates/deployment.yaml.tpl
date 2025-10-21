@@ -30,6 +30,15 @@ metadata:
   labels:
     name: d-{{ .scope.id }}-{{ .deployment.id }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
+    account: {{ .account.slug }}
+    account_id: "{{ .account.id }}"
+    namespace: {{ .namespace.slug }}
+    namespace_id: "{{ .namespace.id }}"
+    application: {{ .application.slug }}
+    application_id: "{{ .application.id }}"
+    scope: {{ .scope.slug }}
+    scope_id: "{{ .scope.id }}"
+    deployment_id: "{{ .deployment.id }}"
 spec:
   replicas: {{ .replicas }}
   selector:
@@ -227,6 +236,14 @@ spec:
                 name: s-{{ .scope.id }}-d-{{ .deployment.id }}
           image: >-
             {{ .asset.url }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 8080
               protocol: TCP
