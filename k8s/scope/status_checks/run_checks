@@ -163,7 +163,7 @@ echo "$FINAL_REPORT" | jq -r '.summary | "📊 CHECKS SUMMARY ✓ Passed: \(.pas
 ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
 SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
 
-np service specification action specification patch --id "$ACTION_ID" --serviceSpecificationId "$SERVICE_ID" --body "$FINAL_REPORT"
+np service specification action specification patch --id "$SERVICE_ID" --serviceSpecificationId "$ACTION_ID" --body "$FINAL_REPORT"
 
 # Exit with error if any checks failed
 FAILED_COUNT=$(echo "$FINAL_REPORT" | jq '.summary.failed')
