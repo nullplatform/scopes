@@ -108,7 +108,7 @@ while IFS= read -r check_script; do
         else
             print_error "Check produced invalid JSON output"
 
-            echo CHECK_RESULT
+            echo "$CHECK_RESULT"
             # Create error result
             ERROR_RESULT=$(jq -n \
                 --arg name "$CHECK_NAME" \
