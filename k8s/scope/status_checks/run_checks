@@ -26,7 +26,6 @@ if [ -z "$SCOPE_ID" ] || [ -z "$K8S_NAMESPACE" ]; then
 fi
 
 print_info "🔍 Starting pod diagnostics for scope_id=$SCOPE_ID in namespace=$K8S_NAMESPACE"
-echo ""
 
 # Initialize checks results array
 CHECKS_RESULTS="[]"
@@ -75,7 +74,7 @@ if [ ! -d "$CHECKS_DIR" ]; then
 fi
 
 # Find all check scripts and sort them
-CHECK_SCRIPTS=$(find "$CHECKS_DIR" -name "*.sh" -type f | sort)
+CHECK_SCRIPTS=$(find "$CHECKS_DIR" -type f | sort)
 
 if [ -z "$CHECK_SCRIPTS" ]; then
     print_warning "WARNING: No check scripts found in $CHECKS_DIR"
@@ -84,7 +83,6 @@ fi
 
 CHECK_COUNT=$(echo "$CHECK_SCRIPTS" | wc -l)
 print_info "Found $CHECK_COUNT check(s) to run"
-echo ""
 
 # Run each check script
 CURRENT_CHECK=0
