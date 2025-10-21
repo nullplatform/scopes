@@ -8,7 +8,7 @@ create_check_result() {
     local status="$3"  # passed, failed, warning
     local evidence="$4"  # JSON string with evidence data
 
-    jq -n \
+    echo jq -n \
         --arg name "$name" \
         --arg description "$description" \
         --arg status "$status" \
@@ -19,7 +19,7 @@ create_check_result() {
             status: $status,
             evidence: $evidence,
             timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
-        }'
+        }' > "$CHECK_OUTPUT_FILE"
 }
 
 # Function to add pod details to evidence

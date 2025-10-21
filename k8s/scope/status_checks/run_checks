@@ -7,6 +7,7 @@ echo "$CONTEXT" | jq -c '.'
 # Configuration
 STATUS_CHECK_DIR="$SERVICE_PATH/scope/status_checks"
 CHECKS_DIR="$STATUS_CHECK_DIR/checks"
+STATUS_OUTPUT_DIR="$OUTPUT_DIR/checks"
 OUTPUT_FILE="${OUTPUT_FILE:-status_report.json}"
 
 # Source utilities
@@ -94,8 +95,11 @@ while IFS= read -r check_script; do
     print_info "Running Check [$CURRENT_CHECK/$CHECK_COUNT]: $CHECK_NAME"
     print_info "═══════════════════════════════════════════════════════════════════════════════"
 
+    export CHECK_OUTPUT_FILE="$STATUS_OUTPUT_DIR/$CHECK_NAME"
+
     # Run check and capture result
     if CHECK_RESULT=$(bash "$check_script" 2>&1); then
+        CHECK_RESULT=$(<"$CHECK_OUTPUT_FILE")
         # Validate JSON output
         if echo "$CHECK_RESULT" | jq empty 2>/dev/null; then
             CHECKS_RESULTS=$(echo "$CHECKS_RESULTS" | jq --argjson result "$CHECK_RESULT" '. + [$result]')
@@ -157,10 +161,6 @@ FINAL_REPORT=$(jq -n \
       },
       checks: $checks
     }')
-
-# Save to file
-echo "$FINAL_REPORT" | jq '.' > "$OUTPUT_FILE"
-print_success "Report saved to: $OUTPUT_FILE"
 
 # Display summary
 print_info "📊 CHECKS SUMMARY"
