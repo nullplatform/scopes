@@ -5,7 +5,8 @@ set -euo pipefail
 echo "$CONTEXT" | jq -c '.'
 
 # Configuration
-CHECKS_DIR="$(dirname "$0")/checks"
+STATUS_CHECK_DIR="$SERVICE_PATH/scope/status_checks"
+CHECKS_DIR="$STATUS_CHECK_DIR/checks"
 OUTPUT_FILE="${OUTPUT_FILE:-status_report.json}"
 
 # Source utilities
@@ -65,6 +66,7 @@ fi
 # Export variables for child scripts
 export PODS_JSON
 export POD_COUNT
+export STATUS_CHECK_DIR
 
 # Check if checks directory exists
 if [ ! -d "$CHECKS_DIR" ]; then

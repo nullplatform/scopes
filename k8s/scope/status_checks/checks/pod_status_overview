@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # Source utilities
-source "$(dirname "$0")/../utils/echo_messages.sh"
-source "$(dirname "$0")/../utils/json_builder.sh"
+source "$STATUS_CHECK_DIR/utils/echo_messages.sh"
+source "$STATUS_CHECK_DIR/utils/json_builder.sh"
 
 CHECK_NAME="pod_status_overview"
 CHECK_DESC="Validates pod phases, readiness, and restart counts"
