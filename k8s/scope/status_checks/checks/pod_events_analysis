@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # Source utilities
-source "$STATUS_CHECK_DIR/utils/echo_messages.sh"
-source "$STATUS_CHECK_DIR/utils/json_builder.sh"
+source "$STATUS_CHECK_DIR/utils/echo_messages"
+source "$STATUS_CHECK_DIR/utils/json_builder"
 
 CHECK_NAME="pod_events_analysis"
 CHECK_DESC="Analyzes recent Kubernetes events for pods requiring attention"

@@ -10,8 +10,8 @@ CHECKS_DIR="$STATUS_CHECK_DIR/checks"
 OUTPUT_FILE="${OUTPUT_FILE:-status_report.json}"
 
 # Source utilities
-source "$(dirname "$0")/utils/echo_messages.sh"
-source "$(dirname "$0")/utils/json_builder.sh"
+source "$STATUS_CHECK_DIR/utils/echo_messages"
+source "$STATUS_CHECK_DIR/utils/json_builder"
 
 # Validate inputs
 if [ -z "$SCOPE_ID" ] || [ -z "$K8S_NAMESPACE" ]; then
@@ -90,7 +90,7 @@ echo ""
 CURRENT_CHECK=0
 while IFS= read -r check_script; do
     CURRENT_CHECK=$((CURRENT_CHECK + 1))
-    CHECK_NAME=$(basename "$check_script" .sh)
+    CHECK_NAME="$check_script"
 
     print_info "═══════════════════════════════════════════════════════════════════════════════"
     print_info "Running Check [$CURRENT_CHECK/$CHECK_COUNT]: $CHECK_NAME"
