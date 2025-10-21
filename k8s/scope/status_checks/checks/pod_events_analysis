@@ -1,0 +1,72 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Source utilities
+source "$(dirname "$0")/../utils/echo_messages.sh"
+source "$(dirname "$0")/../utils/json_builder.sh"
+
+CHECK_NAME="pod_events_analysis"
+CHECK_DESC="Analyzes recent Kubernetes events for pods requiring attention"
+
+# Get problematic pods
+PROBLEMATIC_PODS=$(echo "$PODS_JSON" | jq -r '
+  .items[] |
+  select(
+    .status.phase != "Running" or
+    (.status.containerStatuses // [] | map(.ready) | any(. == false))
+  ) |
+  .metadata.name
+')
+
+EVENTS_DATA="[]"
+
+if [ -n "$PROBLEMATIC_PODS" ]; then
+    print_warning "⚠ PODS REQUIRING ATTENTION"
+
+    while IFS= read -r pod; do
+        if [ -n "$pod" ]; then
+            echo "  • $pod"
+
+            # Get recent events for this pod
+            POD_EVENTS=$(kubectl get events -n "$K8S_NAMESPACE" \
+                --field-selector involvedObject.name="$pod" \
+                --sort-by='.lastTimestamp' \
+                -o json 2>/dev/null || echo '{"items":[]}')
+
+            RECENT_EVENTS=$(echo "$POD_EVENTS" | jq -c '[.items[-5:] | .[] | {
+                timestamp: (.lastTimestamp // .eventTime),
+                reason: .reason,
+                message: .message,
+                type: .type,
+                count: .count
+            }]')
+
+            # Display events
+            echo "$POD_EVENTS" | jq -r '.items[-3:] | .[] | "    [\(.lastTimestamp // .eventTime)] \(.reason): \(.message)"' 2>/dev/null || echo "    No recent events"
+
+            # Add to evidence
+            EVENTS_DATA=$(echo "$EVENTS_DATA" | jq \
+                --arg pod "$pod" \
+                --argjson events "$RECENT_EVENTS" \
+                '. + [{podName: $pod, events: $events}]')
+        fi
+    done <<< "$PROBLEMATIC_PODS"
+
+    CHECK_STATUS="warning"
+else
+    print_success "✓ No pods requiring attention"
+    CHECK_STATUS="passed"
+fi
+
+# Build evidence
+EVIDENCE=$(jq -n \
+    --argjson events "$EVENTS_DATA" \
+    '{
+        problematicPodsCount: ($events | length),
+        podEvents: $events,
+        hasIssues: ($events | length > 0)
+    }')
+
+# Output check result
+create_check_result "$CHECK_NAME" "$CHECK_DESC" "$CHECK_STATUS" "$EVIDENCE"

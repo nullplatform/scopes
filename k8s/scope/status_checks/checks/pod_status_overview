@@ -1,0 +1,102 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Source utilities
+source "$(dirname "$0")/../utils/echo_messages.sh"
+source "$(dirname "$0")/../utils/json_builder.sh"
+
+CHECK_NAME="pod_status_overview"
+CHECK_DESC="Validates pod phases, readiness, and restart counts"
+
+# Parse pod information
+POD_DATA=$(echo "$PODS_JSON" | jq -r '
+  .items[] |
+  [
+    .metadata.name,
+    .status.phase,
+    (.status.containerStatuses // [] | map(.ready) | if . == [] then "N/A" else (if all then "Ready" else "NotReady" end) end),
+    (.status.containerStatuses // [] | map(.restartCount) | add // 0),
+    (.status.conditions // [] | map(select(.type == "Ready")) | .[0].status // "Unknown")
+  ] | @tsv
+')
+
+# Count pods by phase
+PHASE_SUMMARY=$(echo "$PODS_JSON" | jq -c '
+  .items |
+  group_by(.status.phase) |
+  map({
+    phase: .[0].status.phase,
+    count: length
+  }) |
+  sort_by(.phase)
+')
+
+# Display summary
+print_info "📊 PODS SUMMARY"
+echo "$PHASE_SUMMARY" | jq -r '.[] | "  \(.phase): \(.count) pod(s)"'
+print_info "Total pods found: $POD_COUNT"
+echo ""
+
+# Display detailed pod status
+print_info "📋 DETAILED POD STATUS"
+printf "%-50s %-12s %-12s %-10s %-10s\n" "POD NAME" "PHASE" "READY" "RESTARTS" "CONDITION"
+printf "%-50s %-12s %-12s %-10s %-10s\n" "$(printf '%.0s─' {1..50})" "$(printf '%.0s─' {1..12})" "$(printf '%.0s─' {1..12})" "$(printf '%.0s─' {1..10})" "$(printf '%.0s─' {1..10})"
+
+while IFS=$'\t' read -r name phase ready restarts condition; do
+    # Color code based on status
+    if [ "$phase" == "Running" ] && [ "$ready" == "Ready" ]; then
+        color="$GREEN"
+    elif [ "$phase" == "Pending" ] || [ "$phase" == "ContainerCreating" ]; then
+        color="$YELLOW"
+    else
+        color="$RED"
+    fi
+
+    echo -e "${color}$(printf "%-50s %-12s %-12s %-10s %-10s" "$name" "$phase" "$ready" "$restarts" "$condition")${NC}"
+done <<< "$POD_DATA"
+
+# Determine check status
+PROBLEMATIC_COUNT=$(echo "$PODS_JSON" | jq '[.items[] | select(
+    .status.phase != "Running" or
+    (.status.containerStatuses // [] | map(.ready) | any(. == false))
+)] | length')
+
+RUNNING_COUNT=$(echo "$PODS_JSON" | jq '[.items[] | select(.status.phase == "Running")] | length')
+
+if [ "$PROBLEMATIC_COUNT" -eq 0 ]; then
+    CHECK_STATUS="passed"
+    print_success "All pods are running and ready"
+elif [ "$RUNNING_COUNT" -gt 0 ]; then
+    CHECK_STATUS="warning"
+    print_warning "$PROBLEMATIC_COUNT pod(s) require attention"
+else
+    CHECK_STATUS="failed"
+    print_error "No pods are running successfully"
+fi
+
+# Build evidence JSON
+EVIDENCE=$(echo "$PODS_JSON" | jq -c \
+    --argjson phase_summary "$PHASE_SUMMARY" \
+    '{
+        totalPods: (.items | length),
+        phaseSummary: $phase_summary,
+        pods: [.items[] | {
+            name: .metadata.name,
+            phase: .status.phase,
+            ready: (.status.containerStatuses // [] | map(.ready) | all),
+            readyContainers: (.status.containerStatuses // [] | map(select(.ready)) | length),
+            totalContainers: (.status.containerStatuses // [] | length),
+            restartCount: (.status.containerStatuses // [] | map(.restartCount) | add // 0),
+            readyCondition: (.status.conditions // [] | map(select(.type == "Ready")) | .[0].status // "Unknown"),
+            createdAt: .metadata.creationTimestamp,
+            podIP: .status.podIP
+        }],
+        problematicPods: [.items[] | select(
+            .status.phase != "Running" or
+            (.status.containerStatuses // [] | map(.ready) | any(. == false))
+        ) | .metadata.name]
+    }')
+
+# Output check result
+create_check_result "$CHECK_NAME" "$CHECK_DESC" "$CHECK_STATUS" "$EVIDENCE"

@@ -1,0 +1,251 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Source utilities
+source "$(dirname "$0")/../utils/echo_messages.sh"
+source "$(dirname "$0")/../utils/json_builder.sh"
+
+CHECK_NAME="network_diagnostics"
+CHECK_DESC="Comprehensive network connectivity and configuration analysis"
+
+# Get problematic pods for network checks
+PROBLEMATIC_PODS=$(echo "$PODS_JSON" | jq -r '
+  .items[] |
+  select(
+    .status.phase != "Running" or
+    (.status.containerStatuses // [] | map(.ready) | any(. == false))
+  ) |
+  .metadata.name
+')
+
+NETWORK_EVIDENCE="[]"
+
+# Function to check networking for a specific pod
+check_pod_networking() {
+    local pod_name=$1
+    local pod_ip=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o jsonpath='{.status.podIP}' 2>/dev/null)
+    local pod_phase=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+
+    print_info "🔍 NETWORK CHECK: $pod_name"
+    echo ""
+
+    # Initialize pod network data
+    local pod_network_data="{}"
+
+    # 1. POD IP AND PORTS
+    print_info "📍 Pod IP: ${pod_ip:-N/A}"
+
+    PORTS_INFO=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o json | jq -c '[
+      .spec.containers[] | {
+        containerName: .name,
+        ports: (.ports // [] | map({
+          containerPort: .containerPort,
+          protocol: .protocol,
+          name: (.name // "unnamed")
+        }))
+      }
+    ]')
+
+    pod_network_data=$(echo "$pod_network_data" | jq \
+        --arg ip "$pod_ip" \
+        --argjson ports "$PORTS_INFO" \
+        '. + {podIP: $ip, containerPorts: $ports}')
+
+    print_info "🔌 Container Ports:"
+    echo "$PORTS_INFO" | jq -r '.[] |
+      "  Container: \(.containerName)" +
+      (if (.ports | length) > 0 then
+        "\n" + (.ports | map("    - Port: \(.containerPort) Protocol: \(.protocol) Name: \(.name)") | join("\n"))
+      else
+        "\n    No ports defined"
+      end)'
+
+    # 2. SERVICES EXPOSING THIS POD
+    print_info "🔗 Services:"
+    local pod_labels=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o json | jq -c '.metadata.labels' 2>/dev/null)
+
+    SERVICES_INFO=$(kubectl get svc -n "$K8S_NAMESPACE" -o json 2>/dev/null | jq -c \
+        --argjson pod_labels "$pod_labels" \
+        '[.items[] |
+        select(.spec.selector != null) |
+        select(
+          (.spec.selector | to_entries | all(.key as $k | .value as $v | $pod_labels[$k] == $v))
+        ) | {
+          name: .metadata.name,
+          type: .spec.type,
+          clusterIP: .spec.clusterIP,
+          ports: [.spec.ports[] | {port: .port, targetPort: .targetPort, protocol: .protocol}]
+        }]')
+
+    pod_network_data=$(echo "$pod_network_data" | jq \
+        --argjson services "$SERVICES_INFO" \
+        '. + {services: $services}')
+
+    if [ "$(echo "$SERVICES_INFO" | jq 'length')" -gt 0 ]; then
+        echo "$SERVICES_INFO" | jq -r '.[] |
+          "  ✓ Service: \(.name) (Type: \(.type))\n    ClusterIP: \(.clusterIP)\n    Ports: \(.ports | map("\(.port):\(.targetPort)/\(.protocol)") | join(", "))"'
+    else
+        print_warning "  No services found matching this pod's labels"
+    fi
+
+    # 3. ENDPOINT REGISTRATION
+    print_info "📡 Endpoint Registration:"
+    ENDPOINTS_INFO=$(kubectl get endpoints -n "$K8S_NAMESPACE" -o json 2>/dev/null | jq -c \
+        --arg ip "$pod_ip" \
+        '[.items[] |
+        select(.subsets != null) |
+        select(.subsets[].addresses != null) |
+        select(.subsets[].addresses[].ip == $ip) |
+        {endpointName: .metadata.name}]')
+
+    pod_network_data=$(echo "$pod_network_data" | jq \
+        --argjson endpoints "$ENDPOINTS_INFO" \
+        '. + {endpoints: $endpoints, registeredInEndpoint: ($endpoints | length > 0)}')
+
+    if [ "$(echo "$ENDPOINTS_INFO" | jq 'length')" -gt 0 ]; then
+        echo "$ENDPOINTS_INFO" | jq -r '.[] | "  ✓ Registered in endpoint: \(.endpointName)"'
+    else
+        print_warning "  Pod IP not found in any endpoints (not receiving service traffic)"
+    fi
+
+    # 4. DNS CONFIGURATION
+    print_info "🔎 DNS Configuration:"
+    local dns_policy=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.dnsPolicy}' 2>/dev/null)
+    echo "  DNS Policy: ${dns_policy:-Default}"
+
+    DNS_TEST_RESULT="unknown"
+    if [ "$pod_phase" == "Running" ]; then
+        local first_container=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null)
+
+        print_info "  DNS Resolution Test:"
+        if kubectl exec "$pod_name" -n "$K8S_NAMESPACE" -c "$first_container" -- nslookup kubernetes.default.svc.cluster.local &>/dev/null; then
+            print_success "    ✓ DNS resolution working"
+            DNS_TEST_RESULT="passed"
+        else
+            print_warning "    DNS resolution failed or nslookup not available"
+            DNS_TEST_RESULT="failed"
+        fi
+    fi
+
+    pod_network_data=$(echo "$pod_network_data" | jq \
+        --arg dns_policy "$dns_policy" \
+        --arg dns_test "$DNS_TEST_RESULT" \
+        '. + {dnsPolicy: $dns_policy, dnsTest: $dns_test}')
+
+    # 5. NETWORK POLICIES
+    print_info "🛡️  Network Policies:"
+    NETPOL_INFO=$(kubectl get networkpolicy -n "$K8S_NAMESPACE" -o json 2>/dev/null | jq -c '[.items[] | {
+        name: .metadata.name,
+        podSelector: (.spec.podSelector | if . == {} then "all" else . end),
+        policyTypes: .spec.policyTypes,
+        ingressRules: (.spec.ingress // [] | length),
+        egressRules: (.spec.egress // [] | length)
+    }]')
+
+    pod_network_data=$(echo "$pod_network_data" | jq \
+        --argjson netpol "$NETPOL_INFO" \
+        '. + {networkPolicies: $netpol, hasNetworkPolicies: ($netpol | length > 0)}')
+
+    if [ "$(echo "$NETPOL_INFO" | jq 'length')" -gt 0 ]; then
+        echo "$NETPOL_INFO" | jq -r '.[] | "  Policy: \(.name)\n    Types: \(.policyTypes | join(", "))\n    Ingress/Egress Rules: \(.ingressRules)/\(.egressRules)"'
+    else
+        echo "  No network policies (all traffic allowed)"
+    fi
+
+    # 6. HEALTH PROBES
+    print_info "❤️  Health Probes:"
+    PROBES_INFO=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o json | jq -c '[
+      .spec.containers[] | {
+        containerName: .name,
+        readinessProbe: (if .readinessProbe then
+          (if .readinessProbe.httpGet then {type: "http", path: .readinessProbe.httpGet.path, port: .readinessProbe.httpGet.port}
+          elif .readinessProbe.tcpSocket then {type: "tcp", port: .readinessProbe.tcpSocket.port}
+          elif .readinessProbe.exec then {type: "exec"}
+          else {type: "custom"} end)
+        else null end),
+        livenessProbe: (if .livenessProbe then
+          (if .livenessProbe.httpGet then {type: "http", path: .livenessProbe.httpGet.path, port: .livenessProbe.httpGet.port}
+          elif .livenessProbe.tcpSocket then {type: "tcp", port: .livenessProbe.tcpSocket.port}
+          elif .livenessProbe.exec then {type: "exec"}
+          else {type: "custom"} end)
+        else null end)
+      }
+    ]')
+
+    pod_network_data=$(echo "$pod_network_data" | jq \
+        --argjson probes "$PROBES_INFO" \
+        '. + {healthProbes: $probes}')
+
+    echo "$PROBES_INFO" | jq -r '.[] |
+      "  Container: \(.containerName)\n" +
+      "    Readiness: \(if .readinessProbe then "\(.readinessProbe.type) \(if .readinessProbe.path then .readinessProbe.path else "" end):\(.readinessProbe.port // "")" else "None" end)\n" +
+      "    Liveness: \(if .livenessProbe then "\(.livenessProbe.type) \(if .livenessProbe.path then .livenessProbe.path else "" end):\(.livenessProbe.port // "")" else "None" end)"'
+
+    # 7. CONNECTIVITY TESTS
+    if [ "$pod_phase" == "Running" ]; then
+        print_info "🌐 Connectivity Tests:"
+        local first_container=$(kubectl get pod "$pod_name" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null)
+
+        K8S_API_TEST="unknown"
+        EXTERNAL_TEST="unknown"
+
+        if kubectl exec "$pod_name" -n "$K8S_NAMESPACE" -c "$first_container" -- timeout 3 sh -c 'echo > /dev/tcp/kubernetes.default.svc.cluster.local/443' &>/dev/null; then
+            print_success "  ✓ Kubernetes API reachable"
+            K8S_API_TEST="passed"
+        else
+            print_warning "  ⚠️  Kubernetes API not reachable"
+            K8S_API_TEST="failed"
+        fi
+
+        if kubectl exec "$pod_name" -n "$K8S_NAMESPACE" -c "$first_container" -- timeout 3 sh -c 'echo > /dev/tcp/8.8.8.8/53' &>/dev/null; then
+            print_success "  ✓ External connectivity OK"
+            EXTERNAL_TEST="passed"
+        else
+            print_warning "  ⚠️  External connectivity failed"
+            EXTERNAL_TEST="failed"
+        fi
+
+        pod_network_data=$(echo "$pod_network_data" | jq \
+            --arg k8s "$K8S_API_TEST" \
+            --arg ext "$EXTERNAL_TEST" \
+            '. + {connectivityTests: {kubernetesAPI: $k8s, externalConnectivity: $ext}}')
+    fi
+
+    echo "────────────────────────────────────────────────────────────────────────────────"
+    echo ""
+
+    # Return pod network data as JSON string
+    echo "$pod_network_data"
+}
+
+# Run network checks
+if [ -n "$PROBLEMATIC_PODS" ]; then
+    CHECK_STATUS="warning"
+    print_info "Running network diagnostics for problematic pods..."
+
+    while IFS= read -r pod; do
+        if [ -n "$pod" ]; then
+            POD_NET_DATA=$(check_pod_networking "$pod")
+            NETWORK_EVIDENCE=$(echo "$NETWORK_EVIDENCE" | jq \
+                --arg pod "$pod" \
+                --argjson data "$POD_NET_DATA" \
+                '. + [{podName: $pod, networkData: $data}]')
+        fi
+    done <<< "$PROBLEMATIC_PODS"
+else
+    CHECK_STATUS="passed"
+    print_success "✓ All pods healthy - skipping detailed network checks"
+fi
+
+# Build final evidence
+EVIDENCE=$(jq -n \
+    --argjson pods "$NETWORK_EVIDENCE" \
+    '{
+        podsChecked: ($pods | length),
+        networkDetails: $pods,
+        allPodsHealthy: ($pods | length == 0)
+    }')
+
+# Output check result
+create_check_result "$CHECK_NAME" "$CHECK_DESC" "$CHECK_STATUS" "$EVIDENCE"

@@ -1,0 +1,187 @@
+#!/bin/bash
+
+set -euo pipefail
+
+echo "$CONTEXT" | jq -c '.'
+
+# Configuration
+CHECKS_DIR="$(dirname "$0")/checks"
+OUTPUT_FILE="${OUTPUT_FILE:-status_report.json}"
+
+# Source utilities
+source "$(dirname "$0")/utils/colors.sh"
+source "$(dirname "$0")/utils/json_builder.sh"
+
+# Validate inputs
+if [ -z "$SCOPE_ID" ] || [ -z "$K8S_NAMESPACE" ]; then
+    print_error "ERROR: Missing required environment variables"
+    echo "   SCOPE_ID: ${SCOPE_ID:-<not set>}"
+    echo "   NAMESPACE: ${K8S_NAMESPACE:-<not set>}"
+    jq -cn '{
+      error: "Missing SCOPE_ID or NAMESPACE",
+      success: false
+    }'
+    exit 1
+fi
+
+print_info "🔍 Starting pod diagnostics for scope_id=$SCOPE_ID in namespace=$K8S_NAMESPACE"
+echo ""
+
+# Initialize checks results array
+CHECKS_RESULTS="[]"
+
+# Check if namespace exists
+if ! kubectl get namespace "$K8S_NAMESPACE" &>/dev/null; then
+    print_error "ERROR: Namespace '$K8S_NAMESPACE' does not exist"
+    jq -cn \
+        --arg ns "$K8S_NAMESPACE" \
+        '{
+          error: "Namespace does not exist",
+          namespace: $ns,
+          success: false
+        }'
+    exit 1
+fi
+
+# Get pods with the specified label
+PODS_JSON=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 2>/dev/null || echo '{"items":[]}')
+POD_COUNT=$(echo "$PODS_JSON" | jq '.items | length')
+
+if [ "$POD_COUNT" -eq 0 ]; then
+    print_warning "WARNING: No pods found with label scope_id=$SCOPE_ID"
+    jq -cn \
+        --arg scope_id "$SCOPE_ID" \
+        --arg namespace "$K8S_NAMESPACE" \
+        '{
+          error: "No pods found with the specified label",
+          success: false,
+          scope_id: $scope_id,
+          namespace: $K8S_NAMESPACE,
+          pod_count: 0
+        }'
+    exit 1
+fi
+
+# Export variables for child scripts
+export PODS_JSON
+export POD_COUNT
+
+# Check if checks directory exists
+if [ ! -d "$CHECKS_DIR" ]; then
+    print_error "ERROR: Checks directory not found: $CHECKS_DIR"
+    exit 1
+fi
+
+# Find all check scripts and sort them
+CHECK_SCRIPTS=$(find "$CHECKS_DIR" -name "*.sh" -type f | sort)
+
+if [ -z "$CHECK_SCRIPTS" ]; then
+    print_warning "WARNING: No check scripts found in $CHECKS_DIR"
+    exit 1
+fi
+
+CHECK_COUNT=$(echo "$CHECK_SCRIPTS" | wc -l)
+print_info "Found $CHECK_COUNT check(s) to run"
+echo ""
+
+# Run each check script
+CURRENT_CHECK=0
+while IFS= read -r check_script; do
+    CURRENT_CHECK=$((CURRENT_CHECK + 1))
+    CHECK_NAME=$(basename "$check_script" .sh)
+
+    print_info "═══════════════════════════════════════════════════════════════════════════════"
+    print_info "Running Check [$CURRENT_CHECK/$CHECK_COUNT]: $CHECK_NAME"
+    print_info "═══════════════════════════════════════════════════════════════════════════════"
+
+    # Run check and capture result
+    if CHECK_RESULT=$(bash "$check_script" 2>&1); then
+        # Validate JSON output
+        if echo "$CHECK_RESULT" | jq empty 2>/dev/null; then
+            CHECKS_RESULTS=$(echo "$CHECKS_RESULTS" | jq --argjson result "$CHECK_RESULT" '. + [$result]')
+            print_success "Check completed successfully"
+        else
+            print_error "Check produced invalid JSON output"
+            # Create error result
+            ERROR_RESULT=$(jq -n \
+                --arg name "$CHECK_NAME" \
+                --arg error "Invalid JSON output from check script" \
+                '{
+                    checkName: $name,
+                    description: "Check failed to produce valid output",
+                    status: "failed",
+                    evidence: {error: $error},
+                    timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
+                }')
+            CHECKS_RESULTS=$(echo "$CHECKS_RESULTS" | jq --argjson result "$ERROR_RESULT" '. + [$result]')
+        fi
+    else
+        print_error "Check script failed with exit code: $?"
+        # Create error result
+        ERROR_RESULT=$(jq -n \
+            --arg name "$CHECK_NAME" \
+            --arg error "Check script execution failed" \
+            '{
+                checkName: $name,
+                description: "Check script encountered an error during execution",
+                status: "failed",
+                evidence: {error: $error},
+                timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
+            }')
+        CHECKS_RESULTS=$(echo "$CHECKS_RESULTS" | jq --argjson result "$ERROR_RESULT" '. + [$result]')
+    fi
+
+    echo ""
+done <<< "$CHECK_SCRIPTS"
+
+# Generate final report
+print_info "═══════════════════════════════════════════════════════════════════════════════"
+print_success "✅ All checks completed"
+print_info "═══════════════════════════════════════════════════════════════════════════════"
+
+FINAL_REPORT=$(jq -n \
+    --arg scope_id "$SCOPE_ID" \
+    --arg namespace "$K8S_NAMESPACE" \
+    --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    --argjson checks "$CHECKS_RESULTS" \
+    '{
+      metadata: {
+        scope_id: $scope_id,
+        namespace: $K8S_NAMESPACE,
+        timestamp: $timestamp,
+        total_checks: ($checks | length)
+      },
+      summary: {
+        passed: ($checks | map(select(.status == "passed")) | length),
+        failed: ($checks | map(select(.status == "failed")) | length),
+        warning: ($checks | map(select(.status == "warning")) | length)
+      },
+      checks: $checks
+    }')
+
+# Save to file
+echo "$FINAL_REPORT" | jq '.' > "$OUTPUT_FILE"
+print_success "Report saved to: $OUTPUT_FILE"
+
+# Display summary
+echo ""
+print_info "📊 CHECKS SUMMARY"
+echo "$FINAL_REPORT" | jq -r '.summary | "  ✓ Passed: \(.passed)\n  ✗ Failed: \(.failed)\n  ⚠ Warnings: \(.warning)"'
+
+# Display individual check results
+echo ""
+print_info "📋 CHECK RESULTS"
+echo "$FINAL_REPORT" | jq -r '.checks[] |
+  "  " + (if .status == "passed" then "✓" elif .status == "warning" then "⚠" else "✗" end) +
+  " \(.checkName) - \(.status)"'
+
+# Output JSON to stdout
+echo ""
+print_info "JSON Output:"
+echo "$FINAL_REPORT" | jq -c '.'
+
+# Exit with error if any checks failed
+FAILED_COUNT=$(echo "$FINAL_REPORT" | jq '.summary.failed')
+if [ "$FAILED_COUNT" -gt 0 ]; then
+    exit 1
+fi
