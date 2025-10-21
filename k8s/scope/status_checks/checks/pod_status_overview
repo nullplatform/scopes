@@ -99,4 +99,4 @@ EVIDENCE=$(echo "$PODS_JSON" | jq -c \
     }')
 
 # Output check result
-create_check_result "$CHECK_NAME" "$CHECK_DESC" "$CHECK_STATUS" "$EVIDENCE"
+echo $(create_check_result "$CHECK_NAME" "$CHECK_DESC" "$CHECK_STATUS" "$EVIDENCE")

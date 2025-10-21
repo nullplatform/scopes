@@ -147,7 +147,7 @@ FINAL_REPORT=$(jq -n \
     '{
       metadata: {
         scope_id: $scope_id,
-        namespace: $K8S_NAMESPACE,
+        namespace: $namespace,
         timestamp: $timestamp,
         total_checks: ($checks | length)
       },
