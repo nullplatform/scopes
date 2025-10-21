@@ -8,7 +8,8 @@ create_check_result() {
     local status="$3"  # passed, failed, warning
     local evidence="$4"  # JSON string with evidence data
 
-    echo evidence
+    echo "$evidence"
+    echo "$CHECK_OUTPUT_FILE"
 
     echo jq -n \
         --arg name "$name" \
