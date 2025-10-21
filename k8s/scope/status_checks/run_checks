@@ -166,7 +166,7 @@ SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
 ACTION_BODY=$(jq -n \
                 --argjson result "$FINAL_REPORT" \
                 '{
-                  result: $result
+                  results: $result
                 }')
 
 np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
