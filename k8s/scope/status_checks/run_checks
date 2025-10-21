@@ -9,7 +9,7 @@ CHECKS_DIR="$(dirname "$0")/checks"
 OUTPUT_FILE="${OUTPUT_FILE:-status_report.json}"
 
 # Source utilities
-source "$(dirname "$0")/utils/colors.sh"
+source "$(dirname "$0")/utils/echo_messages.sh"
 source "$(dirname "$0")/utils/json_builder.sh"
 
 # Validate inputs
