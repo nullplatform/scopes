@@ -128,9 +128,16 @@ build_query() {
     groupBy=""
   fi
 
-  # Replace instance_id with destination_pod in groupBy
+  # Replace instance_id with appropriate field based on metric type
   if [[ -n "$groupBy" ]]; then
-    groupBy=$(echo "$groupBy" | sed 's/instance_id/destination_pod/g')
+    case "$metric" in
+      "http."*)
+        groupBy=$(echo "$groupBy" | sed 's/instance_id/destination_pod/g')
+        ;;
+      *)
+        groupBy=$(echo "$groupBy" | sed 's/instance_id/pod/g')
+        ;;
+    esac
   fi
 
   case "$metric" in
@@ -335,7 +342,7 @@ transform_response() {
   fi
 
   echo "$results" | jq 'map({
-    selector: (.metric | with_entries(if .key == "destination_pod" then {key: "instance_id", value: .value} else . end)),
+    selector: (.metric | with_entries(if .key == "pod" then .key = "instance_id" elif .key == "destination_pod" then .key = "instance_id" else . end)),
     data: .values | map({
       timestamp: (.[0] | tonumber | todate),
       value: (.[1] | tonumber)
