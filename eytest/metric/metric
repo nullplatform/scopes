@@ -335,7 +335,7 @@ transform_response() {
   fi
 
   echo "$results" | jq 'map({
-    selector: (.metric | with_entries(if .key == "destination_pod" then .key = "instance_id" else . end)),
+    selector: (.metric | with_entries(if .key == "destination_pod" then {key: "instance_id", value: .value} else . end)),
     data: .values | map({
       timestamp: (.[0] | tonumber | todate),
       value: (.[1] | tonumber)
