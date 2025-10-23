@@ -130,67 +130,64 @@ build_query() {
 
   case "$metric" in
     "http.healthcheck_count")
-      local healthcheck_filters="${filters},is_healthcheck=\"yes\""
       if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
+        echo "sum(np_kube_pod_container_status_ready_enriched{$filters}) by ($groupBy)"
       else
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval]))"
+        echo "sum(np_kube_pod_container_status_ready_enriched{$filters})"
       fi
       ;;
     "http.healthcheck_fail")
-      local healthcheck_filters="${filters},is_healthcheck=\"yes\""
-      local ok_filters="${filters},is_healthcheck=\"yes\",quality=\"OK (2XX, 3XX)\""
       if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy) - sum(rate(nullplatform_http_response_time_count{$ok_filters}[$interval])) by ($groupBy)"
+        echo "sum(np_kube_pod_container_status_running_enriched{$filters}) by ($groupBy) - sum(np_kube_pod_container_status_ready_enriched{$filters}) by ($groupBy)"
       else
-        echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) - sum(rate(nullplatform_http_response_time_count{$ok_filters}[$interval]))"
+        echo "sum(np_kube_pod_container_status_running_enriched{$filters}) - sum(np_kube_pod_container_status_ready_enriched{$filters})"
       fi
       ;;
     "system.cpu_usage_percentage_by_instance")
-      echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by (instance_id)"
+      echo "avg(np_container_cpu_usage_percent_enriched{$filters}) by (pod)"
       ;;
     "system.memory_usage_percentage")
       if [[ -n "$groupBy" ]]; then
-        echo "avg(nullplatform_system_memory_usage_percentage{$filters}) by ($groupBy)"
+        echo "avg(np_container_memory_working_set_percent_enriched{$filters}) by ($groupBy)"
       else
-        echo "avg(nullplatform_system_memory_usage_percentage{$filters})"
+        echo "avg(np_container_memory_working_set_percent_enriched{$filters})"
       fi
       ;;
     "system.cpu_usage_percentage")
       if [[ -n "$groupBy" ]]; then
-        echo "avg(nullplatform_system_cpu_usage_percentage{$filters}) by ($groupBy)"
+        echo "avg(np_container_cpu_usage_percent_enriched{$filters}) by ($groupBy)"
       else
-        echo "avg(nullplatform_system_cpu_usage_percentage{$filters})"
+        echo "avg(np_container_cpu_usage_percent_enriched{$filters})"
       fi
       ;;
     "system.used_memory_kb")
       if [[ -n "$groupBy" ]]; then
-        echo "avg(nullplatform_system_used_memory_kb{$filters}) by ($groupBy)"
+        echo "avg(np_container_memory_working_set_bytes_enriched{$filters}) by ($groupBy) / 1024"
       else
-        echo "avg(nullplatform_system_used_memory_kb{$filters})"
+        echo "avg(np_container_memory_working_set_bytes_enriched{$filters}) / 1024"
       fi
       ;;
     "http.response_time")
       if [[ -n "$groupBy" ]]; then
-        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
+        echo "sum(rate(np_request_duration_milliseconds_sum_enriched{$filters}[$interval])) by ($groupBy) / sum(rate(np_request_duration_milliseconds_count_enriched{$filters}[$interval])) by ($groupBy)"
       else
-        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval]))/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval]))"
+        echo "sum(rate(np_request_duration_milliseconds_sum_enriched{$filters}[$interval])) / sum(rate(np_request_duration_milliseconds_count_enriched{$filters}[$interval]))"
       fi
       ;;
     "http.rpm")
       if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy) * 60"
+        echo "sum(rate(np_requests_total_enriched{$filters}[$interval])) by ($groupBy) * 60"
       else
-        echo "sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) * 60"
+        echo "sum(rate(np_requests_total_enriched{$filters}[$interval])) * 60"
       fi
       ;;
     "http.error_rate")
       local base_filters="$filters"
-      local ok_filters="${filters},quality=\"OK (2XX, 3XX)\""
+      local error_filters="${filters},response_code=~\"[45]..\""
       if [[ -n "$groupBy" ]]; then
-        echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by ($groupBy) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) by ($groupBy) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) by ($groupBy) * 60 )) *100"
+        echo "(sum(rate(np_requests_total_enriched{${error_filters}}[$interval])) by ($groupBy) / sum(rate(np_requests_total_enriched{${base_filters}}[$interval])) by ($groupBy)) * 100"
       else
-        echo "((sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) * 60 - sum(rate(nullplatform_http_response_time_count{${ok_filters}}[$interval])) * 60) / (sum(rate(nullplatform_http_response_time_count{${base_filters}}[$interval])) * 60 )) *100"
+        echo "(sum(rate(np_requests_total_enriched{${error_filters}}[$interval])) / sum(rate(np_requests_total_enriched{${base_filters}}[$interval]))) * 100"
       fi
       ;;
     "cronjob.execution_count")
