@@ -125,6 +125,12 @@ spec:
 {{ data.ToYAML $tolerations | indent 10 }}
             {{- end }}
           {{- end }}
+          {{- if .pull_secrets.ENABLED }}
+          imagePullSecrets:
+            {{- range $secret := .pull_secrets.SECRETS }}
+            - name: {{ $secret }}
+            {{- end }}
+          {{- end }}
           containers:
             - name: application
               envFrom:
@@ -138,6 +144,35 @@ spec:
                 requests:
                   cpu: {{ .scope.capabilities.cpu_millicores }}m
                   memory: {{ .scope.capabilities.ram_memory }}Mi
+              imagePullPolicy: IfNotPresent
+              volumeMounts:
+        {{- if .parameters.results }}
+          {{- range .parameters.results }}
+            {{- if and (eq .type "file") }}
+              {{- if gt (len .values) 0 }}
+                - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
+                  mountPath: {{ .destination_path }}
+                  subPath: {{ filepath.Base .destination_path }}
+                  readOnly: true
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+          volumes:
+      {{- if .parameters.results }}
+        {{- range .parameters.results }}
+          {{- if and (eq .type "file") }}
+            {{- if gt (len .values) 0 }}
+            - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
+              secret:
+                secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
+                items:
+                - key: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+                  path: {{ filepath.Base .destination_path }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
           restartPolicy: OnFailure
           securityContext:
             runAsUser: 0
