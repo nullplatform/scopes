@@ -129,7 +129,7 @@ build_query() {
   fi
 
   case "$metric" in
-    "system.healthy_pods")
+    "http.healthcheck_count")
       if [[ -n "$groupBy" ]]; then
         echo "avg(np_kube_pod_container_status_ready_enriched{$filters}) by ($groupBy)"
       else
@@ -255,7 +255,7 @@ if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
     fi
     # Use minimum 5m interval for HTTP metrics to ensure sufficient data points
     case "$METRIC_NAME" in
-      "http.error_rate"|"http.response_time"|"http.rpm"|"system.healthy_pods")
+      "http.error_rate"|"http.response_time"|"http.rpm"|"http.healthcheck_count")
         if [[ $interval_minutes -lt 5 ]]; then
           interval_minutes=5
         fi
