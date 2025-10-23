@@ -4,7 +4,7 @@ echo '{
 	"results": [
 		{
 			"name": "http.rpm",
-			"title": "Throughput",
+			"title": "Throughput testing",
 			"unit": "rpm",
 			"available_filters": ["scope_id", "pod"],
 			"available_group_by": ["pod"]
