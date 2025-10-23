@@ -1,6 +1,11 @@
 #!/bin/bash
 GROUP_BY=${GROUP_BY:-""}
 
+# Transform instance_id to pod for GROUP_BY
+if [[ "$GROUP_BY" == "instance_id" ]]; then
+  GROUP_BY="pod"
+fi
+
 # Validate required parameters
 if [[ -z "$METRIC_NAME" ]]; then
   echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
@@ -332,7 +337,7 @@ transform_response() {
     selector: .metric,
     data: .values | map({
       timestamp: (.[0] | tonumber | todate),
-      value: (.[1] | tonumber)
+      value: (if .[1] == null or .[1] == "null" then 0 else (.[1] | tonumber) end)
     })
   })'
 }
