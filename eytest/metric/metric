@@ -131,7 +131,7 @@ build_query() {
   # Replace instance_id with appropriate field based on metric type
   if [[ -n "$groupBy" ]]; then
     case "$metric" in
-      "http."*)
+      "http.response_time"|"http.rpm"|"http.error_rate")
         groupBy=$(echo "$groupBy" | sed 's/instance_id/destination_pod/g')
         ;;
       *)
