@@ -128,9 +128,9 @@ build_query() {
     groupBy=""
   fi
 
-  # Replace instance_id with pod in groupBy
+  # Replace instance_id with destination_pod in groupBy
   if [[ -n "$groupBy" ]]; then
-    groupBy=$(echo "$groupBy" | sed 's/instance_id/pod/g')
+    groupBy=$(echo "$groupBy" | sed 's/instance_id/destination_pod/g')
   fi
 
   case "$metric" in
