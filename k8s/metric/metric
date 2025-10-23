@@ -129,11 +129,11 @@ build_query() {
   fi
 
   case "$metric" in
-    "http.healthcheck_count")
+    "system.healthy_pods")
       if [[ -n "$groupBy" ]]; then
-        echo "sum(np_kube_pod_container_status_ready_enriched{$filters}) by ($groupBy)"
+        echo "avg(np_kube_pod_container_status_ready_enriched{$filters}) by ($groupBy)"
       else
-        echo "sum(np_kube_pod_container_status_ready_enriched{$filters})"
+        echo "avg(np_kube_pod_container_status_ready_enriched{$filters})"
       fi
       ;;
     "http.healthcheck_fail")
@@ -169,25 +169,26 @@ build_query() {
       ;;
     "http.response_time")
       if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(np_request_duration_milliseconds_sum_enriched{$filters}[$interval])) by ($groupBy) / sum(rate(np_request_duration_milliseconds_count_enriched{$filters}[$interval])) by ($groupBy)"
+        echo "(sum(rate(np_request_duration_milliseconds_sum_enriched{$filters}[$interval])) by ($groupBy) / (sum(rate(np_request_duration_milliseconds_count_enriched{$filters}[$interval])) by ($groupBy) > 0)) or vector(0)"
       else
-        echo "sum(rate(np_request_duration_milliseconds_sum_enriched{$filters}[$interval])) / sum(rate(np_request_duration_milliseconds_count_enriched{$filters}[$interval]))"
+        echo "(sum(rate(np_request_duration_milliseconds_sum_enriched{$filters}[$interval])) / (sum(rate(np_request_duration_milliseconds_count_enriched{$filters}[$interval])) > 0)) or vector(0)"
       fi
       ;;
     "http.rpm")
       if [[ -n "$groupBy" ]]; then
-        echo "sum(rate(np_requests_total_enriched{$filters}[$interval])) by ($groupBy) * 60"
+        echo "ceil(avg_over_time((sum(rate(np_requests_total_enriched{$filters}[$interval])) by ($groupBy) * 60)[2m:10s]))"
+      
       else
-        echo "sum(rate(np_requests_total_enriched{$filters}[$interval])) * 60"
+        echo "ceil(avg_over_time((sum(rate(np_requests_total_enriched{$filters}[$interval])) * 60)[2m:10s]))"
       fi
       ;;
     "http.error_rate")
       local base_filters="$filters"
       local error_filters="${filters},response_code=~\"[45]..\""
       if [[ -n "$groupBy" ]]; then
-        echo "(sum(rate(np_requests_total_enriched{${error_filters}}[$interval])) by ($groupBy) / sum(rate(np_requests_total_enriched{${base_filters}}[$interval])) by ($groupBy)) * 100"
+        echo "(sum(rate(np_requests_total_enriched{${error_filters}}[$interval])) by ($groupBy) / (sum(rate(np_requests_total_enriched{${base_filters}}[$interval])) by ($groupBy) > 0)) * 100 or vector(0)"
       else
-        echo "(sum(rate(np_requests_total_enriched{${error_filters}}[$interval])) / sum(rate(np_requests_total_enriched{${base_filters}}[$interval]))) * 100"
+        echo "(sum(rate(np_requests_total_enriched{${error_filters}}[$interval])) / (sum(rate(np_requests_total_enriched{${base_filters}}[$interval])) > 0)) * 100 or vector(0)"
       fi
       ;;
     "cronjob.execution_count")
@@ -254,7 +255,7 @@ if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
     fi
     # Use minimum 5m interval for HTTP metrics to ensure sufficient data points
     case "$METRIC_NAME" in
-      "http.error_rate"|"http.response_time"|"http.rpm"|"http.healthcheck_count"|"http.healthcheck_fail")
+      "http.error_rate"|"http.response_time"|"http.rpm"|"system.healthy_pods")
         if [[ $interval_minutes -lt 5 ]]; then
           interval_minutes=5
         fi

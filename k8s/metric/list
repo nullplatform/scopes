@@ -45,8 +45,8 @@ echo '{
 			"available_group_by": ["scope_id", "pod"]
 		},
 		{
-			"name": "http.healthcheck_count",
-			"title": "Healthcheck",
+			"name": "system.healthy_pods",
+			"title": "Healthy Pods",
 			"unit": "check",
 			"available_filters": ["scope_id", "pod"],
 			"available_group_by": ["pod"]
