@@ -337,7 +337,7 @@ transform_response() {
     selector: .metric,
     data: .values | map({
       timestamp: (.[0] | tonumber | todate),
-      value: (if .[1] == null or .[1] == "null" then 0 else (.[1] | tonumber) end)
+      value: (if (.[1] | type) == "null" then 0 else (.[1] | tonumber) end)
     })
   })'
 }
