@@ -128,6 +128,11 @@ build_query() {
     groupBy=""
   fi
 
+  # Replace instance_id with pod in groupBy
+  if [[ -n "$groupBy" ]]; then
+    groupBy=$(echo "$groupBy" | sed 's/instance_id/pod/g')
+  fi
+
   case "$metric" in
     "http.healthcheck_count")
       if [[ -n "$groupBy" ]]; then
