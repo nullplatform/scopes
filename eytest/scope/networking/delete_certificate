@@ -2,23 +2,23 @@
 
 set -euo pipefail
 
-DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
-CERTIFICATE_NAME=$(echo "$CONTEXT" | jq -r '.scope.domain')
+# Extract variables from CONTEXT
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 
-: "${GATEWAY_NAMESPACE:?Environment variable GATEWAY_NAMESPACE not set}"
-: "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set}"
+# Optional environment variables with defaults
+NAMESPACE="${NAMESPACE:-default}"
 
-SECRET_NAME="tls-${DEPLOYMENT_ID}"
-LISTENER_NAME="listener-${DEPLOYMENT_ID}"
-SECRET_NAMESPACE="${SECRET_NAMESPACE:-${GATEWAY_NAMESPACE}}"
+# Certificate name based on scope ID
+CERT_NAME="cert-${SCOPE_ID}"
 
-LISTENER_INDEX=$(kubectl get gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" -o json | jq ".spec.listeners | map(.name) | index(\"${LISTENER_NAME}\")")
+echo "Deleting certificate: ${CERT_NAME} from namespace: ${NAMESPACE}"
 
-if [[ "${LISTENER_INDEX}" != "null" ]]; then
-    kubectl patch gateway "${GATEWAY_NAME}" -n "${GATEWAY_NAMESPACE}" --type=json --patch="[{\"op\":\"remove\",\"path\": \"/spec/listeners/${LISTENER_INDEX}\"}]"
-    echo "Listener removed from gateway"
+# Delete the Certificate CRD (this should handle cleanup automatically)
+if kubectl get certificate "$CERT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+    kubectl delete certificate "$CERT_NAME" -n "$NAMESPACE" --grace-period=30
+    echo "Certificate ${CERT_NAME} deleted successfully"
+else
+    echo "Certificate ${CERT_NAME} not found, nothing to delete"
 fi
-
-kubectl delete secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" 2>/dev/null || true
 
 echo "Certificate deletion completed"
