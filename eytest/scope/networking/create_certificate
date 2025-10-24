@@ -24,8 +24,13 @@ fi
 NAMESPACE="${NAMESPACE:-default}"
 CERT_TIMEOUT="${CERT_TIMEOUT:-300}"
 
-# Build template variables using jq
-TEMPLATE_VARS=$(jq -n \
+# Process template and apply
+CERT_NAME="cert-${SCOPE_ID}"
+OUTPUT_FILE="/tmp/certificate-${SCOPE_ID}.yaml"
+CONTEXT_PATH="/tmp/context-${SCOPE_ID}.json"
+
+# Build extended context with certificate-specific variables
+echo "$CONTEXT" | jq \
   --arg scope_id "$SCOPE_ID" \
   --arg certificate_name "$CERTIFICATE_NAME" \
   --arg environment "$ENVIRONMENT" \
@@ -33,7 +38,7 @@ TEMPLATE_VARS=$(jq -n \
   --arg gateway_name "$GATEWAY_NAME" \
   --arg gateway_namespace "$GATEWAY_NAMESPACE" \
   --arg namespace "$NAMESPACE" \
-  '{
+  '. + {
     scope_id: $scope_id,
     certificate_name: $certificate_name,
     environment: $environment,
@@ -41,17 +46,21 @@ TEMPLATE_VARS=$(jq -n \
     gateway_name: $gateway_name,
     gateway_namespace: $gateway_namespace,
     namespace: $namespace
-  }')
+  }' > "$CONTEXT_PATH"
 
-echo "Creating certificate with variables:"
-echo "$TEMPLATE_VARS" | jq '.'
+echo "Building Template: $CERTIFICATE_TEMPLATE to $OUTPUT_FILE"
 
-# Process template and apply
-CERT_NAME="cert-${SCOPE_ID}"
-OUTPUT_FILE="/tmp/certificate-${SCOPE_ID}.yaml"
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$CERTIFICATE_TEMPLATE" \
+  --out "$OUTPUT_FILE"
 
-echo "Processing certificate template..."
-echo "$TEMPLATE_VARS" | gomplate -f "$CERTIFICATE_TEMPLATE" > "$OUTPUT_FILE"
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building certificate template"
+    rm -f "$CONTEXT_PATH"
+    exit 1
+fi
 
 echo "Applying certificate..."
 kubectl apply -f "$OUTPUT_FILE" --field-manager=kubectl-client-side-apply
@@ -67,8 +76,10 @@ if kubectl wait --for=condition=Ready "certificate/${CERT_NAME}" -n "$NAMESPACE"
 else
     echo "ERROR: Certificate failed to become ready within ${CERT_TIMEOUT} seconds"
     kubectl describe certificate "$CERT_NAME" -n "$NAMESPACE"
+    rm -f "$CONTEXT_PATH"
     exit 1
 fi
 
-# Cleanup temp file
+# Cleanup temp files
+rm -f "$CONTEXT_PATH"
 rm -f "$OUTPUT_FILE"
