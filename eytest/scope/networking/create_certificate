@@ -19,9 +19,9 @@ fi
 : "${GATEWAY_NAMESPACE:?Environment variable GATEWAY_NAMESPACE not set}"
 : "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set}"
 : "${CERTIFICATE_TEMPLATE:?Environment variable CERTIFICATE_TEMPLATE not set}"
+: "${K8S_NAMESPACE:?Environment variable K8S_NAMESPACE not set}"
 
 # Optional environment variables with defaults
-NAMESPACE="${NAMESPACE:-default}"
 CERT_TIMEOUT="${CERT_TIMEOUT:-300}"
 
 # Process template and apply
@@ -37,7 +37,7 @@ echo "$CONTEXT" | jq \
   --arg domain_name "$CERTIFICATE_DOMAIN_NAME" \
   --arg gateway_name "$GATEWAY_NAME" \
   --arg gateway_namespace "$GATEWAY_NAMESPACE" \
-  --arg namespace "$NAMESPACE" \
+  --arg namespace "$K8S_NAMESPACE" \
   '. + {
     scope_id: $scope_id,
     certificate_name: $certificate_name,
@@ -66,16 +66,16 @@ echo "Applying certificate..."
 kubectl apply -f "$OUTPUT_FILE" --field-manager=kubectl-client-side-apply
 
 echo "Waiting for certificate to be ready..."
-if kubectl wait --for=condition=Ready "certificate/${CERT_NAME}" -n "$NAMESPACE" --timeout="${CERT_TIMEOUT}s"; then
+if kubectl wait --for=condition=Ready "certificate.pki.ey.com/${CERT_NAME}" -n "$K8S_NAMESPACE" --timeout="${CERT_TIMEOUT}s"; then
     echo "Certificate ${CERT_NAME} is ready!"
     
     # Show certificate status
-    kubectl get certificate "$CERT_NAME" -n "$NAMESPACE" -o wide
+    kubectl get certificate.pki.ey.com "$CERT_NAME" -n "$K8S_NAMESPACE" -o wide
     
     echo "Certificate workflow completed successfully!"
 else
     echo "ERROR: Certificate failed to become ready within ${CERT_TIMEOUT} seconds"
-    kubectl describe certificate "$CERT_NAME" -n "$NAMESPACE"
+    kubectl describe certificate.pki.ey.com "$CERT_NAME" -n "$K8S_NAMESPACE"
     rm -f "$CONTEXT_PATH"
     exit 1
 fi
