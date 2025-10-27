@@ -1,0 +1,169 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Skip DNS creation if DEPLOYMENT_ID env variable is set and not empty
+if [[ -n "${DEPLOYMENT_ID:-}" && "${DEPLOYMENT_ID}" != "" && "${DEPLOYMENT_ID}" != "null" ]]; then
+    echo "DEPLOYMENT_ID env variable is set and not empty, skipping DNS creation"
+    echo "DNS workflow skipped"
+    exit 0
+fi
+
+# Check if logged into Azure CLI
+echo "Checking Azure CLI login status..."
+if ! az account show &>/dev/null; then
+    echo "Not logged into Azure CLI. Logging in..."
+    # Login using service principal with output suppressed
+    az login --service-principal \
+        -u "${AZURE_CLIENT_ID}" \
+        -p "${AZURE_CLIENT_SECRET}" \
+        --tenant "${AZURE_TENANT_ID}" \
+        --output none 2>/dev/null
+    
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Azure login failed"
+        exit 1
+    fi
+    echo "Azure login successful"
+fi
+
+# Set the subscription with output suppressed
+az account set --subscription "${AZURE_SUBSCRIPTION_ID}" --output none 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to set Azure subscription"
+    exit 1
+fi
+
+# Extract variables from CONTEXT
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+FQDN=$(echo "$CONTEXT" | jq -r '.scope.domain')
+
+# Required environment variables
+: "${KEYVAULT_NAME:?Environment variable KEYVAULT_NAME not set}"
+: "${ANSIBLE_TOWER_URL:?Environment variable ANSIBLE_TOWER_URL not set}"
+: "${ANSIBLE_TOWER_TEMPLATE_ID:?Environment variable ANSIBLE_TOWER_TEMPLATE_ID not set}"
+: "${DNS_OWNER:?Environment variable DNS_OWNER not set}"
+: "${DNS_OWNER_GROUP:?Environment variable DNS_OWNER_GROUP not set}"
+: "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set}"
+
+# Optional environment variables with defaults
+DRY_RUN="${DRY_RUN:-false}"
+POLL_INTERVAL="${POLL_INTERVAL:-10}"
+TIMEOUT="${TIMEOUT:-1800}"
+
+# Retrieve Ansible credentials from KeyVault
+echo "Retrieving Ansible credentials from KeyVault..."
+ANSIBLE_TOWER_USERNAME=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "ansibleUser" --query "value" -o tsv)
+ANSIBLE_TOWER_PASSWORD=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "ansiblePassword" --query "value" -o tsv)
+
+if [ -z "${ANSIBLE_TOWER_USERNAME}" ] || [ -z "${ANSIBLE_TOWER_PASSWORD}" ]; then
+    echo "ERROR: Failed to retrieve Ansible credentials from KeyVault"
+    exit 1
+fi
+
+# Get IP from Gateway resource
+echo "Getting IP address for gateway: ${GATEWAY_NAME}..."
+GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+
+if [ -z "$GATEWAY_IP" ]; then
+    echo "Error: Could not get IP address for gateway $GATEWAY_NAME" >&2
+    exit 1
+fi
+
+echo "Gateway IP retrieved: ${GATEWAY_IP}"
+
+# Build EXTRA_VARS for DNS creation
+EXTRA_VARS=$(cat <<EOF
+{
+  "var_action": "add",
+  "var_fqdn": "${FQDN}",
+  "var_owner": "${DNS_OWNER}",
+  "var_owner_group": "${DNS_OWNER_GROUP}",
+  "var_record_type": "A",
+  "var_value": "${GATEWAY_IP}",
+  "var_view": "internal",
+  "var_deployment_id": "${DEPLOYMENT_ID}"
+}
+EOF
+)
+
+echo "Generated EXTRA_VARS:"
+echo "${EXTRA_VARS}"
+echo ""
+
+if [ "$DRY_RUN" = "true" ]; then
+    echo "DRY RUN: Would execute the following curl command:"
+    echo "curl -s -k \\"
+    echo "  -u [USERNAME]:[PASSWORD] \\"
+    echo "  -H \"Content-Type: application/json\" \\"
+    echo "  -X POST \\"
+    echo "  \"${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/\" \\"
+    echo "  -d '{\"extra_vars\": ${EXTRA_VARS}}'"
+else
+    auth_header="Authorization: Basic $(echo -n "${ANSIBLE_TOWER_USERNAME}:${ANSIBLE_TOWER_PASSWORD}" | base64)"
+    
+    LAUNCH_RESPONSE=$(curl -s -k \
+      -H "${auth_header}" \
+      -H "Content-Type: application/json" \
+      -X POST \
+      "${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/" \
+      -d "{\"extra_vars\": ${EXTRA_VARS}}")
+
+    JOB_ID=$(echo "${LAUNCH_RESPONSE}" | jq -r '.id')
+
+    if [ "${JOB_ID}" = "null" ] || [ -z "${JOB_ID}" ]; then
+        echo "ERROR: Failed to launch job"
+        echo "${LAUNCH_RESPONSE}"
+        exit 1
+    fi
+
+    echo "Job launched successfully. Job ID: ${JOB_ID}"
+    
+    START_TIME=$(date +%s)
+
+    echo "Monitoring job status..."
+    while true; do
+        CURRENT_TIME=$(date +%s)
+        ELAPSED=$((CURRENT_TIME - START_TIME))
+        
+        if [ ${ELAPSED} -gt ${TIMEOUT} ]; then
+            echo "ERROR: Job timed out after ${TIMEOUT} seconds"
+            exit 1
+        fi
+        
+        STATUS_RESPONSE=$(curl -s -k \
+            -H "${auth_header}" \
+            "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/")
+        
+        STATUS=$(echo "${STATUS_RESPONSE}" | jq -r '.status')
+        
+        echo "Job ${JOB_ID} status: ${STATUS} (elapsed: ${ELAPSED}s)"
+        
+        case "${STATUS}" in
+            "successful")
+                echo "Job completed successfully!"
+                echo "DNS record created successfully for ${FQDN}"
+                break
+                ;;
+            "failed"|"error"|"canceled")
+                echo "ERROR: Job failed with status: ${STATUS}"
+                echo "Getting job output..."
+                curl -s -k \
+                    -H "${auth_header}" \
+                    "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/stdout/?format=txt_download" \
+                    | tail -50
+                exit 1
+                ;;
+            "pending"|"waiting"|"running")
+                sleep ${POLL_INTERVAL}
+                ;;
+            *)
+                echo "Unknown job status: ${STATUS}"
+                sleep ${POLL_INTERVAL}
+                ;;
+        esac
+    done
+fi
+
+echo "DNS workflow completed successfully!"

@@ -51,6 +51,9 @@ steps:
       - name: delete role
         type: script
         file: "$SERVICE_PATH/scope/iam/delete_role"
+  - name: remove dns
+    type: script
+    file: "$OVERRIDES_PATH/scope/networking/delete_dns"
   - name: delete certificate
     type: script
     file: "$OVERRIDES_PATH/scope/networking/delete_certificate"
