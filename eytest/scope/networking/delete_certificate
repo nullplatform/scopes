@@ -5,17 +5,17 @@ set -euo pipefail
 # Extract variables from CONTEXT
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 
-# Optional environment variables with defaults
-NAMESPACE="${NAMESPACE:-default}"
+# Required environment variables
+: "${K8S_NAMESPACE:?Environment variable K8S_NAMESPACE not set}"
 
 # Certificate name based on scope ID
 CERT_NAME="cert-${SCOPE_ID}"
 
-echo "Deleting certificate: ${CERT_NAME} from namespace: ${NAMESPACE}"
+echo "Deleting certificate: ${CERT_NAME} from namespace: ${K8S_NAMESPACE}"
 
 # Delete the Certificate CRD (this should handle cleanup automatically)
-if kubectl get certificate "$CERT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
-    kubectl delete certificate "$CERT_NAME" -n "$NAMESPACE" --grace-period=30
+if kubectl get certificate.pki.ey.com "$CERT_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    kubectl delete certificate.pki.ey.com "$CERT_NAME" -n "$K8S_NAMESPACE" --grace-period=30
     echo "Certificate ${CERT_NAME} deleted successfully"
 else
     echo "Certificate ${CERT_NAME} not found, nothing to delete"

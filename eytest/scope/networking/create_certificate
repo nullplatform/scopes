@@ -82,4 +82,3 @@ fi
 
 # Cleanup temp files
 rm -f "$CONTEXT_PATH"
-rm -f "$OUTPUT_FILE"
