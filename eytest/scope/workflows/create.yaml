@@ -43,9 +43,6 @@ steps:
         output:
           - name: SCOPE_DOMAIN
             type: environment
-  - name: generate dns
-    type: script
-    file: "$OVERRIDES_PATH/scope/networking/create_dns"
   - name: generate certificate
     type: script
     file: "$OVERRIDES_PATH/scope/networking/create_certificate"
