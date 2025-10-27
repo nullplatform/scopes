@@ -58,7 +58,7 @@ fi
 
 NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
 APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r .application.slug)
-COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | cut -c1-63)
+COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-Z0-9]).*/\1/')
 
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \

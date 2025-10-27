@@ -88,7 +88,7 @@ metadata:
   namespace: {{ $.k8s_namespace }}
   labels:
     name: d-{{ $.scope.id }}-{{ $.deployment.id }}-http-{{ .port }}
-    app.kubernetes.io/part-of: {{ $.namespace.slug }}-{{ $.application.slug }}
+    app.kubernetes.io/part-of: {{ .component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ $.scope.slug }}
     app.kubernetes.io/name: {{ $.scope.slug }}
@@ -169,7 +169,7 @@ metadata:
   namespace: {{ $.k8s_namespace }}
   labels:
     name: d-{{ $.scope.id }}-{{ $.deployment.id }}-grpc-{{ .port }}
-    app.kubernetes.io/part-of: {{ $.namespace.slug }}-{{ $.application.slug }}
+    app.kubernetes.io/part-of: {{ .component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ $.scope.slug }}
     app.kubernetes.io/name: {{ $.scope.slug }}
