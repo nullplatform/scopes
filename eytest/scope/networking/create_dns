@@ -41,10 +41,9 @@ FQDN=$(echo "$CONTEXT" | jq -r '.scope.domain')
 # Required environment variables
 : "${KEYVAULT_NAME:?Environment variable KEYVAULT_NAME not set}"
 : "${ANSIBLE_TOWER_URL:?Environment variable ANSIBLE_TOWER_URL not set}"
-: "${ANSIBLE_TOWER_TEMPLATE_ID:?Environment variable ANSIBLE_TOWER_TEMPLATE_ID not set}"
+: "${DNS_TOWER_TEMPLATE_ID:?Environment variable DNS_TOWER_TEMPLATE_ID not set}"
 : "${DNS_OWNER:?Environment variable DNS_OWNER not set}"
 : "${DNS_OWNER_GROUP:?Environment variable DNS_OWNER_GROUP not set}"
-: "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set}"
 
 # Optional environment variables with defaults
 DRY_RUN="${DRY_RUN:-false}"
@@ -61,17 +60,24 @@ if [ -z "${ANSIBLE_TOWER_USERNAME}" ] || [ -z "${ANSIBLE_TOWER_PASSWORD}" ]; the
     exit 1
 fi
 
-# Get IP from Gateway resource
-echo "Getting IP address for gateway: ${GATEWAY_NAME}..."
-GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-    -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
-
-if [ -z "$GATEWAY_IP" ]; then
-    echo "Error: Could not get IP address for gateway $GATEWAY_NAME" >&2
-    exit 1
+if [ -n "${DNS_VALUE:-}" ]; then
+    echo "Using provided DNS_VALUE: ${DNS_VALUE}"
+    IP_TO_USE="${DNS_VALUE}"
+else
+    # Get IP from Gateway resource
+    : "${GATEWAY_NAME:?Environment variable GATEWAY_NAME not set when DNS_VALUE is not provided}"
+    echo "Getting IP address for gateway: ${GATEWAY_NAME}..."
+    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+    
+    if [ -z "$GATEWAY_IP" ]; then
+        echo "Error: Could not get IP address for gateway $GATEWAY_NAME" >&2
+        exit 1
+    fi
+    
+    echo "Gateway IP retrieved: ${GATEWAY_IP}"
+    IP_TO_USE="${GATEWAY_IP}"
 fi
-
-echo "Gateway IP retrieved: ${GATEWAY_IP}"
 
 # Build EXTRA_VARS for DNS creation
 EXTRA_VARS=$(cat <<EOF
@@ -81,7 +87,7 @@ EXTRA_VARS=$(cat <<EOF
   "var_owner": "${DNS_OWNER}",
   "var_owner_group": "${DNS_OWNER_GROUP}",
   "var_record_type": "A",
-  "var_value": "${GATEWAY_IP}",
+  "var_value": "${IP_TO_USE}",
   "var_view": "internal",
   "var_deployment_id": "${DEPLOYMENT_ID}"
 }
@@ -98,7 +104,7 @@ if [ "$DRY_RUN" = "true" ]; then
     echo "  -u [USERNAME]:[PASSWORD] \\"
     echo "  -H \"Content-Type: application/json\" \\"
     echo "  -X POST \\"
-    echo "  \"${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/\" \\"
+    echo "  \"${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${DNS_TOWER_TEMPLATE_ID}/launch/\" \\"
     echo "  -d '{\"extra_vars\": ${EXTRA_VARS}}'"
 else
     auth_header="Authorization: Basic $(echo -n "${ANSIBLE_TOWER_USERNAME}:${ANSIBLE_TOWER_PASSWORD}" | base64)"

@@ -41,7 +41,7 @@ FQDN=$(echo "$CONTEXT" | jq -r '.scope.domain')
 # Required environment variables
 : "${KEYVAULT_NAME:?Environment variable KEYVAULT_NAME not set}"
 : "${ANSIBLE_TOWER_URL:?Environment variable ANSIBLE_TOWER_URL not set}"
-: "${ANSIBLE_TOWER_TEMPLATE_ID:?Environment variable ANSIBLE_TOWER_TEMPLATE_ID not set}"
+: "${DNS_TOWER_TEMPLATE_ID:?Environment variable DNS_TOWER_TEMPLATE_ID not set}"
 : "${DNS_OWNER:?Environment variable DNS_OWNER not set}"
 : "${DNS_OWNER_GROUP:?Environment variable DNS_OWNER_GROUP not set}"
 : "${DNS_VALUE:?Environment variable DNS_VALUE not set}"
@@ -85,7 +85,7 @@ if [ "$DRY_RUN" = "true" ]; then
     echo "  -u [USERNAME]:[PASSWORD] \\"
     echo "  -H \"Content-Type: application/json\" \\"
     echo "  -X POST \\"
-    echo "  \"${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/\" \\"
+    echo "  \"${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${DNS_TOWER_TEMPLATE_ID}/launch/\" \\"
     echo "  -d '{\"extra_vars\": ${EXTRA_VARS}}'"
 else
     auth_header="Authorization: Basic $(echo -n "${ANSIBLE_TOWER_USERNAME}:${ANSIBLE_TOWER_PASSWORD}" | base64)"
