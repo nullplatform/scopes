@@ -113,7 +113,7 @@ else
       -H "${auth_header}" \
       -H "Content-Type: application/json" \
       -X POST \
-      "${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${ANSIBLE_TOWER_TEMPLATE_ID}/launch/" \
+      "${ANSIBLE_TOWER_URL}/api/v2/workflow_job_templates/${DNS_TOWER_TEMPLATE_ID}/launch/" \
       -d "{\"extra_vars\": ${EXTRA_VARS}}")
 
     JOB_ID=$(echo "${LAUNCH_RESPONSE}" | jq -r '.id')
