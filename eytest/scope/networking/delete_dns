@@ -121,7 +121,7 @@ else
         
         STATUS_RESPONSE=$(curl -s -k \
             -H "${auth_header}" \
-            "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/")
+            "${ANSIBLE_TOWER_URL}/api/v2/workflow_jobs/${JOB_ID}/")
         
         STATUS=$(echo "${STATUS_RESPONSE}" | jq -r '.status')
         
@@ -138,7 +138,7 @@ else
                 echo "Getting job output..."
                 curl -s -k \
                     -H "${auth_header}" \
-                    "${ANSIBLE_TOWER_URL}/api/v2/jobs/${JOB_ID}/stdout/?format=txt_download" \
+                    "${ANSIBLE_TOWER_URL}/api/v2/workflow_jobs/${JOB_ID}/stdout/?format=txt_download" \
                     | tail -50
                 exit 1
                 ;;
