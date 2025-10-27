@@ -69,7 +69,7 @@ EXTRA_VARS=$(cat <<EOF
   "var_owner": "${DNS_OWNER}",
   "var_owner_group": "${DNS_OWNER_GROUP}",
   "var_record_type": "A",
-  "var_view": "both",
+  "var_view": "internal",
   "var_deployment_id": "DSC03H"
 }
 EOF
