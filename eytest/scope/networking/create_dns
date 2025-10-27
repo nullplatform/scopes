@@ -89,7 +89,7 @@ EXTRA_VARS=$(cat <<EOF
   "var_record_type": "A",
   "var_value": "${IP_TO_USE}",
   "var_view": "internal",
-  "var_deployment_id": "${DEPLOYMENT_ID}"
+  "var_deployment_id": "DSC03H"
 }
 EOF
 )
