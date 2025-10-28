@@ -38,7 +38,7 @@ fi
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
 APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
-CERTIFICATE_NAME="${APPLICATION_SLUG}-${DEPLOYMENT_ID}"
+CERTIFICATE_NAME="${APPLICATION_SLUG}-${DEPLOYMENT_ID}.${DOMAIN_NAME}"
 
 SCOPE_ENV=$(echo "$CONTEXT" | jq -r '.scope.dimensions.environment // empty' | tr '[:lower:]' '[:upper:]')
 if [[ -z "${SCOPE_ENV}" || "${SCOPE_ENV}" == "null" || "${SCOPE_ENV}" == "NULL" ]]; then
