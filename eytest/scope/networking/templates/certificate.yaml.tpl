@@ -11,6 +11,11 @@ spec:
   domainName: "{{ .domain_name }}"
   issuerRef:
     name: ey-fabric-issuer
+  dnsConfig:
+    createDNS: true
+    ipAddress: "{{ .dns_value }}"
+    recordType: "A"
+    view: "internal"
   gateway:
     name: {{ .gateway_name }}
     namespace: {{ .gateway_namespace }}

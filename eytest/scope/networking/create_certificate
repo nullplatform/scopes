@@ -38,6 +38,7 @@ echo "$CONTEXT" | jq \
   --arg gateway_name "$GATEWAY_NAME" \
   --arg gateway_namespace "$GATEWAY_NAMESPACE" \
   --arg namespace "$K8S_NAMESPACE" \
+  --arg dns_value "${DNS_VALUE:-}" \
   '. + {
     scope_id: $scope_id,
     certificate_name: $certificate_name,
@@ -45,7 +46,8 @@ echo "$CONTEXT" | jq \
     domain_name: $domain_name,
     gateway_name: $gateway_name,
     gateway_namespace: $gateway_namespace,
-    namespace: $namespace
+    namespace: $namespace,
+    dns_value: $dns_value
   }' > "$CONTEXT_PATH"
 
 echo "Building Template: $CERTIFICATE_TEMPLATE to $OUTPUT_FILE"
