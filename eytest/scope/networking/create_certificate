@@ -38,7 +38,6 @@ fi
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
 APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
-CERTIFICATE_NAME="${APPLICATION_SLUG}-${DEPLOYMENT_ID}.${DOMAIN_NAME}"
 
 SCOPE_ENV=$(echo "$CONTEXT" | jq -r '.scope.dimensions.environment // empty' | tr '[:lower:]' '[:upper:]')
 if [[ -z "${SCOPE_ENV}" || "${SCOPE_ENV}" == "null" || "${SCOPE_ENV}" == "NULL" ]]; then
@@ -69,6 +68,9 @@ CERT_WAIT_TIMEOUT="${CERT_WAIT_TIMEOUT:-60}"
 
 # Set domain name
 DOMAIN_NAME="${CERTIFICATE_DOMAIN_NAME}"
+
+# Set certificate name with application slug, deployment ID, environment, and domain
+CERTIFICATE_NAME="${APPLICATION_SLUG}-${DEPLOYMENT_ID}-${ENVIRONMENT}.${DOMAIN_NAME}"
 
 # Check if certificate already exists in KeyVault
 echo "Checking if certificate already exists in KeyVault..."
