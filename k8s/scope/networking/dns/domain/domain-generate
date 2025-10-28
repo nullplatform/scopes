@@ -156,7 +156,7 @@ if [[ -n "$DOMAIN_LIMIT_SIZE" ]]; then
         final_domain="${final_domain:$trim_amount}"
 
         if [[ "$final_domain" =~ ^[^a-zA-Z0-9] ]] || [[ ! "$final_domain" =~ ^[a-zA-Z0-9] ]]; then
-            final_domain=$(echo "$final_domain" | sed 's/^[^.]*\.//')
+            final_domain=$(echo "$final_domain" | sed 's/^[^a-zA-Z0-9]*//')
         fi
     fi
 fi
