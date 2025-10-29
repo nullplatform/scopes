@@ -351,7 +351,7 @@
          "visibility":{
             "type":"string",
             "const":"internal",
-            "default":"internal"
+            "default":"internal",
          },
          "autoscaling":{
             "type":"object",
