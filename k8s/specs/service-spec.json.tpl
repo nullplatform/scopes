@@ -360,18 +360,13 @@
             "type":"string",
             "oneOf":[
                {
-                  "const":"public",
-                  "title":"Internet",
-                  "description":"Public, reachable by anyone"
-               },
-               {
                   "const":"internal",
-                  "title":"Main Account",
-                  "description":"Only visible inside your organization"
+                  "title":"EY Network",
+                  "description":"Connect with VPN to access scope"
                }
             ],
             "title":"Visibility",
-            "default":"public",
+            "default":"internal",
             "description":"Define whether the scope is publicly accessible or private to your account"
          },
          "autoscaling":{
