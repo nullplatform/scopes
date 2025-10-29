@@ -48,14 +48,6 @@
                "scope":"#/properties/ram_memory"
             },
             {
-               "type":"Control",
-               "label":"Visibility",
-               "scope":"#/properties/visibility",
-               "options":{
-                  "format":"radio"
-               }
-            },
-            {
                "type":"Categorization",
                "options":{
                   "collapsable":{
@@ -358,21 +350,8 @@
          },
          "visibility":{
             "type":"string",
-            "oneOf":[
-               {
-                  "const":"public",
-                  "title":"Internet",
-                  "description":"Public, reachable by anyone"
-               },
-               {
-                  "const":"internal",
-                  "title":"Main Account",
-                  "description":"Only visible inside your organization"
-               }
-            ],
-            "title":"Visibility",
-            "default":"public",
-            "description":"Define whether the scope is publicly accessible or private to your account"
+            "const":"internal",
+            "default":"internal",
          },
          "autoscaling":{
             "type":"object",
