@@ -238,7 +238,6 @@ spec:
             {{ .asset.url }}
           securityContext:
             runAsNonRoot: true
-            runAsUser: 101
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities:
