@@ -35,7 +35,7 @@ if [ "$SCOPE_VISIBILITY" = "public" ]; then
     export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.public_name // $default')
 else
     export INGRESS_VISIBILITY="internal"
-    GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
+    GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
     export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.private_name // $default')
 fi
 
