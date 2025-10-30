@@ -26,6 +26,11 @@ case "$DNS_TYPE" in
     else
       GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
     fi
+
+    echo "Using Azure DNS"
+    echo "> gateway name: $GATEWAY_NAME"
+    echo "> hosted zone name: $HOSTED_ZONE_NAME"
+    echo "> hosted zone resource group: $HOSTED_ZONE_RG"
     
     source "$SERVICE_PATH/scope/networking/dns/az-records/manage_route" \
       --action="$ACTION" \
