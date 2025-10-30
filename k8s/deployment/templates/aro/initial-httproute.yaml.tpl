@@ -44,8 +44,12 @@ metadata:
 {{- end }}
 spec:
   host: {{ .scope.domain }}
+  port:
+    targetPort: 80
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  wildcardPolicy: None
   to:
     kind: Service
     name: d-{{ .scope.id }}-{{ .deployment.id }}
-  port:
-    targetPort: 80

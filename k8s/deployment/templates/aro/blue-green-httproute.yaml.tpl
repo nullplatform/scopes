@@ -46,12 +46,16 @@ metadata:
 {{- end }}
 spec:
   host: {{ .scope.domain }}
+  port:
+    targetPort: 80
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  wildcardPolicy: None
   to:
     kind: Service
     name: d-{{ .scope.id }}-{{ .blue_deployment_id }}
     weight: {{ sub 100 .deployment.strategy_data.desired_switched_traffic }}
-  port:
-    targetPort: 80
   alternateBackends:
     - kind: Service
       name: d-{{ .scope.id }}-{{ .deployment.id }}
