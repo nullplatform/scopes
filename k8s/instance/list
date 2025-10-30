@@ -1,6 +1,5 @@
 #!/bin/bash
 
-K8S_NAMESPACE="${NAMESPACE_OVERRIDE:-nullplatform}"
 LABEL_SELECTOR="nullplatform=true"
 if [[ -n "$APPLICATION_ID" && "$APPLICATION_ID" != "null" ]]; then
  LABEL_SELECTOR="$LABEL_SELECTOR,application_id=$APPLICATION_ID"
