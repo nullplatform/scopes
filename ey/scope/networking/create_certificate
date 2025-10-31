@@ -13,6 +13,11 @@ else
     ENVIRONMENT="${SCOPE_ENV}"
 fi
 
+# Set default values for environment variables
+CERTIFICATE_DOMAIN_NAME="${CERTIFICATE_DOMAIN_NAME:-sbp.eyclienthub.com}"
+GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-gateways}"
+GATEWAY_NAME="${GATEWAY_NAME:-gateway-public}"
+
 # Required environment variables
 : "${CERTIFICATE_DOMAIN_NAME:?Environment variable CERTIFICATE_DOMAIN_NAME not set}"
 : "${ENVIRONMENT:?Environment variable ENVIRONMENT not set}"
