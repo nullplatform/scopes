@@ -147,18 +147,4 @@ fi
 
 final_domain=$(build_scope_domain "$account_slug" "$namespace_slug" "$application_slug" "$scope_slug" "$domain" "$use_account_slug" "$use_namespace_slug")
 
-# Apply domain size limit if DOMAIN_LIMIT_SIZE is set
-if [[ -n "$DOMAIN_LIMIT_SIZE" ]]; then
-    if [[ ${#final_domain} -gt $DOMAIN_LIMIT_SIZE ]]; then
-        # Calculate how many characters to trim from the left
-        trim_amount=$((${#final_domain} - $DOMAIN_LIMIT_SIZE))
-        # Trim from the left to keep the right side (including TLD)
-        final_domain="${final_domain:$trim_amount}"
-
-        if [[ "$final_domain" =~ ^[^a-zA-Z0-9] ]] || [[ ! "$final_domain" =~ ^[a-zA-Z0-9] ]]; then
-            final_domain=$(echo "$final_domain" | sed 's/^[^a-zA-Z0-9]*//')
-        fi
-    fi
-fi
-
 echo "$final_domain"
