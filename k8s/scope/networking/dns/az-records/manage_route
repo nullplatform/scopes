@@ -76,16 +76,22 @@ if [ -z "$GATEWAY_IP" ]; then
     exit 1
 fi
 
-SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
+SCOPE_SUBDOMAIN="${SCOPE_SUBDOMAIN:-}"
+if [ -z "$SCOPE_SUBDOMAIN" ]; then
+    SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
 
-echo "manage_route SCOPE_SUBDOMAIN = $SCOPE_SUBDOMAIN HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME GATEWAY_IP = $GATEWAY_IP"
+echo "manage_route SCOPE_SUBDOMAIN = $SCOPE_SUBDOMAIN HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME GATEWAY_IP = $GATEWAY_IP, SCOPE_VISIBILITY = $SCOPE_VISIBILITY"
 
 if [ "$ACTION" = "CREATE" ]; then
     # Get access token
     ACCESS_TOKEN=$(get_azure_token) || exit 1
 
-    # Create or update A record
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
+    if [ "$SCOPE_VISIBILITY" = "public" ]; then
+      zone_path="dnsZones"
+    else
+      zone_path="privateDnsZones"
+    fi
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-09-01"
 
     RECORD_BODY=$(cat <<EOF
 {
@@ -134,7 +140,12 @@ elif [ "$ACTION" = "DELETE" ]; then
     
     ACCESS_TOKEN=$(get_azure_token) || exit 1
     
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
+    if [ "$SCOPE_VISIBILITY" = "public" ]; then
+      zone_path="dnsZones"
+    else
+      zone_path="privateDnsZones"
+    fi
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-09-01"
     
     curl --http1.1 -s -X DELETE \
         "${RECORD_SET_URL}" \
