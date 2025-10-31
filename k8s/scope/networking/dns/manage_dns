@@ -32,6 +32,8 @@ case "$DNS_TYPE" in
     fi
 
     echo "Using Azure DNS"
+    echo "HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME"
+    echo "HOSTED_ZONE_RG = $HOSTED_ZONE_RG"
     
     source "$SERVICE_PATH/scope/networking/dns/az-records/manage_route" \
       --action="$ACTION" \
