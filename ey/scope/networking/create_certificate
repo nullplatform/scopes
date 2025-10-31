@@ -28,7 +28,7 @@ DNS_VALUE="${DNS_VALUE:-4.156.211.174}"
 : "${K8S_NAMESPACE:?Environment variable K8S_NAMESPACE not set}"
 
 # Optional environment variables with defaults
-CERT_TIMEOUT="${CERT_TIMEOUT:-800}"
+CERT_TIMEOUT="${CERT_TIMEOUT:-1800}"
 
 # Process template and apply
 CERT_NAME="cert-${SCOPE_ID}"
