@@ -17,6 +17,7 @@ fi
 CERTIFICATE_DOMAIN_NAME="${CERTIFICATE_DOMAIN_NAME:-sbp.eyclienthub.com}"
 GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-gateways}"
 GATEWAY_NAME="${GATEWAY_NAME:-gateway-public}"
+DNS_VALUE="${DNS_VALUE:-4.156.211.174}"
 
 # Required environment variables
 : "${CERTIFICATE_DOMAIN_NAME:?Environment variable CERTIFICATE_DOMAIN_NAME not set}"
@@ -43,7 +44,7 @@ echo "$CONTEXT" | jq \
   --arg gateway_name "$GATEWAY_NAME" \
   --arg gateway_namespace "$GATEWAY_NAMESPACE" \
   --arg namespace "$K8S_NAMESPACE" \
-  --arg dns_value "${DNS_VALUE:-}" \
+  --arg dns_value "$DNS_VALUE" \
   '. + {
     scope_id: $scope_id,
     certificate_name: $certificate_name,
