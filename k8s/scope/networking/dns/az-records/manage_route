@@ -89,10 +89,12 @@ if [ "$ACTION" = "CREATE" ]; then
 
     if [ "$SCOPE_VISIBILITY" = "public" ]; then
       zone_path="dnsZones"
+      api_version="2018-05-01"
     else
       zone_path="privateDnsZones"
+      api_version="2018-09-01"
     fi
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-09-01"
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=${api_version}"
 
     RECORD_BODY=$(cat <<EOF
 {
@@ -140,14 +142,16 @@ EOF
 elif [ "$ACTION" = "DELETE" ]; then
     
     ACCESS_TOKEN=$(get_azure_token) || exit 1
-    
+
     if [ "$SCOPE_VISIBILITY" = "public" ]; then
       zone_path="dnsZones"
+      api_version="2018-05-01"
     else
       zone_path="privateDnsZones"
+      api_version="2018-09-01"
     fi
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-09-01"
-    
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=${api_version}"
+
     curl --http1.1 -s -X DELETE \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}"
