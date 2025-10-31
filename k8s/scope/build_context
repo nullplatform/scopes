@@ -14,7 +14,7 @@ SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
-      .providers["cloud-providers"].public_dns_zone_name // .providers["cloud-providers"].networking.domain_name // $default
+      .providers["cloud-providers"].networking.public_dns_zone_name // .providers["cloud-providers"].networking.domain_name // $default
     ')
 else
     DOMAIN=$(echo "$CONTEXT" | jq -r --arg private_default "$PRIVATE_DOMAIN" --arg default "$DOMAIN" '
