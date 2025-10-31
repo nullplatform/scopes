@@ -1,13 +1,5 @@
 steps:
   - name: build green deployment
-    type: script
-    action: replace
-    file: "$OVERRIDES_PATH/deployment/build_deployment"
-    output:
-      - name: DEPLOYMENT_PATH
-        type: file
-        file: "$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-  - name: create green deployment
     post:
       name: wait deployment active
       action: skip

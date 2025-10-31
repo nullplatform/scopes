@@ -57,7 +57,7 @@ if [ "${GATEWAY_TYPE:-istio}" = "aro_cluster" ]; then
     # Get IP from OpenShift router service
     GATEWAY_IP=$(kubectl get svc "${CUSTOM_INGRESS_CONTROLLER:-router-default}" -n openshift-ingress \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-    
+
     if [ -z "$GATEWAY_IP" ]; then
         echo "Error: Could not get IP address from ARO router service" >&2
         echo "Falling back to istio gateway..." >&2
