@@ -12,16 +12,6 @@ case "$DNS_TYPE" in
     # Set default gateway type to istio if not specified
     GATEWAY_TYPE="${GATEWAY_TYPE:-istio}"
     export GATEWAY_TYPE
-    
-    # from values.yaml: HOSTED_ZONE_NAME, HOSTED_ZONE_RG, etc.
-    echo "Azure DNS context ready"
-    echo "GATEWAY_TYPE: $GATEWAY_TYPE"
-    echo "HOSTED_ZONE_NAME: $HOSTED_ZONE_NAME"
-    echo "HOSTED_ZONE_RG: $HOSTED_ZONE_RG"
-    echo "AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID"
-    echo "RESOURCE_GROUP: $RESOURCE_GROUP"
-    # echo "PUBLIC_GATEWAY_NAME: $PUBLIC_GATEWAY_NAME"
-    # echo "PRIVATE_GATEWAY_NAME: $PRIVATE_GATEWAY_NAME"
     ;;
   external_dns)
     echo "external_dns context ready"
