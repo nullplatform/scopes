@@ -1,82 +1,94 @@
 #!/bin/bash
 
-K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
-  .providers["container-orchestration"].cluster.namespace // $default
-')
+echo "Env vars we use are:"
+echo "$DNS_TYPE"
+echo "$USE_ACCOUNT_SLUG"
+echo "$IMAGE_PULL_SECRETS"
+echo "$SERVICE_TEMPLATE"
+echo "$INITIAL_INGRESS_PATH"
+echo "$BLUE_GREEN_INGRESS_PATH"
+echo "End env vars"
 
-USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
-  .providers["cloud-providers"].networking.application_domain // $default
-')
 
-REGION=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].account.region // "us-east-1"')
 
-SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 
-if [ "$SCOPE_VISIBILITY" = "public" ]; then
-    DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
-      .providers["cloud-providers"].networking.domain_name // $default
-    ')
-else
-    DOMAIN=$(echo "$CONTEXT" | jq -r --arg private_default "$PRIVATE_DOMAIN" --arg default "$DOMAIN" '
-      (.providers["cloud-providers"].networking.private_domain_name // $private_default | if . == "" then empty else . end) // .providers["cloud-providers"].networking.domain_name // $default
-    ')
-fi
-SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
-
-eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
-export ORGANIZATION_ID=\(capture("organization=(?<id>\\d+)").id)
-export ACCOUNT_ID=\(capture("account=(?<id>\\d+)").id)
-export NAMESPACE_ID=\(capture("namespace=(?<id>\\d+)").id)
-export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
-"')"
-
-SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
-
-export SCOPE_VISIBILITY
-export SCOPE_DOMAIN
-
-if [ "$SCOPE_VISIBILITY" = "public" ]; then
-    export INGRESS_VISIBILITY="internet-facing"
-    GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
-    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.public_name // $default')
-else
-    export INGRESS_VISIBILITY="internal"
-    GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
-    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.private_name // $default')
-fi
-
-K8S_MODIFIERS="${K8S_MODIFIERS:-"{}"}"
-K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
-
-ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
-
-if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
-    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.public_name // $default')
-else
-    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.private_name // $default')
-fi
-
-NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
-APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r .application.slug)
-COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-Z0-9]).*/\1/')
-
-CONTEXT=$(echo "$CONTEXT" | jq \
-          --arg ingress_visibility "$INGRESS_VISIBILITY" \
-          --arg k8s_namespace "$K8S_NAMESPACE" \
-          --arg region "$REGION" \
-          --arg gateway_name "$GATEWAY_NAME" \
-          --arg alb_name "$ALB_NAME" \
-          --arg component "$COMPONENT" \
-          --argjson modifiers "$K8S_MODIFIERS" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component}')
-
-OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
-if [ -n "${NP_OUTPUT_DIR:-}" ]; then
-    OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
-fi
-
-export OUTPUT_DIR
-export CONTEXT
-export REGION
-
-mkdir -p "$OUTPUT_DIR"
+#K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+#  .providers["container-orchestration"].cluster.namespace // $default
+#')
+#
+#USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
+#  .providers["cloud-providers"].networking.application_domain // $default
+#')
+#
+#REGION=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].account.region // "us-east-1"')
+#
+#SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
+#
+#if [ "$SCOPE_VISIBILITY" = "public" ]; then
+#    DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
+#      .providers["cloud-providers"].networking.domain_name // $default
+#    ')
+#else
+#    DOMAIN=$(echo "$CONTEXT" | jq -r --arg private_default "$PRIVATE_DOMAIN" --arg default "$DOMAIN" '
+#      (.providers["cloud-providers"].networking.private_domain_name // $private_default | if . == "" then empty else . end) // .providers["cloud-providers"].networking.domain_name // $default
+#    ')
+#fi
+#SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
+#
+#eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
+#export ORGANIZATION_ID=\(capture("organization=(?<id>\\d+)").id)
+#export ACCOUNT_ID=\(capture("account=(?<id>\\d+)").id)
+#export NAMESPACE_ID=\(capture("namespace=(?<id>\\d+)").id)
+#export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
+#"')"
+#
+#SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+#
+#export SCOPE_VISIBILITY
+#export SCOPE_DOMAIN
+#
+#if [ "$SCOPE_VISIBILITY" = "public" ]; then
+#    export INGRESS_VISIBILITY="internet-facing"
+#    GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
+#    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.public_name // $default')
+#else
+#    export INGRESS_VISIBILITY="internal"
+#    GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
+#    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.private_name // $default')
+#fi
+#
+#K8S_MODIFIERS="${K8S_MODIFIERS:-"{}"}"
+#K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
+#
+#ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
+#
+#if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+#    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.public_name // $default')
+#else
+#    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.private_name // $default')
+#fi
+#
+#NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
+#APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r .application.slug)
+#COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-Z0-9]).*/\1/')
+#
+#CONTEXT=$(echo "$CONTEXT" | jq \
+#          --arg ingress_visibility "$INGRESS_VISIBILITY" \
+#          --arg k8s_namespace "$K8S_NAMESPACE" \
+#          --arg region "$REGION" \
+#          --arg gateway_name "$GATEWAY_NAME" \
+#          --arg alb_name "$ALB_NAME" \
+#          --arg component "$COMPONENT" \
+#          --argjson modifiers "$K8S_MODIFIERS" \
+#          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component}')
+#
+#OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
+#if [ -n "${NP_OUTPUT_DIR:-}" ]; then
+#    OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
+#fi
+#
+#export OUTPUT_DIR
+#export CONTEXT
+#export REGION
+#
+#mkdir -p "$OUTPUT_DIR"

@@ -13,60 +13,60 @@ steps:
         type: environment
       - name: OUTPUT_DIR
         type: environment
-  - name: iam
-    type: workflow
-    steps:
-      - name: create role
-        type: script
-        file: "$SERVICE_PATH/scope/iam/create_role"
-      - name: build service account
-        type: script
-        file: "$SERVICE_PATH/scope/iam/build_service_account"
-        configuration:
-          ACTION: create
-        output:
-          - name: SERVICE_ACCOUNT_TEMPLATE_PATH
-            type: file
-            file: "$OUTPUT_DIR/service_account-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-      - name: apply
-        type: script
-        file: "$SERVICE_PATH/apply_templates"
-        configuration:
-          ACTION: apply
-          DRY_RUN: false
-  - name: networking
-    type: workflow
-    steps:
-      - name: generate domain
-        type: script
-        file: "$SERVICE_PATH/scope/networking/dns/domain/generate_domain"
-        output:
-          - name: SCOPE_DOMAIN
-            type: environment
-      - name: create dns
-        type: script
-        file: "$SERVICE_PATH/scope/networking/dns/manage_dns"
-        configuration:
-          ACTION: CREATE
-        pre:
-          name: build dns context
-          type: script
-          file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
-          output:
-            - name: HOSTED_PUBLIC_ZONE_ID
-              type: environment
-            - name: HOSTED_PRIVATE_ZONE_ID
-              type: environment
-        post:
-          name: apply_and_wait
-          type: workflow
-          steps:
-            - name: apply dns templates
-              type: script
-              file: "$SERVICE_PATH/apply_templates"
-              configuration:
-                ACTION: apply
-                DRY_RUN: false
-            - name: wait on balancer
-              type: script
-              file: "$SERVICE_PATH/scope/wait_on_balancer"
+#  - name: iam
+#    type: workflow
+#    steps:
+#      - name: create role
+#        type: script
+#        file: "$SERVICE_PATH/scope/iam/create_role"
+#      - name: build service account
+#        type: script
+#        file: "$SERVICE_PATH/scope/iam/build_service_account"
+#        configuration:
+#          ACTION: create
+#        output:
+#          - name: SERVICE_ACCOUNT_TEMPLATE_PATH
+#            type: file
+#            file: "$OUTPUT_DIR/service_account-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+#      - name: apply
+#        type: script
+#        file: "$SERVICE_PATH/apply_templates"
+#        configuration:
+#          ACTION: apply
+#          DRY_RUN: false
+#  - name: networking
+#    type: workflow
+#    steps:
+#      - name: generate domain
+#        type: script
+#        file: "$SERVICE_PATH/scope/networking/dns/domain/generate_domain"
+#        output:
+#          - name: SCOPE_DOMAIN
+#            type: environment
+#      - name: create dns
+#        type: script
+#        file: "$SERVICE_PATH/scope/networking/dns/manage_dns"
+#        configuration:
+#          ACTION: CREATE
+#        pre:
+#          name: build dns context
+#          type: script
+#          file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
+#          output:
+#            - name: HOSTED_PUBLIC_ZONE_ID
+#              type: environment
+#            - name: HOSTED_PRIVATE_ZONE_ID
+#              type: environment
+#        post:
+#          name: apply_and_wait
+#          type: workflow
+#          steps:
+#            - name: apply dns templates
+#              type: script
+#              file: "$SERVICE_PATH/apply_templates"
+#              configuration:
+#                ACTION: apply
+#                DRY_RUN: false
+#            - name: wait on balancer
+#              type: script
+#              file: "$SERVICE_PATH/scope/wait_on_balancer"

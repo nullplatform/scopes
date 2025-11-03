@@ -13,41 +13,41 @@ steps:
         type: environment
       - name: OUTPUT_DIR
         type: environment
-  - name: networking
-    type: workflow
-    steps:
-      - name: delete dns
-        type: script
-        file: "$SERVICE_PATH/scope/networking/dns/manage_dns"
-        configuration:
-          ACTION: DELETE
-        pre:
-          name: build dns context
-          type: script
-          file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
-          output:
-            - name: HOSTED_PUBLIC_ZONE_ID
-              type: environment
-            - name: HOSTED_PRIVATE_ZONE_ID
-              type: environment
-  - name: iam
-    type: workflow
-    steps:
-      - name: build service account
-        type: script
-        file: "$SERVICE_PATH/scope/iam/build_service_account"
-        configuration:
-          ACTION: delete
-        output:
-          - name: SERVICE_ACCOUNT_TEMPLATE_PATH
-            type: file
-            file: "$OUTPUT_DIR/service_account-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-      - name: apply
-        type: script
-        file: "$SERVICE_PATH/apply_templates"
-        configuration:
-          ACTION: delete
-          DRY_RUN: false
-      - name: delete role
-        type: script
-        file: "$SERVICE_PATH/scope/iam/delete_role"
+#  - name: networking
+#    type: workflow
+#    steps:
+#      - name: delete dns
+#        type: script
+#        file: "$SERVICE_PATH/scope/networking/dns/manage_dns"
+#        configuration:
+#          ACTION: DELETE
+#        pre:
+#          name: build dns context
+#          type: script
+#          file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
+#          output:
+#            - name: HOSTED_PUBLIC_ZONE_ID
+#              type: environment
+#            - name: HOSTED_PRIVATE_ZONE_ID
+#              type: environment
+#  - name: iam
+#    type: workflow
+#    steps:
+#      - name: build service account
+#        type: script
+#        file: "$SERVICE_PATH/scope/iam/build_service_account"
+#        configuration:
+#          ACTION: delete
+#        output:
+#          - name: SERVICE_ACCOUNT_TEMPLATE_PATH
+#            type: file
+#            file: "$OUTPUT_DIR/service_account-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+#      - name: apply
+#        type: script
+#        file: "$SERVICE_PATH/apply_templates"
+#        configuration:
+#          ACTION: delete
+#          DRY_RUN: false
+#      - name: delete role
+#        type: script
+#        file: "$SERVICE_PATH/scope/iam/delete_role"
