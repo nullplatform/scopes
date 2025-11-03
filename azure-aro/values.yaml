@@ -8,4 +8,3 @@ configuration:
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/aro/initial-httproute.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/aro/blue-green-httproute.yaml.tpl"
   GATEWAY_TYPE: aro_cluster
-  CUSTOM_INGRESS_CONTROLLER: router-custom-domain

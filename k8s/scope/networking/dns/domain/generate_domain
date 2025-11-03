@@ -15,8 +15,6 @@ SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
   --domain="$DOMAIN" \
   --useAccountSlug="$USE_ACCOUNT_SLUG")
 
-echo "Context: $CONTEXT"
-echo "Domain: $DOMAIN"
 echo "Generated domain: $SCOPE_DOMAIN"
 
 np scope patch --id "$SCOPE_ID" --body "{\"domain\":\"$SCOPE_DOMAIN\"}"
