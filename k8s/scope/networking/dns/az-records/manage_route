@@ -90,13 +90,8 @@ if [ "$ACTION" = "CREATE" ]; then
     if [ "$SCOPE_VISIBILITY" = "public" ]; then
       zone_path="dnsZones"
       api_version="2018-05-01"
-    else
-      zone_path="privateDnsZones"
-      api_version="2018-09-01"
-    fi
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=${api_version}"
-
-    RECORD_BODY=$(cat <<EOF
+      # Public DNS zone uses uppercase TTL and ARecords
+      RECORD_BODY=$(cat <<EOF
 {
   "properties": {
     "TTL": 300,
@@ -109,6 +104,25 @@ if [ "$ACTION" = "CREATE" ]; then
 }
 EOF
 )
+    else
+      zone_path="privateDnsZones"
+      api_version="2018-09-01"
+      # Private DNS zone uses lowercase ttl and aRecords
+      RECORD_BODY=$(cat <<EOF
+{
+  "properties": {
+    "ttl": 300,
+    "aRecords": [
+      {
+        "ipv4Address": "${GATEWAY_IP}"
+      }
+    ]
+  }
+}
+EOF
+)
+    fi
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=${api_version}"
     
     AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
         "${RECORD_SET_URL}" \
