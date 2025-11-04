@@ -1,8 +1,8 @@
 #!/bin/bash
 
 echo "Getting hosted zones"
-HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id // .providers["cloud-providers"].networking.public_dns_zone_name')
-HOSTED_PRIVATE_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_zone_id // .providers["cloud-providers"].networking.private_dns_zone_name')
+HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id // .providers["cloud-providers"].networking.hosted_public_zone_name')
+HOSTED_PRIVATE_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_zone_id // .providers["cloud-providers"].networking.hosted_public_zone_name')
 
 echo "Public Hosted Zone ID: $HOSTED_PUBLIC_ZONE_ID"
 echo "Private Hosted Zone ID: $HOSTED_PRIVATE_ZONE_ID"
