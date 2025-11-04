@@ -14,7 +14,7 @@ metadata:
     scope: {{ .scope.slug }}
     scope_id: "{{ .scope.id }}"
     deployment-strategy: "blue-green"
-    type: custom-domain
+    type: {{ .ingress_visibility }}
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}

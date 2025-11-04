@@ -13,7 +13,7 @@ metadata:
     application_id: "{{ .application.id }}"
     scope: {{ .scope.slug }}
     scope_id: "{{ .scope.id }}"
-    type: custom-domain
+    type: {{ .ingress_visibility }}
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}
