@@ -135,7 +135,13 @@ build_datadog_query() {
       local p99_interval=$((end_time - start_time))
       echo "p99:trace.http.request{service:$service_name,env:$env_name}.rollup(avg, $p99_interval) * 1000"
       ;;
-    
+    p??:*)
+      local env_name=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment')
+      local service_name=$(basename $(echo "$CONTEXT" | jq -r '.tags.repository_url'))-kubernetes
+
+      local percentile_interval=$((end_time - start_time))
+      echo "$metric{service:$service_name,env:$env_name}.rollup(avg, $percentile_interval) * 1000"
+      ;;
     # Generic handler for any other Datadog metric
     *)
       echo "avg:$metric{$filters}$group_clause"
