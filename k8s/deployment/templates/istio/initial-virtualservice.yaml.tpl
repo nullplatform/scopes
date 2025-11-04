@@ -49,7 +49,7 @@ spec:
     - {{ .name }}
 {{- end }}
   gateways:
-    - {{ .gateway_name }}
+    - gateways/private-gateway-new
   http:
     - match:
         - uri:
