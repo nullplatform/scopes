@@ -38,7 +38,8 @@ case "$DNS_TYPE" in
           --subscription-id="$AZURE_SUBSCRIPTION_ID" \
           --gateway-name="$GATEWAY_NAME" \
           --hosted-zone-name="$HOSTED_ZONE_NAME" \
-          --hosted-zone-rg="$HOSTED_ZONE_RG"
+          --hosted-zone-rg="$HOSTED_ZONE_RG" \
+          --visibility="public"
     fi
 
     GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
@@ -55,7 +56,8 @@ case "$DNS_TYPE" in
       --subscription-id="$AZURE_SUBSCRIPTION_ID" \
       --gateway-name="$GATEWAY_NAME" \
       --hosted-zone-name="$HOSTED_ZONE_NAME" \
-      --hosted-zone-rg="$HOSTED_ZONE_RG"
+      --hosted-zone-rg="$HOSTED_ZONE_RG" \
+      --visibility="internal"
     ;;
   external_dns)
     echo "Using external_dns provider"
