@@ -16,7 +16,7 @@ configuration:
       - image-pull-secret
   DOMAIN: $OVERRIDE_DOMAIN
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
-  INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
-  BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/blue-green-httproute.yaml.tpl"
+  INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-virtualservice.yaml.tpl"
+  BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/blue-green-virtualservice.yaml.tpl"
   CERTIFICATE_TEMPLATE: "$OVERRIDES_PATH/scope/networking/templates/certificate.yaml.tpl"
   TRAFFIC_CONTAINER_IMAGE: "public.ecr.aws/nullplatform/k8s-traffic-manager:latest-non-root"
