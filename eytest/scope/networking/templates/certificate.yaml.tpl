@@ -13,11 +13,12 @@ spec:
     name: ey-fabric-issuer
   dnsConfig:
     createDNS: true
-    ipAddress: "{{ .dns_value }}"
+    ipAddress: "172.16.0.15"
     recordType: "A"
     view: "internal"
   gateway:
-    name: {{ .gateway_name }}
-    namespace: {{ .gateway_namespace }}
+    type: "istio"
+    name: "private-gateway-new"
+    namespace: "gateways"
     listenerPort: 443
     allowedNamespaces: "All"
