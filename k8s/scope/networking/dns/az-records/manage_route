@@ -106,7 +106,7 @@ EOF
 )
     else
       zone_path="privateDnsZones"
-      api_version="2018-09-01"
+      api_version="2020-06-01"
       # Private DNS zone uses lowercase ttl and aRecords
       RECORD_BODY=$(cat <<EOF
 {
