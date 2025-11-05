@@ -40,7 +40,6 @@ RESOURCE_GROUP=""
 AZURE_SUBSCRIPTION_ID=""
 HOSTED_ZONE_NAME=""
 HOSTED_ZONE_RG=""
-VISIBILITY=""
 
 for arg in "$@"; do
   case $arg in
@@ -50,7 +49,6 @@ for arg in "$@"; do
     --gateway-name=*) GATEWAY_NAME="${arg#*=}" ;;
     --hosted-zone-name=*) HOSTED_ZONE_NAME="${arg#*=}" ;;
     --hosted-zone-rg=*) HOSTED_ZONE_RG="${arg#*=}" ;;
-    --visibility=*) VISIBILITY="${arg#*=}" ;;
   esac
 done
 
@@ -83,13 +81,13 @@ if [ -z "$SCOPE_SUBDOMAIN" ]; then
     SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
 fi
 
-echo "manage_route SCOPE_SUBDOMAIN = $SCOPE_SUBDOMAIN HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME GATEWAY_IP = $GATEWAY_IP, VISIBILITY = $VISIBILITY"
+echo "manage_route SCOPE_SUBDOMAIN = $SCOPE_SUBDOMAIN HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME GATEWAY_IP = $GATEWAY_IP, SCOPE_VISIBILITY = $SCOPE_VISIBILITY"
 
 if [ "$ACTION" = "CREATE" ]; then
     # Get access token
     ACCESS_TOKEN=$(get_azure_token) || exit 1
 
-    if [ "$VISIBILITY" = "public" ]; then
+    if [ "$SCOPE_VISIBILITY" = "public" ]; then
       zone_path="dnsZones"
       api_version="2018-05-01"
       # Public DNS zone uses uppercase TTL and ARecords
@@ -159,7 +157,7 @@ elif [ "$ACTION" = "DELETE" ]; then
     
     ACCESS_TOKEN=$(get_azure_token) || exit 1
 
-    if [ "$VISIBILITY" = "public" ]; then
+    if [ "$SCOPE_VISIBILITY" = "public" ]; then
       zone_path="dnsZones"
       api_version="2018-05-01"
     else
