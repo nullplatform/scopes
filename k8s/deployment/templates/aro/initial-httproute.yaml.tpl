@@ -28,21 +28,21 @@ metadata:
   {{ data.ToYAML $labels | indent 4 }}
   {{- end }}
   {{- end }}
-annotations:
-  {{- $global := index .k8s_modifiers "global" }}
-  {{- if $global }}
-  {{- $annotations := index $global "annotations" }}
-  {{- if $annotations }}
-  {{ data.ToYAML $annotations | indent 4 }}
-  {{- end }}
-  {{- end }}
-  {{- $ingress := index .k8s_modifiers "ingress" }}
-  {{- if $ingress }}
-  {{- $annotations := index $ingress "annotations" }}
-  {{- if $annotations }}
-  {{ data.ToYAML $annotations | indent 4 }}
-  {{- end }}
-  {{- end }}
+  annotations:
+{{- $global := index .k8s_modifiers "global" }}
+{{- if $global }}
+{{- $annotations := index $global "annotations" }}
+{{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+{{- end }}
+{{- end }}
+{{- $ingress := index .k8s_modifiers "ingress" }}
+{{- if $ingress }}
+{{- $annotations := index $ingress "annotations" }}
+{{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+{{- end }}
+{{- end }}
 spec:
   host: {{ .scope.domain }}
   port:
@@ -86,21 +86,21 @@ metadata:
   {{ data.ToYAML $labels | indent 4 }}
   {{- end }}
   {{- end }}
-annotations:
-  {{- $global := index .k8s_modifiers "global" }}
-  {{- if $global }}
-  {{- $annotations := index $global "annotations" }}
-  {{- if $annotations }}
-  {{ data.ToYAML $annotations | indent 4 }}
-  {{- end }}
-  {{- end }}
-  {{- $ingress := index .k8s_modifiers "ingress" }}
-  {{- if $ingress }}
-  {{- $annotations := index $ingress "annotations" }}
-  {{- if $annotations }}
-  {{ data.ToYAML $annotations | indent 4 }}
-  {{- end }}
-  {{- end }}
+  annotations:
+{{- $global := index .k8s_modifiers "global" }}
+{{- if $global }}
+{{- $annotations := index $global "annotations" }}
+{{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+{{- end }}
+{{- end }}
+{{- $ingress := index .k8s_modifiers "ingress" }}
+{{- if $ingress }}
+{{- $annotations := index $ingress "annotations" }}
+{{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+{{- end }}
+{{- end }}
 spec:
   host: {{ .internal_domain }}
   port:
