@@ -31,6 +31,7 @@ metadata:
   {{- end }}
   annotations:
     route.openshift.io/deployment-strategy: "blue-green"
+    haproxy.router.openshift.io/disable_cookies: "true"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
 {{- $annotations := index $global "annotations" }}
@@ -96,6 +97,7 @@ metadata:
   {{- end }}
   annotations:
     route.openshift.io/deployment-strategy: "blue-green"
+    haproxy.router.openshift.io/disable_cookies: "true"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
 {{- $annotations := index $global "annotations" }}

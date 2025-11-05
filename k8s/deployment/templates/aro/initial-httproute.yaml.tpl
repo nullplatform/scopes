@@ -29,6 +29,7 @@ metadata:
   {{- end }}
   {{- end }}
   annotations:
+    haproxy.router.openshift.io/disable_cookies: "true"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
 {{- $annotations := index $global "annotations" }}
@@ -87,6 +88,7 @@ metadata:
   {{- end }}
   {{- end }}
   annotations:
+    haproxy.router.openshift.io/disable_cookies: "true"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
 {{- $annotations := index $global "annotations" }}
