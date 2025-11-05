@@ -1,0 +1,15 @@
+#!/bin/bash
+
+SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
+
+PUBLIC_HOSTED_ZONE_NAME="$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_name')"
+PRIVATE_HOSTED_ZONE_NAME="$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.private_dns_zone_name')"
+
+INTERNAL_DOMAIN="${SCOPE_DOMAIN%.$PUBLIC_HOSTED_ZONE_NAME}.$PRIVATE_HOSTED_ZONE_NAME"
+
+CONTEXT=$(echo "$CONTEXT" | jq \
+          --arg internal_domain "$INTERNAL_DOMAIN" \
+          '. + {internal_domain: $internal_domain}')
+
+export INTERNAL_DOMAIN
+export CONTEXT
