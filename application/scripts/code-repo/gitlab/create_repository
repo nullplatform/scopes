@@ -1,0 +1,41 @@
+#!/bin/bash
+
+if [[ $CODE_REPOSITORY_STRATEGY == "import" ]]; then
+  echo "Strategy is set to 'import'. Skipping repo creation."
+  return
+fi
+
+IMPORT_URL=$TEMPLATE_URL
+
+if [[ "$TEMPLATE_URL" == "$GITLAB_INSTALLATION_URL"* ]]; then
+  PARSED_HOST=$(echo "$TEMPLATE_URL" | sed -E 's|https?://||' | cut -d'/' -f1)
+  PARSED_PATH=$(echo "$TEMPLATE_URL" | sed -E 's|https?://[^/]+||')
+
+  IMPORT_URL="https://oauth2:${GITLAB_ACCESS_TOKEN}@${PARSED_HOST}${PARSED_PATH}.git"
+fi
+
+CREATE_REPO_BODY="{
+  \"name\": \"$REPOSITORY_NAME\",
+  \"namespace_id\": $GITLAB_GROUP_ID,
+  \"visibility\": \"private\",
+  \"import_url\": \"$IMPORT_URL\"}"
+
+echo "Creating repository with body: "
+echo "$CREATE_REPO_BODY" | jq .
+
+CREATE_RESPONSE=$(curl --header "PRIVATE-TOKEN: $GITLAB_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  --data "$CREATE_REPO_BODY" \
+  "${GITLAB_INSTALLATION_URL}/api/v4/projects")
+
+GITLAB_PROJECT_ID=$(echo "$CREATE_RESPONSE" | jq -r '.id')
+
+if [ -z "$GITLAB_PROJECT_ID" ] || [ "$GITLAB_PROJECT_ID" == "null" ]; then
+  echo "Error creating repository:"
+  echo "$CREATE_RESPONSE" | jq
+  exit 1
+fi
+
+echo "Repository created with ID: $GITLAB_PROJECT_ID"
+
+export GITLAB_PROJECT_ID

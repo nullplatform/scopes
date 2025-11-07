@@ -1,0 +1,39 @@
+#!/bin/bash
+
+CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
+
+REPOSITORY_URL=$(echo "$APPLICATION" | jq -r .repository_url)
+
+if [[ -z $REPOSITORY_URL ]]; then
+  CODE_REPOSITORY_STRATEGY=create
+
+  TEMPLATE_ID=$(echo "$APPLICATION" | jq -r .template_id)
+
+  TEMPLATE_URL=$(np template read --id "$TEMPLATE_ID" --format json | jq -r .url)
+
+  export TEMPLATE_URL
+
+  REPOSITORY_NAME=$NAMESPACE_SLUG-$APPLICATION_SLUG
+else
+  REPOSITORY_NAME=$(basename "$REPOSITORY_URL")
+  CODE_REPOSITORY_STRATEGY=import
+fi
+
+ACCOUNT=$(np account read --id "$ACCOUNT_ID" --format json)
+
+REPOSITORY_PROVIDER=$(echo "$ACCOUNT" | jq -r .repository_provider)
+
+CODE_REPOSITORY=$(np provider list --categories code-repository --nrn "$NRN" --format json | jq ".results[0]")
+
+CODE_REPOSITORY_SCRIPT_PATH="application/scripts/code-repo/$REPOSITORY_PROVIDER"
+
+export CODE_REPOSITORY_STRATEGY
+
+export REPOSITORY_URL
+export REPOSITORY_NAME
+
+export CODE_REPOSITORY
+export REPOSITORY_PROVIDER
+export CODE_REPOSITORY_SCRIPT_PATH
+
+np service workflow exec --workflow application/workflows/create_code_repository.yaml
