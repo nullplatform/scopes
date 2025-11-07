@@ -1,0 +1,3 @@
+#!/bin/bash
+
+np nrn patch --nrn "$NRN" --body "{\"docker.repository_uri\":\"$DOCKER_SERVER_URI\"}"
