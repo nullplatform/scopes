@@ -225,7 +225,9 @@ query_prometheus() {
     echo '---'
   } >> "$LOGFILE"
 
-  curl -s -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
+  local token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+  curl -k -H "Authorization: Bearer $token" -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
 }
 
 urlencode() {
