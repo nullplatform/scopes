@@ -21,7 +21,7 @@ LOGFILE="$HOME/metric_debug.log"
   echo '---'
 } >> "$LOGFILE"
 
-CMD="np service workflow exec --workflow $WORKFLOW_PATH"
+CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 
 if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
   CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"
