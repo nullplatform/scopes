@@ -39,6 +39,13 @@ if [[ -n "$METRIC" ]]; then
   export METRIC_NAME="$METRIC"
 fi
 
+LOGFILE="$HOME/metric_debug.log"
+{
+  date
+  printf 'METRIC_NAME =%s\n' "$METRIC_NAME"
+  echo '---'
+} >> "$LOGFILE"
+
 export PROM_URL
 export K8S_NAMESPACE
 export SCOPE_ID

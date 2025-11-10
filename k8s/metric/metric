@@ -2,6 +2,14 @@
 
 GROUP_BY=${GROUP_BY:-""}
 
+LOGFILE="$HOME/metric_debug.log"
+{
+  date
+  printf 'METRIC FILE: METRIC_NAME =%s\n' "$METRIC_NAME"
+  echo '---'
+} >> "$LOGFILE"
+
+
 # Validate required parameters
 if [[ -z "$METRIC_NAME" ]]; then
   echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
@@ -203,6 +211,18 @@ query_prometheus() {
 
   local url="${PROM_URL}/api/v1/query_range"
   local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+
+  LOGFILE="$HOME/metric_debug.log"
+  {
+    date
+    printf 'PROMETHEUS QUERY URL=%s\n' "$url"
+    printf 'PROMETHEUS QUERY PARAMS=%s\n' "$params"
+    printf 'PROMETHEUS QUERY=%s\n' "$query"
+    printf 'START TIME=%s\n' "$start_time"
+    printf 'END TIME=%s\n' "$end_time"
+    printf 'STEP=%s\n' "$step"
+    echo '---'
+  } >> "$LOGFILE"
 
   curl -s -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
 }
