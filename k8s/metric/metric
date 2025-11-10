@@ -215,6 +215,7 @@ query_prometheus() {
   LOGFILE="$HOME/metric_debug.log"
   {
     date
+    printf 'NP_ACTION_CONTEXT=%s\n' "$NP_ACTION_CONTEXT"
     printf 'PROMETHEUS QUERY URL=%s\n' "$url"
     printf 'PROMETHEUS QUERY PARAMS=%s\n' "$params"
     printf 'PROMETHEUS QUERY=%s\n' "$query"
