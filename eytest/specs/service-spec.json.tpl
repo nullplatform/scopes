@@ -484,7 +484,7 @@
          "cpu_millicores":{
             "type":"integer",
             "title":"CPU Millicores",
-            "default":500,
+            "default":100,
             "maximum":4000,
             "minimum":100,
             "description":"Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)"
