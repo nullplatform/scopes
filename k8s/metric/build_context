@@ -3,6 +3,15 @@
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
 
+LOGFILE="$HOME/metric_debug.log"
+{
+  date
+  printf 'SCOPE_ID=%s\n' "$SCOPE_ID"
+  printf 'K8S_NAMESPACE=%s\n' "$K8S_NAMESPACE"
+  printf 'PROMETHEUS_URL=%s\n' "$PROMETHEUS_URL"
+  echo '---'
+} >> "$LOGFILE"
+
 if [[ -z "$PROMETHEUS_URL" ]]; then
   NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
 

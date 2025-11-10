@@ -8,7 +8,20 @@ if [[ "$NOTIFICATION_ACTION" == "metric:list" ]]; then
   OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/metric/workflows/list.yaml"
 fi
 
-CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
+# append debug info to a file in $HOME
+LOGFILE="$HOME/metric_debug.log"
+{
+  date
+  printf 'SERVICE_PATH=%s\n' "$SERVICE_PATH"
+  printf 'OVERRIDES_PATH=%s\n' "$OVERRIDES_PATH"
+  printf 'NOTIFICATION_ACTION=%s\n' "$NOTIFICATION_ACTION"
+  printf 'WORKFLOW_PATH=%s\n' "$WORKFLOW_PATH"
+  printf 'OVERRIDES_WORKFLOW_PATH=%s\n' "$OVERRIDES_WORKFLOW_PATH"
+  printf 'CMD=%s\n' "$CMD"
+  echo '---'
+} >> "$LOGFILE"
+
+CMD="np service workflow exec --workflow $WORKFLOW_PATH"
 
 if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
   CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"
