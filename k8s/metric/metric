@@ -2,14 +2,6 @@
 
 GROUP_BY=${GROUP_BY:-""}
 
-LOGFILE="$HOME/metric_debug.log"
-{
-  date
-  printf 'METRIC FILE: METRIC_NAME =%s\n' "$METRIC_NAME"
-  echo '---'
-} >> "$LOGFILE"
-
-
 # Validate required parameters
 if [[ -z "$METRIC_NAME" ]]; then
   echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}'
@@ -212,20 +204,6 @@ query_prometheus() {
   local url="${PROM_URL}/api/v1/query_range"
   local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
 
-  LOGFILE="$HOME/metric_debug.log"
-  {
-    date
-    printf 'NP_ACTION_CONTEXT=%s\n' "$NP_ACTION_CONTEXT"
-    printf 'PROMETHEUS QUERY URL=%s\n' "$url"
-    printf 'PROMETHEUS QUERY PARAMS=%s\n' "$params"
-    printf 'PROMETHEUS QUERY=%s\n' "$query"
-    printf 'START TIME=%s\n' "$start_time"
-    printf 'END TIME=%s\n' "$end_time"
-    printf 'STEP=%s\n' "$step"
-    echo '---'
-  } >> "$LOGFILE"
-
-
   if [[ -n "$PROMETHEUS_TOKEN" ]]; then
     curl -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
       --data-urlencode "query=$query" \
@@ -329,14 +307,6 @@ filters=$(build_filters)
 query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
 
 response=$(query_prometheus "$query" "$start_time" "$now" "$step")
-# print response to logfile
-LOGFILE="$HOME/metric_debug.log"
-{
-  date
-  printf 'PROMETHEUS RESPONSE=%s\n' "$response"
-  echo '---'
-} >> "$LOGFILE"
-
 
 transform_response() {
   local response="$1"
@@ -364,14 +334,5 @@ transform_response() {
 }
 
 transformed_results=$(transform_response "$response")
-# Output results to log file
-{
-  date
-  printf 'TRANSFORMED RESULTS=%s\n' "$transformed_results"
-  printf 'METRIC TYPE=%s\n' "$metric_type"
-  printf 'UNIT=%s\n' "$unit"
-  echo '---'
-} >> "$LOGFILE"
-
 
 echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"
