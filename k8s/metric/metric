@@ -318,6 +318,14 @@ filters=$(build_filters)
 query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
 
 response=$(query_prometheus "$query" "$start_time" "$now" "$step")
+# print response to logfile
+LOGFILE="$HOME/metric_debug.log"
+{
+  date
+  printf 'PROMETHEUS RESPONSE=%s\n' "$response"
+  echo '---'
+} >> "$LOGFILE"
+
 
 transform_response() {
   local response="$1"
