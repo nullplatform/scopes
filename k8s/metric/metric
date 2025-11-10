@@ -353,5 +353,14 @@ transform_response() {
 }
 
 transformed_results=$(transform_response "$response")
+# Output results to log file
+{
+  date
+  printf 'TRANSFORMED RESULTS=%s\n' "$transformed_results"
+  printf 'METRIC TYPE=%s\n' "$metric_type"
+  printf 'UNIT=%s\n' "$unit"
+  echo '---'
+} >> "$LOGFILE"
+
 
 echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"
