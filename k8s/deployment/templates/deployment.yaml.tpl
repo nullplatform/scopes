@@ -285,7 +285,7 @@ spec:
       {{- range .parameters.results }}
         {{- if and (eq .type "file") }}
           {{- if gt (len .values) 0 }}
-            - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
+            - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
               mountPath: {{ .destination_path }}
               subPath: {{ filepath.Base .destination_path }}
               readOnly: true
@@ -298,7 +298,7 @@ spec:
   {{- range .parameters.results }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-      - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-") }}
+      - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
         secret:
           secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
           items:
