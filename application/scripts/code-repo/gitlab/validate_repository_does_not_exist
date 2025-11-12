@@ -21,7 +21,7 @@ elif [ "$CODE_REPOSITORY_STRATEGY" = "import" ]; then
     echo "Error: Repository does not exist but strategy is set to 'import'. Please create the repository first or change strategy to 'create'."
     exit 1
 else
-  echo "Repository does not exist and trategy is set to 'create'. Proceeding with repository creation..."
+  echo "Repository does not exist and strategy is set to 'create'. Proceeding with repository creation..."
 fi
 
 
