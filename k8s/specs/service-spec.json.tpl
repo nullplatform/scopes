@@ -103,6 +103,10 @@
                                  "scope":"#/properties/autoscaling/properties/target_cpu_utilization"
                               },
                               {
+                                 "type":"Control",
+                                 "scope":"#/properties/autoscaling/properties/target_memory_enabled"
+                              },
+                              {
                                  "rule": {
                                    "effect": "SHOW",
                                    "condition": {
@@ -362,6 +366,9 @@
             ],
             "title":"Visibility",
             "default":"public",
+            "editableOn": [
+                "create"
+            ],
             "description":"Define whether the scope is publicly accessible or private to your account"
          },
          "autoscaling":{
