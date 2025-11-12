@@ -39,7 +39,7 @@ data:
     {{- end }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-  {{ printf "app-data-%s" (filepath.Base .destination_path) }}: {{ index .values 0 "value" | regexp.Replace "^data:[^;]+;base64," "" }}
+  {{ printf "app-data-%s" (filepath.Base .destination_path) }}: {{ index .values 0 "value" | strings.TrimPrefix "data:application/json;base64," }}
       {{- end }}
     {{- end }}
   {{- end }}
