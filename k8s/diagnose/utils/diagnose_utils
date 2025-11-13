@@ -97,9 +97,9 @@ notify_results() {
         exit 1
     fi
 
-    local output_file="$NP_OUTPUT_DIR/grouped_results.json"
-
-    jq -s '
+    # Generate grouped results directly in memory
+    local grouped_results
+    grouped_results=$(jq -s '
       # category helper
       def cat: .category // "unknown";
 
@@ -108,7 +108,7 @@ notify_results() {
       | group_by(cat)
       | map({
           category: (.[0].category // "unknown"),
-          checkSummary: {
+          summary: {
             pending: (map(select((.status // "UNKNOWN") == "pending")) | length),
             running: (map(select((.status // "UNKNOWN") == "running")) | length),
             success: (map(select((.status // "UNKNOWN") == "success")) | length),
@@ -116,5 +116,19 @@ notify_results() {
           },
           checks: .
         })
-    ' $json_files > "$output_file"
+    ' $json_files)
+
+    # Extract action and service IDs
+    ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
+    SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
+
+    # Build action body with grouped results
+    ACTION_BODY=$(jq -n \
+                    --argjson result "$grouped_results" \
+                    '{
+                      results: $result
+                    }')
+
+    # Send to np service
+    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
 }
