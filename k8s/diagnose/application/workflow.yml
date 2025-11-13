@@ -3,4 +3,4 @@ steps:
     description: Validates the application exposes an http server in the 8080 port.
     category: application
     type: script
-    file: "$SERVICE_PATH/diagnose/networking/network_diagnostics"
+    file: "$SERVICE_PATH/diagnose/application/pod_status_overview"
