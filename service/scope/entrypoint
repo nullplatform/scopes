@@ -9,8 +9,8 @@ map_custom_action() {
     "delete-scope")
       echo "delete"
       ;;
-    "status-scope")
-      echo "status"
+    "diagnose-scope")
+      echo "diagnose"
       ;;
     *)
       echo "$action"
