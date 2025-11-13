@@ -1,0 +1,41 @@
+continue_on_error: true
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/scope/build_context"
+    output:
+      - name: CONTEXT
+        type: environment
+      - name: SCOPE_VISIBILITY
+        type: environment
+      - name: SCOPE_DOMAIN
+        type: environment
+      - name: OUTPUT_DIR
+        type: environment
+  - name: load_functions
+    type: script
+    file: "$SERVICE_PATH/diagnose/diagnose_utils"
+    output:
+      - name: create_check_result
+        type: function
+        parameters:
+          name: …
+          description: ….
+          status: …
+          evidence: …
+  - name: diagnose
+    type: executor
+    post:
+      name: notify_check_results
+      type: script
+      file: "$SERVICE_PATH/diagnose/notify_diagnose_results"
+    before_each:
+      name: notify_check_running
+      type: script
+      file: "$SERVICE_PATH/diagnose/notify_check_running"
+    after_each:
+      name: notify_check_results
+      type: script
+      file: "$SERVICE_PATH/diagnose/notify_diagnose_results"
+    folders:
+      - "$SERVICE_PATH/diagnose/networking"
