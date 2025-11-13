@@ -1,8 +1,8 @@
 {
-  "name": "Scope Status",
-  "slug": "status-scope",
+  "name": "Diagnose Scope",
+  "slug": "diagnose-scope",
   "type": "custom",
-  "retryable": false,
+  "retryable": true,
   "service_specification_id": "{{ env.Getenv "SERVICE_SPECIFICATION_ID" }}",
   "parameters": {
     "schema": {

@@ -14,15 +14,16 @@ steps:
         type: environment
   - name: load_functions
     type: script
-    file: "$SERVICE_PATH/diagnose/diagnose_utils"
+    file: "$SERVICE_PATH/diagnose/utils/diagnose_utils"
     output:
-      - name: create_check_result
+      - name: update_check_result
         type: function
         parameters:
-          name: …
-          description: ….
-          status: …
-          evidence: …
+          status: string
+          evidence: object
+          file: string
+      - name: notify_results
+        type: function
   - name: diagnose
     type: executor
     post:
