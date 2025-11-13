@@ -85,6 +85,8 @@ update_check_result() {
     fi
 
     mv "$tmpfile" "$output_file"
+
+    jq -c '.' "$output_file"
 }
 
 notify_results() {
@@ -129,6 +131,7 @@ notify_results() {
                       results: $result
                     }')
 
+    echo "ACTION_ID: $ACTION_ID SERVICE_ID: $SERVICE_ID"
     # Send to np service
     np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
 }
