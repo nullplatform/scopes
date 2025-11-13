@@ -123,7 +123,7 @@ notify_results() {
     SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
 
     # Build action body with grouped results
-    ACTION_BODY=$(jq -c \
+    ACTION_BODY=$(jq -nc \
                     --argjson result "$grouped_results" \
                     '{
                       results: { categories: $result }
