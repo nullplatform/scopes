@@ -131,7 +131,7 @@ notify_results() {
                       results: $result
                     }')
 
-    echo "ACTION_ID: $ACTION_ID SERVICE_ID: $SERVICE_ID"
+    echo "ACTION_ID: $ACTION_ID SERVICE_ID: $SERVICE_ID ACTION_BODY:$ACTION_BODY"
     # Send to np service
-    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
+    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY"
 }
