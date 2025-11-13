@@ -1,0 +1,63 @@
+#!/bin/bash
+
+CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
+
+export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
+
+CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
+
+cd "$CURRENT_DIR" && cd ..
+
+TOKEN=$(np token create --body "{\"api_key\": \"$NP_API_KEY\"}" --format json | jq -r .access_token)
+
+CALLBACK_URL=$(echo "$NP_ACTION_CONTEXT" | jq -r .notification.callback_url)
+
+logs=$(np service workflow exec --workflow application/workflows/create_app.yaml)
+EXIT_CODE=$?
+# Determine status based on exit code
+if [ $EXIT_CODE -eq 0 ]; then
+    STATUS="success"
+else
+    STATUS="failed"
+fi
+
+timestamp=$(($(date +%s) * 1000))
+
+messages=$(echo "$logs" | while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+
+  if [[ "$line" =~ "failed" ]] || [[ "$line" =~ "ERROR" ]] || [[ "$line" =~ "error" ]]; then
+    level="ERROR"
+  elif [[ "$line" =~ "warning" ]] || [[ "$line" =~ "WARNING" ]] || [[ "$line" =~ "warn" ]]; then
+    level="WARNING"
+  else
+    level="INFO"
+  fi
+
+  jq -n \
+    --arg level "$level" \
+    --arg message "$line" \
+    --arg ts "$timestamp" \
+    '{level: $level, message: $message, timestamp: ($ts | tonumber)}'
+done | jq -s '.')
+
+payload=$(jq -n \
+  --arg status "$STATUS" \
+  --argjson messages "$messages" \
+  '{status: $status, messages: $messages}')
+
+echo "$payload" | jq .
+
+echo "Updating hook with status: $STATUS. URL: $CALLBACK_URL"
+
+# Call the callback URL with the status
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$CALLBACK_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$payload")
+
+if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+    echo "✓ Successfully updated hook (HTTP $HTTP_CODE)"
+else
+    echo "✗ Failed to update hook (HTTP $HTTP_CODE)"
+fi
