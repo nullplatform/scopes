@@ -85,8 +85,6 @@ update_check_result() {
     fi
 
     mv "$tmpfile" "$output_file"
-
-    jq -c '.' "$output_file"
 }
 
 notify_results() {
@@ -125,10 +123,10 @@ notify_results() {
     SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
 
     # Build action body with grouped results
-    ACTION_BODY=$(jq -n \
+    ACTION_BODY=$(jq -c \
                     --argjson result "$grouped_results" \
                     '{
-                      results: $result
+                      results: { categories: $result }
                     }')
 
     echo "ACTION_ID: $ACTION_ID SERVICE_ID: $SERVICE_ID ACTION_BODY:$ACTION_BODY"
