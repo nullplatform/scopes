@@ -60,12 +60,24 @@ update_check_result() {
         return 1
     fi
 
+    # Check if log file exists and read it into an array
+    local log_array="[]"
+    if [[ -n "$SCRIPT_LOG_FILE" && -f "$SCRIPT_LOG_FILE" ]]; then
+        # Read log file and convert to JSON array
+        log_array=$(jq -R -s 'split("\n") | map(select(length > 0))' "$SCRIPT_LOG_FILE")
+        if [[ $? -ne 0 ]]; then
+            echo "Error: Failed to read log file: $SCRIPT_LOG_FILE" >&2
+            return 1
+        fi
+    fi
+
     # Safely update JSON (write to tmp then move)
     tmpfile="$(mktemp)"
     if ! jq \
         --arg status "$status" \
         --argjson evidence "$evidence" \
-        '.status = ($status | ascii_downcase) | .evidence = $evidence' \
+        --argjson logs "$log_array" \
+        '.status = ($status | ascii_downcase) | .evidence = $evidence | .logs = $logs' \
         "$output_file" > "$tmpfile"; then
         echo "Error: Failed to update JSON (is evidence valid JSON?)" >&2
         rm -f "$tmpfile"
@@ -105,6 +117,4 @@ notify_results() {
           checks: .
         })
     ' $json_files > "$output_file"
-
-      jq -c '.' "$output_file"
 }
