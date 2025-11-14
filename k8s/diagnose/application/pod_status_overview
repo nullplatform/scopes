@@ -1,6 +1,10 @@
 #!/bin/bash
+
+# Single kubectl call - store the JSON
+PODS_JSON=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 2>/dev/null || echo '{"items":[]}')
+
 # Parse pod information
-POD_DATA=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 2>/dev/null | jq -r '
+POD_DATA=$(echo "$PODS_JSON" | jq -r '
   .items[] |
   [
     .metadata.name,
@@ -9,10 +13,10 @@ POD_DATA=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 
     (.status.containerStatuses // [] | map(.restartCount) | add // 0),
     (.status.conditions // [] | map(select(.type == "Ready")) | .[0].status // "Unknown")
   ] | @tsv
-' || echo "")
+')
 
 # Count pods by phase
-PHASE_SUMMARY=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 2>/dev/null | jq -c '
+PHASE_SUMMARY=$(echo "$PODS_JSON" | jq -c '
   .items |
   group_by(.status.phase) |
   map({
@@ -20,7 +24,10 @@ PHASE_SUMMARY=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o 
     count: length
   }) |
   sort_by(.phase)
-' || echo "[]")
+')
+
+# Get pod count
+POD_COUNT=$(echo "$PODS_JSON" | jq '.items | length')
 
 # Display summary
 echo "$PHASE_SUMMARY" | jq -r '.[] | "  \(.phase): \(.count) pod(s)"'
@@ -64,7 +71,7 @@ else
 fi
 
 # Build evidence JSON
-EVIDENCE=$ jq -c \
+EVIDENCE=$(echo "$PODS_JSON" | jq -c \
     --argjson phase_summary "$PHASE_SUMMARY" \
     '{
         totalPods: (.items | length),
@@ -84,7 +91,7 @@ EVIDENCE=$ jq -c \
             .status.phase != "Running" or
             (.status.containerStatuses // [] | map(.ready) | any(. == false))
         ) | .metadata.name]
-    }'
+    }')
 
 update_check_result --status "$CHECK_STATUS" \
                     --evidence "$EVIDENCE" \
