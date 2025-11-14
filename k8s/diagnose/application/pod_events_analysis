@@ -1,23 +1,13 @@
 #!/bin/bash
 
-set -euo pipefail
-
-# Source utilities
-source "$STATUS_CHECK_DIR/utils/echo_messages"
-source "$STATUS_CHECK_DIR/utils/json_builder"
-
-CHECK_NAME="pod_events_analysis"
-CHECK_DESC="Analyzes recent Kubernetes events for pods requiring attention"
-
-# Get problematic pods
-PROBLEMATIC_PODS=$(echo "$PODS_JSON" | jq -r '
+PROBLEMATIC_PODS=$(kubectl get pods -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 2>/dev/null | jq -r '
   .items[] |
   select(
     .status.phase != "Running" or
     (.status.containerStatuses // [] | map(.ready) | any(. == false))
   ) |
   .metadata.name
-')
+' || echo "")
 
 EVENTS_DATA="[]"
 
@@ -53,10 +43,10 @@ if [ -n "$PROBLEMATIC_PODS" ]; then
         fi
     done <<< "$PROBLEMATIC_PODS"
 
-    CHECK_STATUS="warning"
+    CHECK_STATUS="failed"
 else
     print_success "✓ No pods requiring attention"
-    CHECK_STATUS="passed"
+    CHECK_STATUS="success"
 fi
 
 # Build evidence
@@ -69,4 +59,6 @@ EVIDENCE=$(jq -n \
     }')
 
 # Output check result
-create_check_result "$CHECK_NAME" "$CHECK_DESC" "$CHECK_STATUS" "$EVIDENCE"
+update_check_result --status "$CHECK_STATUS" \
+                    --evidence "$EVIDENCE" \
+                    --output-file "$SCRIPT_OUTPUT_FILE"

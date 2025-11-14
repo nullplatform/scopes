@@ -1,6 +1,12 @@
 steps:
-  - name: validate_port
-    description: Validates the application exposes an http server in the 8080 port.
+  - name: pod_status
+    description: Status of the related pods
     category: application
     type: script
     file: "$SERVICE_PATH/diagnose/application/pod_status_overview"
+  - name: pod_events
+    description: Analyzes recent Kubernetes events for pods requiring attention
+    category: application
+    type: script
+    file: "$SERVICE_PATH/diagnose/application/pod_events_analysis"
+

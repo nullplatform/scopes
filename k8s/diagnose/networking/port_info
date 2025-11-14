@@ -19,6 +19,6 @@ pod_network_data=$(jq -nc \
     --arg ports "$PORTS_INFO" \
     '{podIP: $ip, containerPorts: $ports}')
 
-update_check_result --status "FAILED" \
+update_check_result --status "success" \
                     --evidence "$pod_network_data" \
                     --output-file "$SCRIPT_OUTPUT_FILE"
