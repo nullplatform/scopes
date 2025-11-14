@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+print_info() {
+    echo -e "${CYAN}ℹ${NC} $1"
+}
+
+update_check_result() {
+    # Usage:
+    #   update_check_result output.json "new-status" '{"new":"evidence"}'
+    # or:
+    #   update_check_result --output-file output.json --status "new-status" --evidence '{"new":"evidence"}'
+
+    # Argument parsing
+    if [[ "$1" == --* ]]; then
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --status) status="$2"; shift 2 ;;
+                --evidence) evidence="$2"; shift 2 ;;
+                --file|--output-file) output_file="$2"; shift 2 ;;
+                *) echo "Unknown parameter: $1" >&2; return 1 ;;
+            esac
+        done
+    else
+        output_file="$1"
+        status="$2"
+        evidence="$3"
+    fi
+
+    # Basic validation
+    if [[ -z "$output_file" || -z "$status" || -z "$evidence" ]]; then
+        echo "Error: output_file, status and evidence are required" >&2
+        return 1
+    fi
+
+    if [[ $output_file != *.json ]]; then
+      output_file="$output_file.json"
+    fi
+
+    if [[ ! -f "$output_file" ]]; then
+        echo "Error: File not found: $output_file" >&2
+        return 1
+    fi
+
+    # Check if log file exists and read it into an array
+    local log_array="[]"
+    if [[ -n "$SCRIPT_LOG_FILE" && -f "$SCRIPT_LOG_FILE" ]]; then
+        # Read log file and convert to JSON array
+        log_array=$(jq -R -s 'split("\n") | map(select(length > 0))' "$SCRIPT_LOG_FILE")
+        if [[ $? -ne 0 ]]; then
+            echo "Error: Failed to read log file: $SCRIPT_LOG_FILE" >&2
+            return 1
+        fi
+    fi
+
+    # Safely update JSON (write to tmp then move)
+    tmpfile="$(mktemp)"
+    if ! jq \
+        --arg status "$status" \
+        --argjson evidence "$evidence" \
+        --argjson logs "$log_array" \
+        '.status = ($status | ascii_downcase) | .evidence = $evidence | .logs = $logs' \
+        "$output_file" > "$tmpfile"; then
+        echo "Error: Failed to update JSON (is evidence valid JSON?)" >&2
+        rm -f "$tmpfile"
+        return 1
+    fi
+
+    mv "$tmpfile" "$output_file"
+}
+
+notify_results() {
+    # Find all JSON result files
+    local json_files
+    json_files=$(find "$NP_OUTPUT_DIR" -type f -name "*.json")
+
+    if [[ -z "$json_files" ]]; then
+        print_warning "No JSON result files found in $NP_OUTPUT_DIR"
+        exit 1
+    fi
+
+    # Generate grouped results directly in memory
+    local grouped_results
+    grouped_results=$(jq -s '
+      # category helper
+      def cat: .category // "unknown";
+
+      # we get an array of all check objects
+      sort_by(cat)
+      | group_by(cat)
+      | map({
+          category: (.[0].category // "unknown"),
+          summary: {
+            pending: (map(select((.status // "UNKNOWN") == "pending")) | length),
+            running: (map(select((.status // "UNKNOWN") == "running")) | length),
+            success: (map(select((.status // "UNKNOWN") == "success")) | length),
+            failed:  (map(select((.status // "UNKNOWN") == "failed"))  | length)
+          },
+          checks: .
+        })
+    ' $json_files)
+
+    # Extract action and service IDs
+    ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
+    SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
+
+    # Build action body with grouped results
+    ACTION_BODY=$(jq -nc \
+                    --argjson result "$grouped_results" \
+                    '{
+                      results: { categories: $result }
+                    }')
+
+    # Send to np service
+    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
+}
