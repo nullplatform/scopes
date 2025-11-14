@@ -1,0 +1,4 @@
+#!/bin/bash
+
+PROMETHEUS_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+export PROMETHEUS_TOKEN

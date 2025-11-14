@@ -1,0 +1,9 @@
+#!/bin/bash
+
+DOCKER_SERVER_URL=$(echo "$ASSET_REPOSITORY" | jq -r .attributes.setup.server)
+DOCKER_SERVER_PATH=$(echo "$ASSET_REPOSITORY" | jq -r .attributes.setup.path)
+DOCKER_SERVER_USE_NAMESPACE=$(echo "$ASSET_REPOSITORY" | jq -r .attributes.setup.use_namespace)
+
+export DOCKER_SERVER_URL
+export DOCKER_SERVER_PATH
+export DOCKER_SERVER_USE_NAMESPACE

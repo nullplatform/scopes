@@ -1,0 +1,10 @@
+steps:
+  - name: build_context
+    type: script
+    file: "$ASSET_REPOSITORY_SCRIPT_PATH/build_context"
+  - name: generate_repository_uri
+    type: script
+    file: "$ASSET_REPOSITORY_SCRIPT_PATH/generate_repository_uri"
+  - name: create_repository
+    type: script
+    file: "$ASSET_REPOSITORY_SCRIPT_PATH/create_repository"
