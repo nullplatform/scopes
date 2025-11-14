@@ -36,3 +36,4 @@ steps:
       file: "$SERVICE_PATH/diagnose/notify_diagnose_results"
     folders:
       - "$SERVICE_PATH/diagnose/networking"
+      - "$SERVICE_PATH/diagnose/application"
