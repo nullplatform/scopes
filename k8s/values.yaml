@@ -58,6 +58,11 @@ configuration:
 #  POD_DISRUPTION_BUDGET:
 #    ENABLED: false
 #    MAX_UNAVAILABLE: "25%"  # Can be percentage or number (e.g., "2")
+  NON_ROOT:
+    ENABLED: false
+    USER_ID: 1000
+    GROUP_ID: 1000
+    FS_GROUP: 1000
 #  K8S_MODIFIERS:
 #    global:
 #      annotations:

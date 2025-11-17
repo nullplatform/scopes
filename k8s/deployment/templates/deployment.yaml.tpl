@@ -117,17 +117,40 @@ spec:
 {{ data.ToYAML $nodeSelector | indent 8 }}
       {{- end }}
       {{- end }}
+      {{- if .non_root.enabled }}
+      securityContext:
+        runAsUser: {{ .non_root.user_id | default 1000 }}
+        runAsGroup: {{ .non_root.group_id | default 1000 }}
+        fsGroup: {{ .non_root.fs_group | default 1000 }}
+        runAsNonRoot: true
+        fsGroupChangePolicy: "OnRootMismatch"
+      {{- end }}
       containers:
         - name: http
-          securityContext:
-            runAsUser: 0
           image: {{ .traffic_image }}
+          securityContext:
+            {{- if .non_root.enabled }}
+            runAsUser: {{ .non_root.user_id | default 1000 }}
+            runAsGroup: {{ .non_root.group_id | default 1000 }}
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+            {{- else }}
+            runAsUser: 0
+            {{- end }}
           ports:
-            - containerPort: 80
+            - containerPort: {{ if .non_root.enabled }}8888{{ else }}80{{ end }}
               protocol: TCP
           env:
             - name: HEALTH_CHECK_TYPE
               value: http
+            - name: PORT
+              value: "{{ if .non_root.enabled }}8888{{ else }}80{{ end }}"
             - name: GRACE_PERIOD
               value: '15'
             - name: LISTENER_PROTOCOL
@@ -142,25 +165,25 @@ spec:
               cpu: 31m
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" (if .non_root.enabled 8888 80) "app_port" 8080 }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" (if .non_root.enabled 8888 80) }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 9
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" (if .non_root.enabled 8888 80) "app_port" 8080 }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" (if .non_root.enabled 8888 80) }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" (if .non_root.enabled 8888 80) "app_port" 8080 }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" (if .non_root.enabled 8888 80) }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
@@ -172,9 +195,22 @@ spec:
         {{ range .scope.capabilities.additional_ports }}
         {{ if eq .type "GRPC" }}
         - name: grpc-{{ .port }}
-          securityContext:
-            runAsUser: 0
           image: {{ $.traffic_image }}
+          securityContext:
+            {{- if $.non_root.enabled }}
+            runAsUser: {{ $.non_root.user_id | default 1000 }}
+            runAsGroup: {{ $.non_root.group_id | default 1000 }}
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+            {{- else }}
+            runAsUser: 0
+            {{- end }}
           ports:
             - containerPort: {{ .port }}
               protocol: TCP
@@ -230,7 +266,18 @@ spec:
           image: >-
             {{ .asset.url }}
           securityContext:
+            {{- if .non_root.enabled }}
+            runAsUser: {{ .non_root.user_id | default 1000 }}
+            runAsGroup: {{ .non_root.group_id | default 1000 }}
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+            {{- else }}
             runAsUser: 0
+            {{- end }}
           ports:
             - containerPort: 8080
               protocol: TCP
