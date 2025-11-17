@@ -24,6 +24,5 @@ else
     echo "Warning: Could not trigger CI automatically"
     echo "$COMMIT_RESPONSE" | jq
 
-    exit 1
   fi
 fi

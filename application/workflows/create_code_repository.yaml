@@ -8,6 +8,9 @@ steps:
   - name: create_repository
     type: script
     file: "$CODE_REPOSITORY_SCRIPT_PATH/create_repository"
+  - name: add_collaborators
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/add_collaborators"
   - name: generate_secrets
     type: script
     file: "application/scripts/code-repo/generate_secrets"
