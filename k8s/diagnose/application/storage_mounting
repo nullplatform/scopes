@@ -1,0 +1,55 @@
+#!/bin/bash
+# Check: Storage Mounting
+# Verifies persistent volumes are bound and mounted
+
+LABEL_SELECTOR="deployment_id=$DEPLOYMENT_ID,scope_id=$SCOPE_ID"
+PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$PODS" ]]; then
+    print_error "No pods found with deployment_id=$DEPLOYMENT_ID and scope_id=$SCOPE_ID"
+    exit 1
+fi
+
+HAS_STORAGE_ISSUES=0
+
+for POD_NAME in $PODS; do
+    POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+    PVCS=$(echo "$POD_INFO" | jq -r '.spec.volumes[]? | select(.persistentVolumeClaim) | .persistentVolumeClaim.claimName')
+
+    if [[ -n "$PVCS" ]]; then
+        for PVC in $PVCS; do
+            PVC_STATUS=$(kubectl get pvc "$PVC" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+
+            if [[ "$PVC_STATUS" == "Pending" ]]; then
+                HAS_STORAGE_ISSUES=1
+                print_error "Pod $POD_NAME: PVC $PVC is in Pending state"
+
+                PVC_INFO=$(kubectl get pvc "$PVC" -n "$NAMESPACE" -o json 2>/dev/null)
+                STORAGE_CLASS=$(echo "$PVC_INFO" | jq -r '.spec.storageClassName // "default"')
+                REQUESTED_SIZE=$(echo "$PVC_INFO" | jq -r '.spec.resources.requests.storage')
+
+                print_warning "  Storage Class: $STORAGE_CLASS"
+                print_warning "  Requested Size: $REQUESTED_SIZE"
+                print_info "  Action: Check if StorageClass exists and has available capacity"
+            elif [[ "$PVC_STATUS" == "Bound" ]]; then
+                print_success "Pod $POD_NAME: PVC $PVC is Bound"
+            else
+                print_warning "Pod $POD_NAME: PVC $PVC status is $PVC_STATUS"
+            fi
+        done
+    fi
+
+    # Check for ContainerCreating waiting on volumes
+    CONTAINER_CREATING=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "ContainerCreating") | .name')
+
+    if [[ -n "$CONTAINER_CREATING" && -n "$PVCS" ]]; then
+        print_warning "Pod $POD_NAME: Containers waiting in ContainerCreating (may be waiting for volumes)"
+    fi
+done
+
+if [[ $HAS_STORAGE_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi

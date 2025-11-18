@@ -1,0 +1,42 @@
+#!/bin/bash
+# Check: Resource Availability
+# Validates pod can be scheduled with requested resources
+
+LABEL_SELECTOR="deployment_id=$DEPLOYMENT_ID,scope_id=$SCOPE_ID"
+PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$PODS" ]]; then
+    print_error "No pods found with deployment_id=$DEPLOYMENT_ID and scope_id=$SCOPE_ID"
+    exit 1
+fi
+
+HAS_ISSUES=0
+
+for POD_NAME in $PODS; do
+    POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+    POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
+
+    if [[ "$POD_PHASE" == "Pending" ]]; then
+        UNSCHEDULABLE=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.reason=="Unschedulable") | .message')
+
+        if [[ -n "$UNSCHEDULABLE" ]]; then
+            HAS_ISSUES=1
+            print_error "Pod $POD_NAME: Cannot be scheduled"
+            print_warning "  Reason: $UNSCHEDULABLE"
+
+            if echo "$UNSCHEDULABLE" | grep -qi "insufficient cpu"; then
+                print_warning "  Issue: Insufficient CPU in cluster"
+            fi
+
+            if echo "$UNSCHEDULABLE" | grep -qi "insufficient memory"; then
+                print_warning "  Issue: Insufficient memory in cluster"
+            fi
+        fi
+    fi
+done
+
+if [[ $HAS_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi
