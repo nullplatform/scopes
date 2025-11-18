@@ -1,12 +1,36 @@
 steps:
-  - name: pod_status
-    description: Status of the related pods
+  - name: image_pull_status
+    description: Verifies container images can be pulled from registry
     category: application
     type: script
-    file: "$SERVICE_PATH/diagnose/application/pod_status_overview"
-  - name: pod_events
-    description: Analyzes recent Kubernetes events for pods requiring attention
-    category: application
-    type: script
-    file: "$SERVICE_PATH/diagnose/application/pod_events_analysis"
+    file: "$SERVICE_PATH/diagnose/application/image_pull_status"
 
+  - name: container_crash_detection
+    description: Checks if containers are crashing on startup
+    category: application
+    type: script
+    file: "$SERVICE_PATH/diagnose/application/container_crash_detection"
+
+  - name: resource_availability
+    description: Validates pod can be scheduled with requested resources
+    category: application
+    type: script
+    file: "$SERVICE_PATH/diagnose/application/resource_availability"
+
+  - name: memory_limits_check
+    description: Checks for out-of-memory container terminations
+    category: application
+    type: script
+    file: "$SERVICE_PATH/diagnose/application/memory_limits_check"
+
+  - name: storage_mounting
+    description: Verifies persistent volumes are bound and mounted
+    category: application
+    type: script
+    file: "$SERVICE_PATH/diagnose/application/storage_mounting"
+
+  - name: pod_readiness
+    description: Confirms pod is running and ready to serve traffic
+    category: application
+    type: script
+    file: "$SERVICE_PATH/diagnose/application/pod_readiness"

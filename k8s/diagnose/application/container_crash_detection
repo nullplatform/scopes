@@ -1,0 +1,46 @@
+#!/bin/bash
+# Check: Container Crash Detection
+# Checks if containers are crashing on startup
+
+LABEL_SELECTOR="deployment_id=$DEPLOYMENT_ID,scope_id=$SCOPE_ID"
+PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$PODS" ]]; then
+    print_error "No pods found with deployment_id=$DEPLOYMENT_ID and scope_id=$SCOPE_ID"
+    exit 1
+fi
+
+HAS_CRASHES=0
+
+for POD_NAME in $PODS; do
+    POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+    CRASH_LOOP=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "CrashLoopBackOff") | .name')
+
+    if [[ -n "$CRASH_LOOP" ]]; then
+        HAS_CRASHES=1
+        print_error "Pod $POD_NAME: CrashLoopBackOff in container(s): $CRASH_LOOP"
+
+        for CONTAINER in $CRASH_LOOP; do
+            RESTART_COUNT=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .restartCount")
+            EXIT_CODE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .lastState.terminated.exitCode // \"N/A\"")
+
+            print_warning "  Container: $CONTAINER | Restarts: $RESTART_COUNT | Exit Code: $EXIT_CODE"
+
+            case "$EXIT_CODE" in
+                137) print_warning "  Exit 137 = OOMKilled (out of memory)" ;;
+                143) print_warning "  Exit 143 = SIGTERM (graceful termination)" ;;
+                1)   print_warning "  Exit 1 = Application error" ;;
+            esac
+        done
+
+        print_info "Last logs from $POD_NAME:"
+        kubectl logs "$POD_NAME" -n "$NAMESPACE" --tail=10 2>&1 | sed 's/^/  /'
+    fi
+done
+
+if [[ $HAS_CRASHES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi
