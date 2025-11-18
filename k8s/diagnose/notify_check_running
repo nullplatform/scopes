@@ -4,8 +4,3 @@ update_check_result --status "running" \
                     --evidence "{}"
 
 notify_results
-
-
-DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.parameters.deployment_id // .notification.parameters.deployment_id // empty')
-
-export DEPLOYMENT_ID
