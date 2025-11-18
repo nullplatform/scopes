@@ -24,5 +24,4 @@ pod_network_data=$(jq -nc \
     '{dnsPolicy: $dns_policy, dnsTest: $dns_test}')
 
 update_check_result --status "success" \
-                    --evidence "$pod_network_data" \
-                    --output-file "$SCRIPT_OUTPUT_FILE"
+                    --evidence "$pod_network_data"
