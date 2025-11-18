@@ -1,7 +1,6 @@
 #!/bin/bash
 
 update_check_result --status "running" \
-                    --evidence "{}" \
-                    --output-file "$SCRIPT_OUTPUT_FILE"
+                    --evidence "{}"
 
 notify_results

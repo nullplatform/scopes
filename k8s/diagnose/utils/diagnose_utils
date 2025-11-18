@@ -25,9 +25,9 @@ print_info() {
 
 update_check_result() {
     # Usage:
-    #   update_check_result output.json "new-status" '{"new":"evidence"}'
+    #   update_check_result "new-status" '{"new":"evidence"}'
     # or:
-    #   update_check_result --output-file output.json --status "new-status" --evidence '{"new":"evidence"}'
+    #   update_check_result --status "new-status" --evidence '{"new":"evidence"}'
 
     # Argument parsing
     if [[ "$1" == --* ]]; then
@@ -35,25 +35,21 @@ update_check_result() {
             case $1 in
                 --status) status="$2"; shift 2 ;;
                 --evidence) evidence="$2"; shift 2 ;;
-                --file|--output-file) output_file="$2"; shift 2 ;;
                 *) echo "Unknown parameter: $1" >&2; return 1 ;;
             esac
         done
     else
-        output_file="$1"
-        status="$2"
-        evidence="$3"
+        status="$1"
+        evidence="$2"
     fi
 
     # Basic validation
-    if [[ -z "$output_file" || -z "$status" || -z "$evidence" ]]; then
-        echo "Error: output_file, status and evidence are required" >&2
+    if [[ -z "$status" || -z "$evidence" ]]; then
+        echo "Error: status and evidence are required" >&2
         return 1
     fi
 
-    if [[ $output_file != *.json ]]; then
-      output_file="$output_file.json"
-    fi
+    output_file="$SCRIPT_OUTPUT_FILE"
 
     if [[ ! -f "$output_file" ]]; then
         echo "Error: File not found: $output_file" >&2
@@ -63,21 +59,38 @@ update_check_result() {
     # Check if log file exists and read it into an array
     local log_array="[]"
     if [[ -n "$SCRIPT_LOG_FILE" && -f "$SCRIPT_LOG_FILE" ]]; then
-        # Read log file and convert to JSON array
-        log_array=$(jq -R -s 'split("\n") | map(select(length > 0))' "$SCRIPT_LOG_FILE")
+        # Read log file, remove empty lines, take last 20 lines, and convert to JSON array
+        log_array=$(grep -v '^[[:space:]]*$' "$SCRIPT_LOG_FILE" | tail -n 20 | jq -R -s 'split("\n") | map(select(length > 0))')
         if [[ $? -ne 0 ]]; then
             echo "Error: Failed to read log file: $SCRIPT_LOG_FILE" >&2
             return 1
         fi
     fi
 
+    # Get current timestamp in ISO 8601 format
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    # Normalize status to lowercase for comparison
+    local status_lower=$(echo "$status" | tr '[:upper:]' '[:lower:]')
+
     # Safely update JSON (write to tmp then move)
     tmpfile="$(mktemp)"
+
+    # Build jq filter based on status
+    local jq_filter='.status = ($status | ascii_downcase) | .evidence = $evidence | .logs = $logs'
+
+    if [[ "$status_lower" == "running" ]]; then
+        jq_filter="$jq_filter | .start_at = \$timestamp"
+    elif [[ "$status_lower" == "success" || "$status_lower" == "failed" ]]; then
+        jq_filter="$jq_filter | .end_at = \$timestamp"
+    fi
+
     if ! jq \
         --arg status "$status" \
         --argjson evidence "$evidence" \
         --argjson logs "$log_array" \
-        '.status = ($status | ascii_downcase) | .evidence = $evidence | .logs = $logs' \
+        --arg timestamp "$timestamp" \
+        "$jq_filter" \
         "$output_file" > "$tmpfile"; then
         echo "Error: Failed to update JSON (is evidence valid JSON?)" >&2
         rm -f "$tmpfile"
