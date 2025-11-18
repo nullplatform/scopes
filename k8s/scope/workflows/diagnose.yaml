@@ -21,7 +21,6 @@ steps:
         parameters:
           status: string
           evidence: object
-          file: string
       - name: notify_results
         type: function
   - name: diagnose

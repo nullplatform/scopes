@@ -94,5 +94,4 @@ EVIDENCE=$(echo "$PODS_JSON" | jq -c \
     }')
 
 update_check_result --status "$CHECK_STATUS" \
-                    --evidence "$EVIDENCE" \
-                    --output-file "$SCRIPT_OUTPUT_FILE"
+                    --evidence "$EVIDENCE"
