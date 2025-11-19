@@ -9,6 +9,11 @@ export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
 
 LABEL_SELECTOR="scope_id=$SCOPE_ID"
 
+CURRENT_ACTIVE_DEPLOYMENT=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment')
+if [ -n "${CURRENT_ACTIVE_DEPLOYMENT:-}" ]; then
+    LABEL_SELECTOR="$LABEL_SELECTOR,deployment_id=$CURRENT_ACTIVE_DEPLOYMENT"
+fi
+
 export LABEL_SELECTOR
 export CONTEXT
 

@@ -17,8 +17,8 @@ if [[ -z "$SERVICES" ]]; then
 
     update_check_result --status "failed" --evidence "{}"
     exit 0
+else
+  SERVICE_COUNT=$(echo "$SERVICES" | wc -w)
+  print_success "Found $SERVICE_COUNT service(s): $SERVICES"
+  update_check_result --status "success" --evidence "{}"
 fi
-
-SERVICE_COUNT=$(echo "$SERVICES" | wc -w)
-print_success "Found $SERVICE_COUNT service(s): $SERVICES"
-update_check_result --status "success" --evidence "{}"

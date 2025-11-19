@@ -7,42 +7,41 @@ PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.item
 if [[ -z "$PODS" ]]; then
     print_error "No pods found with $LABEL_SELECTOR"
     update_check_result --status "failed" --evidence "{}"
-    exit 0
-fi
-
-ALL_READY=1
-
-for POD_NAME in $PODS; do
-    POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
-    POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
-    POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
-
-    if [[ "$POD_PHASE" == "Running" && "$POD_READY" == "True" ]]; then
-        print_success "Pod $POD_NAME: Running and Ready"
-    elif [[ "$POD_PHASE" == "Succeeded" ]]; then
-        print_success "Pod $POD_NAME: Completed successfully"
-    else
-        ALL_READY=0
-        print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
-
-        # Check readiness probe failures
-        READINESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "readiness probe failed" | tail -n 1)
-
-        if [[ -n "$READINESS_FAILURES" ]]; then
-            print_warning "  Readiness probe is failing"
-        fi
-
-        # Check liveness probe failures
-        LIVENESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "liveness probe failed" | tail -n 1)
-
-        if [[ -n "$LIVENESS_FAILURES" ]]; then
-            print_warning "  Liveness probe is failing"
-        fi
-    fi
-done
-
-if [[ $ALL_READY -eq 1 ]]; then
-    update_check_result --status "success" --evidence "{}"
 else
-    update_check_result --status "failed" --evidence "{}"
+  ALL_READY=1
+
+  for POD_NAME in $PODS; do
+      POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+      POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
+      POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
+
+      if [[ "$POD_PHASE" == "Running" && "$POD_READY" == "True" ]]; then
+          print_success "Pod $POD_NAME: Running and Ready"
+      elif [[ "$POD_PHASE" == "Succeeded" ]]; then
+          print_success "Pod $POD_NAME: Completed successfully"
+      else
+          ALL_READY=0
+          print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
+
+          # Check readiness probe failures
+          READINESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "readiness probe failed" | tail -n 1)
+
+          if [[ -n "$READINESS_FAILURES" ]]; then
+              print_warning "  Readiness probe is failing"
+          fi
+
+          # Check liveness probe failures
+          LIVENESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "liveness probe failed" | tail -n 1)
+
+          if [[ -n "$LIVENESS_FAILURES" ]]; then
+              print_warning "  Liveness probe is failing"
+          fi
+      fi
+  done
+
+  if [[ $ALL_READY -eq 1 ]]; then
+      update_check_result --status "success" --evidence "{}"
+  else
+      update_check_result --status "failed" --evidence "{}"
+  fi
 fi
