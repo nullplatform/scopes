@@ -8,75 +8,74 @@ SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath
 if [[ -z "$SERVICES" ]]; then
     print_error "No services found with $LABEL_SELECTOR"
     update_check_result --status "failed" --evidence "{}"
-    exit 0
-fi
-
-HAS_PORT_ISSUES=0
-
-for SERVICE_NAME in $SERVICES; do
-    SERVICE_INFO=$(kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
-
-    # Get service ports and targetPorts
-    SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.targetPort):\(.name // "unnamed")"')
-
-    if [[ -z "$SERVICE_PORTS" ]]; then
-        HAS_PORT_ISSUES=1
-        print_error "Service $SERVICE_NAME: No ports defined"
-        continue
-    fi
-
-    # Get service selector to find pods
-    SERVICE_SELECTORS=$(echo "$SERVICE_INFO" | jq -r '.spec.selector | to_entries | map("\(.key)=\(.value)") | join(",")')
-
-    if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
-        print_warning "Service $SERVICE_NAME: No selector, skipping port validation"
-        continue
-    fi
-
-    # Find pods
-    PODS=$(kubectl get pods -n "$NAMESPACE" -l "$SERVICE_SELECTORS" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
-
-    if [[ -z "$PODS" ]]; then
-        print_warning "Service $SERVICE_NAME: No pods found to validate ports"
-        continue
-    fi
-
-    # Check first pod for port validation
-    FIRST_POD=$(echo "$PODS" | awk '{print $1}')
-    POD_INFO=$(kubectl get pod "$FIRST_POD" -n "$NAMESPACE" -o json 2>/dev/null)
-
-    # Get container ports
-    CONTAINER_PORTS=$(echo "$POD_INFO" | jq -r '.spec.containers[].ports[]?.containerPort' 2>/dev/null | sort -u)
-
-    print_info "Service $SERVICE_NAME port configuration:"
-
-    echo "$SERVICE_PORTS" | while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
-        # Check if targetPort is numeric or named
-        if [[ "$TARGET_PORT" =~ ^[0-9]+$ ]]; then
-            # Numeric targetPort - check if it exists in container ports
-            if echo "$CONTAINER_PORTS" | grep -q "^${TARGET_PORT}$"; then
-                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): OK"
-            else
-                HAS_PORT_ISSUES=1
-                print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Container port $TARGET_PORT not found"
-                print_warning "    Available container ports: $(echo $CONTAINER_PORTS | tr '\n' ' ')"
-            fi
-        else
-            # Named port - check if it exists in container port names
-            NAMED_PORT_VALUE=$(echo "$POD_INFO" | jq -r ".spec.containers[].ports[] | select(.name==\"$TARGET_PORT\") | .containerPort" 2>/dev/null)
-
-            if [[ -n "$NAMED_PORT_VALUE" ]]; then
-                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Resolves to $NAMED_PORT_VALUE"
-            else
-                HAS_PORT_ISSUES=1
-                print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Named port not found in containers"
-            fi
-        fi
-    done
-done
-
-if [[ $HAS_PORT_ISSUES -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
 else
-    update_check_result --status "failed" --evidence "{}"
+  HAS_PORT_ISSUES=0
+
+  for SERVICE_NAME in $SERVICES; do
+      SERVICE_INFO=$(kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+      # Get service ports and targetPorts
+      SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.targetPort):\(.name // "unnamed")"')
+
+      if [[ -z "$SERVICE_PORTS" ]]; then
+          HAS_PORT_ISSUES=1
+          print_error "Service $SERVICE_NAME: No ports defined"
+          continue
+      fi
+
+      # Get service selector to find pods
+      SERVICE_SELECTORS=$(echo "$SERVICE_INFO" | jq -r '.spec.selector | to_entries | map("\(.key)=\(.value)") | join(",")')
+
+      if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
+          print_warning "Service $SERVICE_NAME: No selector, skipping port validation"
+          continue
+      fi
+
+      # Find pods
+      PODS=$(kubectl get pods -n "$NAMESPACE" -l "$SERVICE_SELECTORS" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+      if [[ -z "$PODS" ]]; then
+          print_warning "Service $SERVICE_NAME: No pods found to validate ports"
+          continue
+      fi
+
+      # Check first pod for port validation
+      FIRST_POD=$(echo "$PODS" | awk '{print $1}')
+      POD_INFO=$(kubectl get pod "$FIRST_POD" -n "$NAMESPACE" -o json 2>/dev/null)
+
+      # Get container ports
+      CONTAINER_PORTS=$(echo "$POD_INFO" | jq -r '.spec.containers[].ports[]?.containerPort' 2>/dev/null | sort -u)
+
+      print_info "Service $SERVICE_NAME port configuration:"
+
+      echo "$SERVICE_PORTS" | while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
+          # Check if targetPort is numeric or named
+          if [[ "$TARGET_PORT" =~ ^[0-9]+$ ]]; then
+              # Numeric targetPort - check if it exists in container ports
+              if echo "$CONTAINER_PORTS" | grep -q "^${TARGET_PORT}$"; then
+                  print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): OK"
+              else
+                  HAS_PORT_ISSUES=1
+                  print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Container port $TARGET_PORT not found"
+                  print_warning "    Available container ports: $(echo $CONTAINER_PORTS | tr '\n' ' ')"
+              fi
+          else
+              # Named port - check if it exists in container port names
+              NAMED_PORT_VALUE=$(echo "$POD_INFO" | jq -r ".spec.containers[].ports[] | select(.name==\"$TARGET_PORT\") | .containerPort" 2>/dev/null)
+
+              if [[ -n "$NAMED_PORT_VALUE" ]]; then
+                  print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Resolves to $NAMED_PORT_VALUE"
+              else
+                  HAS_PORT_ISSUES=1
+                  print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Named port not found in containers"
+              fi
+          fi
+      done
+  done
+
+  if [[ $HAS_PORT_ISSUES -eq 0 ]]; then
+      update_check_result --status "success" --evidence "{}"
+  else
+      update_check_result --status "failed" --evidence "{}"
+  fi
 fi

@@ -7,31 +7,30 @@ PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.item
 if [[ -z "$PODS" ]]; then
     print_error "No pods found with $LABEL_SELECTOR"
     update_check_result --status "failed" --evidence "{}"
-    exit 0
-fi
-
-HAS_ERRORS=0
-
-for POD_NAME in $PODS; do
-    POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
-
-    IMAGE_PULL_ERRORS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull") | .name')
-
-    if [[ -n "$IMAGE_PULL_ERRORS" ]]; then
-        HAS_ERRORS=1
-        print_error "Pod $POD_NAME: ImagePullBackOff/ErrImagePull in container(s): $IMAGE_PULL_ERRORS"
-
-        for CONTAINER in $IMAGE_PULL_ERRORS; do
-            IMAGE=$(echo "$POD_INFO" | jq -r ".spec.containers[] | select(.name==\"$CONTAINER\") | .image")
-            MESSAGE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.waiting.message")
-            print_warning "  Image: $IMAGE"
-            print_warning "  Reason: $MESSAGE"
-        done
-    fi
-done
-
-if [[ $HAS_ERRORS -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
 else
-    update_check_result --status "failed" --evidence "{}"
+  HAS_ERRORS=0
+
+  for POD_NAME in $PODS; do
+      POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+      IMAGE_PULL_ERRORS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull") | .name')
+
+      if [[ -n "$IMAGE_PULL_ERRORS" ]]; then
+          HAS_ERRORS=1
+          print_error "Pod $POD_NAME: ImagePullBackOff/ErrImagePull in container(s): $IMAGE_PULL_ERRORS"
+
+          for CONTAINER in $IMAGE_PULL_ERRORS; do
+              IMAGE=$(echo "$POD_INFO" | jq -r ".spec.containers[] | select(.name==\"$CONTAINER\") | .image")
+              MESSAGE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.waiting.message")
+              print_warning "  Image: $IMAGE"
+              print_warning "  Reason: $MESSAGE"
+          done
+      fi
+  done
+
+  if [[ $HAS_ERRORS -eq 0 ]]; then
+      update_check_result --status "success" --evidence "{}"
+  else
+      update_check_result --status "failed" --evidence "{}"
+  fi
 fi
