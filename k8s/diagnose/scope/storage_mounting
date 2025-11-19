@@ -7,6 +7,7 @@ PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.item
 if [[ -z "$PODS" ]]; then
     print_error "No pods found with $LABEL_SELECTOR"
     update_check_result --status "failed" --evidence "{}"
+    exit 0
 fi
 
 HAS_STORAGE_ISSUES=0

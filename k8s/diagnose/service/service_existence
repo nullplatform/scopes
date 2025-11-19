@@ -2,8 +2,6 @@
 # Check: Service Existence
 # Verifies that service resources exist in the namespace
 
-LABEL_SELECTOR="deployment_id=$DEPLOYMENT_ID,scope_id=$SCOPE_ID"
-
 # Get services matching labels
 SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
 
@@ -18,6 +16,7 @@ if [[ -z "$SERVICES" ]]; then
     fi
 
     update_check_result --status "failed" --evidence "{}"
+    exit 0
 fi
 
 SERVICE_COUNT=$(echo "$SERVICES" | wc -w)
