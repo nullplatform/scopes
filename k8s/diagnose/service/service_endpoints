@@ -1,0 +1,56 @@
+#!/bin/bash
+# Check: Service Endpoints
+# Checks if service has healthy endpoints
+
+# Get services
+SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$SERVICES" ]]; then
+    print_error "No services found with $LABEL_SELECTOR"
+    update_check_result --status "failed" --evidence "{}"
+fi
+
+HAS_ISSUES=0
+
+for SERVICE_NAME in $SERVICES; do
+    # Get endpoints for service
+    ENDPOINTS_INFO=$(kubectl get endpoints "$SERVICE_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+    if [[ -z "$ENDPOINTS_INFO" ]]; then
+        HAS_ISSUES=1
+        print_error "Service $SERVICE_NAME: No endpoints resource found"
+        continue
+    fi
+
+    # Check if endpoints has any addresses
+    ADDRESSES=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.addresses[]?.ip' 2>/dev/null)
+    NOT_READY_ADDRESSES=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.notReadyAddresses[]?.ip' 2>/dev/null)
+
+    READY_COUNT=$(echo "$ADDRESSES" | grep -c '^' 2>/dev/null || echo 0)
+    NOT_READY_COUNT=$(echo "$NOT_READY_ADDRESSES" | grep -c '^' 2>/dev/null || echo 0)
+
+    if [[ $READY_COUNT -eq 0 ]]; then
+        HAS_ISSUES=1
+        print_error "Service $SERVICE_NAME: No ready endpoints available"
+
+        if [[ $NOT_READY_COUNT -gt 0 ]]; then
+            print_warning "  Not ready endpoints: $NOT_READY_COUNT"
+            print_info "  Action: Check pod readiness probes and pod status"
+        else
+            print_warning "  No endpoints at all"
+            print_info "  Action: Verify service selector matches pod labels"
+        fi
+    else
+        print_success "Service $SERVICE_NAME: $READY_COUNT ready endpoint(s)"
+
+        if [[ $NOT_READY_COUNT -gt 0 ]]; then
+            print_warning "  Also has $NOT_READY_COUNT not ready endpoint(s)"
+        fi
+    fi
+done
+
+if [[ $HAS_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi

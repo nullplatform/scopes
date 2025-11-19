@@ -2,11 +2,10 @@
 # Check: Pod Readiness
 # Confirms pod is running and ready to serve traffic
 
-LABEL_SELECTOR="scope_id=$SCOPE_ID"
 PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
 
 if [[ -z "$PODS" ]]; then
-    print_error "No pods found with scope_id=$SCOPE_ID"
+    print_error "No pods found with $LABEL_SELECTOR"
     update_check_result --status "failed" --evidence "{}"
 fi
 
