@@ -1,0 +1,50 @@
+#!/bin/bash
+# Check: Service Selector Match
+# Validates service selectors match pod labels
+
+# Get services
+SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$SERVICES" ]]; then
+    print_error "No services found with $LABEL_SELECTOR"
+    update_check_result --status "failed" --evidence "{}"
+fi
+
+HAS_MISMATCH=0
+
+for SERVICE_NAME in $SERVICES; do
+    SERVICE_INFO=$(kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+    # Get service selectors
+    SERVICE_SELECTORS=$(echo "$SERVICE_INFO" | jq -r '.spec.selector | to_entries | map("\(.key)=\(.value)") | join(",")')
+
+    if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
+        HAS_MISMATCH=1
+        print_error "Service $SERVICE_NAME: No selector defined"
+        continue
+    fi
+
+    # Find pods that match service selector
+    MATCHING_PODS=$(kubectl get pods -n "$NAMESPACE" -l "$SERVICE_SELECTORS" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+    if [[ -z "$MATCHING_PODS" ]]; then
+        HAS_MISMATCH=1
+        print_error "Service $SERVICE_NAME: No pods match selector ($SERVICE_SELECTORS)"
+
+        # Show what pods exist with deployment_id
+        EXISTING_PODS=$(kubectl get pods -n "$NAMESPACE" -l "deployment_id=$DEPLOYMENT_ID" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+        if [[ -n "$EXISTING_PODS" ]]; then
+            print_warning "  Existing pods with deployment_id: $EXISTING_PODS"
+            print_info "  Action: Verify pod labels match service selector"
+        fi
+    else
+        POD_COUNT=$(echo "$MATCHING_PODS" | wc -w)
+        print_success "Service $SERVICE_NAME: Selector matches $POD_COUNT pod(s)"
+    fi
+done
+
+if [[ $HAS_MISMATCH -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi
