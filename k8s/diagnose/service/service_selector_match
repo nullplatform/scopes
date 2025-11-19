@@ -8,6 +8,7 @@ SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath
 if [[ -z "$SERVICES" ]]; then
     print_error "No services found with $LABEL_SELECTOR"
     update_check_result --status "failed" --evidence "{}"
+    exit 0
 fi
 
 HAS_MISMATCH=0
