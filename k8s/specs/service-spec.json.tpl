@@ -353,7 +353,7 @@
                }
             ],
             "title":"RAM Memory",
-            "default":64,
+            "default":256,
             "description":"Amount of RAM memory to allocate to the container (in MB)"
          },
          "visibility":{
@@ -361,8 +361,8 @@
             "oneOf":[
                {
                   "const":"internal",
-                  "title":"EY Network",
-                  "description":"Connect with VPN to access scope"
+                  "title":"Publicly Accessible",
+                  "description":"Exposed and reachable from outside your private network"
                }
             ],
             "title":"Visibility",
