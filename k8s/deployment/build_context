@@ -54,6 +54,16 @@ TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/
 PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
 PDB_MAX_UNAVAILABLE=${POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE:-"25%"}
 
+IAM=${IAM-"{}"}
+
+IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
+
+SERVICE_ACCOUNT_NAME=""
+
+if [[ "$IAM_ENABLED" == "true" ]]; then
+  SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+fi
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
           --arg blue_replicas "$BLUE_REPLICAS" \
@@ -63,6 +73,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson pull_secrets "$IMAGE_PULL_SECRETS" \
           --arg pdb_enabled "$PDB_ENABLED" \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
+          --arg service_account_name "$SERVICE_ACCOUNT_NAME" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -70,7 +81,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 pull_secrets: $pull_secrets,
                 traffic_image: $traffic_image,
                 pdb_enabled: $pdb_enabled,
-                pdb_max_unavailable: $pdb_max_unavailable
+                pdb_max_unavailable: $pdb_max_unavailable,
+                service_account_name: $service_account_name
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')

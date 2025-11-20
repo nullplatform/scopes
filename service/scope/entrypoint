@@ -24,9 +24,15 @@ fi
 
 CMD="np service workflow exec --workflow $WORKFLOW_PATH --build-context --include-secrets"
 
-if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
-  CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"
-fi
+IFS=',' read -ra OVERRIDE_PATHS <<< "$OVERRIDES_PATH"
+for path in "${OVERRIDE_PATHS[@]}"; do
+  # Trim whitespace
+  path=$(echo "$path" | xargs)
+  OVERRIDE_WORKFLOW_PATH="$path/scope/workflows/$ACTION_TO_EXECUTE.yaml"
+  if [[ -f "$OVERRIDE_WORKFLOW_PATH" ]]; then
+    CMD="$CMD --overrides $OVERRIDE_WORKFLOW_PATH"
+  fi
+done
 
 echo "Executing command: $CMD"
 eval $CMD

@@ -19,8 +19,14 @@ OVERRIDES_WORKFLOW_PATH="$OVERRIDES_WORKFLOW_PATH/instance/workflows/list.yaml"
 
 CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 
-if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
-  CMD="$CMD --overrides $OVERRIDES_WORKFLOW_PATH"
-fi
+IFS=',' read -ra OVERRIDE_PATHS <<< "$OVERRIDES_PATH"
+for path in "${OVERRIDE_PATHS[@]}"; do
+  # Trim whitespace
+  path=$(echo "$path" | xargs)
+  OVERRIDE_WORKFLOW_PATH="$path/instance/workflows/$ACTION_TO_EXECUTE.yaml"
+  if [[ -f "$OVERRIDE_WORKFLOW_PATH" ]]; then
+    CMD="$CMD --overrides $OVERRIDE_WORKFLOW_PATH"
+  fi
+done
 
 eval "$CMD"

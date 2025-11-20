@@ -38,7 +38,12 @@ for arg in "$@"; do
       SERVICE_PATH="${arg#*=}"
       ;;
     --overrides-path=*)
-      OVERRIDES_PATH="${arg#*=}"
+      OVERRIDE_VALUE="${arg#*=}"
+      IFS=',' read -ra SPLIT_PATHS <<< "$OVERRIDE_VALUE"
+      for path in "${SPLIT_PATHS[@]}"; do
+        path=$(echo "$path" | xargs)
+        OVERRIDES_PATHS+=("$path")
+      done
       ;;
     *)
       echo "Unknown argument: $arg"
@@ -47,7 +52,10 @@ for arg in "$@"; do
   esac
 done
 
-OVERRIDES_PATH="${OVERRIDES_PATH:-$SERVICE_PATH/overrides}"
+if [[ ${#OVERRIDES_PATHS[@]} -gt 0 ]]; then
+  OVERRIDES_PATH=$(IFS=','; echo "${OVERRIDES_PATHS[*]}")
+fi
+
 
 export SERVICE_PATH
 export OVERRIDES_PATH
