@@ -203,18 +203,9 @@ query_prometheus() {
   local step="$4"
 
   local url="${PROM_URL}/api/v1/query_range"
-  #remove s
-  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}"
-  #########debug 
-  local encoded_query=$(urlencode "$query")
-  local full_url="${url}?query=${encoded_query}&start=${start_time}&end=${end_time}&step=${step}"
-  
-  echo "==============================================="
-  echo "FULL URL :"
-  echo "$full_url"
-  echo "==============================================="
-  
-  ##########
+
+  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+
 
   if [[ -n "$PROMETHEUS_TOKEN" ]]; then
     curl -v -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
@@ -328,7 +319,8 @@ unit=$(echo $config | cut -d' ' -f2)
 filters=$(build_filters)
 query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
 
-response=$(query_prometheus "$query" "$start_time" "$now" "$step"s)
+#response=$(query_prometheus "$query" "$start_time" "$now" "$step")
+response=$(query_prometheus "$query" "$start_time" "$(date +%s)"  "$step")
 ## add debug
 echo "$filters"
 echo "$query"
