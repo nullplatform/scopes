@@ -305,6 +305,7 @@ else
 fi
 
 config=$(get_metric_config)
+echo "$config"
 metric_type=$(echo $config | cut -d' ' -f1)
 unit=$(echo $config | cut -d' ' -f2)
 
