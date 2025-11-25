@@ -202,10 +202,11 @@ query_prometheus() {
   local step="$4"
 
   local url="${PROM_URL}/api/v1/query_range"
-  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+  #remove s
+  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}"
   #########debug 
   local encoded_query=$(urlencode "$query")
-  local full_url="${url}?query=${encoded_query}&start=${start_time}&end=${end_time}&step=${step}s"
+  local full_url="${url}?query=${encoded_query}&start=${start_time}&end=${end_time}&step=${step}"
   
   echo "==============================================="
   echo "FULL URL :"
@@ -219,13 +220,13 @@ query_prometheus() {
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
       --data-urlencode "end=$end_time" \
-      --data-urlencode "step=${step}s"
+      --data-urlencode "step=${step}"
   else
     curl -v -k -G "$url" \
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
       --data-urlencode "end=$end_time" \
-      --data-urlencode "step=${step}s"
+      --data-urlencode "step=${step}"
   fi
 }
 
