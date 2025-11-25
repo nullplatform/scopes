@@ -211,7 +211,7 @@ query_prometheus() {
     curl -v -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
-      --data-urlencode "end=$end_time" \
+      --data-urlencode "end=$(date +%s)" \
       --data-urlencode "step=${step}"
   else
     curl -v -k -G "$url" \
