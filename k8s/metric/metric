@@ -203,20 +203,25 @@ query_prometheus() {
 
   local url="${PROM_URL}/api/v1/query_range"
   local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
-  #add debuggin
-  echo ""
-  echo "$url"
-  echo ""
-  echo "$params"
+  #########debug 
+  local encoded_query=$(urlencode "$query")
+  local full_url="${url}?query=${encoded_query}&start=${start_time}&end=${end_time}&step=${step}s"
+  
+  echo "==============================================="
+  echo "FULL URL :"
+  echo "$full_url"
+  echo "==============================================="
+  
+  ##########
 
   if [[ -n "$PROMETHEUS_TOKEN" ]]; then
-    curl -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
+    curl -v -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
       --data-urlencode "end=$end_time" \
       --data-urlencode "step=${step}s"
   else
-    curl -k -G "$url" \
+    curl -v -k -G "$url" \
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
       --data-urlencode "end=$end_time" \
