@@ -203,6 +203,11 @@ query_prometheus() {
 
   local url="${PROM_URL}/api/v1/query_range"
   local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+  #add debuggin
+  echo ""
+  echo "$url"
+  echo ""
+  echo "$params"
 
   if [[ -n "$PROMETHEUS_TOKEN" ]]; then
     curl -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
@@ -307,6 +312,11 @@ filters=$(build_filters)
 query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
 
 response=$(query_prometheus "$query" "$start_time" "$now" "$step")
+## add debug
+echo "$filters"
+echo "$query"
+echo "$response"
+
 
 transform_response() {
   local response="$1"
@@ -334,5 +344,8 @@ transform_response() {
 }
 
 transformed_results=$(transform_response "$response")
+
+#add debug 
+echo "$transformed_results"
 
 echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"
