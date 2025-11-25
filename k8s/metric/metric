@@ -228,13 +228,13 @@ query_prometheus() {
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
       --data-urlencode "end=$end_time" \
-      --data-urlencode "step=${step}"
+      --data-urlencode "step=${step}s"
   else
     curl -v -k -G "$url" \
       --data-urlencode "query=$query" \
       --data-urlencode "start=$start_time" \
       --data-urlencode "end=$end_time" \
-      --data-urlencode "step=${step}"
+      --data-urlencode "step=${step}s"
   fi
 }
 
