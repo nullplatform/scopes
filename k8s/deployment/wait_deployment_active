@@ -10,6 +10,9 @@ while true; do
     ((iteration++))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
         echo "ERROR: Timeout waiting for deployment. Maximum iterations (${MAX_ITERATIONS}) reached."
+
+        source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
+
         exit 1
     fi
     
