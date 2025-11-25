@@ -322,6 +322,9 @@ echo "$response"
 transform_response() {
   local response="$1"
   local status=$(echo "$response" | jq -r '.status')
+  ##debug
+  echo "DEBUG: status = $status"
+  echo "DEBUG: response = $response" 
 
   if [[ "$status" != "success" ]]; then
     echo "[]"
