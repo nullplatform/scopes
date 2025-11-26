@@ -1,7 +1,6 @@
 #!/bin/bash
 
 WORKFLOW_PATH="$SERVICE_PATH/log/workflows/log.yaml"
-OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/log/workflows/log.yaml"
 
 CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 

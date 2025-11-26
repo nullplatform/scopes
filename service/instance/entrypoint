@@ -15,7 +15,6 @@ else
 fi
 
 WORKFLOW_PATH="$SERVICE_PATH/instance/workflows/list.yaml"
-OVERRIDES_WORKFLOW_PATH="$OVERRIDES_WORKFLOW_PATH/instance/workflows/list.yaml"
 
 CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 

@@ -1,12 +1,13 @@
 #!/bin/bash
 
-WORKFLOW_PATH="$SERVICE_PATH/metric/workflows/metric.yaml"
-OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/metric/workflows/metric.yaml"
+ACTION_TO_EXECUTE="metric"
+
 
 if [[ "$NOTIFICATION_ACTION" == "metric:list" ]]; then
-  WORKFLOW_PATH="$SERVICE_PATH/metric/workflows/list.yaml"
-  OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/metric/workflows/list.yaml"
+  ACTION_TO_EXECUTE="list"
 fi
+
+WORKFLOW_PATH="$SERVICE_PATH/metric/workflows/$ACTION_TO_EXECUTE.yaml"
 
 CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 

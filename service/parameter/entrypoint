@@ -5,7 +5,6 @@ IFS=':' read -ra ACTION_PARTS <<< "$NOTIFICATION_ACTION"
 ACTION_TO_EXECUTE="${ACTION_PARTS[1]}"
 
 WORKFLOW_PATH="$SERVICE_PATH/parameters/workflows/$ACTION_TO_EXECUTE.yaml"
-OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/parameters/workflows/$ACTION_TO_EXECUTE.yaml"
 
 CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 
