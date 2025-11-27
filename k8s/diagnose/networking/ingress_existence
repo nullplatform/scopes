@@ -1,0 +1,30 @@
+#!/bin/bash
+# Check: Ingress Existence
+# Verifies that ingress resources exist in the namespace
+
+# Get ingresses matching labels
+INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$INGRESSES" ]]; then
+    print_error "No ingresses found with deployment_id=$DEPLOYMENT_ID and scope_id=$SCOPE_ID"
+
+    # Check if there are ingresses with just deployment_id
+    INGRESSES_BY_DEPLOYMENT=$(kubectl get ingress -n "$NAMESPACE" -l "deployment_id=$DEPLOYMENT_ID" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+    if [[ -n "$INGRESSES_BY_DEPLOYMENT" ]]; then
+        print_warning "Found ingresses with deployment_id but different scope_id: $INGRESSES_BY_DEPLOYMENT"
+    fi
+
+    update_check_result --status "failed" --evidence "{}"
+else
+  INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+  print_success "Found $INGRESS_COUNT ingress(es): $INGRESSES"
+
+  # Show basic ingress info
+  for INGRESS_NAME in $INGRESSES; do
+      HOSTS=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.rules[*].host}' 2>/dev/null)
+      print_info "  $INGRESS_NAME hosts: $HOSTS"
+  done
+
+  update_check_result --status "success" --evidence "{}"
+fi
