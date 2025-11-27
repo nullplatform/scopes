@@ -206,23 +206,7 @@ query_prometheus() {
 
   local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
    
-  # ===== DEBUG START =====
-  echo "=============================================" >&2
-  echo "DEBUG - Query Prometheus" >&2
-  echo "=============================================" >&2
-  echo "URL: $url" >&2
-  echo "Query: $query" >&2
-  echo "Start: $start_time" >&2
-  echo "End: $end_time" >&2
-  echo "Step: ${step}s" >&2
-  echo "Token: ${PROMETHEUS_TOKEN:0:50}..." >&2  # Solo primeros 50 chars
-  echo "" >&2
-  echo "URL completa:" >&2
-  echo "${url}?query=$(urlencode "$query")&start=${start_time}&end=${end_time}&step=${step}s" >&2
-  echo "=============================================" >&2
-
-
-
+  
   if [[ -n "$PROMETHEUS_TOKEN" ]]; then
     curl -v -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
       --data-urlencode "query=$query" \
@@ -337,18 +321,13 @@ query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
 
 response=$(query_prometheus "$query" "$start_time" "$now" "$step")
 
-## add debug
-echo "$filters"
-echo "$query"
-echo "$response"
+
 
 
 transform_response() {
   local response="$1"
   local status=$(echo "$response" | jq -r '.status')
-  ##debug
-  echo  "$status"
-  echo  "$response" 
+
 
   if [[ "$status" != "success" ]]; then
     echo "[]"
@@ -373,7 +352,6 @@ transform_response() {
 
 transformed_results=$(transform_response "$response")
 
-#add debug 
-echo "$transformed_results"
+
 
 echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"
