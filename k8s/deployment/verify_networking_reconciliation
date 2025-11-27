@@ -1,0 +1,10 @@
+#!/bin/bash
+
+case "$DNS_TYPE" in
+  route53)
+    source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
+    ;;
+  *)
+    source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
+    ;;
+esac
