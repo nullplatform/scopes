@@ -17,7 +17,14 @@ esac
 WORKFLOW_PATH="$SERVICE_PATH/scope/workflows/$ACTION_TO_EXECUTE.yaml"
 
 if [[ ! -f "$WORKFLOW_PATH" ]]; then
-  WORKFLOW_PATH="$OVERRIDES_PATH/scope/workflows/$ACTION_TO_EXECUTE.yaml"
+  IFS=',' read -ra OVERRIDE_PATHS <<< "$OVERRIDES_PATH"
+  for path in "${OVERRIDE_PATHS[@]}"; do
+    path=$(echo "$path" | xargs)
+    WORKFLOW_PATH="$path/scope/workflows/$ACTION_TO_EXECUTE.yaml"
+    if [[ -f "$WORKFLOW_PATH" ]]; then
+      break;
+    fi
+  done
 else
   OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/scope/workflows/$ACTION_TO_EXECUTE.yaml"
 fi
