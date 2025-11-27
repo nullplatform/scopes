@@ -1,0 +1,63 @@
+#!/bin/bash
+# Check: Ingress Class Validation
+# Validates ingress class is correctly configured
+
+# Get ingresses
+INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$INGRESSES" ]]; then
+    print_error "No ingresses found with deployment_id=$DEPLOYMENT_ID and scope_id=$SCOPE_ID"
+    update_check_result --status "failed" --evidence "{}"
+else
+  HAS_ISSUES=0
+
+  # Get available ingress classes
+  AVAILABLE_CLASSES=$(kubectl get ingressclass -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+  DEFAULT_CLASS=$(kubectl get ingressclass -o jsonpath='{.items[?(@.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null)
+
+  for INGRESS_NAME in $INGRESSES; do
+      INGRESS_INFO=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+      # Check spec.ingressClassName (new way)
+      INGRESS_CLASS=$(echo "$INGRESS_INFO" | jq -r '.spec.ingressClassName // empty')
+
+      # Check annotation (old way)
+      if [[ -z "$INGRESS_CLASS" ]]; then
+          INGRESS_CLASS=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["kubernetes.io/ingress.class"] // empty')
+
+          if [[ -n "$INGRESS_CLASS" ]]; then
+              print_info "Ingress $INGRESS_NAME: Using deprecated annotation (kubernetes.io/ingress.class)"
+          fi
+      fi
+
+      if [[ -z "$INGRESS_CLASS" ]]; then
+          if [[ -n "$DEFAULT_CLASS" ]]; then
+              print_success "Ingress $INGRESS_NAME: Using default IngressClass ($DEFAULT_CLASS)"
+          else
+              HAS_ISSUES=1
+              print_error "Ingress $INGRESS_NAME: No IngressClass specified and no default found"
+              print_info "  Action: Specify ingressClassName or set a default IngressClass"
+          fi
+      else
+          # Verify the class exists
+          if echo "$AVAILABLE_CLASSES" | grep -qw "$INGRESS_CLASS"; then
+              print_success "Ingress $INGRESS_NAME: IngressClass '$INGRESS_CLASS' is valid"
+          else
+              HAS_ISSUES=1
+              print_error "Ingress $INGRESS_NAME: IngressClass '$INGRESS_CLASS' not found"
+
+              if [[ -n "$AVAILABLE_CLASSES" ]]; then
+                  print_warning "  Available classes: $AVAILABLE_CLASSES"
+              else
+                  print_warning "  No IngressClasses found in cluster"
+              fi
+          fi
+      fi
+  done
+
+  if [[ $HAS_ISSUES -eq 0 ]]; then
+      update_check_result --status "success" --evidence "{}"
+  else
+      update_check_result --status "failed" --evidence "{}"
+  fi
+fi

@@ -1,0 +1,87 @@
+#!/bin/bash
+# Check: Ingress Backend Service
+# Checks if ingress backend services exist and are reachable
+
+# Get ingresses
+INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+if [[ -z "$INGRESSES" ]]; then
+    print_error "No ingresses found with deployment_id=$DEPLOYMENT_ID and scope_id=$SCOPE_ID"
+    update_check_result --status "failed" --evidence "{}"
+else
+
+  HAS_ISSUES=0
+
+  for INGRESS_NAME in $INGRESSES; do
+      INGRESS_INFO=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+
+      print_info "Checking backends for ingress: $INGRESS_NAME"
+
+      # Get default backend if exists
+      DEFAULT_BACKEND=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.name // empty')
+
+      if [[ -n "$DEFAULT_BACKEND" ]]; then
+          DEFAULT_PORT=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.port.number // .spec.defaultBackend.service.port.name // empty')
+
+          # Check if service exists
+          if kubectl get service "$DEFAULT_BACKEND" -n "$NAMESPACE" &>/dev/null; then
+              # Check if service has endpoints
+              ENDPOINTS=$(kubectl get endpoints "$DEFAULT_BACKEND" -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null)
+
+              if [[ -n "$ENDPOINTS" ]]; then
+                  print_success "  Default backend: $DEFAULT_BACKEND:$DEFAULT_PORT (has endpoints)"
+              else
+                  HAS_ISSUES=1
+                  print_error "  Default backend: $DEFAULT_BACKEND:$DEFAULT_PORT (no endpoints)"
+              fi
+          else
+              HAS_ISSUES=1
+              print_error "  Default backend: Service '$DEFAULT_BACKEND' not found"
+          fi
+      fi
+
+      # Get all rule backends
+      BACKENDS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].http.paths[] | "\(.backend.service.name):\(.backend.service.port.number // .backend.service.port.name)"' 2>/dev/null)
+
+      if [[ -z "$BACKENDS" ]]; then
+          print_warning "  No path rules defined"
+          continue
+      fi
+
+      # Check each unique backend
+      echo "$BACKENDS" | sort -u | while IFS=':' read -r SERVICE_NAME SERVICE_PORT; do
+          # Check if service exists
+          if kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" &>/dev/null; then
+              # Check if service has endpoints
+              ENDPOINTS=$(kubectl get endpoints "$SERVICE_NAME" -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null)
+
+              if [[ -n "$ENDPOINTS" ]]; then
+                  ENDPOINT_COUNT=$(echo "$ENDPOINTS" | wc -w)
+                  print_success "  Backend: $SERVICE_NAME:$SERVICE_PORT ($ENDPOINT_COUNT endpoint(s))"
+              else
+                  HAS_ISSUES=1
+                  print_error "  Backend: $SERVICE_NAME:$SERVICE_PORT (no endpoints)"
+                  print_info "    Action: Verify pods are running and service selector matches"
+              fi
+
+              # Verify port exists in service
+              SERVICE_PORTS=$(kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.ports[*].port}' 2>/dev/null)
+
+              if ! echo "$SERVICE_PORTS" | grep -qw "$SERVICE_PORT"; then
+                  HAS_ISSUES=1
+                  print_error "  Backend: Port $SERVICE_PORT not found in service $SERVICE_NAME"
+                  print_warning "    Available ports: $SERVICE_PORTS"
+              fi
+          else
+              HAS_ISSUES=1
+              print_error "  Backend: Service '$SERVICE_NAME' not found in namespace"
+          fi
+      done
+  done
+
+  if [[ $HAS_ISSUES -eq 0 ]]; then
+      update_check_result --status "success" --evidence "{}"
+  else
+      update_check_result --status "failed" --evidence "{}"
+  fi
+fi
