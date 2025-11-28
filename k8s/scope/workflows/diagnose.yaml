@@ -1,4 +1,6 @@
 continue_on_error: true
+include:
+  - "$SERVICE_PATH/values.yaml"
 steps:
   - name: build context
     type: script
