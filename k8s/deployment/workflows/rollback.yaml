@@ -72,3 +72,6 @@ steps:
       file: "$SERVICE_PATH/deployment/delete_cluster_objects"
       configuration:
         DEPLOYMENT: green
+  - name: print_deployment_error_hints
+    type: script
+    file: "$SERVICE_PATH/deployment/print_failed_deployment_hints"
