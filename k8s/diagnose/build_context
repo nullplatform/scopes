@@ -14,5 +14,4 @@ if [ -n "$DEPLOYMENT_ID" ]; then
 fi
 
 export LABEL_SELECTOR
-export CONTEXT
 export NAMESPACE
