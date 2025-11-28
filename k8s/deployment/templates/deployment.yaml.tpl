@@ -167,7 +167,13 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
-
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
         {{ if .scope.capabilities.additional_ports }}
         {{ range .scope.capabilities.additional_ports }}
         {{ if eq .type "GRPC" }}
@@ -220,6 +226,13 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
         {{ end }}
         {{ end }}
         {{ end }}
@@ -294,16 +307,19 @@ spec:
       {{- end }}
     {{- end }}
       volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-config-{{ .scope.id }}-{{ .deployment.id }}
 {{- if .parameters.results }}
   {{- range .parameters.results }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-      - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
-        secret:
-          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
-          items:
-          - key: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
-            path: {{ filepath.Base .destination_path }}
+        - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
+          secret:
+            secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
+            items:
+            - key: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+              path: {{ filepath.Base .destination_path }}
       {{- end }}
     {{- end }}
   {{- end }}
