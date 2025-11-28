@@ -6,12 +6,14 @@ NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-LABEL_SELECTOR="scope_id=$SCOPE_ID"
+SCOPE_LABEL_SELECTOR="scope_id=$SCOPE_ID"
+LABEL_SELECTOR=SCOPE_LABEL_SELECTOR
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id // .scope.current_active_deployment // empty')
 if [ -n "$DEPLOYMENT_ID" ]; then
     LABEL_SELECTOR="$LABEL_SELECTOR,deployment_id=$DEPLOYMENT_ID"
 fi
 
+export SCOPE_LABEL_SELECTOR
 export LABEL_SELECTOR
 export NAMESPACE

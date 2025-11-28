@@ -3,10 +3,10 @@
 # Checks for common ALB issues (IP exhaustion, certificate problems)
 
 # Get ingresses
-INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
 
 if [[ -z "$INGRESSES" ]]; then
-    print_error "No ingresses found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
+    print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
     update_check_result --status "failed" --evidence "{}"
 else
   HAS_ISSUES=0
