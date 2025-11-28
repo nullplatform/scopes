@@ -44,6 +44,9 @@ steps:
       - name: SERVICE_TEMPLATE_PATH
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+      - name: CONFIGMAP_PATH
+        type: file
+        file: "$OUTPUT_DIR/configmap-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
   - name: apply
     type: script
     file: "$SERVICE_PATH/apply_templates"

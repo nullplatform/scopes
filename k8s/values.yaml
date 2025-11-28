@@ -9,6 +9,7 @@ configuration:
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
+  CONFIGMAP_TEMPLATE: "$SERVICE_PATH/deployment/templates/config-maps-traffic.yaml.tpl"
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
   SCALING_TEMPLATE: "$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/service.yaml.tpl"

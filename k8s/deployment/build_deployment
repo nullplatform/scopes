@@ -5,6 +5,7 @@ SECRET_PATH="$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SCALING_PATH="$OUTPUT_DIR/scaling-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SERVICE_TEMPLATE_PATH="$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 PDB_PATH="$OUTPUT_DIR/pdb-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+CONFIGMAP_PATH="$OUTPUT_DIR/configmap-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
 echo "$CONTEXT" | jq --arg replicas "$REPLICAS" '. + {replicas: $replicas}' > "$CONTEXT_PATH"
@@ -71,6 +72,19 @@ TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
     echo "Error building PDB template"
+    exit 1
+fi
+
+echo "Building Template: $CONFIGMAP_TEMPLATE to $CONFIGMAP_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$CONFIGMAP_TEMPLATE" \
+  --out "$CONFIGMAP_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building ConfigMap template"
     exit 1
 fi
 
