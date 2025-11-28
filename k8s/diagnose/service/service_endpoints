@@ -6,7 +6,7 @@
 SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
 
 if [[ -z "$SERVICES" ]]; then
-    print_error "No services found with $LABEL_SELECTOR"
+    print_error "No services found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
     update_check_result --status "failed" --evidence "{}"
 else
   HAS_ISSUES=0
