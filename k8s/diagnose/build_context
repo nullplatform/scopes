@@ -7,6 +7,10 @@ export NAMESPACE_ID=\(capture("namespace=(?<id>\\d+)").id)
 export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
 "')"
 
+NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+  .providers["container-orchestration"].cluster.namespace // $default
+')
+
 LABEL_SELECTOR="scope_id=$SCOPE_ID"
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id // .scope.current_active_deployment // empty')
@@ -16,3 +20,4 @@ fi
 
 export LABEL_SELECTOR
 export CONTEXT
+export NAMESPACE
