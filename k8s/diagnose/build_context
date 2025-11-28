@@ -1,11 +1,6 @@
 #!/bin/bash
 
-eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
-export ORGANIZATION_ID=\(capture("organization=(?<id>\\d+)").id)
-export ACCOUNT_ID=\(capture("account=(?<id>\\d+)").id)
-export NAMESPACE_ID=\(capture("namespace=(?<id>\\d+)").id)
-export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
-"')"
+echo "$CONTEXT"
 
 NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
