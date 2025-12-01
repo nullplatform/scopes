@@ -43,3 +43,5 @@ else
       update_check_result --status "failed" --evidence "{}"
   fi
 fi
+
+exit 1
