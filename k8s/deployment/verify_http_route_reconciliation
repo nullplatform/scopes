@@ -10,8 +10,7 @@ elapsed=0
 echo "Waiting for HTTPRoute [$HTTPROUTE_NAME] reconciliation..."
 
 # Get the current HTTPRoute resourceVersion
-current_httproute=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
-current_resource_version=$(echo "$current_httproute" | jq -r '.metadata.resourceVersion')
+current_resource_version=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json | jq -r '.metadata.resourceVersion')
 
 sleep $CHECK_INTERVAL
 
