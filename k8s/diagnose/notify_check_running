@@ -1,0 +1,6 @@
+#!/bin/bash
+
+update_check_result --status "running" \
+                    --evidence "{}"
+
+notify_results
