@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Add deployment hints for failed deployments
+- Add wait for ingress reconciliation
+- Only wait for blue deployment when using rolling deployment strategy
 
 ## [1.8.0] - 2025-11-28
 - Add support for multiple override layers
