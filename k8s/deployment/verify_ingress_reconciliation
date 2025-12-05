@@ -9,8 +9,7 @@ elapsed=0
 
 echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
 
-current_ingress=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json)
-current_resource_version=$(echo "$current_ingress" | jq -r '.metadata.resourceVersion')
+current_resource_version=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json | jq -r '.metadata.resourceVersion')
 
 sleep $CHECK_INTERVAL
 
