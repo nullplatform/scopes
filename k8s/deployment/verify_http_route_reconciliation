@@ -9,47 +9,37 @@ elapsed=0
 
 echo "Waiting for HTTPRoute [$HTTPROUTE_NAME] reconciliation..."
 
-# Get the current HTTPRoute resourceVersion
-current_resource_version=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json | jq -r '.metadata.resourceVersion')
-
-sleep $CHECK_INTERVAL
-
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
-    # Get the HTTPRoute status
+    sleep $CHECK_INTERVAL
+
     httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
 
-    # Check if status.parents exists and has conditions
     parents_count=$(echo "$httproute_json" | jq '.status.parents | length // 0')
 
     if [ "$parents_count" -eq 0 ]; then
         echo "HTTPRoute is pending sync (no parent status yet). Waiting..."
-        sleep $CHECK_INTERVAL
+
         elapsed=$((elapsed + CHECK_INTERVAL))
         continue
     fi
 
-    # Get the conditions from the first parent (typically the Gateway)
     conditions=$(echo "$httproute_json" | jq -r '.status.parents[0].conditions // []')
     conditions_count=$(echo "$conditions" | jq 'length')
 
     if [ "$conditions_count" -eq 0 ]; then
         echo "HTTPRoute is pending sync (no conditions yet). Waiting..."
-        sleep $CHECK_INTERVAL
         elapsed=$((elapsed + CHECK_INTERVAL))
         continue
     fi
 
-    # Check the "Accepted" condition
     accepted_status=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .status')
     accepted_reason=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .reason')
     accepted_message=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .message')
 
-    # Check the "ResolvedRefs" condition
     resolved_status=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .status')
     resolved_reason=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .reason')
     resolved_message=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .message')
 
-    # Success case: Accepted=True and ResolvedRefs=True
     if [ "$accepted_status" == "True" ] && [ "$resolved_status" == "True" ]; then
         echo "✓ HTTPRoute was successfully reconciled"
         echo "  - Accepted: True"
@@ -110,12 +100,10 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         exit 1
     fi
 
-    # If we're here, conditions exist but are not yet fully ready
     echo "⚠ HTTPRoute is being reconciled..."
     echo "Current status:"
     echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason))"'
     echo "Waiting for reconciliation to complete..."
-    sleep $CHECK_INTERVAL
     elapsed=$((elapsed + CHECK_INTERVAL))
 done
 

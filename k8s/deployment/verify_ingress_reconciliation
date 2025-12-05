@@ -11,9 +11,9 @@ echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
 
 current_resource_version=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json | jq -r '.metadata.resourceVersion')
 
-sleep $CHECK_INTERVAL
-
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
+    sleep $CHECK_INTERVAL
+
     events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
         --field-selector "involvedObject.name=$INGRESS_NAME,involvedObject.kind=Ingress" \
         -o json)
@@ -26,7 +26,6 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
 
     if [ "$event_count" -eq 0 ]; then
         echo "Ingress is pending sync (no events yet). Waiting..."
-        sleep $CHECK_INTERVAL
         elapsed=$((elapsed + CHECK_INTERVAL))
         continue
     fi
@@ -65,13 +64,11 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         echo "Warning messages:"
         echo "$relevant_events" | jq -r '.[] | "  - \(.message)"'
         echo "Waiting for reconciliation to complete..."
-        sleep $CHECK_INTERVAL
         elapsed=$((elapsed + CHECK_INTERVAL))
         continue
     fi
 
     echo "Ingress is pending sync. Waiting..."
-    sleep $CHECK_INTERVAL
     elapsed=$((elapsed + CHECK_INTERVAL))
 done
 
