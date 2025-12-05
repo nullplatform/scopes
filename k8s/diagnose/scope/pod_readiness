@@ -2,16 +2,17 @@
 # Check: Pod Readiness
 # Confirms pod is running and ready to serve traffic
 
-PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+# Validate pods exist
+require_pods || exit 0
 
-if [[ -z "$PODS" ]]; then
-    print_error "No pods found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
-    update_check_result --status "failed" --evidence "{}"
-else
-  ALL_READY=1
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-  for POD_NAME in $PODS; do
-      POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+ALL_READY=1
+
+for POD_NAME in $PODS; do
+      # Get pod info from pre-collected data
+      POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
       POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
       POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
 
@@ -37,11 +38,10 @@ else
               print_warning "  Liveness probe is failing"
           fi
       fi
-  done
+done
 
-  if [[ $ALL_READY -eq 1 ]]; then
-      update_check_result --status "success" --evidence "{}"
-  else
-      update_check_result --status "failed" --evidence "{}"
-  fi
+if [[ $ALL_READY -eq 1 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
 fi

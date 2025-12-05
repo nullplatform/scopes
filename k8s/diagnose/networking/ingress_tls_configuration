@@ -3,7 +3,7 @@
 # Validates TLS/SSL certificate configuration
 
 # Get ingresses
-INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
 if [[ -z "$INGRESSES" ]]; then
     print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
@@ -13,7 +13,7 @@ else
   HAS_ISSUES=0
 
   for INGRESS_NAME in $INGRESSES; do
-      INGRESS_INFO=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+      INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
 
       # Check if TLS is configured
       TLS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[]?.hosts[]?' 2>/dev/null)
@@ -29,13 +29,15 @@ else
       TLS_SECRETS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[] | "\(.secretName):\(.hosts | join(","))"' 2>/dev/null)
 
       echo "$TLS_SECRETS" | while IFS=':' read -r SECRET_NAME HOSTS; do
-          # Check if secret exists
-          if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-              SECRET_TYPE=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.type}' 2>/dev/null)
+          # Check if secret exists in pre-collected data
+          SECRET_INFO=$(jq --arg name "$SECRET_NAME" '.items[] | select(.metadata.name == $name)' "$SECRETS_FILE" 2>/dev/null)
+
+          if [[ -n "$SECRET_INFO" && "$SECRET_INFO" != "null" ]]; then
+              SECRET_TYPE=$(echo "$SECRET_INFO" | jq -r '.type')
 
               if [[ "$SECRET_TYPE" == "kubernetes.io/tls" ]]; then
-                  # Check if secret has required keys
-                  SECRET_KEYS=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data}' 2>/dev/null | jq -r 'keys[]' 2>/dev/null)
+                  # Check if secret has required keys (metadata only, no actual data)
+                  SECRET_KEYS=$(echo "$SECRET_INFO" | jq -r '.metadata.annotations | keys[]' 2>/dev/null)
 
                   HAS_CERT=$(echo "$SECRET_KEYS" | grep -q "tls.crt" && echo "yes" || echo "no")
                   HAS_KEY=$(echo "$SECRET_KEYS" | grep -q "tls.key" && echo "yes" || echo "no")

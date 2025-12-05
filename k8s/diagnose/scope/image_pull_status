@@ -2,16 +2,17 @@
 # Check: Image Pull Status
 # Verifies container images can be pulled from registry
 
-PODS=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+# Validate pods exist
+require_pods || exit 0
 
-if [[ -z "$PODS" ]]; then
-    print_error "No pods found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
-    update_check_result --status "failed" --evidence "{}"
-else
-  HAS_ERRORS=0
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-  for POD_NAME in $PODS; do
-      POD_INFO=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+HAS_ERRORS=0
+
+for POD_NAME in $PODS; do
+      # Get pod info from pre-collected data
+      POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
       IMAGE_PULL_ERRORS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull") | .name')
 
@@ -26,11 +27,10 @@ else
               print_warning "  Reason: $MESSAGE"
           done
       fi
-  done
+done
 
-  if [[ $HAS_ERRORS -eq 0 ]]; then
-      update_check_result --status "success" --evidence "{}"
-  else
-      update_check_result --status "failed" --evidence "{}"
-  fi
+if [[ $HAS_ERRORS -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
 fi

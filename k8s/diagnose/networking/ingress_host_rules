@@ -3,7 +3,8 @@
 # Verifies host and path rules are properly configured
 
 # Get ingresses
-INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+
 
 if [[ -z "$INGRESSES" ]]; then
     print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
@@ -13,7 +14,7 @@ else
   HAS_ISSUES=0
 
   for INGRESS_NAME in $INGRESSES; do
-      INGRESS_INFO=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+      INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
 
       print_info "Checking host rules for ingress: $INGRESS_NAME"
 

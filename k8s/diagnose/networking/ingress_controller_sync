@@ -2,8 +2,8 @@
 # Check: Ingress Controller Sync
 # Verifies ALB ingress controller has synchronized successfully
 
-# Get ingresses
-INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+# Read ingresses from pre-collected data
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
 if [[ -z "$INGRESSES" ]]; then
     print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
@@ -12,13 +12,8 @@ else
 
   HAS_ISSUES=0
 
-  # Find ALB controller pods
-  ALB_CONTROLLER_PODS=$(kubectl get pods -n "$ALB_CONTROLLER_NAMESPACE" -l app.kubernetes.io/name=aws-load-balancer-controller -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
-
-  if [[ -z "$ALB_CONTROLLER_PODS" ]]; then
-      # Try alternative label
-      ALB_CONTROLLER_PODS=$(kubectl get pods -n "$ALB_CONTROLLER_NAMESPACE" -l app=aws-alb-ingress-controller -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
-  fi
+  # Get ALB controller pods from pre-collected data
+  ALB_CONTROLLER_PODS=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
   if [[ -z "$ALB_CONTROLLER_PODS" ]]; then
       print_warning "ALB controller pods not found in namespace $ALB_CONTROLLER_NAMESPACE"
@@ -30,8 +25,8 @@ else
   for INGRESS_NAME in $INGRESSES; do
       print_info "Checking sync status for ingress: $INGRESS_NAME"
 
-      # Check ingress events for errors
-      INGRESS_EVENTS=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$INGRESS_NAME" --sort-by='.lastTimestamp' 2>/dev/null | tail -n 20)
+      # Get ingress events from pre-collected data
+      INGRESS_EVENTS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.involvedObject.name == $name) | "\(.lastTimestamp) \(.type) \(.reason) \(.message)"' "$EVENTS_FILE" 2>/dev/null | tail -n 20)
 
       if [[ -n "$INGRESS_EVENTS" ]]; then
           # Look for error/warning events
@@ -72,8 +67,9 @@ else
       # Check ALB controller logs if pods are found
       if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
           for POD in $ALB_CONTROLLER_PODS; do
-              # Get recent logs related to this ingress
-              CONTROLLER_LOGS=$(kubectl logs "$POD" -n "$ALB_CONTROLLER_NAMESPACE" --tail=100 2>/dev/null | grep -i "$INGRESS_NAME" || true)
+              # Get recent logs related to this ingress from pre-collected logs
+              if [[ -f "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" ]]; then
+                  CONTROLLER_LOGS=$(cat "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" | grep -i "$INGRESS_NAME" || true)
 
               if [[ -n "$CONTROLLER_LOGS" ]]; then
                   # Look for errors in controller logs
@@ -87,11 +83,12 @@ else
                       print_success "  No errors in ALB controller logs for this ingress"
                   fi
               fi
+              fi
           done
       fi
 
-      # Check ingress status/address
-      INGRESS_ADDRESS=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      # Check ingress status/address from pre-collected data
+      INGRESS_ADDRESS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name) | .status.loadBalancer.ingress[0].hostname // empty' "$INGRESSES_FILE" 2>/dev/null)
 
       if [[ -z "$INGRESS_ADDRESS" ]]; then
           HAS_ISSUES=1

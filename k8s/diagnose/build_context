@@ -17,3 +17,65 @@ fi
 export SCOPE_LABEL_SELECTOR
 export LABEL_SELECTOR
 export NAMESPACE
+
+# Collect all Kubernetes data once and store in JSON files
+
+# Pods
+PODS_FILE="$NP_OUTPUT_DIR/pods.json"
+kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o json 2>/dev/null > "$PODS_FILE" || echo '{"items":[]}' > "$PODS_FILE"
+export PODS_FILE
+
+# Services
+SERVICES_FILE="$NP_OUTPUT_DIR/services.json"
+kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o json 2>/dev/null > "$SERVICES_FILE" || echo '{"items":[]}' > "$SERVICES_FILE"
+export SERVICES_FILE
+
+# Endpoints
+ENDPOINTS_FILE="$NP_OUTPUT_DIR/endpoints.json"
+kubectl get endpoints -n "$NAMESPACE" -o json 2>/dev/null > "$ENDPOINTS_FILE" || echo '{"items":[]}' > "$ENDPOINTS_FILE"
+export ENDPOINTS_FILE
+
+# Ingresses
+INGRESSES_FILE="$NP_OUTPUT_DIR/ingresses.json"
+kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o json 2>/dev/null > "$INGRESSES_FILE" || echo '{"items":[]}' > "$INGRESSES_FILE"
+export INGRESSES_FILE
+
+# Secrets (metadata only, no data for security)
+SECRETS_FILE="$NP_OUTPUT_DIR/secrets.json"
+kubectl get secrets -n "$NAMESPACE" -o json 2>/dev/null | jq 'del(.items[].data)' > "$SECRETS_FILE" || echo '{"items":[]}' > "$SECRETS_FILE"
+export SECRETS_FILE
+
+# IngressClasses (cluster-wide)
+INGRESSCLASSES_FILE="$NP_OUTPUT_DIR/ingressclasses.json"
+kubectl get ingressclass -o json 2>/dev/null > "$INGRESSCLASSES_FILE" || echo '{"items":[]}' > "$INGRESSCLASSES_FILE"
+export INGRESSCLASSES_FILE
+
+# Events (namespace-scoped)
+EVENTS_FILE="$NP_OUTPUT_DIR/events.json"
+kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' -o json 2>/dev/null > "$EVENTS_FILE" || echo '{"items":[]}' > "$EVENTS_FILE"
+export EVENTS_FILE
+
+# ALB Controller Pods (for networking diagnostics)
+ALB_CONTROLLER_NAMESPACE="${ALB_CONTROLLER_NAMESPACE:-kube-system}"
+export ALB_CONTROLLER_NAMESPACE
+
+ALB_CONTROLLER_PODS_FILE="$NP_OUTPUT_DIR/alb_controller_pods.json"
+# Try new controller name first
+kubectl get pods -n "$ALB_CONTROLLER_NAMESPACE" -l app.kubernetes.io/name=aws-load-balancer-controller -o json 2>/dev/null > "$ALB_CONTROLLER_PODS_FILE"
+
+# If no pods found, try legacy controller name
+if [[ $(jq '.items | length' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null || echo 0) -eq 0 ]]; then
+    kubectl get pods -n "$ALB_CONTROLLER_NAMESPACE" -l app=aws-alb-ingress-controller -o json 2>/dev/null > "$ALB_CONTROLLER_PODS_FILE" || echo '{"items":[]}' > "$ALB_CONTROLLER_PODS_FILE"
+fi
+export ALB_CONTROLLER_PODS_FILE
+
+# Collect ALB Controller logs
+ALB_CONTROLLER_LOGS_DIR="$NP_OUTPUT_DIR/alb_controller_logs"
+mkdir -p "$ALB_CONTROLLER_LOGS_DIR"
+
+ALB_POD_NAMES=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null)
+if [[ -n "$ALB_POD_NAMES" ]]; then
+    for POD_NAME in $ALB_POD_NAMES; do
+        kubectl logs "$POD_NAME" -n "$ALB_CONTROLLER_NAMESPACE" --tail=200 2>/dev/null > "$ALB_CONTROLLER_LOGS_DIR/${POD_NAME}.log" || echo "" > "$ALB_CONTROLLER_LOGS_DIR/${POD_NAME}.log"
+    done
+fi

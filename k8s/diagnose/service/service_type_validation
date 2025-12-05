@@ -2,74 +2,73 @@
 # Check: Service Type Validation
 # Verifies service type is correctly configured
 
-# Get services
-SERVICES=$(kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+# Validate services exist
+require_services || exit 0
 
-if [[ -z "$SERVICES" ]]; then
-    print_error "No services found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
-    update_check_result --status "failed" --evidence "{}"
+# Read services from pre-collected data
+SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_ISSUES=0
+
+for SERVICE_NAME in $SERVICES; do
+    # Get service info from pre-collected data
+    SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
+
+    SERVICE_TYPE=$(echo "$SERVICE_INFO" | jq -r '.spec.type')
+
+    print_info "Service $SERVICE_NAME: Type=$SERVICE_TYPE"
+
+    case "$SERVICE_TYPE" in
+        ClusterIP)
+            CLUSTER_IP=$(echo "$SERVICE_INFO" | jq -r '.spec.clusterIP')
+            if [[ "$CLUSTER_IP" == "None" ]]; then
+                print_success "  Headless service (ClusterIP: None)"
+            else
+                print_success "  Internal service with ClusterIP: $CLUSTER_IP"
+            fi
+            ;;
+
+        NodePort)
+            NODE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.nodePort)"')
+            print_success "  NodePort service exposed on:"
+            echo "$NODE_PORTS" | while IFS=':' read -r PORT NODE_PORT; do
+                print_info "    Port $PORT -> NodePort $NODE_PORT"
+            done
+            ;;
+
+        LoadBalancer)
+            EXTERNAL_IP=$(echo "$SERVICE_INFO" | jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // "Pending"')
+
+            if [[ "$EXTERNAL_IP" == "Pending" || "$EXTERNAL_IP" == "null" ]]; then
+                HAS_ISSUES=1
+                print_warning "  LoadBalancer IP/Hostname is Pending"
+                print_info "    This may take a few minutes to provision"
+
+                # Check for events related to LoadBalancer from pre-collected data
+                LB_EVENTS=$(jq -r --arg name "$SERVICE_NAME" '.items[] | select(.involvedObject.name == $name and (.message | test("loadbalancer|external"; "i"))) | "\(.lastTimestamp) \(.message)"' "$EVENTS_FILE" 2>/dev/null | tail -n 3)
+                if [[ -n "$LB_EVENTS" ]]; then
+                    print_info "    Recent events:"
+                    echo "$LB_EVENTS" | sed 's/^/      /'
+                fi
+            else
+                print_success "  LoadBalancer available at: $EXTERNAL_IP"
+            fi
+            ;;
+
+        ExternalName)
+            EXTERNAL_NAME=$(echo "$SERVICE_INFO" | jq -r '.spec.externalName')
+            print_success "  ExternalName service pointing to: $EXTERNAL_NAME"
+            ;;
+
+        *)
+            HAS_ISSUES=1
+            print_error "  Unknown service type: $SERVICE_TYPE"
+            ;;
+    esac
+done
+
+if [[ $HAS_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
 else
-  HAS_ISSUES=0
-
-  for SERVICE_NAME in $SERVICES; do
-      SERVICE_INFO=$(kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
-
-      SERVICE_TYPE=$(echo "$SERVICE_INFO" | jq -r '.spec.type')
-
-      print_info "Service $SERVICE_NAME: Type=$SERVICE_TYPE"
-
-      case "$SERVICE_TYPE" in
-          ClusterIP)
-              CLUSTER_IP=$(echo "$SERVICE_INFO" | jq -r '.spec.clusterIP')
-              if [[ "$CLUSTER_IP" == "None" ]]; then
-                  print_success "  Headless service (ClusterIP: None)"
-              else
-                  print_success "  Internal service with ClusterIP: $CLUSTER_IP"
-              fi
-              ;;
-
-          NodePort)
-              NODE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.nodePort)"')
-              print_success "  NodePort service exposed on:"
-              echo "$NODE_PORTS" | while IFS=':' read -r PORT NODE_PORT; do
-                  print_info "    Port $PORT -> NodePort $NODE_PORT"
-              done
-              ;;
-
-          LoadBalancer)
-              EXTERNAL_IP=$(echo "$SERVICE_INFO" | jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // "Pending"')
-
-              if [[ "$EXTERNAL_IP" == "Pending" || "$EXTERNAL_IP" == "null" ]]; then
-                  HAS_ISSUES=1
-                  print_warning "  LoadBalancer IP/Hostname is Pending"
-                  print_info "    This may take a few minutes to provision"
-
-                  # Check for events related to LoadBalancer
-                  LB_EVENTS=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$SERVICE_NAME" 2>/dev/null | grep -i "loadbalancer\|external" | tail -n 3)
-                  if [[ -n "$LB_EVENTS" ]]; then
-                      print_info "    Recent events:"
-                      echo "$LB_EVENTS" | sed 's/^/      /'
-                  fi
-              else
-                  print_success "  LoadBalancer available at: $EXTERNAL_IP"
-              fi
-              ;;
-
-          ExternalName)
-              EXTERNAL_NAME=$(echo "$SERVICE_INFO" | jq -r '.spec.externalName')
-              print_success "  ExternalName service pointing to: $EXTERNAL_NAME"
-              ;;
-
-          *)
-              HAS_ISSUES=1
-              print_error "  Unknown service type: $SERVICE_TYPE"
-              ;;
-      esac
-  done
-
-  if [[ $HAS_ISSUES -eq 0 ]]; then
-      update_check_result --status "success" --evidence "{}"
-  else
-      update_check_result --status "failed" --evidence "{}"
-  fi
+    update_check_result --status "failed" --evidence "{}"
 fi
