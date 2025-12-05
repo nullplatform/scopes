@@ -6,6 +6,8 @@ iteration=0
 LATEST_TIMESTAMP=""
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 
+source "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+
 while true; do
     ((iteration++))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
