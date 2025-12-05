@@ -136,9 +136,9 @@ update_check_result() {
 }
 
 notify_results() {
-    # Find all JSON result files
+    # Find all JSON result files (excluding data directory)
     local json_files
-    json_files=$(find "$NP_OUTPUT_DIR" -type f -name "*.json")
+    json_files=$(find "$NP_OUTPUT_DIR" -type f -name "*.json" ! -path "*/data/*")
 
     if [[ -z "$json_files" ]]; then
         print_warning "No JSON result files found in $NP_OUTPUT_DIR"
@@ -146,8 +146,9 @@ notify_results() {
     fi
 
     # Generate grouped results directly in memory
+    # Use xargs to avoid "Argument list too long" error
     local grouped_results
-    grouped_results=$(jq -s '
+    grouped_results=$(echo "$json_files" | xargs jq -s '
       # category helper
       def cat: .category // "unknown";
 
@@ -164,7 +165,7 @@ notify_results() {
           },
           checks: .
         })
-    ' $json_files)
+    ')
 
     # Extract action and service IDs
     ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
