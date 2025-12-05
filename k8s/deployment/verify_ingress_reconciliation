@@ -1,0 +1,85 @@
+#!/bin/bash
+
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
+
+INGRESS_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
+MAX_WAIT_SECONDS=120
+CHECK_INTERVAL=10
+elapsed=0
+
+echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
+
+# Get the initial generation to detect changes
+initial_generation=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json | jq -r '.metadata.generation')
+last_seen_generation=0
+
+while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
+    sleep $CHECK_INTERVAL
+
+    ingress_json=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
+    
+    if [ $? -ne 0 ]; then
+        echo "Failed to get ingress. Waiting..."
+        elapsed=$((elapsed + CHECK_INTERVAL))
+        continue
+    fi
+
+    # Check the observed generation (indicates controller has processed the resource)
+    observed_generation=$(echo "$ingress_json" | jq -r '.status.loadBalancer.ingress[0].hostname // empty')
+    current_generation=$(echo "$ingress_json" | jq -r '.metadata.generation')
+    
+    # Check status conditions (if your controller sets them)
+    conditions=$(echo "$ingress_json" | jq -r '.status.conditions // []')
+    
+    # Check if LoadBalancer has been provisioned (ALB hostname is set)
+    lb_hostname=$(echo "$ingress_json" | jq -r '.status.loadBalancer.ingress[0].hostname // empty')
+    
+    if [ -n "$lb_hostname" ]; then
+        echo "✓ Ingress has been reconciled successfully"
+        echo "  Load Balancer: $lb_hostname"
+        exit 0
+    fi
+    
+    # Fallback: Check events only if status is not available
+    events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
+        --field-selector "involvedObject.name=$INGRESS_NAME,involvedObject.kind=Ingress" \
+        -o json)
+
+    # Look for recent events (last 2 minutes to account for clock skew)
+    recent_events=$(echo "$events_json" | jq --arg cutoff "$(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2M +%Y-%m-%dT%H:%M:%SZ)" '
+        .items | map(select(.lastTimestamp >= $cutoff))
+    ')
+
+    # Check for certificate errors
+    cert_error=$(echo "$recent_events" | jq -r '.[] | select(.message | contains("no certificate found for host")) | .message' | head -1)
+    
+    if [ -n "$cert_error" ]; then
+        echo "✗ Certificate error detected"
+        echo "Root cause: The ingress hostname does not match any available SSL/TLS certificate"
+        echo "Message: $cert_error"
+        echo ""
+        echo "To fix this issue:"
+        echo "  1. Verify the hostname in your ingress matches a certificate in ACM (AWS Certificate Manager)"
+        echo "  2. Check the 'alb.ingress.kubernetes.io/certificate-arn' annotation points to a valid certificate"
+        echo "  3. Ensure the certificate includes the exact hostname or a wildcard that covers it"
+        exit 1
+    fi
+
+    # Check for explicit error events
+    error_events=$(echo "$recent_events" | jq -r '.[] | select(.type == "Error") | .message')
+    
+    if [ -n "$error_events" ]; then
+        echo "✗ The ingress could not be reconciled"
+        echo "Error messages:"
+        echo "$error_events" | sed 's/^/  - /'
+        exit 1
+    fi
+
+    echo "Ingress is pending reconciliation (elapsed: ${elapsed}s)..."
+    elapsed=$((elapsed + CHECK_INTERVAL))
+done
+
+echo "✗ Timeout waiting for ingress reconciliation after ${MAX_WAIT_SECONDS} seconds"
+echo "Last known state:"
+kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o yaml | grep -A 10 "status:"
+exit 1
