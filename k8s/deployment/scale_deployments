@@ -14,4 +14,13 @@ if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
   BLUE_DEPLOYMENT_NAME="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
 
   kubectl scale deployment "$BLUE_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$BLUE_REPLICAS"
+
+  DEFAULT_TIMEOUT_TEN_MINUTES=600
+  
+  export TIMEOUT=${DEPLOYMENT_MAX_WAIT_IN_SECONDS-$DEFAULT_TIMEOUT_TEN_MINUTES}
+  export SKIP_DEPLOYMENT_STATUS_CHECK=true
+  source "$SERVICE_PATH/deployment/wait_blue_deployment_active"
+
+  unset TIMEOUT
+  unset SKIP_DEPLOYMENT_STATUS_CHECK
 fi
