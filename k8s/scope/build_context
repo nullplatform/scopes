@@ -4,6 +4,27 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
+echo "Validating namespace $K8S_NAMESPACE exists"
+
+if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
+  echo "Namespace '$K8S_NAMESPACE' does not exist in the cluster."
+  
+  CREATE_K8S_NAMESPACE_IF_NOT_EXIST="${CREATE_K8S_NAMESPACE_IF_NOT_EXIST:-true}"
+  
+  if [ "$CREATE_K8S_NAMESPACE_IF_NOT_EXIST" = "true" ]; then
+    echo "Creating namespace '$K8S_NAMESPACE'..."
+    
+    kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
+      kubectl label -f - nullplatform=true --dry-run=client -o yaml | \
+      kubectl apply -f -
+
+    echo "Namespace '$K8S_NAMESPACE' created successfully."
+  else
+    echo "Error: Namespace '$K8S_NAMESPACE' does not exist and CREATE_K8S_NAMESPACE_IF_NOT_EXIST is set to false."
+    exit 1
+  fi
+fi
+
 USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
   .providers["cloud-providers"].networking.application_domain // $default
 ')
