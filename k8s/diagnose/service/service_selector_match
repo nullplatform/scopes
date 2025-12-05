@@ -24,7 +24,19 @@ for SERVICE_NAME in $SERVICES; do
     fi
 
     # Find pods that match service selector from pre-collected data
-    MATCHING_PODS=$(jq -r --arg selectors "$SERVICE_SELECTORS" '.items[] | select(.metadata.labels | to_entries | map("\(.key)=\(.value)") | join(",") | contains($selectors)) | .metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+    # Get service selector as a proper object
+    SELECTOR_OBJECT=$(echo "$SERVICE_INFO" | jq -c '.spec.selector')
+
+    # Match pods where all service selectors are present in pod labels
+    MATCHING_PODS=$(jq -r --argjson selectors "$SELECTOR_OBJECT" '
+      .items[] |
+      select(
+        $selectors | to_entries | all(.key as $k | .value as $v |
+          (.metadata.labels[$k] // "") == $v
+        )
+      ) |
+      .metadata.name
+    ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
     if [[ -z "$MATCHING_PODS" ]]; then
         HAS_MISMATCH=1
