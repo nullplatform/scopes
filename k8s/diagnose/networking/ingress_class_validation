@@ -2,8 +2,8 @@
 # Check: Ingress Class Validation
 # Validates ingress class is correctly configured
 
-# Get ingresses
-INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+# Read ingresses from pre-collected data
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
 if [[ -z "$INGRESSES" ]]; then
     print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
@@ -11,12 +11,13 @@ if [[ -z "$INGRESSES" ]]; then
 else
   HAS_ISSUES=0
 
-  # Get available ingress classes
-  AVAILABLE_CLASSES=$(kubectl get ingressclass -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
-  DEFAULT_CLASS=$(kubectl get ingressclass -o jsonpath='{.items[?(@.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null)
+  # Get available ingress classes from pre-collected data
+  AVAILABLE_CLASSES=$(jq -r '.items[].metadata.name' "$INGRESSCLASSES_FILE" 2>/dev/null | tr '\n' ' ')
+  DEFAULT_CLASS=$(jq -r '.items[] | select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true") | .metadata.name' "$INGRESSCLASSES_FILE" 2>/dev/null)
 
   for INGRESS_NAME in $INGRESSES; do
-      INGRESS_INFO=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+      # Get ingress info from pre-collected data
+      INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
 
       # Check spec.ingressClassName (new way)
       INGRESS_CLASS=$(echo "$INGRESS_INFO" | jq -r '.spec.ingressClassName // empty')

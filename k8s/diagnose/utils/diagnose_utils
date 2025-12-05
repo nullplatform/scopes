@@ -23,6 +23,41 @@ print_info() {
     echo -e "${CYAN}ℹ${NC} $1"
 }
 
+# Validate that required resources exist before running checks
+# Returns 0 if validation passes, 1 if fails (and sets check to failed)
+require_resources() {
+    local resource_type="$1"
+    local resource_names="$2"
+    local label_selector="$3"
+    local namespace="$4"
+
+    if [[ -z "$resource_names" ]]; then
+        print_error "No ${resource_type} found with labels $label_selector in namespace $namespace"
+        update_check_result --status "failed" --evidence "{}"
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate pods exist
+require_pods() {
+    local pods=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+    require_resources "pods" "$pods" "$LABEL_SELECTOR" "$NAMESPACE"
+}
+
+# Validate services exist
+require_services() {
+    local services=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
+    require_resources "services" "$services" "$LABEL_SELECTOR" "$NAMESPACE"
+}
+
+# Validate ingresses exist
+require_ingresses() {
+    local ingresses=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+    require_resources "ingresses" "$ingresses" "$SCOPE_LABEL_SELECTOR" "$NAMESPACE"
+}
+
 update_check_result() {
     # Usage:
     #   update_check_result "new-status" '{"new":"evidence"}'

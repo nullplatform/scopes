@@ -3,7 +3,7 @@
 # Checks if ingress backend services exist and are reachable
 
 # Get ingresses
-INGRESSES=$(kubectl get ingress -n "$NAMESPACE" -l "$SCOPE_LABEL_SELECTOR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
 if [[ -z "$INGRESSES" ]]; then
     print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
@@ -13,7 +13,7 @@ else
   HAS_ISSUES=0
 
   for INGRESS_NAME in $INGRESSES; do
-      INGRESS_INFO=$(kubectl get ingress "$INGRESS_NAME" -n "$NAMESPACE" -o json 2>/dev/null)
+      INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
 
       print_info "Checking backends for ingress: $INGRESS_NAME"
 
@@ -23,10 +23,13 @@ else
       if [[ -n "$DEFAULT_BACKEND" ]]; then
           DEFAULT_PORT=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.port.number // .spec.defaultBackend.service.port.name // empty')
 
-          # Check if service exists
-          if kubectl get service "$DEFAULT_BACKEND" -n "$NAMESPACE" &>/dev/null; then
-              # Check if service has endpoints
-              ENDPOINTS=$(kubectl get endpoints "$DEFAULT_BACKEND" -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null)
+          # Check if service exists in pre-collected data
+          SERVICE_INFO=$(jq --arg name "$DEFAULT_BACKEND" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
+
+          if [[ -n "$SERVICE_INFO" && "$SERVICE_INFO" != "null" ]]; then
+              # Check if service has endpoints from pre-collected data
+              ENDPOINT_INFO=$(jq --arg name "$DEFAULT_BACKEND" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
+              ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[].addresses[].ip' 2>/dev/null | tr '\n' ' ')
 
               if [[ -n "$ENDPOINTS" ]]; then
                   print_success "  Default backend: $DEFAULT_BACKEND:$DEFAULT_PORT (has endpoints)"
@@ -50,10 +53,13 @@ else
 
       # Check each unique backend
       echo "$BACKENDS" | sort -u | while IFS=':' read -r SERVICE_NAME SERVICE_PORT; do
-          # Check if service exists
-          if kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" &>/dev/null; then
-              # Check if service has endpoints
-              ENDPOINTS=$(kubectl get endpoints "$SERVICE_NAME" -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null)
+          # Check if service exists in pre-collected data
+          SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
+
+          if [[ -n "$SERVICE_INFO" && "$SERVICE_INFO" != "null" ]]; then
+              # Check if service has endpoints from pre-collected data
+              ENDPOINT_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
+              ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[].addresses[].ip' 2>/dev/null | tr '\n' ' ')
 
               if [[ -n "$ENDPOINTS" ]]; then
                   ENDPOINT_COUNT=$(echo "$ENDPOINTS" | wc -w)
@@ -64,8 +70,8 @@ else
                   print_info "    Action: Verify pods are running and service selector matches"
               fi
 
-              # Verify port exists in service
-              SERVICE_PORTS=$(kubectl get service "$SERVICE_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.ports[*].port}' 2>/dev/null)
+              # Verify port exists in service from pre-collected data
+              SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[].port' 2>/dev/null | tr '\n' ' ')
 
               if ! echo "$SERVICE_PORTS" | grep -qw "$SERVICE_PORT"; then
                   HAS_ISSUES=1
