@@ -46,6 +46,28 @@ for SERVICE_NAME in $SERVICES; do
         EXISTING_PODS=$(jq -r --arg dep_id "$DEPLOYMENT_ID" '.items[] | select(.metadata.labels.deployment_id == $dep_id) | .metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
         if [[ -n "$EXISTING_PODS" ]]; then
             print_warning "  Existing pods with deployment_id: $EXISTING_PODS"
+
+            # Show first pod's labels for comparison
+            FIRST_POD=$(echo "$EXISTING_PODS" | awk '{print $1}')
+            POD_LABELS=$(jq -r --arg pod "$FIRST_POD" '.items[] | select(.metadata.name == $pod) | .metadata.labels | to_entries | map("\(.key)=\(.value)") | join(",")' "$PODS_FILE" 2>/dev/null)
+            print_info "  Pod labels: $POD_LABELS"
+
+            # Check each selector against pod labels and show only mismatches
+            MISMATCHES=""
+            while IFS='=' read -r key value; do
+                POD_VALUE=$(jq -r --arg pod "$FIRST_POD" --arg key "$key" '.items[] | select(.metadata.name == $pod) | .metadata.labels[$key] // "MISSING"' "$PODS_FILE" 2>/dev/null)
+                if [[ "$POD_VALUE" == "MISSING" ]]; then
+                    MISMATCHES="${MISMATCHES}    ✗ $key: selector=$value, pod=MISSING\n"
+                elif [[ "$POD_VALUE" != "$value" ]]; then
+                    MISMATCHES="${MISMATCHES}    ✗ $key: selector=$value, pod=$POD_VALUE\n"
+                fi
+            done < <(echo "$SELECTOR_OBJECT" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+
+            if [[ -n "$MISMATCHES" ]]; then
+                print_warning "  Selector mismatches:"
+                echo -e "$MISMATCHES"
+            fi
+
             print_info "  Action: Verify pod labels match service selector"
         fi
     else
