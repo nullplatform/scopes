@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add wait for ingress reconciliation
 - Only wait for blue deployment when using rolling deployment strategy
 
+### Added
+- **k8s/diagnose**: New diagnostic workflows and checks for troubleshooting Kubernetes scopes (scope, service, and networking diagnostics)
+
 ## [1.8.0] - 2025-11-28
 - Add support for multiple override layers
 - Add support for IAM / IRSA on Scheduled task

@@ -1,22 +1,22 @@
 {
   "name": "Diagnose Scope",
   "slug": "diagnose-scope",
-  "type": "custom",
+  "type": "diagnose",
   "retryable": true,
   "service_specification_id": "{{ env.Getenv "SERVICE_SPECIFICATION_ID" }}",
   "parameters": {
-    "schema": {
-      "type": "object",
-      "required": [
-        "scope_id"
-      ],
-      "properties": {
-        "scope_id": {
-          "type": "string"
+      "schema": {
+        "type": "object",
+        "required": [
+          "scope_id"
+        ],
+        "properties": {
+          "scope_id": {
+            "type": "string"
+          }
         }
-      }
-    },
-    "values": {}
+      },
+      "values": {}
   },
   "results": {
     "schema": {
@@ -28,7 +28,7 @@
   },
   "annotations": {
     "show_on": [
-      "scope", "deployment", "performance"
+      "scope", "performance"
     ],
     "runs_over": "scope"
   }
