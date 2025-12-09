@@ -30,10 +30,11 @@ for SERVICE_NAME in $SERVICES; do
     # Match pods where all service selectors are present in pod labels
     MATCHING_PODS=$(jq -r --argjson selectors "$SELECTOR_OBJECT" '
       .items[] |
+      . as $pod |
       select(
-        ($selectors | to_entries | all(.key as $k | .value as $v |
-          .metadata.labels[$k] == $v
-        ))
+        $selectors | to_entries | all(.key as $k | .value as $v |
+          $pod.metadata.labels[$k] == $v
+        )
       ) |
       .metadata.name
     ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
@@ -78,10 +79,11 @@ for SERVICE_NAME in $SERVICES; do
                 # Debug: try the query manually to see what happens
                 DEBUG_RESULT=$(jq --argjson selectors "$SELECTOR_OBJECT" --arg pod "$FIRST_POD" '
                   .items[] | select(.metadata.name == $pod) |
+                  . as $p |
                   {
                     pod: .metadata.name,
                     matches: ($selectors | to_entries | all(.key as $k | .value as $v |
-                      .metadata.labels[$k] == $v
+                      $p.metadata.labels[$k] == $v
                     ))
                   }
                 ' "$PODS_FILE" 2>&1)
