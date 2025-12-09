@@ -31,9 +31,9 @@ for SERVICE_NAME in $SERVICES; do
     MATCHING_PODS=$(jq -r --argjson selectors "$SELECTOR_OBJECT" '
       .items[] |
       select(
-        $selectors | to_entries | all(.key as $k | .value as $v |
-          (.metadata.labels[$k] // "") == $v
-        )
+        ($selectors | to_entries | all(.key as $k | .value as $v |
+          .metadata.labels[$k] == $v
+        ))
       ) |
       .metadata.name
     ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
@@ -54,18 +54,38 @@ for SERVICE_NAME in $SERVICES; do
 
             # Check each selector against pod labels and show only mismatches
             MISMATCHES=""
+            MATCH_COUNT=0
+            SELECTOR_COUNT=0
             while IFS='=' read -r key value; do
+                SELECTOR_COUNT=$((SELECTOR_COUNT + 1))
                 POD_VALUE=$(jq -r --arg pod "$FIRST_POD" --arg key "$key" '.items[] | select(.metadata.name == $pod) | .metadata.labels[$key] // "MISSING"' "$PODS_FILE" 2>/dev/null)
                 if [[ "$POD_VALUE" == "MISSING" ]]; then
-                    MISMATCHES="${MISMATCHES}    ✗ $key: selector=$value, pod=MISSING\n"
+                    MISMATCHES="${MISMATCHES}    ✗ $key: selector='$value', pod=MISSING\n"
                 elif [[ "$POD_VALUE" != "$value" ]]; then
-                    MISMATCHES="${MISMATCHES}    ✗ $key: selector=$value, pod=$POD_VALUE\n"
+                    MISMATCHES="${MISMATCHES}    ✗ $key: selector='$value', pod='$POD_VALUE'\n"
+                else
+                    MATCH_COUNT=$((MATCH_COUNT + 1))
                 fi
             done < <(echo "$SELECTOR_OBJECT" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+
+            print_info "  Selector check: $MATCH_COUNT/$SELECTOR_COUNT labels match"
 
             if [[ -n "$MISMATCHES" ]]; then
                 print_warning "  Selector mismatches:"
                 echo -e "$MISMATCHES"
+            else
+                print_warning "  All selectors match but jq query failed - checking jq logic..."
+                # Debug: try the query manually to see what happens
+                DEBUG_RESULT=$(jq --argjson selectors "$SELECTOR_OBJECT" --arg pod "$FIRST_POD" '
+                  .items[] | select(.metadata.name == $pod) |
+                  {
+                    pod: .metadata.name,
+                    matches: ($selectors | to_entries | all(.key as $k | .value as $v |
+                      .metadata.labels[$k] == $v
+                    ))
+                  }
+                ' "$PODS_FILE" 2>&1)
+                print_info "  Debug result: $DEBUG_RESULT"
             fi
 
             print_info "  Action: Verify pod labels match service selector"
