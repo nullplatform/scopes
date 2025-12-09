@@ -3,7 +3,7 @@
 # Checks if containers are crashing on startup
 
 # Validate pods exist
-require_pods || exit 0
+require_pods || return 0
 
 # Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
