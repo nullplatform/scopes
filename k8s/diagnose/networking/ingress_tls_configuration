@@ -2,92 +2,89 @@
 # Check: Ingress TLS Configuration
 # Validates TLS/SSL certificate configuration
 
+# Validate ingresses exist
+require_ingresses || exit 0
+
 # Get ingresses
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-if [[ -z "$INGRESSES" ]]; then
-    print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
-    update_check_result --status "failed" --evidence "{}"
+HAS_ISSUES=0
+
+for INGRESS_NAME in $INGRESSES; do
+    INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
+
+    # Check if TLS is configured
+    TLS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[]?.hosts[]?' 2>/dev/null)
+
+    if [[ -z "$TLS_HOSTS" ]]; then
+        print_info "Ingress $INGRESS_NAME: No TLS configuration (HTTP only)"
+        continue
+    fi
+
+    print_info "Checking TLS configuration for ingress: $INGRESS_NAME"
+
+    # Get TLS secrets
+    TLS_SECRETS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[] | "\(.secretName):\(.hosts | join(","))"' 2>/dev/null)
+
+    echo "$TLS_SECRETS" | while IFS=':' read -r SECRET_NAME HOSTS; do
+        # Check if secret exists in pre-collected data
+        SECRET_INFO=$(jq --arg name "$SECRET_NAME" '.items[] | select(.metadata.name == $name)' "$SECRETS_FILE" 2>/dev/null)
+
+        if [[ -n "$SECRET_INFO" && "$SECRET_INFO" != "null" ]]; then
+            SECRET_TYPE=$(echo "$SECRET_INFO" | jq -r '.type')
+
+            if [[ "$SECRET_TYPE" == "kubernetes.io/tls" ]]; then
+                # Check if secret has required keys (metadata only, no actual data)
+                SECRET_KEYS=$(echo "$SECRET_INFO" | jq -r '.metadata.annotations | keys[]' 2>/dev/null)
+
+                HAS_CERT=$(echo "$SECRET_KEYS" | grep -q "tls.crt" && echo "yes" || echo "no")
+                HAS_KEY=$(echo "$SECRET_KEYS" | grep -q "tls.key" && echo "yes" || echo "no")
+
+                if [[ "$HAS_CERT" == "yes" && "$HAS_KEY" == "yes" ]]; then
+                    print_success "  TLS Secret: $SECRET_NAME (valid for hosts: $HOSTS)"
+
+                    # Optional: Check certificate expiration (requires openssl)
+                    if command -v openssl &>/dev/null; then
+                        CERT_DATA=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d 2>/dev/null)
+
+                        if [[ -n "$CERT_DATA" ]]; then
+                            EXPIRY=$(echo "$CERT_DATA" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+
+                            if [[ -n "$EXPIRY" ]]; then
+                                print_info "    Certificate expires: $EXPIRY"
+
+                                # Check if certificate is expired or expiring soon (30 days)
+                                EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY" +%s 2>/dev/null)
+                                CURRENT_EPOCH=$(date +%s)
+                                DAYS_UNTIL_EXPIRY=$(( ($EXPIRY_EPOCH - $CURRENT_EPOCH) / 86400 ))
+
+                                if [[ $DAYS_UNTIL_EXPIRY -lt 0 ]]; then
+                                    HAS_ISSUES=1
+                                    print_error "    Certificate has EXPIRED"
+                                elif [[ $DAYS_UNTIL_EXPIRY -lt 30 ]]; then
+                                    print_warning "    Certificate expires in $DAYS_UNTIL_EXPIRY days"
+                                fi
+                            fi
+                        fi
+                    fi
+                else
+                    HAS_ISSUES=1
+                    print_error "  TLS Secret: $SECRET_NAME missing required keys (needs tls.crt and tls.key)"
+                fi
+            else
+                HAS_ISSUES=1
+                print_error "  TLS Secret: $SECRET_NAME has wrong type '$SECRET_TYPE' (expected kubernetes.io/tls)"
+            fi
+        else
+            HAS_ISSUES=1
+            print_error "  TLS Secret: '$SECRET_NAME' not found in namespace"
+            print_info "    Action: Create TLS secret or update ingress configuration"
+        fi
+    done
+done
+
+if [[ $HAS_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
 else
-
-  HAS_ISSUES=0
-
-  for INGRESS_NAME in $INGRESSES; do
-      INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
-
-      # Check if TLS is configured
-      TLS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[]?.hosts[]?' 2>/dev/null)
-
-      if [[ -z "$TLS_HOSTS" ]]; then
-          print_info "Ingress $INGRESS_NAME: No TLS configuration (HTTP only)"
-          continue
-      fi
-
-      print_info "Checking TLS configuration for ingress: $INGRESS_NAME"
-
-      # Get TLS secrets
-      TLS_SECRETS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[] | "\(.secretName):\(.hosts | join(","))"' 2>/dev/null)
-
-      echo "$TLS_SECRETS" | while IFS=':' read -r SECRET_NAME HOSTS; do
-          # Check if secret exists in pre-collected data
-          SECRET_INFO=$(jq --arg name "$SECRET_NAME" '.items[] | select(.metadata.name == $name)' "$SECRETS_FILE" 2>/dev/null)
-
-          if [[ -n "$SECRET_INFO" && "$SECRET_INFO" != "null" ]]; then
-              SECRET_TYPE=$(echo "$SECRET_INFO" | jq -r '.type')
-
-              if [[ "$SECRET_TYPE" == "kubernetes.io/tls" ]]; then
-                  # Check if secret has required keys (metadata only, no actual data)
-                  SECRET_KEYS=$(echo "$SECRET_INFO" | jq -r '.metadata.annotations | keys[]' 2>/dev/null)
-
-                  HAS_CERT=$(echo "$SECRET_KEYS" | grep -q "tls.crt" && echo "yes" || echo "no")
-                  HAS_KEY=$(echo "$SECRET_KEYS" | grep -q "tls.key" && echo "yes" || echo "no")
-
-                  if [[ "$HAS_CERT" == "yes" && "$HAS_KEY" == "yes" ]]; then
-                      print_success "  TLS Secret: $SECRET_NAME (valid for hosts: $HOSTS)"
-
-                      # Optional: Check certificate expiration (requires openssl)
-                      if command -v openssl &>/dev/null; then
-                          CERT_DATA=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d 2>/dev/null)
-
-                          if [[ -n "$CERT_DATA" ]]; then
-                              EXPIRY=$(echo "$CERT_DATA" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
-
-                              if [[ -n "$EXPIRY" ]]; then
-                                  print_info "    Certificate expires: $EXPIRY"
-
-                                  # Check if certificate is expired or expiring soon (30 days)
-                                  EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY" +%s 2>/dev/null)
-                                  CURRENT_EPOCH=$(date +%s)
-                                  DAYS_UNTIL_EXPIRY=$(( ($EXPIRY_EPOCH - $CURRENT_EPOCH) / 86400 ))
-
-                                  if [[ $DAYS_UNTIL_EXPIRY -lt 0 ]]; then
-                                      HAS_ISSUES=1
-                                      print_error "    Certificate has EXPIRED"
-                                  elif [[ $DAYS_UNTIL_EXPIRY -lt 30 ]]; then
-                                      print_warning "    Certificate expires in $DAYS_UNTIL_EXPIRY days"
-                                  fi
-                              fi
-                          fi
-                      fi
-                  else
-                      HAS_ISSUES=1
-                      print_error "  TLS Secret: $SECRET_NAME missing required keys (needs tls.crt and tls.key)"
-                  fi
-              else
-                  HAS_ISSUES=1
-                  print_error "  TLS Secret: $SECRET_NAME has wrong type '$SECRET_TYPE' (expected kubernetes.io/tls)"
-              fi
-          else
-              HAS_ISSUES=1
-              print_error "  TLS Secret: '$SECRET_NAME' not found in namespace"
-              print_info "    Action: Create TLS secret or update ingress configuration"
-          fi
-      done
-  done
-
-  if [[ $HAS_ISSUES -eq 0 ]]; then
-      update_check_result --status "success" --evidence "{}"
-  else
-      update_check_result --status "failed" --evidence "{}"
-  fi
+    update_check_result --status "failed" --evidence "{}"
 fi

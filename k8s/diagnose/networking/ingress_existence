@@ -2,30 +2,20 @@
 # Check: Ingress Existence
 # Verifies that ingress resources exist in the namespace
 
+# Validate ingresses exist
+require_ingresses || exit 0
+
 # Read ingresses from pre-collected data
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-if [[ -z "$INGRESSES" ]]; then
-    print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
+INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+print_success "Found $INGRESS_COUNT ingress(es): $INGRESSES"
 
-    # Check if there are ingresses with just deployment_id from collected data
-    INGRESSES_BY_DEPLOYMENT=$(jq -r --arg dep_id "$DEPLOYMENT_ID" '.items[] | select(.metadata.labels.deployment_id == $dep_id) | .metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+# Show basic ingress info
+for INGRESS_NAME in $INGRESSES; do
+    # Get hosts from pre-collected data
+    HOSTS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name) | .spec.rules[].host' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+    print_info "  $INGRESS_NAME hosts: $HOSTS"
+done
 
-    if [[ -n "$INGRESSES_BY_DEPLOYMENT" ]]; then
-        print_warning "Found ingresses with deployment_id but different scope_id: $INGRESSES_BY_DEPLOYMENT"
-    fi
-
-    update_check_result --status "failed" --evidence "{}"
-else
-  INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
-  print_success "Found $INGRESS_COUNT ingress(es): $INGRESSES"
-
-  # Show basic ingress info
-  for INGRESS_NAME in $INGRESSES; do
-      # Get hosts from pre-collected data
-      HOSTS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name) | .spec.rules[].host' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
-      print_info "  $INGRESS_NAME hosts: $HOSTS"
-  done
-
-  update_check_result --status "success" --evidence "{}"
-fi
+update_check_result --status "success" --evidence "{}"
