@@ -3,7 +3,7 @@
 # Verifies service type is correctly configured
 
 # Validate services exist
-require_services || exit 0
+require_services || return 0
 
 # Read services from pre-collected data
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')

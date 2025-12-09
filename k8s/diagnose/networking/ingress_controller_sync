@@ -3,7 +3,7 @@
 # Verifies ALB ingress controller has synchronized successfully
 
 # Validate ingresses exist
-require_ingresses || exit 0
+require_ingresses || return 0
 
 # Read ingresses from pre-collected data
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')

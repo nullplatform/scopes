@@ -3,7 +3,7 @@
 # Checks if ingress backend services exist and are reachable
 
 # Validate ingresses exist
-require_ingresses || exit 0
+require_ingresses || return 0
 
 # Get ingresses
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
