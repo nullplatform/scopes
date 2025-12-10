@@ -1,0 +1,211 @@
+#!/bin/bash
+
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
+ALB_NAME=$(echo "$CONTEXT" | jq -r .alb_name)
+SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r .scope.domain)
+INGRESS_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
+MAX_WAIT_SECONDS=120
+CHECK_INTERVAL=10
+elapsed=0
+
+echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
+echo "Validating ALB [$ALB_NAME] configuration for domain [$SCOPE_DOMAIN]"
+
+INGRESS_JSON=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
+
+if [ $? -ne 0 ]; then
+    echo "✗ Failed to get ingress $INGRESS_NAME"
+    exit 1
+fi
+
+current_resource_version=$(echo "$INGRESS_JSON" | jq -r '.metadata.resourceVersion')
+
+BG_ANNOTATION=$(echo "$INGRESS_JSON" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/actions.bg-deployment"] // empty')
+
+ALL_DOMAINS=("$SCOPE_DOMAIN")
+ADDITIONAL_DOMAINS=$(echo "$CONTEXT" | jq -r '.scope.domains[]?.name // empty' 2>/dev/null)
+if [ -n "$ADDITIONAL_DOMAINS" ]; then
+    while IFS= read -r domain; do
+        [ -n "$domain" ] && ALL_DOMAINS+=("$domain")
+    done <<< "$ADDITIONAL_DOMAINS"
+fi
+
+echo "Domains to validate: ${ALL_DOMAINS[*]}"
+
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+        --names "$ALB_NAME" \
+        --region "$REGION" \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text 2>&1)
+
+if [ $? -ne 0 ] || [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
+    echo "⚠ Could not find ALB: $ALB_NAME"
+    return 1
+fi
+
+echo "Found ALB: $ALB_ARN"
+
+validate_alb_config() {
+    LISTENERS=$(aws elbv2 describe-listeners \
+        --load-balancer-arn "$ALB_ARN" \
+        --region "$REGION" \
+        --output json 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        echo "⚠ Could not get listeners for ALB"
+        return 1
+    fi
+
+    local all_domains_found=true
+    
+    for domain in "${ALL_DOMAINS[@]}"; do
+        echo "Checking domain: $domain"
+        local domain_found=false
+        
+        LISTENER_ARNS=$(echo "$LISTENERS" | jq -r '.Listeners[].ListenerArn')
+        
+        for listener_arn in $LISTENER_ARNS; do
+            RULES=$(aws elbv2 describe-rules \
+                --listener-arn "$listener_arn" \
+                --region "$REGION" \
+                --output json 2>&1)
+            
+            if [ $? -ne 0 ]; then
+                continue
+            fi
+            
+            MATCHING_RULE=$(echo "$RULES" | jq --arg domain "$domain" '
+                .Rules[] | select(
+                    .Conditions[]? | 
+                    select(.Field == "host-header") | 
+                    .Values[]? == $domain
+                )
+            ')
+            
+            if [ -n "$MATCHING_RULE" ]; then
+                echo "  ✓ Found rule for domain: $domain"
+                
+                if [ -n "$BG_ANNOTATION" ]; then
+                    EXPECTED_WEIGHTS=$(echo "$BG_ANNOTATION" | jq -r '.forwardConfig.targetGroups[] | "\(.serviceName):\(.weight)"' 2>/dev/null | sort)
+                    
+                    ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
+                        .Actions[]? | 
+                        select(.Type == "forward") | 
+                        .ForwardConfig.TargetGroups[]? | 
+                        "\(.TargetGroupArn | split("/") | .[1]):\(.Weight // 1)"
+                    ' 2>/dev/null | sort)
+                    
+                    if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
+                        echo "  Expected target groups: $EXPECTED_WEIGHTS"
+                        echo "  Actual target groups: $ACTUAL_WEIGHTS"
+                        
+                        if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
+                            echo "  ✓ Weights match"
+                            domain_found=true
+                        else
+                            echo "  ✗ Weights do not match"
+                            domain_found=false
+                        fi
+                    else
+                        echo "  ⚠ Could not extract weights for comparison"
+                        domain_found=false
+                    fi
+                else
+                    domain_found=true
+                fi
+                break
+            fi
+        done
+        
+        if [ "$domain_found" = false ]; then
+            echo "  ✗ Domain not found in ALB rules: $domain"
+            all_domains_found=false
+        fi
+    done
+    
+    if [ "$all_domains_found" = true ]; then
+        echo "✓ All domains are configured in ALB"
+        return 0
+    else
+        echo "⚠ Some domains are missing from ALB configuration"
+        return 1
+    fi
+}
+
+while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
+    if validate_alb_config; then
+        echo "✓ ALB configuration validated successfully"
+        return 0
+    fi
+    
+    echo "ALB validation incomplete, checking Kubernetes events..."
+    
+    events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
+        --field-selector "involvedObject.name=$INGRESS_NAME,involvedObject.kind=Ingress" \
+        -o json)
+
+    relevant_events=$(echo "$events_json" | jq --arg rv "$current_resource_version" '
+          .items | map(select((.involvedObject.resourceVersion | tonumber) >= ($rv | tonumber)))
+      ')
+
+    event_count=$(echo "$relevant_events" | jq 'length')
+
+    if [ "$event_count" -gt 0 ]; then
+        newest_event=$(echo "$relevant_events" | jq -r 'sort_by(.lastTimestamp) | last')
+        event_type=$(echo "$newest_event" | jq -r '.type')
+        event_reason=$(echo "$newest_event" | jq -r '.reason')
+        event_message=$(echo "$newest_event" | jq -r '.message')
+
+        if [ "$event_reason" == "SuccessfullyReconciled" ]; then
+            echo "✓ Ingress was successfully reconciled (via event)"
+            return 0
+        fi
+
+        if echo "$event_message" | grep -q "no certificate found for host"; then
+            echo "✗ Certificate error detected"
+            echo "Root cause: The ingress hostname does not match any available SSL/TLS certificate"
+            echo "Message: $event_message"
+
+            echo "To fix this issue:"
+            echo "  1. Verify the hostname in your ingress matches a certificate in ACM (AWS Certificate Manager)"
+            echo "  2. Check the 'alb.ingress.kubernetes.io/certificate-arn' annotation points to a valid certificate"
+            echo "  3. Ensure the certificate includes the exact hostname or a wildcard that covers it"
+            exit 1
+        fi
+
+        if [ "$event_type" == "Error" ]; then
+            echo "✗ The ingress could not be reconciled"
+            echo "Error messages:"
+            echo "$relevant_events" | jq -r '.[] | "  - \(.message)"'
+            exit 1
+        fi
+
+        if [ "$event_type" == "Warning" ]; then
+            echo "⚠ There are some potential issues with the ingress"
+            echo "Warning messages:"
+            echo "$relevant_events" | jq -r '.[] | "  - \(.message)"'
+        fi
+    fi
+
+    echo "Waiting for ALB reconciliation... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
+    sleep $CHECK_INTERVAL
+    elapsed=$((elapsed + CHECK_INTERVAL))
+done
+
+# Timeout reached - show diagnostic information
+echo "✗ Timeout waiting for ingress reconciliation after ${MAX_WAIT_SECONDS} seconds"
+echo ""
+echo "Diagnostic information:"
+echo "1. Check ALB Ingress Controller logs:"
+echo "   kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller"
+echo ""
+echo "2. Check ingress status:"
+echo "   kubectl describe ingress $INGRESS_NAME -n $K8S_NAMESPACE"
+echo ""
+echo "3. Recent events:"
+events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
+    --field-selector "involvedObject.name=$INGRESS_NAME,involvedObject.kind=Ingress" \
+    -o json)
+echo "$events_json" | jq -r '.items | sort_by(.lastTimestamp) | .[] | "  [\(.type)] \(.reason): \(.message)"' | tail -10
+
+exit 1
