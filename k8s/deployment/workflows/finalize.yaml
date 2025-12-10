@@ -44,6 +44,10 @@ steps:
       - name: INGRESS_FILE
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+    post:
+      name: verify_networking_reconciliation
+      type: script
+      file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
   - name: build deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_blue_deployment"

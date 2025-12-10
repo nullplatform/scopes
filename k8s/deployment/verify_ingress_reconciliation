@@ -85,40 +85,49 @@ validate_alb_config() {
             if [ -n "$MATCHING_RULE" ]; then
                 echo "  ✓ Found rule for domain: $domain"
                 
-                # Calculate expected weights
-                BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
-                GREEN_WEIGHT=$SWITCH_TRAFFIC
-                
-                # Get expected weights (sorted)
-                BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
-                if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
-                    EXPECTED_WEIGHTS=$(printf "%s\n%s" "$BLUE_WEIGHT" "$GREEN_WEIGHT" | sort -n)
-                else
-                    # No blue deployment, only green
-                    EXPECTED_WEIGHTS="$GREEN_WEIGHT"
-                fi
-                
-                # Extract actual weights from ALB (sorted)
-                ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
-                    .Actions[]? | 
-                    select(.Type == "forward") | 
-                    .ForwardConfig.TargetGroups[]? | 
-                    "\(.Weight // 1)"
-                ' 2>/dev/null | sort -n)
-                
-                if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
-                    echo "  GREEN_WEIGHT: $GREEN_WEIGHT; BLUE_WEIGHT: $BLUE_WEIGHT"
+                # Only validate weights if SWITCH_TRAFFIC != 100
+                if [ "$SWITCH_TRAFFIC" -ne 100 ]; then
+                    # Calculate expected weights
+                    BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
+                    GREEN_WEIGHT=$SWITCH_TRAFFIC
                     
-                    if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
-                        echo "  ✓ Weights match"
-                        domain_found=true
+                    # Get expected weights (sorted)
+                    BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
+                    if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
+                        EXPECTED_WEIGHTS=$(printf "%s\n%s" "$BLUE_WEIGHT" "$GREEN_WEIGHT" | sort -n)
                     else
-                        echo "  ✗ Weights do not match"
+                        # No blue deployment, only green
+                        EXPECTED_WEIGHTS="$GREEN_WEIGHT"
+                    fi
+                    
+                    # Extract actual weights from ALB (sorted)
+                    ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
+                        .Actions[]? | 
+                        select(.Type == "forward") | 
+                        .ForwardConfig.TargetGroups[]? | 
+                        "\(.Weight // 1)"
+                    ' 2>/dev/null | sort -n)
+                    
+                    if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
+                        echo "  GREEN_WEIGHT: $GREEN_WEIGHT; BLUE_WEIGHT: $BLUE_WEIGHT"
+                        
+                        if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
+                            echo "  ✓ Weights match"
+                            domain_found=true
+                        else
+                            echo "  ✗ Weights do not match"
+                            echo "    Expected: $EXPECTED_WEIGHTS"
+                            echo "    Actual: $ACTUAL_WEIGHTS"
+                            domain_found=false
+                        fi
+                    else
+                        echo "  ⚠ Could not extract weights for comparison"
                         domain_found=false
                     fi
                 else
-                    echo "  ⚠ Could not extract weights for comparison"
-                    domain_found=false
+                    # SWITCH_TRAFFIC is 100, skip weight validation
+                    echo "  ℹ SWITCH_TRAFFIC is 100%, skipping weight validation"
+                    domain_found=true
                 fi
                 break
             fi

@@ -57,6 +57,9 @@ steps:
         - name: notify_active_domains
           type: script
           file: "$SERVICE_PATH/deployment/notify_active_domains"
+        - name: verify_networking_reconciliation
+          type: script
+          file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
         - name: wait deployment active
           type: script
           file: "$SERVICE_PATH/deployment/wait_deployment_active"
