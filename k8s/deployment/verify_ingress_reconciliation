@@ -11,13 +11,10 @@ elapsed=0
 
 echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
 
-# Set ALB_RECONCILIATION_ENABLED early to use in messages
 ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-true}"
 
-# Get deployment strategy from CONTEXT
 DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r ".deployment.strategy")
 
-# Early validation: Skip verification if ALB reconciliation is disabled and this is an blue_green deployment
 if [ "$ALB_RECONCILIATION_ENABLED" = "false" ] && [ "$DEPLOYMENT_STRATEGY" = "blue_green" ]; then
     echo "⚠ Skipping verification as ALB access needed to validate blue-green and switch traffic reconciliation."
     
@@ -29,7 +26,6 @@ if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
 else
     echo "ALB reconciliation disabled, will check cluster events only"
 fi
-
 
 INGRESS_JSON=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
 
@@ -50,7 +46,6 @@ if [ -n "$ADDITIONAL_DOMAINS" ]; then
     done <<< "$ADDITIONAL_DOMAINS"
 fi
 
-# Only get ALB ARN if ALB reconciliation is enabled
 if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
     ALB_ARN=$(aws elbv2 describe-load-balancers \
             --names "$ALB_NAME" \
@@ -104,22 +99,17 @@ validate_alb_config() {
             if [ -n "$MATCHING_RULE" ]; then
                 echo "  ✓ Found rule for domain: $domain"
                 
-                # Only validate weights if VERIFY_WEIGHTS is true
                 if [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
-                    # Calculate expected weights
                     BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
                     GREEN_WEIGHT=$SWITCH_TRAFFIC
-                    
-                    # Get expected weights (sorted)
+
                     BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
                     if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
                         EXPECTED_WEIGHTS=$(printf "%s\n%s" "$BLUE_WEIGHT" "$GREEN_WEIGHT" | sort -n)
                     else
-                        # No blue deployment, only green
                         EXPECTED_WEIGHTS="$GREEN_WEIGHT"
                     fi
                     
-                    # Extract actual weights from ALB (sorted)
                     ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
                         .Actions[]? | 
                         select(.Type == "forward") | 
@@ -164,7 +154,6 @@ validate_alb_config() {
 }
 
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
-    # Only validate ALB config if ALB_RECONCILIATION_ENABLED is true
     if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
         if validate_alb_config; then
             echo "✓ ALB configuration validated successfully"
