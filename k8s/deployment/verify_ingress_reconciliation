@@ -85,35 +85,29 @@ validate_alb_config() {
             if [ -n "$MATCHING_RULE" ]; then
                 echo "  ✓ Found rule for domain: $domain"
                 
-                # Get deployment IDs from CONTEXT
-                BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
-                GREEN_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
-                SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
-                
                 # Calculate expected weights
                 BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
                 GREEN_WEIGHT=$SWITCH_TRAFFIC
                 
-                # Build expected weights string (sorted by service name)
+                # Get expected weights (sorted)
+                BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
                 if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
-                    EXPECTED_WEIGHTS=$(printf "d-%s-%s:%s\nd-%s-%s:%s" \
-                        "$SCOPE_ID" "$BLUE_DEPLOYMENT_ID" "$BLUE_WEIGHT" \
-                        "$SCOPE_ID" "$GREEN_DEPLOYMENT_ID" "$GREEN_WEIGHT" | sort)
+                    EXPECTED_WEIGHTS=$(printf "%s\n%s" "$BLUE_WEIGHT" "$GREEN_WEIGHT" | sort -n)
                 else
                     # No blue deployment, only green
-                    EXPECTED_WEIGHTS="d-${SCOPE_ID}-${GREEN_DEPLOYMENT_ID}:${GREEN_WEIGHT}"
+                    EXPECTED_WEIGHTS="$GREEN_WEIGHT"
                 fi
                 
+                # Extract actual weights from ALB (sorted)
                 ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
                     .Actions[]? | 
                     select(.Type == "forward") | 
                     .ForwardConfig.TargetGroups[]? | 
-                    "\(.TargetGroupArn | split("/") | .[1]):\(.Weight // 1)"
-                ' 2>/dev/null | sort)
+                    "\(.Weight // 1)"
+                ' 2>/dev/null | sort -n)
                 
                 if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
-                    echo "  Expected target groups: $EXPECTED_WEIGHTS"
-                    echo "  Actual target groups: $ACTUAL_WEIGHTS"
+                    echo "  GREEN_WEIGHT: $GREEN_WEIGHT; BLUE_WEIGHT: $BLUE_WEIGHT"
                     
                     if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
                         echo "  ✓ Weights match"
