@@ -30,8 +30,6 @@ if [ -n "$ADDITIONAL_DOMAINS" ]; then
     done <<< "$ADDITIONAL_DOMAINS"
 fi
 
-echo "Domains to validate: ${ALL_DOMAINS[*]}"
-
 ALB_ARN=$(aws elbv2 describe-load-balancers \
         --names "$ALB_NAME" \
         --region "$REGION" \
@@ -42,8 +40,6 @@ if [ $? -ne 0 ] || [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
     echo "⚠ Could not find ALB: $ALB_NAME"
     return 1
 fi
-
-echo "Found ALB: $ALB_ARN"
 
 validate_alb_config() {
     LISTENERS=$(aws elbv2 describe-listeners \
@@ -85,8 +81,8 @@ validate_alb_config() {
             if [ -n "$MATCHING_RULE" ]; then
                 echo "  ✓ Found rule for domain: $domain"
                 
-                # Only validate weights if SWITCH_TRAFFIC != 100
-                if [ "$SWITCH_TRAFFIC" -ne 100 ]; then
+                # Only validate weights if VERIFY_WEIGHTS is true
+                if [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
                     # Calculate expected weights
                     BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
                     GREEN_WEIGHT=$SWITCH_TRAFFIC
@@ -109,8 +105,6 @@ validate_alb_config() {
                     ' 2>/dev/null | sort -n)
                     
                     if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
-                        echo "  GREEN_WEIGHT: $GREEN_WEIGHT; BLUE_WEIGHT: $BLUE_WEIGHT"
-                        
                         if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
                             echo "  ✓ Weights match"
                             domain_found=true
@@ -125,8 +119,6 @@ validate_alb_config() {
                         domain_found=false
                     fi
                 else
-                    # SWITCH_TRAFFIC is 100, skip weight validation
-                    echo "  ℹ SWITCH_TRAFFIC is 100%, skipping weight validation"
                     domain_found=true
                 fi
                 break
