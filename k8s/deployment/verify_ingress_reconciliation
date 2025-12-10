@@ -20,7 +20,7 @@ fi
 
 current_resource_version=$(echo "$INGRESS_JSON" | jq -r '.metadata.resourceVersion')
 
-BG_ANNOTATION=$(echo "$INGRESS_JSON" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/actions.bg-deployment"] // empty')
+SWITCH_TRAFFIC=$(echo "$CONTEXT" | jq -r ".deployment.strategy_data.desired_switched_traffic // 100")
 
 ALL_DOMAINS=("$SCOPE_DOMAIN")
 ADDITIONAL_DOMAINS=$(echo "$CONTEXT" | jq -r '.scope.domains[]?.name // empty' 2>/dev/null)
@@ -85,33 +85,46 @@ validate_alb_config() {
             if [ -n "$MATCHING_RULE" ]; then
                 echo "  ✓ Found rule for domain: $domain"
                 
-                if [ -n "$BG_ANNOTATION" ]; then
-                    EXPECTED_WEIGHTS=$(echo "$BG_ANNOTATION" | jq -r '.forwardConfig.targetGroups[] | "\(.serviceName):\(.weight)"' 2>/dev/null | sort)
+                # Get deployment IDs from CONTEXT
+                BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
+                GREEN_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
+                SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+                
+                # Calculate expected weights
+                BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
+                GREEN_WEIGHT=$SWITCH_TRAFFIC
+                
+                # Build expected weights string (sorted by service name)
+                if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
+                    EXPECTED_WEIGHTS=$(printf "d-%s-%s:%s\nd-%s-%s:%s" \
+                        "$SCOPE_ID" "$BLUE_DEPLOYMENT_ID" "$BLUE_WEIGHT" \
+                        "$SCOPE_ID" "$GREEN_DEPLOYMENT_ID" "$GREEN_WEIGHT" | sort)
+                else
+                    # No blue deployment, only green
+                    EXPECTED_WEIGHTS="d-${SCOPE_ID}-${GREEN_DEPLOYMENT_ID}:${GREEN_WEIGHT}"
+                fi
+                
+                ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
+                    .Actions[]? | 
+                    select(.Type == "forward") | 
+                    .ForwardConfig.TargetGroups[]? | 
+                    "\(.TargetGroupArn | split("/") | .[1]):\(.Weight // 1)"
+                ' 2>/dev/null | sort)
+                
+                if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
+                    echo "  Expected target groups: $EXPECTED_WEIGHTS"
+                    echo "  Actual target groups: $ACTUAL_WEIGHTS"
                     
-                    ACTUAL_WEIGHTS=$(echo "$MATCHING_RULE" | jq -r '
-                        .Actions[]? | 
-                        select(.Type == "forward") | 
-                        .ForwardConfig.TargetGroups[]? | 
-                        "\(.TargetGroupArn | split("/") | .[1]):\(.Weight // 1)"
-                    ' 2>/dev/null | sort)
-                    
-                    if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
-                        echo "  Expected target groups: $EXPECTED_WEIGHTS"
-                        echo "  Actual target groups: $ACTUAL_WEIGHTS"
-                        
-                        if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
-                            echo "  ✓ Weights match"
-                            domain_found=true
-                        else
-                            echo "  ✗ Weights do not match"
-                            domain_found=false
-                        fi
+                    if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
+                        echo "  ✓ Weights match"
+                        domain_found=true
                     else
-                        echo "  ⚠ Could not extract weights for comparison"
+                        echo "  ✗ Weights do not match"
                         domain_found=false
                     fi
                 else
-                    domain_found=true
+                    echo "  ⚠ Could not extract weights for comparison"
+                    domain_found=false
                 fi
                 break
             fi
