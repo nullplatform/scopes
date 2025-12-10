@@ -14,9 +14,12 @@ echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
 # Set ALB_RECONCILIATION_ENABLED early to use in messages
 ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-true}"
 
-# Early validation: VERIFY_WEIGHTS requires ALB_RECONCILIATION_ENABLED
-if [ "${VERIFY_WEIGHTS:-false}" = "true" ] && [ "$ALB_RECONCILIATION_ENABLED" = "false" ]; then
-    echo "⚠ This is a switch traffic event but ALB_RECONCILIATION_ENABLED is disabled. Skipping verification as ALB access needed to validate switch traffic reconciliation."
+# Get deployment strategy from CONTEXT
+DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r ".deployment.strategy")
+
+# Early validation: Skip verification if ALB reconciliation is disabled and this is an blue_green deployment
+if [ "$ALB_RECONCILIATION_ENABLED" = "false" ] && [ "$DEPLOYMENT_STRATEGY" = "blue_green" ]; then
+    echo "⚠ Skipping verification as ALB access needed to validate blue-green and switch traffic reconciliation."
     
     return 0
 fi
@@ -26,7 +29,6 @@ if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
 else
     echo "ALB reconciliation disabled, will check cluster events only"
 fi
-
 
 
 INGRESS_JSON=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
