@@ -8,8 +8,26 @@ MAX_WAIT_SECONDS=120
 CHECK_INTERVAL=10
 elapsed=0
 
+
 echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
-echo "Validating ALB [$ALB_NAME] configuration for domain [$SCOPE_DOMAIN]"
+
+# Set ALB_RECONCILIATION_ENABLED early to use in messages
+ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-true}"
+
+# Early validation: VERIFY_WEIGHTS requires ALB_RECONCILIATION_ENABLED
+if [ "${VERIFY_WEIGHTS:-false}" = "true" ] && [ "$ALB_RECONCILIATION_ENABLED" = "false" ]; then
+    echo "⚠ This is a switch traffic event but ALB_RECONCILIATION_ENABLED is disabled. Skipping verification as ALB access needed to validate switch traffic reconciliation."
+    
+    return 0
+fi
+
+if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
+    echo "Validating ALB [$ALB_NAME] configuration for domain [$SCOPE_DOMAIN]"
+else
+    echo "ALB reconciliation disabled, will check cluster events only"
+fi
+
+
 
 INGRESS_JSON=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
 
@@ -30,15 +48,18 @@ if [ -n "$ADDITIONAL_DOMAINS" ]; then
     done <<< "$ADDITIONAL_DOMAINS"
 fi
 
-ALB_ARN=$(aws elbv2 describe-load-balancers \
-        --names "$ALB_NAME" \
-        --region "$REGION" \
-        --query 'LoadBalancers[0].LoadBalancerArn' \
-        --output text 2>&1)
+# Only get ALB ARN if ALB reconciliation is enabled
+if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
+    ALB_ARN=$(aws elbv2 describe-load-balancers \
+            --names "$ALB_NAME" \
+            --region "$REGION" \
+            --query 'LoadBalancers[0].LoadBalancerArn' \
+            --output text 2>&1)
 
-if [ $? -ne 0 ] || [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
-    echo "⚠ Could not find ALB: $ALB_NAME"
-    return 1
+    if [ $? -ne 0 ] || [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
+        echo "⚠ Could not find ALB: $ALB_NAME"
+        return 1
+    fi
 fi
 
 validate_alb_config() {
@@ -141,12 +162,15 @@ validate_alb_config() {
 }
 
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
-    if validate_alb_config; then
-        echo "✓ ALB configuration validated successfully"
-        return 0
+    # Only validate ALB config if ALB_RECONCILIATION_ENABLED is true
+    if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
+        if validate_alb_config; then
+            echo "✓ ALB configuration validated successfully"
+            return 0
+        fi
+        
+        echo "ALB validation incomplete, checking Kubernetes events..."
     fi
-    
-    echo "ALB validation incomplete, checking Kubernetes events..."
     
     events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
         --field-selector "involvedObject.name=$INGRESS_NAME,involvedObject.kind=Ingress" \
