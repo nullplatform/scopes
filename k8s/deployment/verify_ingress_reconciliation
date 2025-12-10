@@ -106,7 +106,7 @@ validate_alb_config() {
                     
                     if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
                         if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
-                            echo "  ✓ Weights match"
+                            echo "  ✓ Weights match (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
                             domain_found=true
                         else
                             echo "  ✗ Weights do not match"
