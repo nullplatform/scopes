@@ -37,6 +37,12 @@ steps:
     configuration:
       ACTION: apply
       DRY_RUN: false
+    post:
+      name: verify_networking_reconciliation
+      type: script
+      file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+      configuration:
+        VERIFY_WEIGHTS: false
   - name: build deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"
