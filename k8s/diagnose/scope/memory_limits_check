@@ -1,0 +1,39 @@
+#!/bin/bash
+# Check: Memory Limits
+# Checks for out-of-memory container terminations
+
+# Validate pods exist
+require_pods || return 0
+
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_OOM=0
+
+for POD_NAME in $PODS; do
+    # Get pod info from pre-collected data
+    POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
+
+    OOM_KILLED=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.lastState.terminated.reason == "OOMKilled") | .name')
+
+    if [[ -n "$OOM_KILLED" ]]; then
+        HAS_OOM=1
+        print_error "Pod $POD_NAME: OOMKilled in container(s): $OOM_KILLED"
+
+        for CONTAINER in $OOM_KILLED; do
+            MEMORY_LIMIT=$(echo "$POD_INFO" | jq -r ".spec.containers[] | select(.name==\"$CONTAINER\") | .resources.limits.memory // \"not set\"")
+            MEMORY_REQUEST=$(echo "$POD_INFO" | jq -r ".spec.containers[] | select(.name==\"$CONTAINER\") | .resources.requests.memory // \"not set\"")
+
+            print_warning "  Container: $CONTAINER"
+            print_warning "  Memory Limit: $MEMORY_LIMIT"
+            print_warning "  Memory Request: $MEMORY_REQUEST"
+            print_info "  Action: Increase memory limits or optimize application memory usage"
+        done
+    fi
+done
+
+if [[ $HAS_OOM -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi

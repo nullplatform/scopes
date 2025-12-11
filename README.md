@@ -81,11 +81,18 @@ The script will:
 
 -   **`configure`**: The setup script that registers the provider with nullplatform.
 -   **`entrypoint`**: The main script executed by the agent. It routes events to the appropriate scope implementation.
--   **`k8s/`**: Implementation for the Kubernetes scope.
+-   **`k8s/`**: Kubernetes scope implementation.
     -   `specs/`: JSON schemas and templates.
     -   `scope/`: Lifecycle workflows (create, update, delete).
--   **`azure/`**: Implementation for the Azure scope.
--   **`scheduled_task/`**: Implementation for Scheduled Tasks scope.
+    -   `diagnose/`: Diagnostic workflows and checks for troubleshooting (scope, service, networking diagnostics).
+    -   `deployment/`: Deployment configuration and templates.
+    -   `backup/`: Backup workflows and utilities.
+    -   `instance/`: Instance management workflows.
+    -   `log/`: Log collection and processing workflows.
+    -   `metric/`: Metrics collection workflows.
+    -   `parameters/`: Parameter management workflows.
+-   **`azure/`**: Azure scope implementation.
+-   **`scheduled_task/`**: Scheduled Tasks scope implementation.
 -   **`agent/`**: Agent deployment scripts.
 
 ## IDE Support for Workflow YAML
