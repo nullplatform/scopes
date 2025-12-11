@@ -11,7 +11,7 @@ elapsed=0
 
 echo "Waiting for ingress [$INGRESS_NAME] reconciliation..."
 
-ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-true}"
+ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-false}"
 
 DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r ".deployment.strategy")
 
