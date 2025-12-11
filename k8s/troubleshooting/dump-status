@@ -447,48 +447,34 @@ if get_and_print_resources_by_label "pod"; then
             echo -e "${BOLD}${GREEN}Describe:${NC}"
             kubectl describe pod "${pod_name}" -n "${NAMESPACE}" 2>&1 || true
             print_separator
+        fi
+    fi
+fi
+print_file_marker "END" "pods.yaml"
 
-            # Get all containers in the pod (both running and terminated)
-            containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || true)
+# Separate file for pod logs
+print_file_marker "START" "pod-logs.txt"
+if [[ -n "$pods" ]]; then
+    if [[ -n "$selected_pod" ]]; then
+        pod_name=$(echo "$selected_pod" | cut -d'/' -f2)
+        print_header "POD LOGS: ${pod_name}"
 
-            # Get init containers as well
-            init_containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null || true)
+        # Get all containers in the pod (both running and terminated)
+        containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || true)
 
-            # Process init containers first
-            if [[ -n "$init_containers" ]]; then
-                echo -e "${BOLD}${CYAN}Init Containers:${NC}"
-                for container in $init_containers; do
-                    echo -e "${BOLD}${GREEN}Init Container: ${container}${NC}"
-                    echo -e "${BOLD}Logs (last 100 lines):${NC}"
-                    kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --tail=100 2>&1 || true
-                    echo ""
+        # Get init containers as well
+        init_containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null || true)
 
-                    # Try to get previous logs
-                    if kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous &> /dev/null; then
-                        echo -e "${BOLD}${YELLOW}Previous logs (last 100 lines):${NC}"
-                        kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous --tail=100 2>&1 || true
-                        echo ""
-                    fi
-                    print_separator
-                done
-            fi
-
-            # Process regular containers
-            for container in $containers; do
-                echo -e "${BOLD}${GREEN}Container: ${container}${NC}"
-
-                # Check container state
-                container_state=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath="{.status.containerStatuses[?(@.name=='${container}')].state}" 2>/dev/null || true)
-
-                if [[ "$container_state" == *"terminated"* ]]; then
-                    echo -e "${RED}Status: Terminated/Dead${NC}"
-                fi
-
+        # Process init containers first
+        if [[ -n "$init_containers" ]]; then
+            echo -e "${BOLD}${CYAN}Init Containers:${NC}"
+            for container in $init_containers; do
+                echo -e "${BOLD}${GREEN}Init Container: ${container}${NC}"
                 echo -e "${BOLD}Logs (last 100 lines):${NC}"
                 kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --tail=100 2>&1 || true
                 echo ""
 
-                # Also get previous logs if pod restarted
+                # Try to get previous logs
                 if kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous &> /dev/null; then
                     echo -e "${BOLD}${YELLOW}Previous logs (last 100 lines):${NC}"
                     kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous --tail=100 2>&1 || true
@@ -496,27 +482,51 @@ if get_and_print_resources_by_label "pod"; then
                 fi
                 print_separator
             done
+        fi
 
-            # Check for any terminated containers not in the current spec (containers that were removed)
-            terminated_containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.status.containerStatuses[?(@.state.terminated)].name}' 2>/dev/null || true)
+        # Process regular containers
+        for container in $containers; do
+            echo -e "${BOLD}${GREEN}Container: ${container}${NC}"
 
-            if [[ -n "$terminated_containers" ]]; then
-                for terminated in $terminated_containers; do
-                    # Check if we already processed this container
-                    if [[ ! " $containers " =~ " $terminated " ]]; then
-                        echo -e "${BOLD}${RED}Terminated Container: ${terminated}${NC}"
-                        echo -e "${RED}Status: Dead (not in current spec)${NC}"
-                        echo -e "${BOLD}Logs (last 100 lines):${NC}"
-                        kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${terminated}" --tail=100 2>&1 || true
-                        echo ""
-                        print_separator
-                    fi
-                done
+            # Check container state
+            container_state=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath="{.status.containerStatuses[?(@.name=='${container}')].state}" 2>/dev/null || true)
+
+            if [[ "$container_state" == *"terminated"* ]]; then
+                echo -e "${RED}Status: Terminated/Dead${NC}"
             fi
+
+            echo -e "${BOLD}Logs (last 100 lines):${NC}"
+            kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --tail=100 2>&1 || true
+            echo ""
+
+            # Also get previous logs if pod restarted
+            if kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous &> /dev/null; then
+                echo -e "${BOLD}${YELLOW}Previous logs (last 100 lines):${NC}"
+                kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous --tail=100 2>&1 || true
+                echo ""
+            fi
+            print_separator
+        done
+
+        # Check for any terminated containers not in the current spec (containers that were removed)
+        terminated_containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.status.containerStatuses[?(@.state.terminated)].name}' 2>/dev/null || true)
+
+        if [[ -n "$terminated_containers" ]]; then
+            for terminated in $terminated_containers; do
+                # Check if we already processed this container
+                if [[ ! " $containers " =~ " $terminated " ]]; then
+                    echo -e "${BOLD}${RED}Terminated Container: ${terminated}${NC}"
+                    echo -e "${RED}Status: Dead (not in current spec)${NC}"
+                    echo -e "${BOLD}Logs (last 100 lines):${NC}"
+                    kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${terminated}" --tail=100 2>&1 || true
+                    echo ""
+                    print_separator
+                fi
+            done
         fi
     fi
 fi
-print_file_marker "END" "pods.yaml"
+print_file_marker "END" "pod-logs.txt"
 
 ################################################################################
 # Get Services
@@ -579,9 +589,13 @@ if get_and_print_resources_by_scope "ingress"; then
     print_section "Ingress Status (detailed)"
     kubectl get ingress -n "${NAMESPACE}" -l "scope_id=${SCOPE_ID}" -o wide 2>&1 || true
     print_separator
+fi
+print_file_marker "END" "ingress.yaml"
 
-    # Get ALB Ingress Controller logs (last 30 lines)
-    print_section "ALB Ingress Controller Logs"
+# Separate file for ALB controller logs
+print_file_marker "START" "alb-controller-logs.txt"
+if get_and_print_resources_by_scope "ingress" &>/dev/null; then
+    print_header "ALB INGRESS CONTROLLER LOGS"
     print_info "Searching for ALB Ingress Controller pods..."
 
     found_alb=false
@@ -618,7 +632,7 @@ if get_and_print_resources_by_scope "ingress"; then
         print_separator
     fi
 fi
-print_file_marker "END" "ingress.yaml"
+print_file_marker "END" "alb-controller-logs.txt"
 
 ################################################################################
 # Get HTTPRoute Objects (Istio)
