@@ -30,6 +30,8 @@ for POD_NAME in $PODS; do
 done
 
 if [[ $HAS_ERRORS -eq 0 ]]; then
+    POD_COUNT=$(echo "$PODS" | wc -w)
+    print_success "All $POD_COUNT pod(s) have images pulled successfully"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

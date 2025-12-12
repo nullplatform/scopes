@@ -84,6 +84,8 @@ for INGRESS_NAME in $INGRESSES; do
 done
 
 if [[ $HAS_ISSUES -eq 0 ]]; then
+    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+    print_success "All backend services healthy for $INGRESS_COUNT ingress(es)"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

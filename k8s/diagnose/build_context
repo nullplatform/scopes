@@ -7,7 +7,7 @@ NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
 SCOPE_LABEL_SELECTOR="scope_id=$SCOPE_ID"
 LABEL_SELECTOR="$SCOPE_LABEL_SELECTOR"
 
-DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id // .scope.current_active_deployment // empty')
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.parameters.deployment_id // .deployment.id // .scope.current_active_deployment // empty')
 if [ -n "$DEPLOYMENT_ID" ]; then
     LABEL_SELECTOR="$LABEL_SELECTOR,deployment_id=$DEPLOYMENT_ID"
 fi
