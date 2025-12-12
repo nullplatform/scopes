@@ -97,6 +97,8 @@ for INGRESS_NAME in $INGRESSES; do
 done
 
 if [[ $HAS_ISSUES -eq 0 ]]; then
+    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+    print_success "All $INGRESS_COUNT ingress(es) synchronized successfully with controller"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"
