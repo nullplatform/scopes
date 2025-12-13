@@ -1,4 +1,2 @@
-steps:
-  - name: no_op
-    type: command
-    command: echo "No action needed to delete scope"
+include:
+  - "$SERVICE_PATH/scope/workflows/create.yaml"
