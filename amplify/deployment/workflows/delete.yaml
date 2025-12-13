@@ -1,3 +1,5 @@
+provider_categories:
+  - cloud-providers
 steps:
   - name: tofu
     type: script

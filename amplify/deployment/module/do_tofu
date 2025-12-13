@@ -32,8 +32,12 @@ RESOURCE_TAGS_JSON=$(echo "$CONTEXT" | jq \
      deployment_id: .deployment.id
      }')
 
-DOMAIN="kwik-e-mart-main.nullapps.io"
-SUBDOMAIN="graviton-amplify"
+ HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id')
+
+DOMAIN=$(aws route53 get-hosted-zone --id "$HOSTED_PUBLIC_ZONE_ID" --query 'HostedZone.Name' --output text | sed 's/\.$//')
+SUBDOMAIN="$APPLICATION_SLUG-$SCOPE_SLUG"
+
+np scope patch --id "$SCOPE_ID" --body "{\"domain\":\"$SUBDOMAIN.$DOMAIN\"}"
 
 #echo $APPLICATION_SLUG
 #echo $SCOPE_SLUG
