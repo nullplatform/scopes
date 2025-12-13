@@ -1,0 +1,6 @@
+steps:
+  - name: tofu
+    type: script
+    file: "$SERVICE_PATH/deployment/module/do_tofu"
+    configuration:
+      ACTION: "apply"

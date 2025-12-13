@@ -1,0 +1,4 @@
+steps:
+  - name: no_op
+    type: command
+    command: echo "No action needed to delete scope"
