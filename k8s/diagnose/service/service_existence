@@ -1,0 +1,13 @@
+#!/bin/bash
+# Check: Service Existence
+# Verifies that service resources exist in the namespace
+
+# Validate services exist
+require_services || return 0
+
+# Read services from pre-collected data
+SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
+
+SERVICE_COUNT=$(echo "$SERVICES" | wc -w)
+print_success "Found $SERVICE_COUNT service(s): $SERVICES"
+update_check_result --status "success" --evidence "{}"

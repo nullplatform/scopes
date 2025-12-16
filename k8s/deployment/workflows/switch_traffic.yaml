@@ -41,16 +41,15 @@ steps:
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
-    post:
-      name: wait deployment active
-      type: script
-      file: "$SERVICE_PATH/deployment/wait_blue_deployment_active"
-      configuration:
-        TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
-        SKIP_DEPLOYMENT_STATUS_CHECK: true
   - name: apply traffic
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
       ACTION: apply
       DRY_RUN: false
+    post:
+      name: verify_networking_reconciliation
+      type: script
+      file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+      configuration:
+        VERIFY_WEIGHTS: true

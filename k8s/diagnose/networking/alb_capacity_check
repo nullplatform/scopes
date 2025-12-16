@@ -1,0 +1,141 @@
+#!/bin/bash
+# Check: ALB Capacity Check
+# Checks for common ALB issues (IP exhaustion, certificate problems)
+
+# Validate ingresses exist
+require_ingresses || return 0
+
+# Read ingresses from pre-collected data
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_ISSUES=0
+
+# Get ALB controller pods from pre-collected data
+ALB_CONTROLLER_PODS=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
+    for POD in $ALB_CONTROLLER_PODS; do
+        # Look for IP exhaustion errors in pre-collected controller logs
+        if [[ -f "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" ]]; then
+            IP_ERRORS=$(cat "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" | grep -iE "no available ip|insufficient ip|ip address.*(exhausted|unavailable)" || true)
+
+            if [[ -n "$IP_ERRORS" ]]; then
+                HAS_ISSUES=1
+                print_error "  ALB subnet IP exhaustion detected, Recent logs:"
+                echo "$IP_ERRORS" | tail -n 3 | sed 's/^/    /'
+                print_info "  Action: Check subnet CIDR ranges and consider expanding or using different subnets"
+                print_info "  Annotation: alb.ingress.kubernetes.io/subnets=<subnet-ids>"
+                break
+            fi
+        fi
+    done
+
+    if [[ -z "$IP_ERRORS" ]]; then
+        print_success "  No IP exhaustion issues detected"
+    fi
+fi
+
+# Consolidated loop: check all ingress-related issues in one pass
+for INGRESS_NAME in $INGRESSES; do
+    # Get ingress info from pre-collected data (single read per ingress)
+    INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
+
+    print_info "Checking ingress: $INGRESS_NAME"
+
+    # ===== TLS/Certificate Configuration Checks =====
+    CERT_ARN=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/certificate-arn"] // empty')
+    TLS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[]?.hosts[]?' 2>/dev/null)
+    INGRESS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[]?.host' 2>/dev/null)
+
+    if [[ -n "$TLS_HOSTS" || -n "$CERT_ARN" ]]; then
+        print_info "  SSL/TLS configured"
+
+        if [[ -n "$CERT_ARN" ]]; then
+            print_info "    Certificate ARN: $CERT_ARN"
+
+            # Check controller logs for certificate errors
+            if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
+                for POD in $ALB_CONTROLLER_PODS; do
+                    if [[ -f "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" ]]; then
+                        CERT_ERRORS=$(cat "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" | grep -i "$INGRESS_NAME" | grep -iE "certificate.*(not found|invalid|failed|error)" || true)
+
+                        if [[ -n "$CERT_ERRORS" ]]; then
+                            HAS_ISSUES=1
+                            print_error "    Certificate validation errors found:"
+                            echo "$CERT_ERRORS" | tail -n 2 | sed 's/^/      /'
+                            print_info "    Action: Verify certificate ARN exists in ACM and covers the required domains"
+                        fi
+                    fi
+                done
+            fi
+        fi
+
+        # Verify hosts match between rules and TLS
+        if [[ -n "$TLS_HOSTS" && -n "$INGRESS_HOSTS" ]]; then
+            for HOST in $INGRESS_HOSTS; do
+                if ! echo "$TLS_HOSTS" | grep -qw "$HOST"; then
+                    HAS_ISSUES=1
+                    print_error "    Host '$HOST' in rules but not in TLS configuration"
+                    print_info "    Action: Add host to spec.tls or ensure certificate covers this domain"
+                fi
+            done
+        fi
+
+        # Check for missing certificate when TLS is configured
+        if [[ -n "$TLS_HOSTS" && -z "$CERT_ARN" ]]; then
+            print_warning "    TLS hosts configured but no ACM certificate ARN annotation"
+            print_info "    Add annotation: alb.ingress.kubernetes.io/certificate-arn=<arn>"
+        fi
+    else
+        print_info "  No SSL/TLS configured (HTTP only)"
+    fi
+
+    # ===== Events Checks (subnet, security group, target group) =====
+    EVENTS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.involvedObject.name == $name) | "\(.lastTimestamp) \(.type) \(.reason) \(.message)"' "$EVENTS_FILE" 2>/dev/null | tail -n 20)
+
+    if [[ -n "$EVENTS" ]]; then
+        # Check for subnet errors
+        SUBNET_ERRORS=$(echo "$EVENTS" | grep -iE "subnet|availability zone" | grep -iE "error|failed" || true)
+        if [[ -n "$SUBNET_ERRORS" ]]; then
+            HAS_ISSUES=1
+            print_error "  Subnet configuration issues"
+            echo "$SUBNET_ERRORS" | tail -n 2 | sed 's/^/    /'
+        fi
+
+        # Check for security group errors
+        SG_ERRORS=$(echo "$EVENTS" | grep -iE "security.?group" | grep -iE "error|failed" || true)
+        if [[ -n "$SG_ERRORS" ]]; then
+            HAS_ISSUES=1
+            print_error "  Security group issues"
+            echo "$SG_ERRORS" | tail -n 2 | sed 's/^/    /'
+        fi
+
+        # Check for target group errors
+        TG_ERRORS=$(echo "$EVENTS" | grep -iE "target.?group" | grep -iE "error|failed" || true)
+        if [[ -n "$TG_ERRORS" ]]; then
+            HAS_ISSUES=1
+            print_error "  Target group registration issues"
+            echo "$TG_ERRORS" | tail -n 2 | sed 's/^/    /'
+        fi
+    fi
+
+    # ===== Annotation Checks (scheme, subnets) =====
+    SCHEME=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/scheme"] // empty')
+    if [[ -z "$SCHEME" ]]; then
+        print_warning "  No scheme annotation (defaulting to internal)"
+        print_info "    Add annotation: alb.ingress.kubernetes.io/scheme=internet-facing (or internal)"
+    fi
+
+    SUBNETS=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/subnets"] // empty')
+    if [[ -z "$SUBNETS" ]]; then
+        print_info "  Using auto-discovered subnets"
+        print_info "    Consider explicit subnets: alb.ingress.kubernetes.io/subnets=<subnet-ids>"
+    fi
+done
+
+if [[ $HAS_ISSUES -eq 0 ]]; then
+    print_success "No critical ALB capacity or configuration issues detected"
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi

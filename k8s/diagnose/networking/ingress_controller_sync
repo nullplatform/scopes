@@ -1,0 +1,103 @@
+#!/bin/bash
+# Check: Ingress Controller Sync
+# Verifies ALB ingress controller has synchronized successfully
+
+# Validate ingresses exist
+require_ingresses || return 0
+
+# Read ingresses from pre-collected data
+INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_ISSUES=0
+
+# Get ALB controller pods from pre-collected data
+ALB_CONTROLLER_PODS=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+if [[ -z "$ALB_CONTROLLER_PODS" ]]; then
+    print_warning "ALB controller pods not found in namespace $ALB_CONTROLLER_NAMESPACE"
+    print_info "  Set ALB_CONTROLLER_NAMESPACE env var if controller is in different namespace"
+else
+    print_info "Found ALB controller pod(s): $ALB_CONTROLLER_PODS"
+fi
+
+for INGRESS_NAME in $INGRESSES; do
+    print_info "Checking sync status for ingress: $INGRESS_NAME"
+
+    # Get ingress events from pre-collected data
+    INGRESS_EVENTS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.involvedObject.name == $name) | "\(.lastTimestamp) \(.type) \(.reason) \(.message)"' "$EVENTS_FILE" 2>/dev/null | tail -n 20)
+
+    if [[ -n "$INGRESS_EVENTS" ]]; then
+        # Look for error/warning events
+        ERROR_EVENTS=$(echo "$INGRESS_EVENTS" | grep -iE "error|failed|warning" || true)
+
+        if [[ -n "$ERROR_EVENTS" ]]; then
+            HAS_ISSUES=1
+            print_error "  Found error/warning events:"
+            echo "$ERROR_EVENTS" | tail -n 5 | sed 's/^/    /'
+
+            # Check for specific ALB errors
+            if echo "$ERROR_EVENTS" | grep -qi "failed to reconcile"; then
+                print_error "  Issue: Failed to reconcile ingress"
+            fi
+
+            if echo "$ERROR_EVENTS" | grep -qi "no available ip"; then
+                print_error "  Issue: No available IPs in subnet (see alb_capacity_check)"
+            fi
+
+            if echo "$ERROR_EVENTS" | grep -qi "certificate"; then
+                print_error "  Issue: Certificate problem detected (see alb_capacity_check)"
+            fi
+        else
+            # Look for successful sync
+            SUCCESS_EVENTS=$(echo "$INGRESS_EVENTS" | grep -iE "successfully reconciled|ensured" || true)
+
+            if [[ -n "$SUCCESS_EVENTS" ]]; then
+                LAST_SUCCESS=$(echo "$SUCCESS_EVENTS" | tail -n 1 | awk '{print $1, $2}')
+                print_success "  Last successful reconciliation: $LAST_SUCCESS"
+            else
+                print_warning "  No explicit success or error events found"
+            fi
+        fi
+    else
+        print_warning "  No events found for this ingress"
+    fi
+
+    # Check ALB controller logs if pods are found
+    if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
+        for POD in $ALB_CONTROLLER_PODS; do
+            # Get recent logs related to this ingress from pre-collected logs
+            if [[ -f "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" ]]; then
+                CONTROLLER_LOGS=$(cat "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" | grep -i "$INGRESS_NAME" || true)
+
+                if [[ -n "$CONTROLLER_LOGS" ]]; then
+                    # Look for errors in controller logs
+                    ERROR_LOGS=$(echo "$CONTROLLER_LOGS" | grep -iE "error|failed|warning" || true)
+
+                    if [[ -n "$ERROR_LOGS" ]]; then
+                        HAS_ISSUES=1
+                        print_error "  Found errors in ALB controller logs:"
+                        echo "$ERROR_LOGS" | tail -n 3 | sed 's/^/    /'
+                    else
+                        print_success "  No errors in ALB controller logs for this ingress"
+                    fi
+                fi
+            fi
+        done
+    fi
+
+    # Check ingress status/address from pre-collected data
+    INGRESS_ADDRESS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name) | .status.loadBalancer.ingress[0].hostname // empty' "$INGRESSES_FILE" 2>/dev/null)
+
+    if [[ -z "$INGRESS_ADDRESS" ]]; then
+        HAS_ISSUES=1
+        print_error "  ALB address not assigned yet (sync may be in progress or failing)"
+    else
+        print_success "  ALB address assigned: $INGRESS_ADDRESS"
+    fi
+done
+
+if [[ $HAS_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi

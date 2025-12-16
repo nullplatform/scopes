@@ -1,0 +1,36 @@
+#!/bin/bash
+# Check: Image Pull Status
+# Verifies container images can be pulled from registry
+
+# Validate pods exist
+require_pods || return 0
+
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_ERRORS=0
+
+for POD_NAME in $PODS; do
+      # Get pod info from pre-collected data
+      POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
+
+      IMAGE_PULL_ERRORS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull") | .name')
+
+      if [[ -n "$IMAGE_PULL_ERRORS" ]]; then
+          HAS_ERRORS=1
+          print_error "Pod $POD_NAME: ImagePullBackOff/ErrImagePull in container(s): $IMAGE_PULL_ERRORS"
+
+          for CONTAINER in $IMAGE_PULL_ERRORS; do
+              IMAGE=$(echo "$POD_INFO" | jq -r ".spec.containers[] | select(.name==\"$CONTAINER\") | .image")
+              MESSAGE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.waiting.message")
+              print_warning "  Image: $IMAGE"
+              print_warning "  Reason: $MESSAGE"
+          done
+      fi
+done
+
+if [[ $HAS_ERRORS -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi
