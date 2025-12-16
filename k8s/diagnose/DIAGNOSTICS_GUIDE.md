@@ -1,12 +1,12 @@
-# Kubernetes Diagnostics Guide
+# Kubernetes diagnostics guide
 
 This guide documents all diagnostic checks available in the `k8s/diagnose` workflow, including what errors they detect, possible solutions, and example outputs.
 
-## How Diagnostics Work
+## How diagnostics work
 
 The diagnostic workflow follows a two-phase approach:
 
-### Phase 1: Build Context (`build_context`)
+### Phase 1: build context (`build_context`)
 
 Before running any checks, the `build_context` script collects a **snapshot of the Kubernetes cluster state**. This snapshot includes:
 
@@ -26,7 +26,7 @@ All this data is stored in JSON files within the `data/` subdirectory of the out
 - **Efficiency**: Reduces load on the Kubernetes API server
 - **Reliability**: Avoids "Argument list too long" errors when processing many resources
 
-### Phase 2: Diagnostic Checks
+### Phase 2: diagnostic checks
 
 After the context is built, individual diagnostic checks run in parallel, reading from the pre-collected data files. Each check:
 
@@ -35,15 +35,15 @@ After the context is built, individual diagnostic checks run in parallel, readin
 3. Reports findings with status: `success`, `failed`, or provides warnings
 4. Generates actionable evidence and recommendations
 
-### Result Notification
+### Result notification
 
 Once all checks complete, the `notify_results` function aggregates the results by category and sends them back to the nullplatform, excluding the raw data files from the `data/` directory.
 
 ---
 
-## Table of Contents
+## Table of contents
 
-### Scope Checks (`k8s/diagnose/scope/`)
+### Scope checks (`k8s/diagnose/scope/`)
 1. [pod_existence](#1-pod_existence) - `scope/pod_existence`
 2. [container_crash_detection](#2-container_crash_detection) - `scope/container_crash_detection`
 3. [image_pull_status](#3-image_pull_status) - `scope/image_pull_status`
@@ -52,14 +52,14 @@ Once all checks complete, the `notify_results` function aggregates the results b
 6. [resource_availability](#6-resource_availability) - `scope/resource_availability`
 7. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
 
-### Service Checks (`k8s/diagnose/service/`)
+### Service checks (`k8s/diagnose/service/`)
 1. [service_existence](#1-service_existence) - `service/service_existence`
 2. [service_selector_match](#2-service_selector_match) - `service/service_selector_match`
 3. [service_endpoints](#3-service_endpoints) - `service/service_endpoints`
 4. [service_port_configuration](#4-service_port_configuration) - `service/service_port_configuration`
 5. [service_type_validation](#5-service_type_validation) - `service/service_type_validation`
 
-### Networking Checks (`k8s/diagnose/networking/`)
+### Networking checks (`k8s/diagnose/networking/`)
 1. [ingress_existence](#1-ingress_existence) - `networking/ingress_existence`
 2. [ingress_class_validation](#2-ingress_class_validation) - `networking/ingress_class_validation`
 3. [ingress_controller_sync](#3-ingress_controller_sync) - `networking/ingress_controller_sync`
@@ -70,7 +70,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 
 ---
 
-## Scope Checks
+## Scope checks
 
 ### 1. pod_existence
 
@@ -144,7 +144,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 
 ---
 
-## Service Checks
+## Service checks
 
 ### 1. service_existence
 
@@ -198,7 +198,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 
 ---
 
-## Networking Checks
+## Networking checks
 
 ### 1. ingress_existence
 
@@ -272,7 +272,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 
 ---
 
-## Quick Reference: Error Categories
+## Quick reference: error categories
 
 | **Category** | **Checks** | **Common Root Causes** |
 |--------------|------------|------------------------|
