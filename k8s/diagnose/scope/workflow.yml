@@ -1,4 +1,9 @@
 steps:
+  - name: pod_existence
+    description: Verifies that pod resources exist in the namespace
+    category: scope
+    type: script
+    file: "$SERVICE_PATH/diagnose/scope/pod_existence"
   - name: image_pull_status
     description: Verifies container images can be pulled from registry
     category: scope

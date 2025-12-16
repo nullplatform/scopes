@@ -32,8 +32,8 @@ require_resources() {
     local namespace="$4"
 
     if [[ -z "$resource_names" ]]; then
-        print_error "No ${resource_type} found with labels $label_selector in namespace $namespace"
-        update_check_result --status "failed" --evidence "{}"
+        print_warning "No ${resource_type} found with labels $label_selector in namespace $namespace"
+        update_check_result --status "warning" --evidence "{}"
         return 1
     fi
 

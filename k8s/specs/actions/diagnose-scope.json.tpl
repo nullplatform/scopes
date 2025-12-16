@@ -28,7 +28,7 @@
   },
   "annotations": {
     "show_on": [
-      "scope", "performance"
+      "manage", "performance"
     ],
     "runs_over": "scope"
   }

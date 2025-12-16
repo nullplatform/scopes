@@ -44,12 +44,13 @@ Once all checks complete, the `notify_results` function aggregates the results b
 ## Table of Contents
 
 ### Scope Checks (`k8s/diagnose/scope/`)
-1. [container_crash_detection](#1-container_crash_detection) - `scope/container_crash_detection`
-2. [image_pull_status](#2-image_pull_status) - `scope/image_pull_status`
-3. [memory_limits_check](#3-memory_limits_check) - `scope/memory_limits_check`
-4. [pod_readiness](#4-pod_readiness) - `scope/pod_readiness`
-5. [resource_availability](#5-resource_availability) - `scope/resource_availability`
-6. [storage_mounting](#6-storage_mounting) - `scope/storage_mounting`
+1. [pod_existence](#1-pod_existence) - `scope/pod_existence`
+2. [container_crash_detection](#2-container_crash_detection) - `scope/container_crash_detection`
+3. [image_pull_status](#3-image_pull_status) - `scope/image_pull_status`
+4. [memory_limits_check](#4-memory_limits_check) - `scope/memory_limits_check`
+5. [pod_readiness](#5-pod_readiness) - `scope/pod_readiness`
+6. [resource_availability](#6-resource_availability) - `scope/resource_availability`
+7. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
 
 ### Service Checks (`k8s/diagnose/service/`)
 1. [service_existence](#1-service_existence) - `service/service_existence`
@@ -71,7 +72,17 @@ Once all checks complete, the `notify_results` function aggregates the results b
 
 ## Scope Checks
 
-### 1. container_crash_detection
+### 1. pod_existence
+
+| **Aspect** | **Details** |
+|------------|-------------|
+| **What it detects** | Missing pod resources for the deployment |
+| **Common causes** | - Pods not created<br>- Pods deleted or evicted<br>- Deployment failed to create pods<br>- Label selector mismatch<br>- Namespace mismatch |
+| **Possible solutions** | - Check deployment status and events<br>- Verify deployment spec is correct<br>- Review pod creation errors<br>- Check resource quotas and limits<br>- Verify namespace and label selectors<br>- Review deployment controller logs |
+| **Example output (failure)** | `⚠ No pods found with labels scope_id=123456 in namespace production` |
+| **Example output (success)** | `✓ Found 3 pod(s): web-app-123-abc web-app-123-def web-app-123-ghi` |
+
+### 2. container_crash_detection
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -81,7 +92,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 | **Example output (failure)** | `✗ Pod web-app-123: Container app is crash looping (restart count: 5)`<br>`ℹ  Last termination: CrashLoopBackOff`<br>`ℹ  Exit code: 1`<br>`ℹ  Action: Check container logs and fix application startup issues` |
 | **Example output (success)** | `✓ All 3 pod(s) running without crashes` |
 
-### 2. image_pull_status
+### 3. image_pull_status
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -91,7 +102,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 | **Example output (failure)** | `✗ Pod web-app-123: Image pull failed`<br>`  Image: registry.example.com/app:v1.0.0`<br>`  Reason: ErrImagePull`<br>`  Message: Failed to pull image "registry.example.com/app:v1.0.0": rpc error: code = Unknown desc = Error response from daemon: pull access denied`<br>`ℹ  Action: Verify image exists and imagePullSecrets are configured` |
 | **Example output (success)** | `✓ All 3 pod(s) have images pulled successfully` |
 
-### 3. memory_limits_check
+### 4. memory_limits_check
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -101,7 +112,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 | **Example output (failure)** | `✗ Pod web-app-123: Container app has no memory limits`<br>`ℹ  Current resources: requests.memory=128Mi, limits.memory=NONE`<br>`⚠  Risk: Container can consume all node memory`<br>`ℹ  Action: Add memory limits to prevent resource exhaustion` |
 | **Example output (success)** | `✓ No OOMKilled containers detected in 3 pod(s)` |
 
-### 4. pod_readiness
+### 5. pod_readiness
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -111,7 +122,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 | **Example output (failure)** | `✗ Pod web-app-123: Not ready (0/1 containers ready)`<br>`  Status: Running but failing readiness probe`<br>`  Readiness probe: GET http://:8080/health`<br>`  Last probe result: HTTP 500 Internal Server Error`<br>`ℹ  Action: Check application health endpoint and ensure dependencies are available` |
 | **Example output (success)** | `✓ Pod web-app-123: Running and Ready` |
 
-### 5. resource_availability
+### 6. resource_availability
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -121,7 +132,7 @@ Once all checks complete, the `notify_results` function aggregates the results b
 | **Example output (failure)** | `✗ Pod web-app-123: Pending - Insufficient resources`<br>`  Requested: cpu=2, memory=4Gi`<br>`  Events:`<br>`    0/3 nodes are available: 1 Insufficient cpu, 2 Insufficient memory`<br>`⚠  Cluster capacity exhausted`<br>`ℹ  Action: Reduce resource requests or add more nodes to cluster` |
 | **Example output (success)** | `✓ All 3 pod(s) successfully scheduled with sufficient resources` |
 
-### 6. storage_mounting
+### 7. storage_mounting
 
 | **Aspect** | **Details** |
 |------------|-------------|
