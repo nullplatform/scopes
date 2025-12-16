@@ -19,25 +19,23 @@ Before running any checks, the `build_context` script collects a **snapshot of t
 - **Events**: Recent Kubernetes events for troubleshooting
 - **ALB Controller Data**: AWS Load Balancer controller pods and logs (if applicable)
 
-All this data is stored in JSON files within the `data/` subdirectory of the output folder. This approach provides several benefits:
+All this data is stored in JSON files within the `data/` subdirectory of the output folder. Storing the data this way
+enables a few key benefits:
 
-- **Performance**: Each check reads from pre-collected files instead of making repeated API calls
-- **Consistency**: All checks analyze the same point-in-time snapshot
-- **Efficiency**: Reduces load on the Kubernetes API server
-- **Reliability**: Avoids "Argument list too long" errors when processing many resources
+- **Better performance:**: Each check reads from pre-collected files instead of making repeated API calls
+- **Consistent results**: All checks analyze the same point-in-time snapshot
+- **Lower API load**: Fewer requests to the Kubernetes API server
+- **More reliable runs**: Prevents issues like “*argument list too long*” when processing many resources
 
 ### Phase 2: diagnostic checks
 
-After the context is built, individual diagnostic checks run in parallel, reading from the pre-collected data files. Each check:
+After the context is built, individual diagnostic checks run in parallel, reading from the pre-collected data files.
+Each check:
 
 1. Validates that required resources exist (using helper functions like `require_pods`, `require_services`, `require_ingresses`)
 2. Analyzes the data for specific issues
 3. Reports findings with status: `success`, `failed`, or provides warnings
 4. Generates actionable evidence and recommendations
-
-### Result notification
-
-Once all checks complete, the `notify_results` function aggregates the results by category and sends them back to the nullplatform, excluding the raw data files from the `data/` directory.
 
 ---
 
