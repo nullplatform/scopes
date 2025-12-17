@@ -63,12 +63,12 @@ for INGRESS_NAME in $INGRESSES; do
         fi
 
         echo "$PATHS" | while read -r PATH_RULE; do
-            PATH=$(echo "$PATH_RULE" | jq -r '.path // "/"')
+            PATH_VALUE=$(echo "$PATH_RULE" | jq -r '.path // "/"')
             PATH_TYPE=$(echo "$PATH_RULE" | jq -r '.pathType // "Prefix"')
             BACKEND_SERVICE=$(echo "$PATH_RULE" | jq -r '.backend.service.name')
             BACKEND_PORT=$(echo "$PATH_RULE" | jq -r '.backend.service.port.number // .backend.service.port.name')
 
-            print_info "    Path: $PATH ($PATH_TYPE) -> $BACKEND_SERVICE:$BACKEND_PORT"
+            print_info "    Path: $PATH_VALUE ($PATH_TYPE) -> $BACKEND_SERVICE:$BACKEND_PORT"
 
             # Validate pathType
             if [[ "$PATH_TYPE" != "Exact" && "$PATH_TYPE" != "Prefix" && "$PATH_TYPE" != "ImplementationSpecific" ]]; then
@@ -77,7 +77,7 @@ for INGRESS_NAME in $INGRESSES; do
             fi
 
             # Warn about path conventions
-            if [[ "$PATH_TYPE" == "Prefix" && "$PATH" != "/" && ! "$PATH" =~ ^/.*[^/]$ ]]; then
+            if [[ "$PATH_TYPE" == "Prefix" && "$PATH_VALUE" != "/" && ! "$PATH" =~ ^/.*[^/]$ ]]; then
                 print_warning "      Path ends with '/' - this may cause routing issues with Prefix type"
             fi
         done
