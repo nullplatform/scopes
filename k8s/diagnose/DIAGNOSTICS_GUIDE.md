@@ -1,6 +1,7 @@
 # Kubernetes diagnostics guide
 
-This guide documents all diagnostic checks available in the `k8s/diagnose` workflow, including what errors they detect, possible solutions, and example outputs.
+This guide documents all diagnostic checks available in the `k8s/diagnose` workflow, including what errors they detect,
+possible solutions, and example outputs.
 
 ## How diagnostics work
 
@@ -8,7 +9,8 @@ The diagnostic workflow follows a two-phase approach:
 
 ### Phase 1: build context (`build_context`)
 
-Before running any checks, the `build_context` script collects a **snapshot of the Kubernetes cluster state**. This snapshot includes:
+Before running any checks, the `build_context` script collects a **snapshot of the Kubernetes cluster state**. This
+snapshot includes:
 
 - **Pods**: All pods matching the scope labels
 - **Services**: Services associated with the deployment
@@ -32,14 +34,27 @@ enables a few key benefits:
 After the context is built, individual diagnostic checks run in parallel, reading from the pre-collected data files.
 Each check:
 
-1. Validates that required resources exist (using helper functions like `require_pods`, `require_services`, `require_ingresses`)
+1. Validates that required resources exist (using helper functions like
+   `require_pods`, `require_services`, `require_ingresses`)
 2. Analyzes the data for specific issues
 3. Reports findings with status: `success`, `failed`, or provides warnings
 4. Generates actionable evidence and recommendations
 
 ---
 
-## Table of contents
+## Diagnostic checks reference
+
+Below is the complete list of diagnostic checks executed during a run. Checks are grouped by category and run in
+parallel to identify common networking, scope, and service-level issues in the cluster.
+
+### Networking checks (`k8s/diagnose/networking/`)
+1. [ingress_existence](#1-ingress_existence) - `networking/ingress_existence`
+2. [ingress_class_validation](#2-ingress_class_validation) - `networking/ingress_class_validation`
+3. [ingress_controller_sync](#3-ingress_controller_sync) - `networking/ingress_controller_sync`
+4. [ingress_host_rules](#4-ingress_host_rules) - `networking/ingress_host_rules`
+5. [ingress_backend_service](#5-ingress_backend_service) - `networking/ingress_backend_service`
+6. [ingress_tls_configuration](#6-ingress_tls_configuration) - `networking/ingress_tls_configuration`
+7. [alb_capacity_check](#7-alb_capacity_check) - `networking/alb_capacity_check`
 
 ### Scope checks (`k8s/diagnose/scope/`)
 1. [pod_existence](#1-pod_existence) - `scope/pod_existence`
@@ -57,16 +72,81 @@ Each check:
 4. [service_port_configuration](#4-service_port_configuration) - `service/service_port_configuration`
 5. [service_type_validation](#5-service_type_validation) - `service/service_type_validation`
 
-### Networking checks (`k8s/diagnose/networking/`)
-1. [ingress_existence](#1-ingress_existence) - `networking/ingress_existence`
-2. [ingress_class_validation](#2-ingress_class_validation) - `networking/ingress_class_validation`
-3. [ingress_controller_sync](#3-ingress_controller_sync) - `networking/ingress_controller_sync`
-4. [ingress_host_rules](#4-ingress_host_rules) - `networking/ingress_host_rules`
-5. [ingress_backend_service](#5-ingress_backend_service) - `networking/ingress_backend_service`
-6. [ingress_tls_configuration](#6-ingress_tls_configuration) - `networking/ingress_tls_configuration`
-7. [alb_capacity_check](#7-alb_capacity_check) - `networking/alb_capacity_check`
 
 ---
+
+## Networking checks
+
+### 1. ingress_existence
+
+| **Aspect**                   | **Details**                                                                                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it detects**          | Missing ingress resources                                                                                                                                                 |
+| **Common causes**            | - Ingress not created<br>- Ingress in wrong namespace<br>- Label selector mismatch<br>- Ingress deleted accidentally                                                      |
+| **Possible solutions**       | - Create ingress resource<br>- Verify ingress is in correct namespace<br>- Check ingress labels match scope selectors<br>- Review ingress creation in deployment pipeline |
+| **Example output (failure)** | `✗ No ingresses found with labels scope_id=123456 in namespace production`<br>`ℹ  Action: Create ingress resource to expose services externally`                          |
+| **Example output (success)** | `✓ Found 1 ingress(es): web-app-ingress`<br>`ℹ  web-app-ingress hosts: example.com, www.example.com`                                                                      |
+
+### 2. ingress_class_validation
+
+| **Aspect**                   | **Details**                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **What it detects**          | Invalid or missing ingress class configuration                                                                                                                                                                                                                                                                                                                                 |
+| **Common causes**            | - IngressClass does not exist<br>- Using deprecated annotation instead of ingressClassName<br>- No default IngressClass defined<br>- Ingress controller not installed                                                                                                                                                                                                          |
+| **Possible solutions**       | - Install ingress controller (nginx, ALB, traefik, etc.)<br>- Create IngressClass resource<br>- Set default IngressClass:<br>  ```yaml<br>  metadata:<br>    annotations:<br>      ingressclass.kubernetes.io/is-default-class: "true"<br>  ```<br>- Update ingress to use `spec.ingressClassName` instead of annotation<br>- Verify IngressClass matches installed controller |
+| **Example output (failure)** | `✗ Ingress web-app-ingress: IngressClass 'nginx-internal' not found`<br>`⚠  Available classes: nginx, alb`<br>`ℹ  Action: Use an available IngressClass or install the required controller`                                                                                                                                                                                    |
+| **Example output (success)** | `✓ Ingress web-app-ingress: IngressClass 'alb' is valid`                                                                                                                                                                                                                                                                                                                       |
+
+### 3. ingress_controller_sync
+
+| **Aspect**                   | **Details**                                                                                                                                                                                                                                                                                               |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it detects**          | Ingress controller failing to reconcile/sync ingress resources                                                                                                                                                                                                                                            |
+| **Common causes**            | - Ingress controller pods not running<br>- Backend service errors<br>- Certificate validation failures<br>- Subnet IP exhaustion (for ALB)<br>- Security group misconfiguration<br>- Ingress syntax errors                                                                                                |
+| **Possible solutions**       | - Check ingress controller logs<br>- Verify backend services exist and have endpoints<br>- For ALB: check AWS ALB controller logs<br>- Verify certificates are valid<br>- Check subnet capacity<br>- Review ingress configuration for errors<br>- Ensure required AWS IAM permissions                     |
+| **Example output (failure)** | `✗ Ingress web-app-ingress: Sync errors detected`<br>`  Found error/warning events:`<br>`    2024-01-15 10:30:45 Warning SyncError Failed to reconcile`<br>`✗  ALB address not assigned yet (sync may be in progress or failing)`<br>`ℹ  Action: Fix backend service reference and check controller logs` |
+| **Example output (success)** | `✓ All 2 ingress(es) synchronized successfully with controller`                                                                                                                                                                                                                                           |
+
+### 4. ingress_host_rules
+
+| **Aspect**                   | **Details**                                                                                                                                                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **What it detects**          | Invalid or problematic host and path rules                                                                                                                                                                                                                         |
+| **Common causes**            | - No rules and no default backend defined<br>- Invalid pathType (must be Exact, Prefix, or ImplementationSpecific)<br>- Path ending with `/` for Prefix type (can cause routing issues)<br>- Duplicate host rules<br>- Wildcard hosts without proper configuration |
+| **Possible solutions**       | - Define at least one rule or a default backend<br>- Use valid pathType values<br>- Remove trailing slashes from Prefix paths<br>- Consolidate duplicate host rules<br>- Specify explicit hostnames instead of wildcards when possible                             |
+| **Example output (failure)** | `✗ Ingress web-app-ingress: No rules and no default backend configured`<br>`ℹ  Action: Add at least one rule or configure default backend`                                                                                                                         |
+| **Example output (success)** | `✓ Host and path rules valid for all 2 ingress(es)`                                                                                                                                                                                                                |
+
+### 5. ingress_backend_service
+
+| **Aspect**                   | **Details**                                                                                                                                                                                                                                               |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it detects**          | Backend services that don't exist or have no endpoints                                                                                                                                                                                                    |
+| **Common causes**            | - Backend service doesn't exist<br>- Service has no healthy endpoints<br>- Service port mismatch<br>- Service in different namespace (not supported)                                                                                                      |
+| **Possible solutions**       | - Create missing backend services<br>- Fix service endpoint issues (see service_endpoints check)<br>- Verify service port matches ingress backend port<br>- Ensure all backends are in same namespace as ingress<br>- Check service selector matches pods |
+| **Example output (failure)** | `✗ Ingress web-app-ingress: Backend api-service:8080 (no endpoints)`<br>`ℹ  Action: Verify pods are running and service selector matches`                                                                                                                 |
+| **Example output (success)** | `✓ All backend services healthy for 2 ingress(es)`                                                                                                                                                                                                        |
+
+### 6. ingress_tls_configuration
+
+| **Aspect**                   | **Details**                                                                                                                                                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it detects**          | TLS/SSL certificate configuration issues                                                                                                                                                                                        |
+| **Common causes**            | - TLS secret does not exist<br>- Secret is wrong type (not kubernetes.io/tls)<br>- Secret missing required keys (tls.crt, tls.key)<br>- Certificate expired or expiring soon<br>- Certificate doesn't cover requested hostnames |
+| **Possible solutions**       | - Create TLS secret with certificate and key<br>- Verify secret type and keys<br>- Renew expired certificates<br>- Ensure certificate covers all ingress hosts<br>- For cert-manager, check certificate resource status         |
+| **Example output (failure)** | `✗ Ingress web-app-ingress: TLS Secret 'app-tls-cert' not found in namespace`<br>`ℹ  Action: Create TLS secret or update ingress configuration`                                                                                 |
+| **Example output (success)** | `✓ TLS configuration valid for all 2 ingress(es)`                                                                                                                                                                               |
+
+### 7. alb_capacity_check
+
+| **Aspect**                   | **Details**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **What it detects**          | AWS ALB-specific capacity and configuration issues                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Common causes**            | - Subnet IP exhaustion<br>- Invalid or missing certificate ARN<br>- Security group misconfigurations<br>- Target group registration failures<br>- Missing or invalid subnet annotations<br>- Scheme not specified (internal vs internet-facing)                                                                                                                                                                                                                                                        |
+| **Possible solutions**       | - For IP exhaustion: expand subnet CIDR or use different subnets<br>- Verify ACM certificate ARN exists and is in correct region<br>- Check security groups allow ALB traffic<br>- Review ALB controller logs for detailed errors<br>- Explicitly specify subnets:<br>  ```yaml<br>  annotations:<br>    alb.ingress.kubernetes.io/subnets: subnet-abc123,subnet-def456<br>  ```<br>- Specify scheme:<br>  ```yaml<br>  annotations:<br>    alb.ingress.kubernetes.io/scheme: internet-facing<br>  ``` |
+| **Example output (failure)** | `✗ ALB capacity check failed`<br>`  ALB subnet IP exhaustion detected, Recent logs:`<br>`    Error allocating address: InsufficientFreeAddressesInSubnet`<br>`ℹ  Action: Check subnet CIDR ranges and consider expanding or using different subnets`<br>`ℹ  Annotation: alb.ingress.kubernetes.io/subnets=<subnet-ids>`                                                                                                                                                                                |
+| **Example output (success)** | `✓ No critical ALB capacity or configuration issues detected`<br>`  No IP exhaustion issues detected`<br>`  SSL/TLS configured`<br>`    Certificate ARN: arn:aws:acm:us-east-1:123456789:certificate/abc123`<br>`  Scheme: internet-facing`                                                                                                                                                                                                                                                            |
+
 
 ## Scope checks
 
@@ -194,79 +274,7 @@ Each check:
 | **Example output (failure)** | `✗ Service web-app-service: Type=LoadBalancer`<br>`⚠  LoadBalancer IP/Hostname is Pending`<br>`ℹ  This may take a few minutes to provision` |
 | **Example output (success)** | `✓ Service web-app-service: Type=ClusterIP`<br>`  Internal service with ClusterIP: 10.96.100.50` |
 
----
 
-## Networking checks
-
-### 1. ingress_existence
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | Missing ingress resources |
-| **Common causes** | - Ingress not created<br>- Ingress in wrong namespace<br>- Label selector mismatch<br>- Ingress deleted accidentally |
-| **Possible solutions** | - Create ingress resource<br>- Verify ingress is in correct namespace<br>- Check ingress labels match scope selectors<br>- Review ingress creation in deployment pipeline |
-| **Example output (failure)** | `✗ No ingresses found with labels scope_id=123456 in namespace production`<br>`ℹ  Action: Create ingress resource to expose services externally` |
-| **Example output (success)** | `✓ Found 1 ingress(es): web-app-ingress`<br>`ℹ  web-app-ingress hosts: example.com, www.example.com` |
-
-### 2. ingress_class_validation
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | Invalid or missing ingress class configuration |
-| **Common causes** | - IngressClass does not exist<br>- Using deprecated annotation instead of ingressClassName<br>- No default IngressClass defined<br>- Ingress controller not installed |
-| **Possible solutions** | - Install ingress controller (nginx, ALB, traefik, etc.)<br>- Create IngressClass resource<br>- Set default IngressClass:<br>  ```yaml<br>  metadata:<br>    annotations:<br>      ingressclass.kubernetes.io/is-default-class: "true"<br>  ```<br>- Update ingress to use `spec.ingressClassName` instead of annotation<br>- Verify IngressClass matches installed controller |
-| **Example output (failure)** | `✗ Ingress web-app-ingress: IngressClass 'nginx-internal' not found`<br>`⚠  Available classes: nginx, alb`<br>`ℹ  Action: Use an available IngressClass or install the required controller` |
-| **Example output (success)** | `✓ Ingress web-app-ingress: IngressClass 'alb' is valid` |
-
-### 3. ingress_controller_sync
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | Ingress controller failing to reconcile/sync ingress resources |
-| **Common causes** | - Ingress controller pods not running<br>- Backend service errors<br>- Certificate validation failures<br>- Subnet IP exhaustion (for ALB)<br>- Security group misconfiguration<br>- Ingress syntax errors |
-| **Possible solutions** | - Check ingress controller logs<br>- Verify backend services exist and have endpoints<br>- For ALB: check AWS ALB controller logs<br>- Verify certificates are valid<br>- Check subnet capacity<br>- Review ingress configuration for errors<br>- Ensure required AWS IAM permissions |
-| **Example output (failure)** | `✗ Ingress web-app-ingress: Sync errors detected`<br>`  Found error/warning events:`<br>`    2024-01-15 10:30:45 Warning SyncError Failed to reconcile`<br>`✗  ALB address not assigned yet (sync may be in progress or failing)`<br>`ℹ  Action: Fix backend service reference and check controller logs` |
-| **Example output (success)** | `✓ All 2 ingress(es) synchronized successfully with controller` |
-
-### 4. ingress_host_rules
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | Invalid or problematic host and path rules |
-| **Common causes** | - No rules and no default backend defined<br>- Invalid pathType (must be Exact, Prefix, or ImplementationSpecific)<br>- Path ending with `/` for Prefix type (can cause routing issues)<br>- Duplicate host rules<br>- Wildcard hosts without proper configuration |
-| **Possible solutions** | - Define at least one rule or a default backend<br>- Use valid pathType values<br>- Remove trailing slashes from Prefix paths<br>- Consolidate duplicate host rules<br>- Specify explicit hostnames instead of wildcards when possible |
-| **Example output (failure)** | `✗ Ingress web-app-ingress: No rules and no default backend configured`<br>`ℹ  Action: Add at least one rule or configure default backend` |
-| **Example output (success)** | `✓ Host and path rules valid for all 2 ingress(es)` |
-
-### 5. ingress_backend_service
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | Backend services that don't exist or have no endpoints |
-| **Common causes** | - Backend service doesn't exist<br>- Service has no healthy endpoints<br>- Service port mismatch<br>- Service in different namespace (not supported) |
-| **Possible solutions** | - Create missing backend services<br>- Fix service endpoint issues (see service_endpoints check)<br>- Verify service port matches ingress backend port<br>- Ensure all backends are in same namespace as ingress<br>- Check service selector matches pods |
-| **Example output (failure)** | `✗ Ingress web-app-ingress: Backend api-service:8080 (no endpoints)`<br>`ℹ  Action: Verify pods are running and service selector matches` |
-| **Example output (success)** | `✓ All backend services healthy for 2 ingress(es)` |
-
-### 6. ingress_tls_configuration
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | TLS/SSL certificate configuration issues |
-| **Common causes** | - TLS secret does not exist<br>- Secret is wrong type (not kubernetes.io/tls)<br>- Secret missing required keys (tls.crt, tls.key)<br>- Certificate expired or expiring soon<br>- Certificate doesn't cover requested hostnames |
-| **Possible solutions** | - Create TLS secret with certificate and key<br>- Verify secret type and keys<br>- Renew expired certificates<br>- Ensure certificate covers all ingress hosts<br>- For cert-manager, check certificate resource status |
-| **Example output (failure)** | `✗ Ingress web-app-ingress: TLS Secret 'app-tls-cert' not found in namespace`<br>`ℹ  Action: Create TLS secret or update ingress configuration` |
-| **Example output (success)** | `✓ TLS configuration valid for all 2 ingress(es)` |
-
-### 7. alb_capacity_check
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | AWS ALB-specific capacity and configuration issues |
-| **Common causes** | - Subnet IP exhaustion<br>- Invalid or missing certificate ARN<br>- Security group misconfigurations<br>- Target group registration failures<br>- Missing or invalid subnet annotations<br>- Scheme not specified (internal vs internet-facing) |
-| **Possible solutions** | - For IP exhaustion: expand subnet CIDR or use different subnets<br>- Verify ACM certificate ARN exists and is in correct region<br>- Check security groups allow ALB traffic<br>- Review ALB controller logs for detailed errors<br>- Explicitly specify subnets:<br>  ```yaml<br>  annotations:<br>    alb.ingress.kubernetes.io/subnets: subnet-abc123,subnet-def456<br>  ```<br>- Specify scheme:<br>  ```yaml<br>  annotations:<br>    alb.ingress.kubernetes.io/scheme: internet-facing<br>  ``` |
-| **Example output (failure)** | `✗ ALB capacity check failed`<br>`  ALB subnet IP exhaustion detected, Recent logs:`<br>`    Error allocating address: InsufficientFreeAddressesInSubnet`<br>`ℹ  Action: Check subnet CIDR ranges and consider expanding or using different subnets`<br>`ℹ  Annotation: alb.ingress.kubernetes.io/subnets=<subnet-ids>` |
-| **Example output (success)** | `✓ No critical ALB capacity or configuration issues detected`<br>`  No IP exhaustion issues detected`<br>`  SSL/TLS configured`<br>`    Certificate ARN: arn:aws:acm:us-east-1:123456789:certificate/abc123`<br>`  Scheme: internet-facing` |
 
 ---
 
