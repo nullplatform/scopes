@@ -1,0 +1,21 @@
+#!/bin/bash
+
+ASSET_REPOSITORY=$(np provider list --categories assets-repository --nrn "$NRN" --format json | jq ".results[0]")
+
+if [[ -n "$ASSET_REPOSITORY_PROVIDER" ]]; then
+  echo "Using ASSET_REPOSITORY_PROVIDER from environment: $ASSET_REPOSITORY_PROVIDER"
+else
+  ASSET_REPOSITORY_SPEC=$(echo "$ASSET_REPOSITORY" | jq -r .specification_id)
+  ASSET_REPOSITORY_PROVIDER=$(np provider specification read --id "$ASSET_REPOSITORY_SPEC" --format json | jq -r .slug)
+
+  echo "No ASSET_REPOSITORY_PROVIDER configured from environment, will use the provider configured in platform settings: $ASSET_REPOSITORY_PROVIDER"
+fi
+
+ASSET_REPOSITORY_SCRIPT_PATH="application/scripts/asset-repo/$ASSET_REPOSITORY_PROVIDER"
+
+export ASSET_REPOSITORY_TYPE
+export ASSET_REPOSITORY
+
+export ASSET_REPOSITORY_SCRIPT_PATH
+
+np service workflow exec --workflow application/workflows/create_asset_repository.yaml

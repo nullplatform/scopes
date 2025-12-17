@@ -40,6 +40,7 @@ RESOURCE_GROUP=""
 AZURE_SUBSCRIPTION_ID=""
 HOSTED_ZONE_NAME=""
 HOSTED_ZONE_RG=""
+VISIBILITY=""
 
 for arg in "$@"; do
   case $arg in
@@ -49,15 +50,16 @@ for arg in "$@"; do
     --gateway-name=*) GATEWAY_NAME="${arg#*=}" ;;
     --hosted-zone-name=*) HOSTED_ZONE_NAME="${arg#*=}" ;;
     --hosted-zone-rg=*) HOSTED_ZONE_RG="${arg#*=}" ;;
+    --visibility=*) VISIBILITY="${arg#*=}" ;;
   esac
 done
 
 # Get IP based on gateway type
 if [ "${GATEWAY_TYPE:-istio}" = "aro_cluster" ]; then
     # Get IP from OpenShift router service
-    GATEWAY_IP=$(kubectl get svc router-default -n openshift-ingress \
+    GATEWAY_IP=$(kubectl get svc "$GATEWAY_NAME" -n openshift-ingress \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-    
+
     if [ -z "$GATEWAY_IP" ]; then
         echo "Error: Could not get IP address from ARO router service" >&2
         echo "Falling back to istio gateway..." >&2
@@ -81,14 +83,17 @@ if [ -z "$SCOPE_SUBDOMAIN" ]; then
     SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
 fi
 
+echo "manage_route SCOPE_SUBDOMAIN = $SCOPE_SUBDOMAIN HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME GATEWAY_IP = $GATEWAY_IP, VISIBILITY = $VISIBILITY"
+
 if [ "$ACTION" = "CREATE" ]; then
     # Get access token
     ACCESS_TOKEN=$(get_azure_token) || exit 1
 
-    # Create or update A record
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
-
-    RECORD_BODY=$(cat <<EOF
+    if [ "$VISIBILITY" = "public" ]; then
+      zone_path="dnsZones"
+      api_version="2018-05-01"
+      # Public DNS zone uses uppercase TTL and ARecords
+      RECORD_BODY=$(cat <<EOF
 {
   "properties": {
     "TTL": 300,
@@ -101,6 +106,25 @@ if [ "$ACTION" = "CREATE" ]; then
 }
 EOF
 )
+    else
+      zone_path="privateDnsZones"
+      api_version="2020-06-01"
+      # Private DNS zone uses lowercase ttl and aRecords
+      RECORD_BODY=$(cat <<EOF
+{
+  "properties": {
+    "ttl": 300,
+    "aRecords": [
+      {
+        "ipv4Address": "${GATEWAY_IP}"
+      }
+    ]
+  }
+}
+EOF
+)
+    fi
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=${api_version}"
     
     AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
         "${RECORD_SET_URL}" \
@@ -134,9 +158,16 @@ EOF
 elif [ "$ACTION" = "DELETE" ]; then
     
     ACCESS_TOKEN=$(get_azure_token) || exit 1
-    
-    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
-    
+
+    if [ "$VISIBILITY" = "public" ]; then
+      zone_path="dnsZones"
+      api_version="2018-05-01"
+    else
+      zone_path="privateDnsZones"
+      api_version="2018-09-01"
+    fi
+    RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/${zone_path}/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=${api_version}"
+
     curl --http1.1 -s -X DELETE \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}"

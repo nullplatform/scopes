@@ -1,0 +1,5 @@
+steps:
+  - name: get prometheus token
+    type: script
+    file: "$OVERRIDES_PATH/metric/get_prom_token"
+    after: build context

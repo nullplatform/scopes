@@ -1,0 +1,74 @@
+#!/bin/bash
+
+PROJECT_PATH="${GITLAB_ENCODED_GROUP_PATH}%2F${REPOSITORY_NAME}"
+
+get_access_level() {
+    local role="$1"  # Don't convert to uppercase
+    case $role in
+        guest) echo "10" ;;
+        reporter) echo "20" ;;
+        developer) echo "30" ;;
+        maintainer) echo "40" ;;
+        owner) echo "50" ;;
+        *) echo "30" ;; # default to DEVELOPER
+    esac
+}
+
+# Function to get user ID from username
+get_user_id() {
+    local username="$1"
+    curl --silent --header "PRIVATE-TOKEN: ${GITLAB_ACCESS_TOKEN}" \
+      "${GITLAB_INSTALLATION_URL}/api/v4/users?username=${username}" | jq -r '.[0].id'
+}
+
+# Function to get group ID from group path
+get_group_id() {
+    local group_path="$1"
+
+    curl --silent --header "PRIVATE-TOKEN: ${GITLAB_ACCESS_TOKEN}" \
+      "${GITLAB_INSTALLATION_URL}/api/v4/groups/${group_path}" | jq -r '.id'
+}
+
+echo "$CODE_REPOSITORY_COLLABORATORS" | jq -c '.[]' | while read -r collaborator; do
+    id=$(echo "$collaborator" | jq -r '.id')
+    role=$(echo "$collaborator" | jq -r '.role')
+    type=$(echo "$collaborator" | jq -r '.type')
+    access_level=$(get_access_level "$role")
+
+    if [ "$type" = "user" ]; then
+        # Look up user ID from username
+        user_id=$(get_user_id "$id")
+
+        if [ "$user_id" = "null" ] || [ -z "$user_id" ]; then
+            echo "Error: User '$id' not found"
+            continue
+        fi
+
+        echo "Adding user '$id' (ID: $user_id) with role '$role' (access_level=$access_level)"
+
+        curl --request POST \
+          --header "PRIVATE-TOKEN: ${GITLAB_ACCESS_TOKEN}" \
+          --data "user_id=${user_id}&access_level=${access_level}" \
+          "${GITLAB_INSTALLATION_URL}/api/v4/projects/${PROJECT_PATH}/members"
+        echo ""
+
+    elif [ "$type" = "group" ]; then
+        # Look up group ID from group path
+        group_id=$(get_group_id "$id")
+
+        if [ "$group_id" = "null" ] || [ -z "$group_id" ]; then
+            echo "Error: Group '$id' not found"
+            continue
+        fi
+
+        echo "Adding group '$id' (ID: $group_id) with role '$role' (access_level=$access_level)"
+
+        curl --request POST \
+          --header "PRIVATE-TOKEN: ${GITLAB_ACCESS_TOKEN}" \
+          --data "group_id=${group_id}&group_access=${access_level}" \
+          "${GITLAB_INSTALLATION_URL}/api/v4/projects/${PROJECT_PATH}/share"
+        echo ""
+    fi
+done
+
+echo "Finished adding collaborators"

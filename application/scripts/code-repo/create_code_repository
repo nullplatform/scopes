@@ -1,0 +1,45 @@
+#!/bin/bash
+
+CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
+
+REPOSITORY_URL=$(echo "$APPLICATION" | jq -r .repository_url)
+TEMPLATE_ID=$(echo "$APPLICATION" | jq -r '.template_id // empty' )
+
+if [[ -n "$TEMPLATE_ID" ]]; then
+  CODE_REPOSITORY_STRATEGY=create
+
+  TEMPLATE_URL=$(np template read --id "$TEMPLATE_ID" --format json | jq -r .url)
+
+  export TEMPLATE_URL
+else
+  CODE_REPOSITORY_STRATEGY=import
+fi
+
+REPOSITORY_NAME=$(basename "$REPOSITORY_URL")
+
+if [[ -n "$CODE_REPOSITORY_PROVIDER" ]]; then
+  echo "Using CODE_REPOSITORY_PROVIDER from environment: $CODE_REPOSITORY_PROVIDER"
+else
+  ACCOUNT=$(np account read --id "$ACCOUNT_ID" --format json)
+
+  CODE_REPOSITORY_PROVIDER=$(echo "$ACCOUNT" | jq -r .repository_provider)
+
+  echo "No CODE_REPOSITORY_PROVIDER configured from environment, will use the provider configured in the nullplatform account: $CODE_REPOSITORY_PROVIDER"
+fi
+
+CODE_REPOSITORY=$(np provider list --categories code-repository --nrn "$NRN" --format json | jq ".results[0]")
+
+CODE_REPOSITORY_SCRIPT_PATH="application/scripts/code-repo/$CODE_REPOSITORY_PROVIDER"
+
+CODE_REPOSITORY_COLLABORATORS=$(echo "$CODE_REPOSITORY" | jq .attributes.access.default_collaborators)
+
+export CODE_REPOSITORY_STRATEGY
+
+export REPOSITORY_URL
+export REPOSITORY_NAME
+
+export CODE_REPOSITORY
+export CODE_REPOSITORY_SCRIPT_PATH
+export CODE_REPOSITORY_COLLABORATORS
+
+np service workflow exec --workflow application/workflows/create_code_repository.yaml

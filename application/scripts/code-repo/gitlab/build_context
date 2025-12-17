@@ -1,0 +1,44 @@
+#!/bin/bash
+
+if [[ -n "$GITLAB_ACCESS_TOKEN" ]]; then
+  echo "Using GITLAB_ACCESS_TOKEN from environment (hidden)"
+else
+  GITLAB_ACCESS_TOKEN=$(echo "$CODE_REPOSITORY" | jq -r '.attributes.setup.access_token')
+  echo "No GITLAB_ACCESS_TOKEN in environment, using value from platform (hidden)"
+fi
+
+if [[ -n "$GITLAB_GROUP_PATH" ]]; then
+  echo "Using GITLAB_GROUP_PATH from environment: $GITLAB_GROUP_PATH"
+else
+  GITLAB_GROUP_PATH=$(echo "$CODE_REPOSITORY" | jq -r '.attributes.setup.group_path')
+  echo "No GITLAB_GROUP_PATH in environment, using value from platform: $GITLAB_GROUP_PATH"
+fi
+
+if [[ -n "$GITLAB_INSTALLATION_URL" ]]; then
+  echo "Using GITLAB_INSTALLATION_URL from environment: $GITLAB_INSTALLATION_URL"
+else
+  GITLAB_INSTALLATION_URL=$(echo "$CODE_REPOSITORY" | jq -r '.attributes.setup.installation_url')
+  echo "No GITLAB_INSTALLATION_URL in environment, using value from platform: $GITLAB_INSTALLATION_URL"
+fi
+
+
+echo "Getting group ID for path: $GITLAB_GROUP_PATH"
+GROUP_RESPONSE=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_ACCESS_TOKEN" \
+  "${GITLAB_INSTALLATION_URL}/api/v4/groups?search=${GITLAB_GROUP_PATH}")
+
+GITLAB_GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r ".[] | select(.full_path == \"${GITLAB_GROUP_PATH}\") | .id")
+
+if [ -z "$GITLAB_GROUP_ID" ] || [ "$GITLAB_GROUP_ID" == "null" ]; then
+  echo "Error: Group not found for path: $GITLAB_GROUP_PATH"
+  exit 1
+fi
+
+echo "Found gitlab Group ID: $GITLAB_GROUP_ID"
+
+GITLAB_ENCODED_GROUP_PATH=$(echo "$GITLAB_GROUP_PATH" | sed 's/\//%2F/g')
+
+export GITLAB_ACCESS_TOKEN
+export GITLAB_GROUP_PATH
+export GITLAB_INSTALLATION_URL
+export GITLAB_GROUP_ID
+export GITLAB_ENCODED_GROUP_PATH

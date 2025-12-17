@@ -1,0 +1,25 @@
+#!/bin/bash
+
+echo "Checking if repository exists: $GITLAB_INSTALLATION_URL/$GITLAB_GROUP_PATH/$REPOSITORY_NAME"
+
+REPO_CHECK=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_ACCESS_TOKEN" \
+  "${GITLAB_INSTALLATION_URL}/api/v4/projects/${GITLAB_ENCODED_GROUP_PATH}%2F${REPOSITORY_NAME}" || echo "")
+
+if echo "$REPO_CHECK" | jq -e '.id' > /dev/null 2>&1; then
+  # Repository exists
+  if [ "$CODE_REPOSITORY_STRATEGY" = "create" ]; then
+    echo "Error: Repository already exists but strategy is set to 'create'. Please use a different repository name or change strategy to 'import'."
+    exit 1
+  fi
+
+  GITLAB_PROJECT_ID=$(echo "$REPO_CHECK" | jq -r '.id')
+
+  export GITLAB_PROJECT_ID
+
+  echo "Repository found and strategy is set to 'import'. Proceeding with import configuration..."
+elif [ "$CODE_REPOSITORY_STRATEGY" = "import" ]; then
+    echo "Error: Repository does not exist but strategy is set to 'import'. Please create the repository first or change strategy to 'create'."
+    exit 1
+else
+  echo "Repository does not exist and strategy is set to 'create'. Proceeding with repository creation..."
+fi
