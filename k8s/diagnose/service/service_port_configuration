@@ -32,7 +32,16 @@ for SERVICE_NAME in $SERVICES; do
     fi
 
     # Find pods from pre-collected data that match service selectors
-    PODS=$(jq -r --arg selectors "$SERVICE_SELECTORS" '.items[] | select(.metadata.labels | to_entries | map("\(.key)=\(.value)") | join(",") | contains($selectors)) | .metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+    PODS=$(jq -r --argjson selectors "$SERVICE_SELECTORS" '
+               .items[] |
+               . as $pod |
+               select(
+                 $selectors | to_entries | all(.key as $k | .value as $v |
+                   $pod.metadata.labels[$k] == $v
+                 )
+               ) |
+               .metadata.name
+             ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
     if [[ -z "$PODS" ]]; then
         print_warning "Service $SERVICE_NAME: No pods found to validate ports"
