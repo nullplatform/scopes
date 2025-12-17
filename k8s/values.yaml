@@ -3,10 +3,12 @@ provider_categories:
   - cloud-providers
 configuration:
   K8S_NAMESPACE: nullplatform
+  CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
   DOMAIN: nullapps.io
 #  PRIVATE_DOMAIN: nullapps.io
   USE_ACCOUNT_SLUG: false
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
+  ALB_RECONCILIATION_ENABLED: false
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"

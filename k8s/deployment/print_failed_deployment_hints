@@ -1,0 +1,14 @@
+#!/bin/bash
+
+HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r .scope.capabilities.health_check.path)
+REQUESTED_MEMORY=$(echo "$CONTEXT" | jq -r .scope.capabilities.ram_memory)
+SCOPE_NAME=$(echo "$CONTEXT" | jq -r .scope.name)
+SCOPE_DIMENSIONS=$(echo "$CONTEXT" | jq -r .scope.dimensions)
+
+echo "⚠️ Application Startup Issue Detected"
+echo "We noticed that your application was unable to start within the expected timeframe. Please verify the following configuration settings:"
+echo "1. Port Configuration: Ensure your application is configured to listen on port 8080"
+echo "2. Health Check Endpoint: Confirm that your application responds correctly to the configured health check path: $HEALTH_CHECK_PATH"
+echo "3. Application Logs: We suggest reviewing the application logs for any startup errors, including database connection issues, missing dependencies, or initialization errors"
+echo "4. Memory Allocation: Verify that sufficient memory resources have been allocated (Current allocation: ${REQUESTED_MEMORY}Mi)"
+echo "5. Environment Variables: Confirm that all required environment variables have been properly configured in the parameter section and are correctly applied to scope '$SCOPE_NAME' or the associated scope dimensions: $SCOPE_DIMENSIONS"

@@ -1,0 +1,183 @@
+#!/bin/bash
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+print_info() {
+    echo -e "${CYAN}ℹ${NC} $1"
+}
+
+# Validate that required resources exist before running checks
+# Returns 0 if validation passes, 1 if fails (and sets check to failed)
+require_resources() {
+    local resource_type="$1"
+    local resource_names="$2"
+    local label_selector="$3"
+    local namespace="$4"
+
+    if [[ -z "$resource_names" ]]; then
+        print_error "No ${resource_type} found with labels $label_selector in namespace $namespace"
+        update_check_result --status "failed" --evidence "{}"
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate pods exist
+require_pods() {
+    local pods=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+    require_resources "pods" "$pods" "$LABEL_SELECTOR" "$NAMESPACE"
+}
+
+# Validate services exist
+require_services() {
+    local services=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
+    require_resources "services" "$services" "$LABEL_SELECTOR" "$NAMESPACE"
+}
+
+# Validate ingresses exist
+require_ingresses() {
+    local ingresses=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+    require_resources "ingresses" "$ingresses" "$SCOPE_LABEL_SELECTOR" "$NAMESPACE"
+}
+
+update_check_result() {
+    # Usage:
+    #   update_check_result "new-status" '{"new":"evidence"}'
+    # or:
+    #   update_check_result --status "new-status" --evidence '{"new":"evidence"}'
+
+    # Argument parsing
+    if [[ "$1" == --* ]]; then
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --status) status="$2"; shift 2 ;;
+                --evidence) evidence="$2"; shift 2 ;;
+                *) echo "Unknown parameter: $1" >&2; return 1 ;;
+            esac
+        done
+    else
+        status="$1"
+        evidence="$2"
+    fi
+
+    # Basic validation
+    if [[ -z "$status" || -z "$evidence" ]]; then
+        echo "Error: status and evidence are required" >&2
+        return 1
+    fi
+
+    output_file="$SCRIPT_OUTPUT_FILE"
+
+    if [[ ! -f "$output_file" ]]; then
+        echo "Error: File not found: $output_file" >&2
+        return 1
+    fi
+
+    # Check if log file exists and read it into an array
+    local log_array="[]"
+    if [[ -n "$SCRIPT_LOG_FILE" && -f "$SCRIPT_LOG_FILE" ]]; then
+        # Read log file, remove empty lines, take last 20 lines, and convert to JSON array
+        log_array=$(grep -v '^[[:space:]]*$' "$SCRIPT_LOG_FILE" | tail -n 20 | jq -R -s 'split("\n") | map(select(length > 0))')
+        if [[ $? -ne 0 ]]; then
+            echo "Error: Failed to read log file: $SCRIPT_LOG_FILE" >&2
+            return 1
+        fi
+    fi
+
+    # Get current timestamp in ISO 8601 format
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    # Normalize status to lowercase for comparison
+    local status_lower=$(echo "$status" | tr '[:upper:]' '[:lower:]')
+
+    # Safely update JSON (write to tmp then move)
+    tmpfile="$(mktemp)"
+
+    # Build jq filter based on status
+    local jq_filter='.status = ($status | ascii_downcase) | .evidence = $evidence | .logs = $logs'
+
+    if [[ "$status_lower" == "running" ]]; then
+        jq_filter="$jq_filter | .start_at = \$timestamp"
+    elif [[ "$status_lower" == "success" || "$status_lower" == "failed" ]]; then
+        jq_filter="$jq_filter | .end_at = \$timestamp"
+    fi
+
+    if ! jq \
+        --arg status "$status" \
+        --argjson evidence "$evidence" \
+        --argjson logs "$log_array" \
+        --arg timestamp "$timestamp" \
+        "$jq_filter" \
+        "$output_file" > "$tmpfile"; then
+        echo "Error: Failed to update JSON (is evidence valid JSON?)" >&2
+        rm -f "$tmpfile"
+        return 1
+    fi
+
+    mv "$tmpfile" "$output_file"
+}
+
+notify_results() {
+    # Find all JSON result files (excluding data directory)
+    local json_files
+    json_files=$(find "$NP_OUTPUT_DIR" -type f -name "*.json" ! -path "*/data/*")
+
+    if [[ -z "$json_files" ]]; then
+        print_warning "No JSON result files found in $NP_OUTPUT_DIR"
+        exit 1
+    fi
+
+    # Generate grouped results directly in memory
+    # Use xargs to avoid "Argument list too long" error
+    local grouped_results
+    grouped_results=$(echo "$json_files" | xargs jq -s '
+      # category helper
+      def cat: .category // "unknown";
+
+      # we get an array of all check objects
+      sort_by(cat)
+      | group_by(cat)
+      | map({
+          category: (.[0].category // "unknown"),
+          summary: {
+            pending: (map(select((.status // "UNKNOWN") == "pending")) | length),
+            running: (map(select((.status // "UNKNOWN") == "running")) | length),
+            success: (map(select((.status // "UNKNOWN") == "success")) | length),
+            failed:  (map(select((.status // "UNKNOWN") == "failed"))  | length)
+          },
+          checks: .
+        })
+    ')
+
+    # Extract action and service IDs
+    ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
+    SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
+
+    # Build action body with grouped results
+    ACTION_BODY=$(jq -nc \
+                    --argjson result "$grouped_results" \
+                    '{
+                      results: { categories: $result }
+                    }')
+
+    # Send to np service
+    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
+}

@@ -1,0 +1,116 @@
+#!/bin/bash
+
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
+
+HTTPROUTE_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
+MAX_WAIT_SECONDS=120
+CHECK_INTERVAL=10
+elapsed=0
+
+echo "Waiting for HTTPRoute [$HTTPROUTE_NAME] reconciliation..."
+
+while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
+    sleep $CHECK_INTERVAL
+
+    httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
+
+    parents_count=$(echo "$httproute_json" | jq '.status.parents | length // 0')
+
+    if [ "$parents_count" -eq 0 ]; then
+        echo "HTTPRoute is pending sync (no parent status yet). Waiting..."
+
+        elapsed=$((elapsed + CHECK_INTERVAL))
+        continue
+    fi
+
+    conditions=$(echo "$httproute_json" | jq -r '.status.parents[0].conditions // []')
+    conditions_count=$(echo "$conditions" | jq 'length')
+
+    if [ "$conditions_count" -eq 0 ]; then
+        echo "HTTPRoute is pending sync (no conditions yet). Waiting..."
+        elapsed=$((elapsed + CHECK_INTERVAL))
+        continue
+    fi
+
+    accepted_status=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .status')
+    accepted_reason=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .reason')
+    accepted_message=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .message')
+
+    resolved_status=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .status')
+    resolved_reason=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .reason')
+    resolved_message=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .message')
+
+    if [ "$accepted_status" == "True" ] && [ "$resolved_status" == "True" ]; then
+        echo "✓ HTTPRoute was successfully reconciled"
+        echo "  - Accepted: True"
+        echo "  - ResolvedRefs: True"
+        return 0
+    fi
+
+    # Check for certificate/TLS errors
+    if echo "$accepted_message $resolved_message" | grep -qi "certificate\|tls\|secret.*not found"; then
+        echo "✗ Certificate/TLS error detected"
+        echo "Root cause: TLS certificate or secret configuration issue"
+        if [ "$accepted_status" == "False" ]; then
+            echo "Accepted condition: $accepted_reason - $accepted_message"
+        fi
+        if [ "$resolved_status" == "False" ]; then
+            echo "ResolvedRefs condition: $resolved_reason - $resolved_message"
+        fi
+        echo ""
+        echo "To fix this issue:"
+        echo "  1. Verify the TLS secret exists in the correct namespace"
+        echo "  2. Check the certificate is valid and not expired"
+        echo "  3. Ensure the Gateway references the correct certificate secret"
+        exit 1
+    fi
+
+    # Check for backend service errors
+    if echo "$resolved_message" | grep -qi "service.*not found\|backend.*not found"; then
+        echo "✗ Backend service error detected"
+        echo "Root cause: Referenced service does not exist"
+        echo "Message: $resolved_message"
+        echo ""
+        echo "To fix this issue:"
+        echo "  1. Verify the backend service name is correct"
+        echo "  2. Check the service exists in the namespace: kubectl get svc -n $K8S_NAMESPACE"
+        echo "  3. Ensure the service has ready endpoints"
+        exit 1
+    fi
+
+    # Accepted=False is an error
+    if [ "$accepted_status" == "False" ]; then
+        echo "✗ HTTPRoute was not accepted by the Gateway"
+        echo "Reason: $accepted_reason"
+        echo "Message: $accepted_message"
+        echo ""
+        echo "All conditions:"
+        echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason)) - \(.message)"'
+        exit 1
+    fi
+
+    # ResolvedRefs=False is an error
+    if [ "$resolved_status" == "False" ]; then
+        echo "✗ HTTPRoute references could not be resolved"
+        echo "Reason: $resolved_reason"
+        echo "Message: $resolved_message"
+        echo ""
+        echo "All conditions:"
+        echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason)) - \(.message)"'
+        exit 1
+    fi
+
+    echo "⚠ HTTPRoute is being reconciled..."
+    echo "Current status:"
+    echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason))"'
+    echo "Waiting for reconciliation to complete..."
+    elapsed=$((elapsed + CHECK_INTERVAL))
+done
+
+echo "✗ Timeout waiting for HTTPRoute reconciliation after ${MAX_WAIT_SECONDS} seconds"
+echo "Current conditions:"
+httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
+echo "$httproute_json" | jq -r '.status.parents[0].conditions[] | "  - \(.type): \(.status) (\(.reason)) - \(.message)"'
+echo ""
+echo "Verify your Gateway and Istio configuration"
+exit 1
