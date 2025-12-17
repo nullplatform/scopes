@@ -1,0 +1,416 @@
+#!/bin/bash
+
+################################################################################
+# Kubernetes Deployment Status Dump and Upload Script
+#
+# Purpose: Collect all Kubernetes objects, events, and configuration for debugging
+# Usage: ./dump-and-upload --deployment-id <id> [--scope-id <id>] [--k8s-namespace <ns>]
+#
+# This script will:
+# - Create a temporary directory with all K8s objects as separate files
+# - Include ~/.np configuration (excluding .git folders)
+# - Create a tar.gz archive
+# - Upload to Null Platform support file storage
+# - Print download URL for sharing
+################################################################################
+
+set -eo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Script configuration
+SCOPE_ID=""
+DEPLOYMENT_ID=""
+NAMESPACE="nullplatform"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DUMP_SCRIPT="${SCRIPT_DIR}/dump-status"
+
+################################################################################
+# Helper Functions
+################################################################################
+
+print_header() {
+    echo -e "\n${BOLD}${BLUE}========================================${NC}"
+    echo -e "${BOLD}${BLUE}$1${NC}"
+    echo -e "${BOLD}${BLUE}========================================${NC}\n"
+}
+
+print_section() {
+    echo -e "\n${BOLD}${CYAN}>>> $1${NC}\n"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+usage() {
+    echo -e "${BOLD}Usage:${NC}"
+    echo "    $0 --deployment-id <deployment_id> [--scope-id <scope_id>] [--k8s-namespace <namespace>]"
+    echo ""
+    echo -e "${BOLD}Required Arguments:${NC}"
+    echo "    --deployment-id <id>     The deployment identifier"
+    echo ""
+    echo -e "${BOLD}Optional Arguments:${NC}"
+    echo "    --scope-id <id>          The scope identifier (optional if deployment-id is provided)"
+    echo "    --k8s-namespace <ns>     Kubernetes namespace (default: nullplatform)"
+    echo "    --help                   Show this help message"
+    echo ""
+    echo -e "${BOLD}Environment Variables:${NC}"
+    echo "    NP_API_KEY               Null Platform API key (required for upload)"
+    echo ""
+    echo -e "${BOLD}Examples:${NC}"
+    echo "    # Using deployment ID only"
+    echo "    $0 --deployment-id 2037314419"
+    echo ""
+    echo "    # With custom namespace"
+    echo "    $0 --deployment-id 2037314419 --k8s-namespace production"
+    echo ""
+    echo -e "${BOLD}Output:${NC}"
+    echo "    Creates a tar.gz archive with all K8s objects and uploads it"
+    echo "    Prints a download URL for accessing the archive"
+    exit 1
+}
+
+################################################################################
+# Parse command line arguments
+################################################################################
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --scope-id)
+                SCOPE_ID="$2"
+                shift 2
+                ;;
+            --deployment-id)
+                DEPLOYMENT_ID="$2"
+                shift 2
+                ;;
+            --k8s-namespace)
+                NAMESPACE="$2"
+                shift 2
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                print_error "Unknown argument: $1"
+                usage
+                ;;
+        esac
+    done
+}
+
+# Parse arguments
+parse_args "$@"
+
+# Validate required arguments
+if [[ -z "$DEPLOYMENT_ID" ]]; then
+    print_error "Missing required argument: --deployment-id"
+    usage
+fi
+
+# Check if dump-status script exists
+if [[ ! -f "$DUMP_SCRIPT" ]]; then
+    print_error "dump-status script not found at: ${DUMP_SCRIPT}"
+    exit 1
+fi
+
+# Check if np CLI is available
+if ! command -v np &> /dev/null; then
+    print_error "np CLI is not installed or not in PATH"
+    print_info "Install from: https://docs.nullplatform.com/cli"
+    exit 1
+fi
+
+# Check for NP_API_KEY
+if [[ -z "$NP_API_KEY" ]]; then
+    print_error "NP_API_KEY environment variable is not set"
+    print_info "Export your API key: export NP_API_KEY=your-api-key"
+    exit 1
+fi
+
+################################################################################
+# Main Script
+################################################################################
+
+print_header "Kubernetes Deployment Status Collection and Upload"
+print_info "Timestamp: $(date)"
+print_info "Deployment ID: ${DEPLOYMENT_ID}"
+if [[ -n "$SCOPE_ID" ]]; then
+    print_info "Scope ID: ${SCOPE_ID}"
+fi
+print_info "Namespace: ${NAMESPACE}"
+
+# Create temporary directory
+TEMP_DIR=$(mktemp -d -t k8s-dump-XXXXXX)
+print_success "Created temporary directory: ${TEMP_DIR}"
+
+# Ensure cleanup on exit
+cleanup() {
+    if [[ -d "$TEMP_DIR" ]]; then
+        print_info "Cleaning up temporary directory..."
+        rm -rf "$TEMP_DIR"
+    fi
+}
+trap cleanup EXIT
+
+################################################################################
+# Step 1: Run dump-status and capture output
+################################################################################
+print_header "Step 1: Collecting K8s Objects"
+
+DUMP_ARGS="--deployment-id ${DEPLOYMENT_ID} --k8s-namespace ${NAMESPACE}"
+if [[ -n "$SCOPE_ID" ]]; then
+    DUMP_ARGS="${DUMP_ARGS} --scope-id ${SCOPE_ID}"
+fi
+
+print_info "Running dump-status script..."
+DUMP_OUTPUT="${TEMP_DIR}/dump-output.txt"
+
+if ! bash "$DUMP_SCRIPT" $DUMP_ARGS > "$DUMP_OUTPUT" 2>&1; then
+    print_error "dump-status script failed"
+    cat "$DUMP_OUTPUT"
+    exit 1
+fi
+
+print_success "Dump completed successfully"
+
+# Extract NRN directly from np CLI for upload metadata
+print_info "Fetching NRN for upload metadata..."
+
+DEPLOYMENT_JSON_NRN=$(np deployment read --id "${DEPLOYMENT_ID}" --format json 2>/dev/null)
+DEPLOYMENT_NRN=$(echo "$DEPLOYMENT_JSON_NRN" | jq -r '.nrn // empty')
+
+# Extract scope_id if we don't have it yet
+if [[ -z "$SCOPE_ID" ]]; then
+    SCOPE_ID=$(echo "$DEPLOYMENT_JSON_NRN" | jq -r '.scope_id // empty')
+fi
+
+# If we have scope ID but no deployment NRN, try to get scope NRN
+SCOPE_NRN=""
+if [[ -z "$DEPLOYMENT_NRN" ]] && [[ -n "$SCOPE_ID" ]]; then
+    SCOPE_NRN=$(np scope read --id "${SCOPE_ID}" --format json 2>/dev/null | jq -r '.nrn // empty')
+fi
+
+# Use deployment NRN if available, otherwise use scope NRN
+UPLOAD_NRN=""
+if [[ -n "$DEPLOYMENT_NRN" ]]; then
+    UPLOAD_NRN="$DEPLOYMENT_NRN"
+    print_info "Using Deployment NRN: ${UPLOAD_NRN}"
+elif [[ -n "$SCOPE_NRN" ]]; then
+    UPLOAD_NRN="$SCOPE_NRN"
+    print_info "Using Scope NRN: ${UPLOAD_NRN}"
+else
+    print_warning "Could not fetch NRN from np CLI"
+fi
+
+################################################################################
+# Step 2: Parse output and create individual files
+################################################################################
+print_header "Step 2: Splitting Output into Files"
+
+# Create k8s directory for objects
+K8S_DIR="${TEMP_DIR}/k8s-objects"
+mkdir -p "$K8S_DIR"
+
+# Parse the output and split by file markers
+current_file=""
+in_file=false
+
+while IFS= read -r line; do
+    if [[ "$line" =~ ^###\ FILE_START:\ (.+)\ ###$ ]]; then
+        # Start of a new file
+        current_file="${K8S_DIR}/${BASH_REMATCH[1]}"
+        in_file=true
+        # Create empty file
+        > "$current_file"
+    elif [[ "$line" =~ ^###\ FILE_END:\ (.+)\ ###$ ]]; then
+        # End of file
+        in_file=false
+        if [[ -n "$current_file" ]]; then
+            print_success "Created: $(basename "$current_file")"
+        fi
+        current_file=""
+    elif [[ "$in_file" == "true" ]] && [[ -n "$current_file" ]]; then
+        # Write line to current file
+        echo "$line" >> "$current_file"
+    fi
+done < "$DUMP_OUTPUT"
+
+# Remove the raw dump output
+rm -f "$DUMP_OUTPUT"
+
+file_count=$(find "$K8S_DIR" -type f | wc -l | tr -d ' ')
+print_success "Created ${file_count} K8s object files"
+
+################################################################################
+# Step 3: Copy ~/.np configuration
+################################################################################
+print_header "Step 3: Collecting Null Platform Configuration"
+
+if [[ -d "$HOME/.np" ]]; then
+    NP_HOME_DIR="${TEMP_DIR}/np-home"
+    mkdir -p "$NP_HOME_DIR"
+
+    print_info "Copying ~/.np configuration (excluding .git folders)..."
+
+    # Use rsync or tar to copy while excluding .git
+    if command -v rsync &> /dev/null; then
+        rsync -a --exclude='.git' "$HOME/.np/" "$NP_HOME_DIR/" 2>/dev/null || true
+    else
+        # Fallback to tar
+        (cd "$HOME/.np" && tar --exclude='.git' -cf - .) | (cd "$NP_HOME_DIR" && tar -xf -) 2>/dev/null || true
+    fi
+
+    np_file_count=$(find "$NP_HOME_DIR" -type f | wc -l | tr -d ' ')
+    print_success "Copied ${np_file_count} files from ~/.np"
+else
+    print_warning "~/.np directory not found, skipping"
+fi
+
+################################################################################
+# Step 4: Create tar.gz archive
+################################################################################
+print_header "Step 4: Creating Archive"
+
+ARCHIVE_NAME="k8s-dump-${DEPLOYMENT_ID}-$(date +%Y%m%d-%H%M%S).tar.gz"
+ARCHIVE_PATH="${TEMP_DIR}/${ARCHIVE_NAME}"
+
+print_info "Creating ${ARCHIVE_NAME}..."
+
+# Create archive from temp directory contents
+(cd "$TEMP_DIR" && tar -czf "$ARCHIVE_NAME" k8s-objects np-home 2>/dev/null) || {
+    # If np-home doesn't exist, just archive k8s-objects
+    (cd "$TEMP_DIR" && tar -czf "$ARCHIVE_NAME" k8s-objects 2>/dev/null)
+}
+
+if [[ ! -f "$ARCHIVE_PATH" ]]; then
+    print_error "Failed to create archive"
+    exit 1
+fi
+
+archive_size=$(du -h "$ARCHIVE_PATH" | cut -f1)
+print_success "Archive created: ${ARCHIVE_NAME} (${archive_size})"
+
+################################################################################
+# Step 5: Get access token
+################################################################################
+print_header "Step 5: Authenticating"
+
+print_info "Getting access token..."
+ACCESS_TOKEN=$(np token create --body "{\"api_key\":\"$NP_API_KEY\"}" --query .access_token 2>&1)
+
+if [[ -z "$ACCESS_TOKEN" ]] || [[ "$ACCESS_TOKEN" == "null" ]]; then
+    print_error "Failed to get access token"
+    echo "$ACCESS_TOKEN"
+    exit 1
+fi
+
+print_success "Access token obtained"
+
+################################################################################
+# Step 6: Request pre-signed URLs
+################################################################################
+print_header "Step 6: Requesting Upload URLs"
+
+print_info "Requesting pre-signed upload URL..."
+
+# Build request body with NRN if available
+if [[ -n "$UPLOAD_NRN" ]]; then
+    REQUEST_BODY="{\"files\":[\"${ARCHIVE_NAME}\"],\"nrn\":\"${UPLOAD_NRN}\"}"
+    print_info "Including NRN in request"
+else
+    REQUEST_BODY="{\"files\":[\"${ARCHIVE_NAME}\"]}"
+fi
+
+PRESIGNED_RESPONSE=$(curl -s --request POST \
+    --url https://api.nullplatform.com/controlplane/agent_support_files \
+    --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+    --header 'content-type: application/json' \
+    --data "$REQUEST_BODY")
+
+if [[ -z "$PRESIGNED_RESPONSE" ]]; then
+    print_error "Failed to get pre-signed URLs"
+    exit 1
+fi
+
+# Extract write and read URLs using jq
+WRITE_URL=$(echo "$PRESIGNED_RESPONSE" | jq -r ".\"${ARCHIVE_NAME}\".write_url")
+READ_URL=$(echo "$PRESIGNED_RESPONSE" | jq -r ".\"${ARCHIVE_NAME}\".read_url")
+
+if [[ -z "$WRITE_URL" ]] || [[ "$WRITE_URL" == "null" ]]; then
+    print_error "Failed to extract write URL from response"
+    echo "$PRESIGNED_RESPONSE" | jq .
+    exit 1
+fi
+
+print_success "Upload URL obtained"
+
+################################################################################
+# Step 7: Upload archive
+################################################################################
+print_header "Step 7: Uploading Archive"
+
+print_info "Uploading ${ARCHIVE_NAME} to Null Platform..."
+
+UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" --request PUT \
+    --url "$WRITE_URL" \
+    --header 'content-type: application/gzip' \
+    --data-binary "@${ARCHIVE_PATH}")
+
+# Extract HTTP status code (last line)
+HTTP_STATUS=$(echo "$UPLOAD_RESPONSE" | tail -1)
+
+if [[ "$HTTP_STATUS" != "200" ]]; then
+    print_error "Upload failed with HTTP status: ${HTTP_STATUS}"
+    echo "$UPLOAD_RESPONSE"
+    exit 1
+fi
+
+print_success "Upload completed successfully!"
+
+################################################################################
+# Summary
+################################################################################
+print_header "UPLOAD COMPLETE"
+
+print_success "Archive uploaded successfully!"
+echo ""
+print_info "Archive Details:"
+echo "  Name:       ${ARCHIVE_NAME}"
+echo "  Size:       ${archive_size}"
+echo "  Files:      ${file_count} K8s objects"
+if [[ -n "$UPLOAD_NRN" ]]; then
+echo "  NRN:        ${UPLOAD_NRN}"
+fi
+echo ""
+print_info "Download URL (valid for 1 hour):"
+echo ""
+echo -e "${BOLD}${GREEN}${READ_URL}${NC}"
+echo ""
+print_info "You can download the archive with:"
+echo "  curl -o ${ARCHIVE_NAME} '${READ_URL}'"
+echo ""
+print_info "Timestamp: $(date)"
+
+exit 0
