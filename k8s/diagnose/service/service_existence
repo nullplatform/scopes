@@ -2,11 +2,13 @@
 # Check: Service Existence
 # Verifies that service resources exist in the namespace
 
-# Validate services exist
-require_services || return 0
-
-# Read services from pre-collected data
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
+
+if [[ -z "$SERVICES" ]]; then
+    print_error "No services found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
+    update_check_result --status "failed" --evidence "{}"
+    return 1
+fi
 
 SERVICE_COUNT=$(echo "$SERVICES" | wc -w)
 print_success "Found $SERVICE_COUNT service(s): $SERVICES"

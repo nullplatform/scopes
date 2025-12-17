@@ -2,11 +2,14 @@
 # Check: Ingress Existence
 # Verifies that ingress resources exist in the namespace
 
-# Validate ingresses exist
-require_ingresses || return 0
-
 # Read ingresses from pre-collected data
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
+
+if [[ -z "$INGRESSES" ]]; then
+    print_error "No ingresses found with labels $SCOPE_LABEL_SELECTOR in namespace $NAMESPACE"
+    update_check_result --status "failed" --evidence "{}"
+    return 1
+fi
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
 print_success "Found $INGRESS_COUNT ingress(es): $INGRESSES"

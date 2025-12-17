@@ -33,6 +33,8 @@ for POD_NAME in $PODS; do
 done
 
 if [[ $HAS_OOM -eq 0 ]]; then
+    POD_COUNT=$(echo "$PODS" | wc -w)
+    print_success "No OOMKilled containers detected in $POD_COUNT pod(s)"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"
