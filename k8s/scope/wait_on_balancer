@@ -11,38 +11,43 @@ case "$DNS_TYPE" in
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
     SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
     
+    DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
     echo "Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
-    
+    echo "Waiting for DNSEndpoint: $DNS_ENDPOINT_NAME"
+
     while true; do
         iteration=$((iteration + 1))
         if [ $iteration -gt $MAX_ITERATIONS ]; then
             echo "⚠️  DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
             echo "ExternalDNS may still be processing the DNSEndpoint resource"
-            echo "You can check manually with: kubectl get dnsendpoint -A"
+            echo "You can check manually with: kubectl get dnsendpoint $DNS_ENDPOINT_NAME -n $K8S_NAMESPACE -o yaml"
             exit 1
         fi
-        
-        echo "Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
-        
-        DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
-        echo "Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
-        
-        DNS_STATUS=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || echo "not found")
 
-        if [ "$DNS_STATUS" != "not found" ] && [ -n "$DNS_STATUS" ]; then
-            echo "DNSEndpoint status: $DNS_STATUS"
+        echo "Checking DNSEndpoint status (attempt $iteration/$MAX_ITERATIONS)"
+
+        # Get the DNSEndpoint resource and check generation vs observedGeneration
+        ENDPOINT_JSON=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
+
+        if [ -z "$ENDPOINT_JSON" ]; then
+            echo "DNSEndpoint not found yet, waiting 10s..."
+            sleep 10
+            continue
         fi
-        
-        if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
-            echo "✓ DNS record for $SCOPE_DOMAIN is now resolvable"
-            
-            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
-            echo "✓ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
-            
+
+        GENERATION=$(echo "$ENDPOINT_JSON" | jq -r '.metadata.generation // 0')
+        OBSERVED_GENERATION=$(echo "$ENDPOINT_JSON" | jq -r '.status.observedGeneration // 0')
+
+        echo "DNSEndpoint generation: $GENERATION, observedGeneration: $OBSERVED_GENERATION"
+
+        # Check if ExternalDNS has observed and processed the current generation
+        if [ "$GENERATION" -gt 0 ] && [ "$OBSERVED_GENERATION" -ge "$GENERATION" ]; then
+            echo "✓ ExternalDNS has processed DNSEndpoint $DNS_ENDPOINT_NAME"
+            echo "✓ DNS record for $SCOPE_DOMAIN should now be propagating"
             break
         fi
-        
-        echo "DNS record not yet available, waiting 10s..."
+
+        echo "ExternalDNS has not yet processed the DNSEndpoint, waiting 10s..."
         sleep 10
     done
     
