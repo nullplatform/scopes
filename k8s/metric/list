@@ -50,6 +50,13 @@ echo '{
 			"unit": "check",
 			"available_filters": ["scope_id", "instance_id"],
 			"available_group_by": ["instance_id"]
+		},
+		{
+			"name": "http.healthcheck_fail",
+			"title": "Healthcheck failures",
+			"unit": "count",
+			"available_filters": ["scope_id", "instance_id"],
+			"available_group_by": ["instance_id"]
 		}
 	]
 }'
