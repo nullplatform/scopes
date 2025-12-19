@@ -65,6 +65,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 6. [resource_availability](#6-resource_availability) - `scope/resource_availability`
 7. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
 8. [container_port_health](#8-container_port_health) - `scope/container_port_health`
+9. [health_probe_validation](#9-health_probe_validation) - `scope/health_probe_validation`
 
 ### Service checks (`k8s/diagnose/service/`)
 1. [service_existence](#1-service_existence) - `service/service_existence`
@@ -231,6 +232,16 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **Example output (failure)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`ℹ      Port 8080 (http):`<br>`✗        Application is NOT listening on port 8080`<br>`⚠        Your application is configured to use port 8080 in Kubernetes`<br>`⚠        but it's not actually listening on that port inside the container.`<br>`ℹ        Action: Check your application configuration and ensure it listens on port 8080`<br>`ℹ        Check logs: kubectl logs web-app-123 -n production -c application` |
 | **Example output (success)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'http':`<br>`ℹ      Port 80 (http):`<br>`✓        Application is listening on port 80`<br>`ℹ    Container 'application':`<br>`ℹ      Port 8080 (http):`<br>`✓        Application is listening on port 8080` |
 
+### 9. health_probe_validation
+
+| **Aspect** | **Details** |
+|------------|-------------|
+| **What it detects** | Incorrectly configured readiness and liveness probes |
+| **Common causes** | - Wrong port configured in probe<br>- Incorrect health check endpoint path<br>- Application not exposing health endpoint<br>- Health endpoint returning non-2xx status code<br>- Probe timeout too short for application startup<br>- Wrong HTTP scheme (http vs https)<br>- Health check command failures in exec probes |
+| **Possible solutions** | - Verify probe port matches application's actual listening port<br>- Check health endpoint path exists and is correct (e.g., `/health`, `/healthz`, `/ready`)<br>- Test health endpoint manually: `kubectl exec <pod> -c <container> -- curl http://localhost:PORT/PATH`<br>- Ensure health endpoint returns 2xx or 3xx status codes<br>- Increase `initialDelaySeconds` if application needs more startup time<br>- Adjust `periodSeconds` and `timeoutSeconds` for probe timing<br>- Review application logs for health check errors<br>- For exec probes, verify command exists and runs successfully |
+| **Example output (failure)** | `ℹ  Checking pod web-app-123 health probes:`<br>`ℹ    Container 'application':`<br>`ℹ      Readiness Probe:`<br>`ℹ        Type: HTTP GET http://localhost:8080/health`<br>`✗        Probe failed: HTTP 404 (expected 2xx/3xx)`<br>`⚠        The endpoint '/health' may be incorrect or returning errors`<br>`ℹ        Check your application's health endpoint configuration`<br>`ℹ        Action: Verify readiness probe configuration in deployment spec`<br>`⚠      Recent readiness probe failures: 15` |
+| **Example output (success)** | `ℹ  Checking pod web-app-123 health probes:`<br>`ℹ    Container 'application':`<br>`ℹ      Readiness Probe:`<br>`ℹ        Type: HTTP GET http://localhost:8080/healthz`<br>`✓        Probe successful (HTTP 200)`<br>`ℹ      Liveness Probe:`<br>`ℹ        Type: TCP Socket localhost:8080`<br>`✓        TCP probe successful` |
+
 ---
 
 ## Service checks
@@ -293,7 +304,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 
 | **Category** | **Checks** | **Common Root Causes** |
 |--------------|------------|------------------------|
-| **Pod Issues** | container_crash_detection, image_pull_status, pod_readiness, container_port_health | Application errors, configuration issues, image problems, port misconfigurations |
+| **Pod Issues** | container_crash_detection, image_pull_status, pod_readiness, container_port_health, health_probe_validation | Application errors, configuration issues, image problems, port misconfigurations, health check failures |
 | **Resource Issues** | memory_limits_check, resource_availability, storage_mounting | Insufficient resources, missing limits, capacity planning |
 | **Service Routing** | service_existence, service_selector_match, service_endpoints | Label mismatches, configuration errors, no healthy pods |
 | **Ingress/Networking** | ingress_existence, ingress_class_validation, ingress_controller_sync | Missing resources, controller issues, backend problems |

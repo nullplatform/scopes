@@ -1,0 +1,223 @@
+#!/bin/bash
+# Check: Health Probe Validation
+# Validates readiness and liveness probes are correctly configured
+
+# Validate pods exist
+require_pods || return 0
+
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_PROBE_ISSUES=0
+
+for POD_NAME in $PODS; do
+    # Get pod info from pre-collected data
+    POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
+
+    # Check if pod is running
+    POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
+    if [[ "$POD_PHASE" != "Running" ]]; then
+        print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping probe checks"
+        continue
+    fi
+
+    print_info "Checking pod $POD_NAME health probes:"
+
+    # Get all containers with their probes
+    CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
+
+    for CONTAINER_B64 in $CONTAINERS; do
+        CONTAINER_DATA=$(echo "$CONTAINER_B64" | base64 -d)
+        CONTAINER_NAME=$(echo "$CONTAINER_DATA" | jq -r '.name')
+
+        print_info "  Container '$CONTAINER_NAME':"
+
+        # Check readiness probe
+        READINESS_PROBE=$(echo "$CONTAINER_DATA" | jq -c '.readinessProbe // empty')
+        if [[ -n "$READINESS_PROBE" && "$READINESS_PROBE" != "null" ]]; then
+            print_info "    Readiness Probe:"
+            validate_probe "$POD_NAME" "$CONTAINER_NAME" "$READINESS_PROBE" "readiness"
+        else
+            print_warning "    No readiness probe configured"
+        fi
+
+        # Check liveness probe
+        LIVENESS_PROBE=$(echo "$CONTAINER_DATA" | jq -c '.livenessProbe // empty')
+        if [[ -n "$LIVENESS_PROBE" && "$LIVENESS_PROBE" != "null" ]]; then
+            print_info "    Liveness Probe:"
+            validate_probe "$POD_NAME" "$CONTAINER_NAME" "$LIVENESS_PROBE" "liveness"
+        else
+            print_warning "    No liveness probe configured"
+        fi
+
+        # Check probe failure statistics from K8s events
+        check_probe_failures "$POD_NAME" "$CONTAINER_NAME"
+    done
+done
+
+if [[ $HAS_PROBE_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi
+
+# Function to validate a probe by executing it manually
+validate_probe() {
+    local pod_name="$1"
+    local container_name="$2"
+    local probe_config="$3"
+    local probe_type="$4"
+
+    # Determine probe type (httpGet, tcpSocket, exec)
+    local probe_handler=""
+    if echo "$probe_config" | jq -e '.httpGet' >/dev/null 2>&1; then
+        probe_handler="httpGet"
+    elif echo "$probe_config" | jq -e '.tcpSocket' >/dev/null 2>&1; then
+        probe_handler="tcpSocket"
+    elif echo "$probe_config" | jq -e '.exec' >/dev/null 2>&1; then
+        probe_handler="exec"
+    else
+        print_warning "      Unknown probe handler type"
+        return
+    fi
+
+    case "$probe_handler" in
+        httpGet)
+            validate_http_probe "$pod_name" "$container_name" "$probe_config" "$probe_type"
+            ;;
+        tcpSocket)
+            validate_tcp_probe "$pod_name" "$container_name" "$probe_config" "$probe_type"
+            ;;
+        exec)
+            validate_exec_probe "$pod_name" "$container_name" "$probe_config" "$probe_type"
+            ;;
+    esac
+}
+
+# Validate HTTP GET probe
+validate_http_probe() {
+    local pod_name="$1"
+    local container_name="$2"
+    local probe_config="$3"
+    local probe_type="$4"
+
+    local port=$(echo "$probe_config" | jq -r '.httpGet.port')
+    local path=$(echo "$probe_config" | jq -r '.httpGet.path // "/"')
+    local scheme=$(echo "$probe_config" | jq -r '.httpGet.scheme // "HTTP"' | tr '[:upper:]' '[:lower:]')
+    local host=$(echo "$probe_config" | jq -r '.httpGet.host // "localhost"')
+
+    print_info "      Type: HTTP GET $scheme://$host:$port$path"
+
+    # Execute health check from inside the container
+    local test_cmd=""
+    if [[ "$scheme" == "https" ]]; then
+        test_cmd="curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 https://$host:$port$path"
+    else
+        test_cmd="curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://$host:$port$path"
+    fi
+
+    HTTP_CODE=$(kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "$test_cmd" 2>/dev/null)
+    EXIT_CODE=$?
+
+    # Check if successful (2xx or 3xx status codes are considered successful for probes)
+    if [[ $EXIT_CODE -eq 0 && "$HTTP_CODE" =~ ^[23][0-9][0-9]$ ]]; then
+        print_success "      ✓ Probe successful (HTTP $HTTP_CODE)"
+    else
+        HAS_PROBE_ISSUES=1
+        if [[ $EXIT_CODE -ne 0 ]]; then
+            print_error "      ✗ Probe failed: Cannot connect to port $port"
+            print_warning "      The port may be wrong or the application is not listening"
+            print_info "      Check if your application is actually running on port $port"
+        else
+            print_error "      ✗ Probe failed: HTTP $HTTP_CODE (expected 2xx/3xx)"
+            print_warning "      The endpoint '$path' may be incorrect or returning errors"
+            print_info "      Check your application's health endpoint configuration"
+        fi
+        print_info "      Action: Verify $probe_type probe configuration in deployment spec"
+    fi
+}
+
+# Validate TCP Socket probe
+validate_tcp_probe() {
+    local pod_name="$1"
+    local container_name="$2"
+    local probe_config="$3"
+    local probe_type="$4"
+
+    local port=$(echo "$probe_config" | jq -r '.tcpSocket.port')
+    local host=$(echo "$probe_config" | jq -r '.tcpSocket.host // "localhost"')
+
+    print_info "      Type: TCP Socket $host:$port"
+
+    # Test TCP connection
+    kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- timeout 2 sh -c "nc -z $host $port" 2>/dev/null
+    EXIT_CODE=$?
+
+    if [[ $EXIT_CODE -eq 0 ]]; then
+        print_success "      ✓ TCP probe successful"
+    else
+        HAS_PROBE_ISSUES=1
+        print_error "      ✗ TCP probe failed: Cannot connect to $host:$port"
+        print_warning "      The port may be wrong or the application is not listening"
+        print_info "      Action: Verify $probe_type probe port in deployment spec"
+    fi
+}
+
+# Validate Exec probe
+validate_exec_probe() {
+    local pod_name="$1"
+    local container_name="$2"
+    local probe_config="$3"
+    local probe_type="$4"
+
+    local command=$(echo "$probe_config" | jq -r '.exec.command | join(" ")')
+
+    print_info "      Type: Exec command"
+    print_info "      Command: $command"
+
+    # Execute the probe command
+    kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "$command" >/dev/null 2>&1
+    EXIT_CODE=$?
+
+    if [[ $EXIT_CODE -eq 0 ]]; then
+        print_success "      ✓ Exec probe successful"
+    else
+        HAS_PROBE_ISSUES=1
+        print_error "      ✗ Exec probe failed (exit code: $EXIT_CODE)"
+        print_warning "      The probe command may be incorrect or returning non-zero exit code"
+        print_info "      Action: Verify $probe_type probe command in deployment spec"
+        print_info "      Test manually: kubectl exec $pod_name -n $NAMESPACE -c $container_name -- $command"
+    fi
+}
+
+# Check probe failure statistics from Kubernetes events
+check_probe_failures() {
+    local pod_name="$1"
+    local container_name="$2"
+
+    # Get recent probe failure events
+    READINESS_FAILURES=$(echo "$POD_INFO" | jq -r --arg container "$container_name" '
+        .status.containerStatuses[]? |
+        select(.name == $container) |
+        .lastState.terminated.reason // empty
+    ')
+
+    # Count recent failures from events
+    RECENT_READINESS_FAILURES=$(kubectl get events -n "$NAMESPACE" \
+        --field-selector involvedObject.name="$pod_name" 2>/dev/null | \
+        grep -c "Readiness probe failed" || echo "0")
+
+    RECENT_LIVENESS_FAILURES=$(kubectl get events -n "$NAMESPACE" \
+        --field-selector involvedObject.name="$pod_name" 2>/dev/null | \
+        grep -c "Liveness probe failed" || echo "0")
+
+    if [[ "$RECENT_READINESS_FAILURES" -gt 0 ]]; then
+        print_warning "    Recent readiness probe failures: $RECENT_READINESS_FAILURES"
+        HAS_PROBE_ISSUES=1
+    fi
+
+    if [[ "$RECENT_LIVENESS_FAILURES" -gt 0 ]]; then
+        print_warning "    Recent liveness probe failures: $RECENT_LIVENESS_FAILURES"
+        HAS_PROBE_ISSUES=1
+    fi
+}

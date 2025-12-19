@@ -53,10 +53,8 @@ for POD_NAME in $PODS; do
             else
                 HAS_PORT_ISSUES=1
                 print_error "      ✗ Application is NOT listening on port $PORT"
-                print_warning "      Your application is configured to use port $PORT in Kubernetes"
-                print_warning "      but it's not actually listening on that port inside the container."
+                print_warning "      Your application is configured to use port $PORT in Kubernetes but it's not actually listening on that port inside the container."
                 print_info "      Action: Check your application configuration and ensure it listens on port $PORT"
-                print_info "      Check logs: kubectl logs $POD_NAME -n $NAMESPACE -c $CONTAINER_NAME"
             fi
         done < <(echo "$CONTAINER_PORTS")
     done
