@@ -39,8 +39,3 @@ steps:
     category: scope
     type: script
     file: "$SERVICE_PATH/diagnose/scope/container_port_health"
-  - name: health_probe_validation
-    description: Validates health probes are correctly configured
-    category: scope
-    type: script
-    file: "$SERVICE_PATH/diagnose/scope/health_probe_validation"
