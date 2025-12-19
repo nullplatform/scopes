@@ -57,16 +57,21 @@ for SERVICE_NAME in $SERVICES; do
 
     print_info "Service $SERVICE_NAME port configuration:"
 
-    echo "$SERVICE_PORTS" | while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
+    # Validate configuration and test connectivity
+    # Use process substitution to avoid subshell and preserve HAS_PORT_ISSUES updates
+    while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
+        ACTUAL_TARGET_PORT="$TARGET_PORT"
+
         # Check if targetPort is numeric or named
         if [[ "$TARGET_PORT" =~ ^[0-9]+$ ]]; then
             # Numeric targetPort - check if it exists in container ports
             if echo "$CONTAINER_PORTS" | grep -q "^${TARGET_PORT}$"; then
-                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): OK"
+                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Configuration OK"
             else
                 HAS_PORT_ISSUES=1
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Container port $TARGET_PORT not found"
                 print_warning "    Available container ports: $(echo $CONTAINER_PORTS | tr '\n' ' ')"
+                continue
             fi
         else
             # Named port - check if it exists in container port names
@@ -74,12 +79,30 @@ for SERVICE_NAME in $SERVICES; do
 
             if [[ -n "$NAMED_PORT_VALUE" ]]; then
                 print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Resolves to $NAMED_PORT_VALUE"
+                ACTUAL_TARGET_PORT="$NAMED_PORT_VALUE"
             else
                 HAS_PORT_ISSUES=1
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Named port not found in containers"
+                continue
             fi
         fi
-    done
+
+        # Active connectivity check - verify application is listening on the port
+        print_info "    Testing connectivity to port $ACTUAL_TARGET_PORT..."
+
+        # Try to connect to the port from inside the pod
+        CONNECTIVITY_TEST=$(kubectl exec "$FIRST_POD" -n "$NAMESPACE" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $ACTUAL_TARGET_PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1)
+        CONNECTIVITY_EXIT_CODE=$?
+
+        if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
+            print_success "    ✓ Port $ACTUAL_TARGET_PORT is accepting connections"
+        else
+            HAS_PORT_ISSUES=1
+            print_error "    ✗ Port $ACTUAL_TARGET_PORT is NOT accepting connections"
+            print_warning "    Configuration is correct but application may not be listening on port $ACTUAL_TARGET_PORT"
+            print_info "    Check application logs and configuration inside the container"
+        fi
+    done < <(echo "$SERVICE_PORTS")
 done
 
 if [[ $HAS_PORT_ISSUES -eq 0 ]]; then
