@@ -52,34 +52,46 @@ for SERVICE_NAME in $SERVICES; do
     FIRST_POD=$(echo "$PODS" | awk '{print $1}')
     POD_INFO=$(jq --arg name "$FIRST_POD" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
-    # Get container ports
-    CONTAINER_PORTS=$(echo "$POD_INFO" | jq -r '.spec.containers[].ports[]?.containerPort' 2>/dev/null | sort -u)
-
     print_info "Service $SERVICE_NAME port configuration:"
 
     # Validate configuration and test connectivity
     # Use process substitution to avoid subshell and preserve HAS_PORT_ISSUES updates
     while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
         ACTUAL_TARGET_PORT="$TARGET_PORT"
+        CONTAINER_NAME=""
 
         # Check if targetPort is numeric or named
         if [[ "$TARGET_PORT" =~ ^[0-9]+$ ]]; then
-            # Numeric targetPort - check if it exists in container ports
-            if echo "$CONTAINER_PORTS" | grep -q "^${TARGET_PORT}$"; then
-                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Configuration OK"
+            # Numeric targetPort - find which container has this port
+            CONTAINER_INFO=$(echo "$POD_INFO" | jq -r --arg port "$TARGET_PORT" '
+                .spec.containers[] |
+                select(.ports[]?.containerPort == ($port | tonumber)) |
+                "\(.name):\(.ports[] | select(.containerPort == ($port | tonumber)) | .containerPort)"
+            ' | head -1)
+
+            if [[ -n "$CONTAINER_INFO" ]]; then
+                CONTAINER_NAME=$(echo "$CONTAINER_INFO" | cut -d':' -f1)
+                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Configuration OK [container: $CONTAINER_NAME]"
             else
                 HAS_PORT_ISSUES=1
+                # Show available ports per container
+                AVAILABLE_PORTS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | "\(.name): \([.ports[]?.containerPort] | join(","))"' | tr '\n' '; ')
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Container port $TARGET_PORT not found"
-                print_warning "    Available container ports: $(echo $CONTAINER_PORTS | tr '\n' ' ')"
+                print_warning "    Available ports by container: $AVAILABLE_PORTS"
                 continue
             fi
         else
-            # Named port - check if it exists in container port names
-            NAMED_PORT_VALUE=$(echo "$POD_INFO" | jq -r ".spec.containers[].ports[] | select(.name==\"$TARGET_PORT\") | .containerPort" 2>/dev/null)
+            # Named port - find which container has this named port
+            CONTAINER_INFO=$(echo "$POD_INFO" | jq -r --arg portname "$TARGET_PORT" '
+                .spec.containers[] |
+                select(.ports[]? | select(.name == $portname)) |
+                "\(.name):\(.ports[] | select(.name == $portname) | .containerPort)"
+            ' | head -1)
 
-            if [[ -n "$NAMED_PORT_VALUE" ]]; then
-                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Resolves to $NAMED_PORT_VALUE"
-                ACTUAL_TARGET_PORT="$NAMED_PORT_VALUE"
+            if [[ -n "$CONTAINER_INFO" ]]; then
+                CONTAINER_NAME=$(echo "$CONTAINER_INFO" | cut -d':' -f1)
+                ACTUAL_TARGET_PORT=$(echo "$CONTAINER_INFO" | cut -d':' -f2)
+                print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Resolves to $ACTUAL_TARGET_PORT [container: $CONTAINER_NAME]"
             else
                 HAS_PORT_ISSUES=1
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Named port not found in containers"
@@ -88,10 +100,10 @@ for SERVICE_NAME in $SERVICES; do
         fi
 
         # Active connectivity check - verify application is listening on the port
-        print_info "    Testing connectivity to port $ACTUAL_TARGET_PORT..."
+        print_info "    Testing connectivity to port $ACTUAL_TARGET_PORT in container '$CONTAINER_NAME'..."
 
-        # Try to connect to the port from inside the pod
-        CONNECTIVITY_TEST=$(kubectl exec "$FIRST_POD" -n "$NAMESPACE" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $ACTUAL_TARGET_PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1)
+        # Try to connect to the port from inside the specific container
+        CONNECTIVITY_TEST=$(kubectl exec "$FIRST_POD" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $ACTUAL_TARGET_PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1)
         CONNECTIVITY_EXIT_CODE=$?
 
         if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
@@ -100,7 +112,7 @@ for SERVICE_NAME in $SERVICES; do
             HAS_PORT_ISSUES=1
             print_error "    ✗ Port $ACTUAL_TARGET_PORT is NOT accepting connections"
             print_warning "    Configuration is correct but application may not be listening on port $ACTUAL_TARGET_PORT"
-            print_info "    Check application logs and configuration inside the container"
+            print_info "    Check logs: kubectl logs $FIRST_POD -n $NAMESPACE -c $CONTAINER_NAME"
         fi
     done < <(echo "$SERVICE_PORTS")
 done
