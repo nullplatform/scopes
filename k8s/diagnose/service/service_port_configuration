@@ -24,7 +24,7 @@ for SERVICE_NAME in $SERVICES; do
     fi
 
     # Get service selector to find pods
-    SERVICE_SELECTORS=$(echo "$SERVICE_INFO" | jq -r '.spec.selector | to_entries | map("\(.key)=\(.value)") | join(",")')
+    SERVICE_SELECTORS=$(echo "$SERVICE_INFO" | jq -c '.spec.selector')
 
     if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
         print_warning "Service $SERVICE_NAME: No selector, skipping port validation"
