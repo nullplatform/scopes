@@ -64,6 +64,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 5. [pod_readiness](#5-pod_readiness) - `scope/pod_readiness`
 6. [resource_availability](#6-resource_availability) - `scope/resource_availability`
 7. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
+8. [container_port_health](#8-container_port_health) - `scope/container_port_health`
 
 ### Service checks (`k8s/diagnose/service/`)
 1. [service_existence](#1-service_existence) - `service/service_existence`
@@ -220,6 +221,16 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **Example output (failure)** | `✗ Pod web-app-123: Volume mount failed`<br>`  Volume: data-volume (PersistentVolumeClaim)`<br>`  PVC: app-data-pvc`<br>`  Status: Pending`<br>`  Events:`<br>`    MountVolume.SetUp failed: PersistentVolumeClaim "app-data-pvc" not found`<br>`ℹ  Action: Create missing PVC or fix volume reference in deployment` |
 | **Example output (success)** | `✓ All volumes mounted successfully for 3 pod(s)` |
 
+### 8. container_port_health
+
+| **Aspect** | **Details** |
+|------------|-------------|
+| **What it detects** | Containers not listening on their declared ports |
+| **Common causes** | - Application configured to listen on different port than Kubernetes configuration<br>- Application failed to bind to port (permission issues, port conflict)<br>- Application code error preventing port binding<br>- Wrong port number in deployment spec<br>- Environment variable for port not set correctly |
+| **Possible solutions** | - Check application configuration files (e.g., nginx.conf, application.properties)<br>- Verify environment variables controlling port binding<br>- Review application startup logs for port binding errors<br>- Ensure containerPort in deployment matches application's listen port<br>- Test port binding manually: `kubectl exec <pod> -c <container> -- netstat -tlnp` |
+| **Example output (failure)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`ℹ      Port 8080 (http):`<br>`✗        Application is NOT listening on port 8080`<br>`⚠        Your application is configured to use port 8080 in Kubernetes`<br>`⚠        but it's not actually listening on that port inside the container.`<br>`ℹ        Action: Check your application configuration and ensure it listens on port 8080`<br>`ℹ        Check logs: kubectl logs web-app-123 -n production -c application` |
+| **Example output (success)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'http':`<br>`ℹ      Port 80 (http):`<br>`✓        Application is listening on port 80`<br>`ℹ    Container 'application':`<br>`ℹ      Port 8080 (http):`<br>`✓        Application is listening on port 8080` |
+
 ---
 
 ## Service checks
@@ -282,7 +293,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 
 | **Category** | **Checks** | **Common Root Causes** |
 |--------------|------------|------------------------|
-| **Pod Issues** | container_crash_detection, image_pull_status, pod_readiness | Application errors, configuration issues, image problems |
+| **Pod Issues** | container_crash_detection, image_pull_status, pod_readiness, container_port_health | Application errors, configuration issues, image problems, port misconfigurations |
 | **Resource Issues** | memory_limits_check, resource_availability, storage_mounting | Insufficient resources, missing limits, capacity planning |
 | **Service Routing** | service_existence, service_selector_match, service_endpoints | Label mismatches, configuration errors, no healthy pods |
 | **Ingress/Networking** | ingress_existence, ingress_class_validation, ingress_controller_sync | Missing resources, controller issues, backend problems |

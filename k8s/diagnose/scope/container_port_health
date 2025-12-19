@@ -1,0 +1,69 @@
+#!/bin/bash
+# Check: Container Port Health
+# Validates that containers are actually listening on their declared ports
+
+# Validate pods exist
+require_pods || return 0
+
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_PORT_ISSUES=0
+
+for POD_NAME in $PODS; do
+    # Get pod info from pre-collected data
+    POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
+
+    # Check if pod is running
+    POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
+    if [[ "$POD_PHASE" != "Running" ]]; then
+        print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping port checks"
+        continue
+    fi
+
+    print_info "Checking pod $POD_NAME:"
+
+    # Get all containers with their ports
+    CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
+
+    for CONTAINER_B64 in $CONTAINERS; do
+        CONTAINER_DATA=$(echo "$CONTAINER_B64" | base64 -d)
+        CONTAINER_NAME=$(echo "$CONTAINER_DATA" | jq -r '.name')
+
+        # Get declared ports for this container
+        CONTAINER_PORTS=$(echo "$CONTAINER_DATA" | jq -r '.ports[]? | "\(.containerPort):\(.name // "unnamed")"')
+
+        if [[ -z "$CONTAINER_PORTS" ]]; then
+            print_info "  Container '$CONTAINER_NAME': No ports declared"
+            continue
+        fi
+
+        print_info "  Container '$CONTAINER_NAME':"
+
+        # Check each declared port
+        while IFS=':' read -r PORT PORT_NAME; do
+            print_info "    Port $PORT ($PORT_NAME):"
+
+            # Active connectivity check
+            CONNECTIVITY_TEST=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$PORT >/dev/null)" 2>&1)
+            CONNECTIVITY_EXIT_CODE=$?
+
+            if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
+                print_success "      ✓ Application is listening on port $PORT"
+            else
+                HAS_PORT_ISSUES=1
+                print_error "      ✗ Application is NOT listening on port $PORT"
+                print_warning "      Your application is configured to use port $PORT in Kubernetes"
+                print_warning "      but it's not actually listening on that port inside the container."
+                print_info "      Action: Check your application configuration and ensure it listens on port $PORT"
+                print_info "      Check logs: kubectl logs $POD_NAME -n $NAMESPACE -c $CONTAINER_NAME"
+            fi
+        done < <(echo "$CONTAINER_PORTS")
+    done
+done
+
+if [[ $HAS_PORT_ISSUES -eq 0 ]]; then
+    update_check_result --status "success" --evidence "{}"
+else
+    update_check_result --status "failed" --evidence "{}"
+fi
