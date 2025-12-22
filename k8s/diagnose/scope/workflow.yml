@@ -34,3 +34,8 @@ steps:
     category: scope
     type: script
     file: "$SERVICE_PATH/diagnose/scope/pod_readiness"
+  - name: container_port_health
+    description: Validates containers are listening on declared ports
+    category: scope
+    type: script
+    file: "$SERVICE_PATH/diagnose/scope/container_port_health"
