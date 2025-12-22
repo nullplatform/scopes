@@ -122,6 +122,15 @@ spec:
           securityContext:
             runAsUser: 0
           image: {{ .traffic_image }}
+          {{- if .traffic_manager_config_map }}
+          volumeMounts:
+              - name: nginx-config
+                mountPath: /etc/nginx/nginx.conf
+                subPath: nginx.conf
+              - name: nginx-config
+                mountPath: /etc/nginx/conf.d/default.conf
+                subPath: default.conf
+          {{- end }}
           ports:
             - containerPort: 80
               protocol: TCP
@@ -294,6 +303,11 @@ spec:
       {{- end }}
     {{- end }}
       volumes:
+      {{- if .traffic_manager_config_map }}
+      - name: nginx-config
+        configMap:
+          name: {{ .traffic_manager_config_map }}
+      {{- end }}
 {{- if .parameters.results }}
   {{- range .parameters.results }}
     {{- if and (eq .type "file") }}
