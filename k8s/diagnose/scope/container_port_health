@@ -23,9 +23,6 @@ for POD_NAME in $PODS; do
 
     print_info "Checking pod $POD_NAME:"
 
-    # Get pod ready status (we'll use this if port checks fail)
-    POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
-
     # Get all containers with their ports
     CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
 
@@ -34,7 +31,7 @@ for POD_NAME in $PODS; do
         CONTAINER_NAME=$(echo "$CONTAINER_DATA" | jq -r '.name')
 
         # Get declared ports for this container
-        CONTAINER_PORTS=$(echo "$CONTAINER_DATA" | jq -r '.ports[]? | "\(.containerPort):\(.name // "unnamed")"')
+        CONTAINER_PORTS=$(echo "$CONTAINER_DATA" | jq -r '.ports[]? | .containerPort' | tr '\n' ' ')
 
         if [[ -z "$CONTAINER_PORTS" ]]; then
             print_info "  Container '$CONTAINER_NAME': No ports declared"
@@ -43,29 +40,58 @@ for POD_NAME in $PODS; do
 
         print_info "  Container '$CONTAINER_NAME':"
 
-        # Check each declared port
-        while IFS=':' read -r PORT PORT_NAME; do
-            print_info "    Port $PORT ($PORT_NAME):"
+        # Detect which ports are actually listening in the container
+        # Try ss first, then netstat
+        LISTENING_PORTS=""
+        if kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v ss >/dev/null 2>&1" 2>/dev/null; then
+            LISTENING_PORTS=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "ss -tlnH 2>/dev/null | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | sort -u | tr '\n' ' ')
+        elif kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v netstat >/dev/null 2>&1" 2>/dev/null; then
+            LISTENING_PORTS=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "netstat -tln 2>/dev/null | grep LISTEN | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | sort -u | tr '\n' ' ')
+        fi
 
-            # Active connectivity check
-            kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$PORT >/dev/null)" >/dev/null 2>&1
-            CONNECTIVITY_EXIT_CODE=$?
+        if [[ -z "$LISTENING_PORTS" ]]; then
+            print_warning "    Cannot detect listening ports (ss/netstat not available), using connectivity test"
 
-            if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
-                print_success "      ✓ Application is listening on port $PORT"
-            else
-                # Port check failed - determine if this is a real issue or just because pod is not ready
-                if [[ "$POD_READY" != "True" ]]; then
-                    print_warning "      ⚠ Port $PORT is not responding, but pod is not ready yet"
-                    print_info "      Note: This may be normal. Fix pod readiness issues first, then verify port health."
+            # Fallback to connectivity test
+            for PORT in $CONTAINER_PORTS; do
+                kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$PORT >/dev/null)" >/dev/null 2>&1
+                CONNECTIVITY_EXIT_CODE=$?
+
+                if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
+                    print_success "    Port $PORT: ✓ Responding"
                 else
                     HAS_PORT_ISSUES=1
-                    print_error "      ✗ Application is NOT listening on port $PORT"
-                    print_warning "      Your application is configured to use port $PORT in Kubernetes but it's not actually listening on that port inside the container."
-                    print_info "      Action: Check your application configuration and ensure it listens on port $PORT"
+                    print_warning "    Port $PORT: ⚠ Not responding"
                 fi
-            fi
-        done < <(echo "$CONTAINER_PORTS")
+            done
+        else
+            print_info "    Ports listening in container: $LISTENING_PORTS"
+            print_info "    Ports declared in config: $CONTAINER_PORTS"
+
+            # Check each declared port
+            for PORT in $CONTAINER_PORTS; do
+                if echo "$LISTENING_PORTS" | grep -wq "$PORT"; then
+                    print_success "    Port $PORT: ✓ App is listening"
+                else
+                    HAS_PORT_ISSUES=1
+                    print_error "    Port $PORT: ✗ App is NOT listening on this port"
+                    print_warning "      Config declares port $PORT but app is not listening on it"
+
+                    # Suggest alternative ports
+                    if [[ -n "$LISTENING_PORTS" ]]; then
+                        print_info "      App is listening on: $LISTENING_PORTS"
+                        print_info "      Action: Update containerPort in deployment to match where app actually listens"
+                    fi
+                fi
+            done
+
+            # Check for ports listening but not declared (informational)
+            for LISTEN_PORT in $LISTENING_PORTS; do
+                if ! echo "$CONTAINER_PORTS" | grep -wq "$LISTEN_PORT"; then
+                    print_info "    Port $LISTEN_PORT: App is listening but not declared in config (may be intentional)"
+                fi
+            done
+        fi
     done
 done
 
