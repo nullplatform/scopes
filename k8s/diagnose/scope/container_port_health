@@ -50,7 +50,7 @@ for POD_NAME in $PODS; do
         fi
 
         if [[ -z "$LISTENING_PORTS" ]]; then
-            print_warning "    Cannot detect listening ports (ss/netstat not available), using connectivity test"
+            print_warning "    Cannot detect listening ports in this container, checking connectivity"
 
             # Fallback to connectivity test
             for PORT in $CONTAINER_PORTS; do
@@ -71,8 +71,8 @@ for POD_NAME in $PODS; do
                     print_success "    Port $PORT: ✓ Listening"
                 else
                     HAS_PORT_ISSUES=1
-                    # Format listening ports nicely for display
-                    FORMATTED_LISTENING=$(echo "$LISTENING_PORTS" | tr ' ' ', ' | sed 's/, $//')
+                    # Format listening ports nicely for display (remove trailing spaces and convert to comma-separated)
+                    FORMATTED_LISTENING=$(echo "$LISTENING_PORTS" | xargs | tr ' ' ',')
                     print_error "    Port $PORT: ✗ Declared but not listening (pod listening on: $FORMATTED_LISTENING)"
                 fi
             done
