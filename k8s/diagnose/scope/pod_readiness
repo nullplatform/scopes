@@ -24,18 +24,69 @@ for POD_NAME in $PODS; do
           ALL_READY=0
           print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
 
+          # Get detailed condition information
+          READY_CONDITION=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready")')
+          READY_REASON=$(echo "$READY_CONDITION" | jq -r '.reason // "Unknown"')
+          READY_MESSAGE=$(echo "$READY_CONDITION" | jq -r '.message // "No message available"')
+
+          if [[ -n "$READY_REASON" && "$READY_REASON" != "Unknown" ]]; then
+              print_warning "  Reason: $READY_REASON"
+          fi
+
+          if [[ -n "$READY_MESSAGE" && "$READY_MESSAGE" != "No message available" ]]; then
+              print_warning "  Message: $READY_MESSAGE"
+          fi
+
+          # Check container statuses
+          CONTAINER_STATUSES=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | "\(.name): Ready=\(.ready), Restarts=\(.restartCount)"' 2>/dev/null)
+
+          if [[ -n "$CONTAINER_STATUSES" ]]; then
+              print_warning "  Container Status:"
+              while IFS= read -r line; do
+                  print_warning "    $line"
+              done <<< "$CONTAINER_STATUSES"
+          fi
+
+          # Check for waiting containers with reasons
+          WAITING_CONTAINERS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting) | "  \(.name): \(.state.waiting.reason) - \(.state.waiting.message // "No details")"' 2>/dev/null)
+
+          if [[ -n "$WAITING_CONTAINERS" ]]; then
+              print_warning "  Waiting Containers:"
+              echo "$WAITING_CONTAINERS" | while IFS= read -r line; do
+                  print_warning "$line"
+              done
+          fi
+
           # Check readiness probe failures
-          READINESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "readiness probe failed" | tail -n 1)
+          READINESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "readiness probe failed" | tail -n 3)
 
           if [[ -n "$READINESS_FAILURES" ]]; then
-              print_warning "  Readiness probe is failing"
+              print_warning "  Recent Readiness Probe Failures:"
+              echo "$READINESS_FAILURES" | while IFS= read -r line; do
+                  print_warning "    $line"
+              done
           fi
 
           # Check liveness probe failures
-          LIVENESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "liveness probe failed" | tail -n 1)
+          LIVENESS_FAILURES=$(kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name="$POD_NAME" 2>/dev/null | grep -i "liveness probe failed" | tail -n 3)
 
           if [[ -n "$LIVENESS_FAILURES" ]]; then
-              print_warning "  Liveness probe is failing"
+              print_warning "  Recent Liveness Probe Failures:"
+              echo "$LIVENESS_FAILURES" | while IFS= read -r line; do
+                  print_warning "    $line"
+              done
+          fi
+
+          # Show recent pod logs (last 10 lines)
+          print_warning "  Recent logs:"
+          RECENT_LOGS=$(kubectl logs -n "$NAMESPACE" "$POD_NAME" --tail=10 2>&1)
+
+          if [[ $? -eq 0 ]]; then
+              echo "$RECENT_LOGS" | while IFS= read -r line; do
+                  print_warning "    $line"
+              done
+          else
+              print_warning "    Unable to fetch logs: $RECENT_LOGS"
           fi
       fi
 done

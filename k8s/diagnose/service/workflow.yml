@@ -1,26 +1,26 @@
 steps:
   - name: service_existence
     description: Verifies that service resources exist in the namespace
-    category: service
+    category: K8S service
     type: script
     file: "$SERVICE_PATH/diagnose/service/service_existence"
   - name: service_selector_match
     description: Validates service selectors match pod labels
-    category: service
+    category: K8S service
     type: script
     file: "$SERVICE_PATH/diagnose/service/service_selector_match"
   - name: service_endpoints
     description: Checks if service has healthy endpoints
-    category: service
-    type: script
+    category: K8S service
+    type: K8S service
     file: "$SERVICE_PATH/diagnose/service/service_endpoints"
   - name: service_port_configuration
     description: Validates service and container port alignment
-    category: service
+    category: K8S service
     type: script
     file: "$SERVICE_PATH/diagnose/service/service_port_configuration"
   - name: service_type_validation
     description: Verifies service type is correctly configured
-    category: service
+    category: K8S service
     type: script
     file: "$SERVICE_PATH/diagnose/service/service_type_validation"
