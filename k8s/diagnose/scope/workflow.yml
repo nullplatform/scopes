@@ -39,3 +39,8 @@ steps:
     category: Scope
     type: script
     file: "$SERVICE_PATH/diagnose/scope/container_port_health"
+  - name: health_probe_endpoints
+    description: Validates health probe endpoints are configured and responding
+    category: Scope
+    type: script
+    file: "$SERVICE_PATH/diagnose/scope/health_probe_endpoints"
