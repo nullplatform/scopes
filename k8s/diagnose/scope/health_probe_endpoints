@@ -114,10 +114,10 @@ for POD_NAME in $PODS; do
                     if check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
                         # Port is listening, so it's an endpoint issue
                         HAS_PROBE_ISSUES=1
-                        print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (port is listening, check endpoint path)"
+                        print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Verify health check endpoint is correctly configured in your application"
                     else
                         # Port is not listening, that's the real issue
-                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (port $PROBE_PORT not listening - fix port config first)"
+                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -167,10 +167,10 @@ for POD_NAME in $PODS; do
                     if check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
                         # Port is listening, so it's an endpoint issue
                         HAS_PROBE_ISSUES=1
-                        print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (port is listening, check endpoint path)"
+                        print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Verify health check endpoint is correctly configured in your application"
                     else
                         # Port is not listening, that's the real issue
-                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (port $PROBE_PORT not listening - fix port config first)"
+                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -218,9 +218,9 @@ for POD_NAME in $PODS; do
                 else
                     # Probe failed - check if it's a port issue or endpoint issue
                     if check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (port is listening, check endpoint path)"
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Verify health check endpoint is correctly configured in your application"
                     else
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (port $PROBE_PORT not listening - fix port config first)"
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
