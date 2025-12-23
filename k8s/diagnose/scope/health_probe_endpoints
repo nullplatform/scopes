@@ -16,16 +16,32 @@ check_port_listening() {
     local container_name=$2
     local port=$3
 
-    # Try nc first, then curl as fallback
+    # Try to detect listening ports using ss or netstat (same as container_port_health)
+    local listening_ports=""
+
+    if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v ss >/dev/null 2>&1" 2>/dev/null; then
+        listening_ports=$(kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "ss -tlnH 2>/dev/null | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | tr '\n' ' ')
+    elif kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v netstat >/dev/null 2>&1" 2>/dev/null; then
+        listening_ports=$(kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "netstat -tln 2>/dev/null | grep LISTEN | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | tr '\n' ' ')
+    fi
+
+    # Check if the port is in the list
+    if [[ -n "$listening_ports" ]]; then
+        echo "$listening_ports" | grep -wq "$port"
+        return $?
+    fi
+
+    # Fallback to connectivity check if ss/netstat not available
     if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v nc >/dev/null 2>&1" 2>/dev/null; then
         kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- timeout 1 nc -z localhost "$port" >/dev/null 2>&1
         return $?
     elif kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v curl >/dev/null 2>&1" 2>/dev/null; then
         kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- timeout 1 curl -s --max-time 1 localhost:"$port" >/dev/null 2>&1
         return $?
-    else
-        return 1
     fi
+
+    # If we can't check, assume port is listening to avoid false positives
+    return 0
 }
 
 for POD_NAME in $PODS; do
