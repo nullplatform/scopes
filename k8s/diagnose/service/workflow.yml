@@ -12,7 +12,7 @@ steps:
   - name: service_endpoints
     description: Checks if service has healthy endpoints
     category: K8S service
-    type: K8S service
+    type: script
     file: "$SERVICE_PATH/diagnose/service/service_endpoints"
   - name: service_port_configuration
     description: Validates service and container port alignment
