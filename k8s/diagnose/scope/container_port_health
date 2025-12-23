@@ -65,30 +65,15 @@ for POD_NAME in $PODS; do
                 fi
             done
         else
-            print_info "    Ports listening in container: $LISTENING_PORTS"
-            print_info "    Ports declared in config: $CONTAINER_PORTS"
-
             # Check each declared port
             for PORT in $CONTAINER_PORTS; do
                 if echo "$LISTENING_PORTS" | grep -wq "$PORT"; then
-                    print_success "    Port $PORT: ✓ App is listening"
+                    print_success "    Port $PORT: ✓ Listening"
                 else
                     HAS_PORT_ISSUES=1
-                    print_error "    Port $PORT: ✗ App is NOT listening on this port"
-                    print_warning "      Config declares port $PORT but app is not listening on it"
-
-                    # Suggest alternative ports
-                    if [[ -n "$LISTENING_PORTS" ]]; then
-                        print_info "      App is listening on: $LISTENING_PORTS"
-                        print_info "      Action: Update containerPort in deployment to match where app actually listens"
-                    fi
-                fi
-            done
-
-            # Check for ports listening but not declared (informational)
-            for LISTEN_PORT in $LISTENING_PORTS; do
-                if ! echo "$CONTAINER_PORTS" | grep -wq "$LISTEN_PORT"; then
-                    print_info "    Port $LISTEN_PORT: App is listening but not declared in config (may be intentional)"
+                    # Format listening ports nicely for display
+                    FORMATTED_LISTENING=$(echo "$LISTENING_PORTS" | tr ' ' ', ' | sed 's/, $//')
+                    print_error "    Port $PORT: ✗ Declared but not listening (pod listening on: $FORMATTED_LISTENING)"
                 fi
             done
         fi
