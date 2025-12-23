@@ -23,9 +23,6 @@ for POD_NAME in $PODS; do
 
     print_info "Checking pod $POD_NAME:"
 
-    # Get pod ready status
-    POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
-
     # Get all containers
     CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
 
@@ -79,12 +76,8 @@ for POD_NAME in $PODS; do
                 if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
                     print_success "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
                 else
-                    if [[ "$POD_READY" != "True" ]]; then
-                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (pod not ready - likely the cause)"
-                    else
-                        HAS_PROBE_ISSUES=1
-                        print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE (check endpoint path/port)"
-                    fi
+                    HAS_PROBE_ISSUES=1
+                    print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE"
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
                 PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.tcpSocket.port')
@@ -129,12 +122,8 @@ for POD_NAME in $PODS; do
                 if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
                     print_success "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
                 else
-                    if [[ "$POD_READY" != "True" ]]; then
-                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE (may cause pod restart if continues)"
-                    else
-                        HAS_PROBE_ISSUES=1
-                        print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE (check endpoint path/port)"
-                    fi
+                    HAS_PROBE_ISSUES=1
+                    print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE"
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
                 PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.tcpSocket.port')
