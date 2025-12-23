@@ -23,6 +23,9 @@ for POD_NAME in $PODS; do
 
     print_info "Checking pod $POD_NAME:"
 
+    # Get pod ready status (we'll use this if port checks fail)
+    POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
+
     # Get all containers with their ports
     CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
 
@@ -45,16 +48,22 @@ for POD_NAME in $PODS; do
             print_info "    Port $PORT ($PORT_NAME):"
 
             # Active connectivity check
-            CONNECTIVITY_TEST=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$PORT >/dev/null)" 2>&1)
+            kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$PORT >/dev/null)" >/dev/null 2>&1
             CONNECTIVITY_EXIT_CODE=$?
 
             if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
                 print_success "      ✓ Application is listening on port $PORT"
             else
-                HAS_PORT_ISSUES=1
-                print_error "      ✗ Application is NOT listening on port $PORT"
-                print_warning "      Your application is configured to use port $PORT in Kubernetes but it's not actually listening on that port inside the container."
-                print_info "      Action: Check your application configuration and ensure it listens on port $PORT"
+                # Port check failed - determine if this is a real issue or just because pod is not ready
+                if [[ "$POD_READY" != "True" ]]; then
+                    print_warning "      ⚠ Port $PORT is not responding, but pod is not ready yet"
+                    print_info "      Note: This may be normal. Fix pod readiness issues first, then verify port health."
+                else
+                    HAS_PORT_ISSUES=1
+                    print_error "      ✗ Application is NOT listening on port $PORT"
+                    print_warning "      Your application is configured to use port $PORT in Kubernetes but it's not actually listening on that port inside the container."
+                    print_info "      Action: Check your application configuration and ensure it listens on port $PORT"
+                fi
             fi
         done < <(echo "$CONTAINER_PORTS")
     done
