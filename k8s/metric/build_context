@@ -3,20 +3,12 @@
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
 
-if [[ -z "$PROMETHEUS_URL" ]]; then
-  NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
-
-  PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
-
-  PROM_URL=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.server.url // empty')
-else
-  PROM_URL="$PROMETHEUS_URL"
+# Export metric provider-agnostic variables
+if [[ -n "$METRIC" ]]; then
+  export METRIC_NAME="$METRIC"
 fi
 
-if [[ -z "$PROM_URL" ]]; then
-  echo "There is no prometheus provider configured. Please configure prometheus in Platform settings and try again." >&2
-  exit 1
-fi
+export K8S_NAMESPACE
 
 while read -r line; do
   eval "$line"
@@ -26,10 +18,56 @@ done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
   else
     "export \(.key | ascii_upcase)=\(.value)"
   end')
-if [[ -n "$METRIC" ]]; then
-  export METRIC_NAME="$METRIC"
+
+function export_datadog_variables() {
+  DATADOG_SITE=${DATADOG_SITE:-"datadoghq.com"}
+  export METRIC_PROVIDER="datadog"
+  export DATADOG_API_KEY
+  export DATADOG_APP_KEY
+  export DATADOG_SITE
+}
+
+function export_prometheus_variables() {
+  PROMETHEUS_URL=${PROMETHEUS_URL:-$PROM_URL}
+
+  export METRIC_PROVIDER="prometheus"
+  export PROMETHEUS_URL
+}
+
+# Use datadog credentials from environment variables
+if [[ -n "$DATADOG_API_KEY" ]] && [[ -n "$DATADOG_APP_KEY" ]]; then
+  export_datadog_variables
+
+  return
 fi
 
-export PROM_URL
-export K8S_NAMESPACE
-export SCOPE_ID
+if [[ -n "$PROMETHEUS_URL" ]] || [[ -n "$PROM_URL" ]]; then
+  export_prometheus_variables
+
+  return
+fi
+
+NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
+
+PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
+
+DATADOG_API_KEY=$(echo "$PROVIDERS" | jq -r '.results[]? | select(.attributes.credentials?) | .attributes.credentials.api_key // empty')
+DATADOG_APP_KEY=$(echo "$PROVIDERS" | jq -r '.results[]? | select(.attributes.credentials?) | .attributes.credentials.app_key // empty')
+DATADOG_SITE=$(echo "$PROVIDERS" | jq -r '.results[]? | select(.attributes.settings?) | .attributes.settings.site // empty')
+PROM_URL=$(echo "$PROVIDERS" | jq -r '.results[]? | select(.attributes.server?) | .attributes.server.url // empty')
+
+if [[ -n "$DATADOG_API_KEY" ]] && [[ -n "$DATADOG_APP_KEY" ]]; then
+  export_datadog_variables
+
+  return
+fi
+
+if [[ -n "$PROM_URL" ]]; then
+  export_prometheus_variables
+
+  return
+fi
+
+echo "There is no metrics provider configured. Please configure prometheus or datadog in Platform settings and try again." >&2
+
+exit 1
