@@ -29,13 +29,13 @@ validate_status() {
 
   case "$action" in
     start-initial|start-blue-green)
-      expected_status="creating"
+      expected_status="creating, waiting_for_instances or running"
       ;;
     switch-traffic)
       expected_status="running or waiting_for_instances"
       ;;
     rollback-deployment)
-      expected_status="rollbacking"
+      expected_status="rolling_back"
       ;;
     finalize-blue-green)
       expected_status="finalizing"
@@ -54,7 +54,7 @@ validate_status() {
 
   case "$action" in
     start-initial|start-blue-green)
-      [[ "$status" == "creating" ]]
+      [[ "$status" == "creating" || "$status" == "waiting_for_instances" || "$status" == "running" ]]
       ;;
     switch-traffic)
       [[ "$status" == "running" || "$status" == "waiting_for_instances" ]]
