@@ -1,9 +1,11 @@
 #!/bin/bash
 
+OBJECTS_TO_DELETE="deployment,service,hpa,ingress,pdb,secret,configmap"
+
 # Function to delete all resources for a given deployment_id
 delete_deployment_resources() {
     local DEPLOYMENT_ID_TO_DELETE="$1"
-    kubectl delete deployment,service,hpa,ingress,pdb,secret,configmap \
+    kubectl delete "$OBJECTS_TO_DELETE" \
       -l deployment_id="$DEPLOYMENT_ID_TO_DELETE" -n "$K8S_NAMESPACE" --cascade=foreground --wait=true
 }
 
@@ -24,7 +26,7 @@ delete_deployment_resources "$DEPLOYMENT_TO_CLEAN"
 echo "Verifying cleanup for scope_id: $SCOPE_ID in namespace: $K8S_NAMESPACE"
 
 # Get all unique deployment_ids for this scope_id
-ALL_DEPLOYMENT_IDS=$(kubectl get deployment,service,hpa,ingress,pdb,secret,configmap -n "$K8S_NAMESPACE" \
+ALL_DEPLOYMENT_IDS=$(kubectl get "$OBJECTS_TO_DELETE" -n "$K8S_NAMESPACE" \
   -l "scope_id=$SCOPE_ID" \
   -o jsonpath='{range .items[*]}{.metadata.labels.deployment_id}{"\n"}{end}' 2>/dev/null | sort -u | grep -v '^$')
 
