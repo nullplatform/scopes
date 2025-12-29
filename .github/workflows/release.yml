@@ -1,0 +1,354 @@
+name: Release Management
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, closed]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to create release from'
+        required: true
+        type: string
+        default: 'main'
+      version:
+        description: 'Version number (e.g., 1.9.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  # Job 1: Check that PR has version label (runs on open/sync/label changes)
+  check-version-label:
+    if: |
+      github.event.pull_request.state == 'open' &&
+      github.head_ref == 'beta'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for version label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+
+            // Find label that matches version pattern (v1.9.1 or 1.9.1)
+            const versionLabel = labels.find(l => /^v?\d+\.\d+\.\d+$/.test(l));
+
+            if (versionLabel) {
+              console.log(`Found version label: ${versionLabel}`);
+
+              // Post success comment
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const botComment = comments.data.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('Version Label Check')
+              );
+
+              const body = `## ✅ Version Label Check\n\n**Version**: \`${versionLabel}\`\n\nThis PR is ready to merge. The CHANGELOG will be automatically updated with this version.`;
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body
+                });
+              }
+            } else {
+              console.log('No version label found');
+
+              // Post error comment
+              const body = `## ❌ Version Label Check\n\n**Missing version label**\n\nPlease add a label with the version number (e.g., \`v1.9.1\` or \`1.9.1\`) before merging.\n\nThe version label will be used to automatically update the CHANGELOG.`;
+
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const botComment = comments.data.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('Version Label Check')
+              );
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body
+                });
+              }
+
+              core.setFailed('Missing version label');
+            }
+
+  # Job 2: Create release on merge (runs when PR is merged)
+  create-release:
+    if: |
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'beta'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from PR labels
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+
+            // Find label that matches version pattern
+            const versionLabel = labels.find(l => /^v?\d+\.\d+\.\d+$/.test(l));
+
+            if (!versionLabel) {
+              core.setFailed('No version label found on merged PR');
+              return;
+            }
+
+            // Remove 'v' prefix if present
+            const version = versionLabel.replace(/^v/, '');
+            console.log(`Using version: ${version}`);
+            core.setOutput('version', version);
+
+      - name: Get current date
+        id: date
+        run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Update CHANGELOG
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DATE="${{ steps.date.outputs.today }}"
+
+          # Check if unreleased section exists
+          if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+            echo "Error: No [Unreleased] section found in CHANGELOG.md"
+            exit 1
+          fi
+
+          # Replace [Unreleased] with the version and date
+          sed -i.bak "s/## \[Unreleased\]/## [$VERSION] - $DATE/" CHANGELOG.md
+          rm CHANGELOG.md.bak
+
+          # Add new empty Unreleased section at the top
+          awk '/^## \[/ && !found {
+            print "## [Unreleased]\n"
+            found=1
+          }
+          {print}' CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push CHANGELOG changes
+        run: |
+          git add CHANGELOG.md
+
+          # Extract the release notes
+          release_notes=$(sed -n "/## \[${{ steps.version.outputs.version }}\]/,/## \[/p" CHANGELOG.md | sed '$d' | tail -n +2)
+
+          # Create commit message
+          cat > commit_msg.txt << EOF
+          chore: release v${{ steps.version.outputs.version }}
+
+          ${release_notes}
+          EOF
+
+          git commit -F commit_msg.txt
+          git push origin main
+
+      - name: Fetch latest changes
+        run: git pull origin main
+
+      - name: Check if version already exists
+        run: |
+          if git rev-parse "${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Error: Tag ${{ steps.version.outputs.version }} already exists"
+            echo "This version has already been released"
+            exit 1
+          fi
+          if git ls-remote --heads origin "${{ steps.version.outputs.version }}" | grep -q "${{ steps.version.outputs.version }}"; then
+            echo "Error: Branch ${{ steps.version.outputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Create and push version tag
+        run: |
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+
+      - name: Create and push version branch
+        run: |
+          git checkout -b ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+
+      - name: Update latest tag
+        run: |
+          git checkout main
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+          git tag latest
+          git push origin latest --force
+
+      - name: Summary
+        run: |
+          echo "### Release Created Successfully! :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: ${{ steps.date.outputs.today }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR**: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Created:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Tag: \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Updated tag: \`latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Updated CHANGELOG.md" >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: Manual release creation (runs on workflow_dispatch)
+  create-release-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate version format
+        run: |
+          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Version must be in format X.Y.Z (e.g., 1.9.1)"
+            exit 1
+          fi
+
+      - name: Check if version already exists
+        run: |
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "Error: Tag ${{ inputs.version }} already exists"
+            echo "This version has already been released"
+            exit 1
+          fi
+          if git ls-remote --heads origin "${{ inputs.version }}" | grep -q "${{ inputs.version }}"; then
+            echo "Error: Branch ${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Get current date
+        id: date
+        run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Update CHANGELOG
+        run: |
+          VERSION="${{ inputs.version }}"
+          DATE="${{ steps.date.outputs.today }}"
+
+          # Check if unreleased section exists
+          if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+            echo "Error: No [Unreleased] section found in CHANGELOG.md"
+            exit 1
+          fi
+
+          # Replace [Unreleased] with the version and date
+          sed -i.bak "s/## \[Unreleased\]/## [$VERSION] - $DATE/" CHANGELOG.md
+          rm CHANGELOG.md.bak
+
+          # Add new empty Unreleased section at the top
+          awk '/^## \[/ && !found {
+            print "## [Unreleased]\n"
+            found=1
+          }
+          {print}' CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push CHANGELOG changes
+        run: |
+          git add CHANGELOG.md
+
+          # Extract the release notes
+          release_notes=$(sed -n "/## \[${{ inputs.version }}\]/,/## \[/p" CHANGELOG.md | sed '$d' | tail -n +2)
+
+          # Create commit message
+          cat > commit_msg.txt << EOF
+          chore: release v${{ inputs.version }}
+
+          ${release_notes}
+          EOF
+
+          git commit -F commit_msg.txt
+          git push origin ${{ inputs.branch }}
+
+      - name: Fetch latest changes
+        run: git pull origin ${{ inputs.branch }}
+
+      - name: Create and push version tag
+        run: |
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      - name: Create and push version branch
+        run: |
+          git checkout -b ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      - name: Update latest tag
+        run: |
+          git checkout ${{ inputs.branch }}
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+          git tag latest
+          git push origin latest --force
+
+      - name: Summary
+        run: |
+          echo "### Release Created Successfully! :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: ${{ steps.date.outputs.today }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Branch**: ${{ inputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Created:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Tag: \`${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Updated tag: \`latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Updated CHANGELOG.md" >> $GITHUB_STEP_SUMMARY
