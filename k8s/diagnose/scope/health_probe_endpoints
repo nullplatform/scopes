@@ -9,6 +9,7 @@ require_pods || return 0
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
 HAS_PROBE_ISSUES=0
+HAS_PROBE_WARNINGS=0
 
 # Helper function to check if a port is listening
 check_port_listening() {
@@ -113,6 +114,7 @@ for POD_NAME in $PODS; do
                     # Probe failed - check if it's a port issue, config issue, or app issue
                     if ! check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
                         # Port is not listening
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
                     elif [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
@@ -120,10 +122,12 @@ for POD_NAME in $PODS; do
                         print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
                         # 5xx error: app has internal issues, cannot verify health check config
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
                     else
                         # Connection failed or other error
-                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed"
+                        HAS_PROBE_WARNINGS=1
+                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -172,6 +176,7 @@ for POD_NAME in $PODS; do
                     # Probe failed - check if it's a port issue, config issue, or app issue
                     if ! check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
                         # Port is not listening
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
                     elif [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
@@ -179,10 +184,12 @@ for POD_NAME in $PODS; do
                         print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
                         # 5xx error: app has internal issues, cannot verify health check config
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
                     else
                         # Connection failed or other error
-                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed"
+                        HAS_PROBE_WARNINGS=1
+                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -230,13 +237,21 @@ for POD_NAME in $PODS; do
                 else
                     # Probe failed - check if it's a port issue, config issue, or app issue
                     if ! check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
+                        # Port is not listening
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
                     elif [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
+                        # 4xx error: endpoint not found or bad config
+                        HAS_PROBE_ISSUES=1
+                        print_error "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
+                        # 5xx error: app has internal issues, cannot verify health check config
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
                     else
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed"
+                        # Connection failed or other error
+                        HAS_PROBE_WARNINGS=1
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -250,8 +265,10 @@ for POD_NAME in $PODS; do
     done
 done
 
-if [[ $HAS_PROBE_ISSUES -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
-else
+if [[ $HAS_PROBE_ISSUES -gt 0 ]]; then
     update_check_result --status "failed" --evidence "{}"
+elif [[ $HAS_PROBE_WARNINGS -gt 0 ]]; then
+    update_check_result --status "warning" --evidence "{}"
+else
+    update_check_result --status "success" --evidence "{}"
 fi
