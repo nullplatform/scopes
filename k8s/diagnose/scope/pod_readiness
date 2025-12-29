@@ -56,7 +56,8 @@ for POD_NAME in $PODS; do
                   print_warning "$line"
               done
           fi
-          
+
+          print_info "  Action: Check application health endpoint and ensure dependencies are available"
       fi
 done
 

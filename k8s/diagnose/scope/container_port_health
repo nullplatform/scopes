@@ -69,6 +69,7 @@ for POD_NAME in $PODS; do
             else
                 HAS_PORT_ISSUES=1
                 print_error "    Port $PORT: ✗ Declared but not listening or unreachable"
+                print_info "    Action: Check application configuration and ensure it listens on port $PORT"
             fi
         done
     done
