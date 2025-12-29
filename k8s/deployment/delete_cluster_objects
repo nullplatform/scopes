@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CURRENT_ACTIVE=$(echo "$CONTEXT" | jq -r .scope.current_active_deployment)
+CURRENT_ACTIVE=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
 
 if [ "$DEPLOYMENT" = "blue" ]; then
     # Deleting blue (old) deployment, keeping green (new)
