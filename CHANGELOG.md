@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - Add **k8s/diagnose** documentation && new checks
 - Fix **k8s/diagnose** checks, adding logs && improvements
+- Change delete cluster objects to maintain only one deployment_id per scope
 
 ## [1.9.0] - 2025-12-17
 - Add namespace validation and auto-creation
