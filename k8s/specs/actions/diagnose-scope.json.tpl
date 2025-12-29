@@ -12,7 +12,8 @@
         ],
         "properties": {
           "scope_id": {
-            "type": "string"
+            "type": "string",
+            "readOnly": true
           }
         }
       },
