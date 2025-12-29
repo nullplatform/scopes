@@ -21,6 +21,13 @@ for POD_NAME in $PODS; do
         continue
     fi
 
+    # Get pod IP
+    POD_IP=$(echo "$POD_INFO" | jq -r '.status.podIP')
+    if [[ -z "$POD_IP" || "$POD_IP" == "null" ]]; then
+        print_warning "Pod $POD_NAME: No IP assigned, skipping port checks"
+        continue
+    fi
+
     print_info "Checking pod $POD_NAME:"
 
     # Get all containers with their ports
@@ -40,43 +47,31 @@ for POD_NAME in $PODS; do
 
         print_info "  Container '$CONTAINER_NAME':"
 
-        # Detect which ports are actually listening in the container
-        # Try ss first, then netstat
-        LISTENING_PORTS=""
-        if kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v ss >/dev/null 2>&1" 2>/dev/null; then
-            LISTENING_PORTS=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "ss -tlnH 2>/dev/null | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | sort -u | tr '\n' ' ')
-        elif kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v netstat >/dev/null 2>&1" 2>/dev/null; then
-            LISTENING_PORTS=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "netstat -tln 2>/dev/null | grep LISTEN | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | sort -u | tr '\n' ' ')
-        fi
-
-        if [[ -z "$LISTENING_PORTS" ]]; then
-            print_warning "    Cannot detect listening ports in this container, checking connectivity"
-
-            # Fallback to connectivity test
-            for PORT in $CONTAINER_PORTS; do
-                kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$PORT >/dev/null)" >/dev/null 2>&1
+        # Test connectivity to each declared port from agent
+        for PORT in $CONTAINER_PORTS; do
+            # Try nc first, then timeout + /dev/tcp, then curl
+            if command -v nc >/dev/null 2>&1; then
+                timeout 2 nc -z -w 1 "$POD_IP" "$PORT" >/dev/null 2>&1
                 CONNECTIVITY_EXIT_CODE=$?
+            elif command -v timeout >/dev/null 2>&1; then
+                timeout 2 bash -c "cat < /dev/null > /dev/tcp/$POD_IP/$PORT" 2>/dev/null
+                CONNECTIVITY_EXIT_CODE=$?
+            elif command -v curl >/dev/null 2>&1; then
+                curl -s --connect-timeout 2 --max-time 2 "telnet://$POD_IP:$PORT" >/dev/null 2>&1
+                CONNECTIVITY_EXIT_CODE=$?
+            else
+                print_warning "    Port $PORT: Cannot test (nc/timeout/curl not available in agent)"
+                continue
+            fi
 
-                if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
-                    print_success "    Port $PORT: ✓ Responding"
-                else
-                    HAS_PORT_ISSUES=1
-                    print_warning "    Port $PORT: ⚠ Not responding"
-                fi
-            done
-        else
-            # Check each declared port
-            for PORT in $CONTAINER_PORTS; do
-                if echo "$LISTENING_PORTS" | grep -wq "$PORT"; then
-                    print_success "    Port $PORT: ✓ Listening"
-                else
-                    HAS_PORT_ISSUES=1
-                    # Format listening ports nicely for display (remove trailing spaces and convert to comma-separated)
-                    FORMATTED_LISTENING=$(echo "$LISTENING_PORTS" | xargs | tr ' ' ',')
-                    print_error "    Port $PORT: ✗ Declared but not listening (pod listening on: $FORMATTED_LISTENING)"
-                fi
-            done
-        fi
+            if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
+                print_success "    Port $PORT: ✓ Listening"
+            else
+                HAS_PORT_ISSUES=1
+                print_error "    Port $PORT: ✗ Declared but not listening or unreachable"
+                print_info "    Action: Check application configuration and ensure it listens on port $PORT"
+            fi
+        done
     done
 done
 

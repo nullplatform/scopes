@@ -9,40 +9,7 @@ require_pods || return 0
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
 HAS_PROBE_ISSUES=0
-
-# Helper function to check if a port is listening
-check_port_listening() {
-    local pod_name=$1
-    local container_name=$2
-    local port=$3
-
-    # Try to detect listening ports using ss or netstat (same as container_port_health)
-    local listening_ports=""
-
-    if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v ss >/dev/null 2>&1" 2>/dev/null; then
-        listening_ports=$(kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "ss -tlnH 2>/dev/null | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | tr '\n' ' ')
-    elif kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v netstat >/dev/null 2>&1" 2>/dev/null; then
-        listening_ports=$(kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "netstat -tln 2>/dev/null | grep LISTEN | awk '{print \$4}' | sed 's/.*://'" 2>/dev/null | tr '\n' ' ')
-    fi
-
-    # Check if the port is in the list
-    if [[ -n "$listening_ports" ]]; then
-        echo "$listening_ports" | grep -wq "$port"
-        return $?
-    fi
-
-    # Fallback to connectivity check if ss/netstat not available
-    if kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v nc >/dev/null 2>&1" 2>/dev/null; then
-        kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- timeout 1 nc -z localhost "$port" >/dev/null 2>&1
-        return $?
-    elif kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- sh -c "command -v curl >/dev/null 2>&1" 2>/dev/null; then
-        kubectl exec "$pod_name" -n "$NAMESPACE" -c "$container_name" -- timeout 1 curl -s --max-time 1 localhost:"$port" >/dev/null 2>&1
-        return $?
-    fi
-
-    # If we can't check, assume port is listening to avoid false positives
-    return 0
-}
+HAS_PROBE_WARNINGS=0
 
 for POD_NAME in $PODS; do
     # Get pod info from pre-collected data
@@ -52,6 +19,13 @@ for POD_NAME in $PODS; do
     POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
     if [[ "$POD_PHASE" != "Running" ]]; then
         print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping probe checks"
+        continue
+    fi
+
+    # Get pod IP
+    POD_IP=$(echo "$POD_INFO" | jq -r '.status.podIP')
+    if [[ -z "$POD_IP" || "$POD_IP" == "null" ]]; then
+        print_warning "Pod $POD_NAME: No IP assigned, skipping probe checks"
         continue
     fi
 
@@ -84,46 +58,61 @@ for POD_NAME in $PODS; do
                 PROBE_PATH=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.httpGet.path')
                 PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.httpGet.port')
                 PROBE_SCHEME=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.httpGet.scheme // "HTTP"')
-                PROBE_URL="$PROBE_SCHEME://localhost:$PROBE_PORT$PROBE_PATH"
+                PROBE_URL="${PROBE_SCHEME,,}://$POD_IP:$PROBE_PORT$PROBE_PATH"
 
-                # Try curl first, then wget
-                if kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v curl >/dev/null 2>&1" 2>/dev/null; then
-                    if [[ "$PROBE_SCHEME" == "HTTPS" ]]; then
-                        PROBE_RESPONSE=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 '$PROBE_URL'" 2>&1)
+                # Try curl first from agent, then wget
+                if command -v curl >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
                     else
-                        PROBE_RESPONSE=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "curl -s -o /dev/null -w '%{http_code}' --max-time 2 '$PROBE_URL'" 2>&1)
+                        PROBE_RESPONSE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
                     fi
                     PROBE_EXIT_CODE=$?
-                elif kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v wget >/dev/null 2>&1" 2>/dev/null; then
-                    if [[ "$PROBE_SCHEME" == "HTTPS" ]]; then
-                        kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "wget --no-check-certificate -q -O /dev/null --timeout=2 '$PROBE_URL'" >/dev/null 2>&1
+                elif command -v wget >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(wget --no-check-certificate -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
                     else
-                        kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "wget -q -O /dev/null --timeout=2 '$PROBE_URL'" >/dev/null 2>&1
+                        PROBE_RESPONSE=$(wget -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
                     fi
                     PROBE_EXIT_CODE=$?
-                    PROBE_RESPONSE=$([[ $PROBE_EXIT_CODE -eq 0 ]] && echo "200" || echo "failed")
+                    # Parse wget output to extract HTTP status or error
+                    if [[ $PROBE_EXIT_CODE -eq 0 ]]; then
+                        PROBE_RESPONSE="200"
+                    else
+                        # Extract error from wget output - try multiple patterns
+                        ERROR_MSG=$(echo "$PROBE_RESPONSE" | grep -iE "failed:|connection refused|timed? ?out|cannot connect|unable to|network|unreachable" | head -1)
+                        if [[ -n "$ERROR_MSG" ]]; then
+                            # Shorten the message if too long
+                            PROBE_RESPONSE=$(echo "$ERROR_MSG" | cut -c1-80)
+                        else
+                            # If no specific error found, show exit code
+                            PROBE_RESPONSE="wget failed with exit code $PROBE_EXIT_CODE"
+                        fi
+                    fi
                 else
-                    print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available)"
+                    print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available in agent)"
                     continue
                 fi
 
                 if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
                     print_success "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
                 else
-                    # Probe failed - check if it's a port issue, config issue, or app issue
-                    if ! check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
-                        # Port is not listening
-                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
-                    elif [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
+                    # Probe failed - check if it's config issue or app issue
+                    if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
                         HAS_PROBE_ISSUES=1
                         print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
+                        print_info "    Action: Update probe path or implement $PROBE_PATH endpoint in application"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
-                        # 5xx error: app has internal issues, cannot verify health check config
+                        # 5xx error: app has internal issues
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
+                        print_info "    Action: Check application logs and fix internal errors or dependencies"
                     else
-                        # Connection failed or other error
-                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed"
+                        # Connection failed or other error (port not listening, network issue, etc)
+                        HAS_PROBE_WARNINGS=1
+                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
+                        print_info "    Action: Verify port is listening and accessible from within cluster"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -143,46 +132,61 @@ for POD_NAME in $PODS; do
                 PROBE_PATH=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.httpGet.path')
                 PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.httpGet.port')
                 PROBE_SCHEME=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.httpGet.scheme // "HTTP"')
-                PROBE_URL="$PROBE_SCHEME://localhost:$PROBE_PORT$PROBE_PATH"
+                PROBE_URL="${PROBE_SCHEME,,}://$POD_IP:$PROBE_PORT$PROBE_PATH"
 
-                # Try curl first, then wget
-                if kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v curl >/dev/null 2>&1" 2>/dev/null; then
-                    if [[ "$PROBE_SCHEME" == "HTTPS" ]]; then
-                        PROBE_RESPONSE=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 '$PROBE_URL'" 2>&1)
+                # Try curl first from agent, then wget
+                if command -v curl >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
                     else
-                        PROBE_RESPONSE=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "curl -s -o /dev/null -w '%{http_code}' --max-time 2 '$PROBE_URL'" 2>&1)
+                        PROBE_RESPONSE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
                     fi
                     PROBE_EXIT_CODE=$?
-                elif kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v wget >/dev/null 2>&1" 2>/dev/null; then
-                    if [[ "$PROBE_SCHEME" == "HTTPS" ]]; then
-                        kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "wget --no-check-certificate -q -O /dev/null --timeout=2 '$PROBE_URL'" >/dev/null 2>&1
+                elif command -v wget >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(wget --no-check-certificate -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
                     else
-                        kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "wget -q -O /dev/null --timeout=2 '$PROBE_URL'" >/dev/null 2>&1
+                        PROBE_RESPONSE=$(wget -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
                     fi
                     PROBE_EXIT_CODE=$?
-                    PROBE_RESPONSE=$([[ $PROBE_EXIT_CODE -eq 0 ]] && echo "200" || echo "failed")
+                    # Parse wget output to extract HTTP status or error
+                    if [[ $PROBE_EXIT_CODE -eq 0 ]]; then
+                        PROBE_RESPONSE="200"
+                    else
+                        # Extract error from wget output - try multiple patterns
+                        ERROR_MSG=$(echo "$PROBE_RESPONSE" | grep -iE "failed:|connection refused|timed? ?out|cannot connect|unable to|network|unreachable" | head -1)
+                        if [[ -n "$ERROR_MSG" ]]; then
+                            # Shorten the message if too long
+                            PROBE_RESPONSE=$(echo "$ERROR_MSG" | cut -c1-80)
+                        else
+                            # If no specific error found, show exit code
+                            PROBE_RESPONSE="wget failed with exit code $PROBE_EXIT_CODE"
+                        fi
+                    fi
                 else
-                    print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available)"
+                    print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available in agent)"
                     continue
                 fi
 
                 if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
                     print_success "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
                 else
-                    # Probe failed - check if it's a port issue, config issue, or app issue
-                    if ! check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
-                        # Port is not listening
-                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
-                    elif [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
+                    # Probe failed - check if it's config issue or app issue
+                    if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
                         HAS_PROBE_ISSUES=1
                         print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
+                        print_info "    Action: Update probe path or implement $PROBE_PATH endpoint in application"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
-                        # 5xx error: app has internal issues, cannot verify health check config
+                        # 5xx error: app has internal issues
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
+                        print_info "    Action: Check application logs and fix internal errors or dependencies"
                     else
-                        # Connection failed or other error
-                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed"
+                        # Connection failed or other error (port not listening, network issue, etc)
+                        HAS_PROBE_WARNINGS=1
+                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
+                        print_info "    Action: Verify port is listening and accessible from within cluster"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -202,41 +206,61 @@ for POD_NAME in $PODS; do
                 PROBE_PATH=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.httpGet.path')
                 PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.httpGet.port')
                 PROBE_SCHEME=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.httpGet.scheme // "HTTP"')
-                PROBE_URL="$PROBE_SCHEME://localhost:$PROBE_PORT$PROBE_PATH"
+                PROBE_URL="${PROBE_SCHEME,,}://$POD_IP:$PROBE_PORT$PROBE_PATH"
 
-                # Try curl first, then wget
-                if kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v curl >/dev/null 2>&1" 2>/dev/null; then
-                    if [[ "$PROBE_SCHEME" == "HTTPS" ]]; then
-                        PROBE_RESPONSE=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 '$PROBE_URL'" 2>&1)
+                # Try curl first from agent, then wget
+                if command -v curl >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
                     else
-                        PROBE_RESPONSE=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "curl -s -o /dev/null -w '%{http_code}' --max-time 2 '$PROBE_URL'" 2>&1)
+                        PROBE_RESPONSE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
                     fi
                     PROBE_EXIT_CODE=$?
-                elif kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "command -v wget >/dev/null 2>&1" 2>/dev/null; then
-                    if [[ "$PROBE_SCHEME" == "HTTPS" ]]; then
-                        kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "wget --no-check-certificate -q -O /dev/null --timeout=2 '$PROBE_URL'" >/dev/null 2>&1
+                elif command -v wget >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(wget --no-check-certificate -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
                     else
-                        kubectl exec "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- sh -c "wget -q -O /dev/null --timeout=2 '$PROBE_URL'" >/dev/null 2>&1
+                        PROBE_RESPONSE=$(wget -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
                     fi
                     PROBE_EXIT_CODE=$?
-                    PROBE_RESPONSE=$([[ $PROBE_EXIT_CODE -eq 0 ]] && echo "200" || echo "failed")
+                    # Parse wget output to extract HTTP status or error
+                    if [[ $PROBE_EXIT_CODE -eq 0 ]]; then
+                        PROBE_RESPONSE="200"
+                    else
+                        # Extract error from wget output - try multiple patterns
+                        ERROR_MSG=$(echo "$PROBE_RESPONSE" | grep -iE "failed:|connection refused|timed? ?out|cannot connect|unable to|network|unreachable" | head -1)
+                        if [[ -n "$ERROR_MSG" ]]; then
+                            # Shorten the message if too long
+                            PROBE_RESPONSE=$(echo "$ERROR_MSG" | cut -c1-80)
+                        else
+                            # If no specific error found, show exit code
+                            PROBE_RESPONSE="wget failed with exit code $PROBE_EXIT_CODE"
+                        fi
+                    fi
                 else
-                    print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available)"
+                    print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available in agent)"
                     continue
                 fi
 
                 if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
                     print_success "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
                 else
-                    # Probe failed - check if it's a port issue, config issue, or app issue
-                    if ! check_port_listening "$POD_NAME" "$CONTAINER_NAME" "$PROBE_PORT"; then
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Port $PROBE_PORT not listening"
-                    elif [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
+                    # Probe failed - check if it's config issue or app issue
+                    if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
+                        # 4xx error: endpoint not found or bad config
+                        HAS_PROBE_ISSUES=1
+                        print_error "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
+                        print_info "    Action: Update probe path or implement $PROBE_PATH endpoint in application"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
+                        # 5xx error: app has internal issues
+                        HAS_PROBE_WARNINGS=1
                         print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
+                        print_info "    Action: Check application logs and fix internal errors or dependencies"
                     else
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed"
+                        # Connection failed or other error (port not listening, network issue, etc)
+                        HAS_PROBE_WARNINGS=1
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
+                        print_info "    Action: Verify port is listening and accessible from within cluster"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -250,8 +274,10 @@ for POD_NAME in $PODS; do
     done
 done
 
-if [[ $HAS_PROBE_ISSUES -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
-else
+if [[ $HAS_PROBE_ISSUES -gt 0 ]]; then
     update_check_result --status "failed" --evidence "{}"
+elif [[ $HAS_PROBE_WARNINGS -gt 0 ]]; then
+    update_check_result --status "warning" --evidence "{}"
+else
+    update_check_result --status "success" --evidence "{}"
 fi

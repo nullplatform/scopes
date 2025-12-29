@@ -65,6 +65,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 6. [resource_availability](#6-resource_availability) - `scope/resource_availability`
 7. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
 8. [container_port_health](#8-container_port_health) - `scope/container_port_health`
+9. [health_probe_endpoints](#9-health_probe_endpoints) - `scope/health_probe_endpoints`
 
 ### Service checks (`k8s/diagnose/service/`)
 1. [service_existence](#1-service_existence) - `service/service_existence`
@@ -105,7 +106,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects**          | Ingress controller failing to reconcile/sync ingress resources                                                                                                                                                                                                                                            |
 | **Common causes**            | - Ingress controller pods not running<br>- Backend service errors<br>- Certificate validation failures<br>- Subnet IP exhaustion (for ALB)<br>- Security group misconfiguration<br>- Ingress syntax errors                                                                                                |
 | **Possible solutions**       | - Check ingress controller logs<br>- Verify backend services exist and have endpoints<br>- For ALB: check AWS ALB controller logs<br>- Verify certificates are valid<br>- Check subnet capacity<br>- Review ingress configuration for errors<br>- Ensure required AWS IAM permissions                     |
-| **Example output (failure)** | `✗ Ingress web-app-ingress: Sync errors detected`<br>`  Found error/warning events:`<br>`    2024-01-15 10:30:45 Warning SyncError Failed to reconcile`<br>`✗  ALB address not assigned yet (sync may be in progress or failing)`<br>`ℹ  Action: Fix backend service reference and check controller logs` |
+| **Example output (failure)** | `✗ Ingress web-app-ingress: Sync errors detected`<br>`  Found error/warning events:`<br>`    2024-01-15 10:30:45 Warning SyncError Failed to reconcile`<br>`✗  ALB address not assigned yet (sync may be in progress or failing)`<br>`ℹ  Action: Check ingress controller logs and verify backend services are healthy` |
 | **Example output (success)** | `✓ All 2 ingress(es) synchronized successfully with controller`                                                                                                                                                                                                                                           |
 
 ### 4. ingress_host_rules
@@ -158,7 +159,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Missing pod resources for the deployment |
 | **Common causes** | - Pods not created<br>- Pods deleted or evicted<br>- Deployment failed to create pods<br>- Label selector mismatch<br>- Namespace mismatch |
 | **Possible solutions** | - Check deployment status and events<br>- Verify deployment spec is correct<br>- Review pod creation errors<br>- Check resource quotas and limits<br>- Verify namespace and label selectors<br>- Review deployment controller logs |
-| **Example output (failure)** | `⚠ No pods found with labels scope_id=123456 in namespace production` |
+| **Example output (failure)** | `✗ No pods found with labels scope_id=123456 in namespace production`<br>`ℹ  Action: Check deployment status and verify label selectors match` |
 | **Example output (success)** | `✓ Found 3 pod(s): web-app-123-abc web-app-123-def web-app-123-ghi` |
 
 ### 2. container_crash_detection
@@ -168,7 +169,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Containers that are crashing repeatedly (CrashLoopBackOff state) |
 | **Common causes** | - Application crashes at startup<br>- Missing dependencies or configuration<br>- Invalid command or entrypoint<br>- OOMKilled (Out of Memory)<br>- Failed health checks causing restarts |
 | **Possible solutions** | - Check application logs<br>- Review container command and arguments<br>- Verify environment variables and secrets are properly mounted<br>- Increase memory limits if OOMKilled<br>- Fix application code causing the crash<br>- Ensure all required config files exist |
-| **Example output (failure)** | `✗ Pod web-app-123: Container app is crash looping (restart count: 5)`<br>`ℹ  Last termination: CrashLoopBackOff`<br>`ℹ  Exit code: 1`<br>`ℹ  Action: Check container logs and fix application startup issues` |
+| **Example output (failure)** | `✗ Pod web-app-123: CrashLoopBackOff in container(s): app`<br>`⚠  Container: app \| Restarts: 5 \| Exit Code: 1`<br>`⚠  Exit 1 = Application error`<br>`ℹ  Last logs from web-app-123:`<br>`    [application logs...]`<br>`ℹ  Action: Check container logs and fix application startup issues` |
 | **Example output (success)** | `✓ All 3 pod(s) running without crashes` |
 
 ### 3. image_pull_status
@@ -178,7 +179,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Failures to pull container images from registries |
 | **Common causes** | - Image does not exist in the registry<br>- Incorrect image name or tag<br>- Missing or invalid imagePullSecrets for private registries<br>- Network connectivity issues to registry<br>- Registry authentication failures<br>- Rate limiting from public registries |
 | **Possible solutions** | - Verify image name and tag are correct<br>- Check if image exists in registry<br>- For private registries, ensure imagePullSecrets are configured<br>- Verify registry credentials are valid<br>- Check network connectivity to registry<br>- Consider using a registry mirror or cache |
-| **Example output (failure)** | `✗ Pod web-app-123: Image pull failed`<br>`  Image: registry.example.com/app:v1.0.0`<br>`  Reason: ErrImagePull`<br>`  Message: Failed to pull image "registry.example.com/app:v1.0.0": rpc error: code = Unknown desc = Error response from daemon: pull access denied`<br>`ℹ  Action: Verify image exists and imagePullSecrets are configured` |
+| **Example output (failure)** | `✗ Pod web-app-123: ImagePullBackOff/ErrImagePull in container(s): app`<br>`⚠  Image: registry.example.com/app:v1.0.0`<br>`⚠  Reason: Failed to pull image: pull access denied`<br>`ℹ  Action: Verify image exists and imagePullSecrets are configured for private registries` |
 | **Example output (success)** | `✓ All 3 pod(s) have images pulled successfully` |
 
 ### 4. memory_limits_check
@@ -198,7 +199,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Pods that are not ready to serve traffic |
 | **Common causes** | - Readiness probe failing (HTTP endpoint returns non-2xx)<br>- Application not fully initialized<br>- Database connection failures<br>- Dependent services unavailable<br>- Readiness probe configured incorrectly<br>- Application port mismatch |
 | **Possible solutions** | - Check readiness probe endpoint responds correctly<br>- Review application logs for initialization errors<br>- Verify dependent services are accessible<br>- Adjust `initialDelaySeconds` to allow more startup time<br>- Check readiness probe configuration (path, port, timeout)<br>- Ensure application is listening on correct port |
-| **Example output (failure)** | `✗ Pod web-app-123: Not ready (0/1 containers ready)`<br>`  Status: Running but failing readiness probe`<br>`  Readiness probe: GET http://:8080/health`<br>`  Last probe result: HTTP 500 Internal Server Error`<br>`ℹ  Action: Check application health endpoint and ensure dependencies are available` |
+| **Example output (failure)** | `⚠ Pod web-app-123: Phase=Running, Ready=False`<br>`⚠  Reason: ContainersNotReady`<br>`⚠  Container Status:`<br>`    app: Ready=false, Restarts=0`<br>`ℹ  Action: Check application health endpoint and ensure dependencies are available` |
 | **Example output (success)** | `✓ Pod web-app-123: Running and Ready` |
 
 ### 6. resource_availability
@@ -208,7 +209,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Insufficient cluster resources to schedule pods |
 | **Common causes** | - Requesting more CPU/memory than available on any node<br>- All nodes at capacity<br>- Resource quotas exceeded<br>- Taints/tolerations preventing scheduling<br>- Node selector/affinity rules too restrictive<br>- Too many replicas requested |
 | **Possible solutions** | - Reduce resource requests in deployment<br>- Scale up cluster (add more nodes)<br>- Remove or adjust node selectors/affinity rules<br>- Check and adjust resource quotas<br>- Verify node taints and add tolerations if needed<br>- Review and optimize resource usage across cluster<br>- Consider pod priority classes for critical workloads |
-| **Example output (failure)** | `✗ Pod web-app-123: Pending - Insufficient resources`<br>`  Requested: cpu=2, memory=4Gi`<br>`  Events:`<br>`    0/3 nodes are available: 1 Insufficient cpu, 2 Insufficient memory`<br>`⚠  Cluster capacity exhausted`<br>`ℹ  Action: Reduce resource requests or add more nodes to cluster` |
+| **Example output (failure)** | `✗ Pod web-app-123: Cannot be scheduled`<br>`⚠  Reason: 0/3 nodes are available: 1 Insufficient cpu, 2 Insufficient memory`<br>`⚠  Issue: Insufficient CPU in cluster`<br>`⚠  Issue: Insufficient memory in cluster`<br>`ℹ  Action: Reduce resource requests or add more nodes to cluster` |
 | **Example output (success)** | `✓ All 3 pod(s) successfully scheduled with sufficient resources` |
 
 ### 7. storage_mounting
@@ -227,9 +228,20 @@ parallel to identify common networking, scope, and service-level issues in the c
 |------------|-------------|
 | **What it detects** | Containers not listening on their declared ports |
 | **Common causes** | - Application configured to listen on different port than Kubernetes configuration<br>- Application failed to bind to port (permission issues, port conflict)<br>- Application code error preventing port binding<br>- Wrong port number in deployment spec<br>- Environment variable for port not set correctly |
-| **Possible solutions** | - Check application configuration files (e.g., nginx.conf, application.properties)<br>- Verify environment variables controlling port binding<br>- Review application startup logs for port binding errors<br>- Ensure containerPort in deployment matches application's listen port<br>- Test port binding manually: `kubectl exec <pod> -c <container> -- netstat -tlnp` |
-| **Example output (failure)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`ℹ      Port 8080 (http):`<br>`✗        Application is NOT listening on port 8080`<br>`⚠        Your application is configured to use port 8080 in Kubernetes`<br>`⚠        but it's not actually listening on that port inside the container.`<br>`ℹ        Action: Check your application configuration and ensure it listens on port 8080`<br>`ℹ        Check logs: kubectl logs web-app-123 -n production -c application` |
-| **Example output (success)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'http':`<br>`ℹ      Port 80 (http):`<br>`✓        Application is listening on port 80`<br>`ℹ    Container 'application':`<br>`ℹ      Port 8080 (http):`<br>`✓        Application is listening on port 8080` |
+| **Possible solutions** | - Check application configuration files (e.g., nginx.conf, application.properties)<br>- Verify environment variables controlling port binding<br>- Review application startup logs for port binding errors<br>- Ensure containerPort in deployment matches application's listen port<br>- Test port connectivity from within cluster |
+| **Example output (failure)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`✗      Port 8080: ✗ Declared but not listening or unreachable`<br>`ℹ      Action: Check application configuration and ensure it listens on port 8080` |
+| **Example output (success)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`✓      Port 8080: ✓ Listening` |
+
+### 9. health_probe_endpoints
+
+| **Aspect** | **Details** |
+|------------|-------------|
+| **What it detects** | Health probe endpoints (readiness, liveness, startup) that are misconfigured or failing |
+| **Common causes** | - Health check endpoint path not found (404)<br>- Application not exposing health endpoint<br>- Port not listening or network unreachable<br>- Application returning errors (5xx) preventing health validation<br>- Path mismatch between probe config and application routes<br>- Health check dependencies failing (database, cache, etc.) |
+| **Possible solutions** | - Verify health endpoint exists in application:<br>  ```yaml<br>  readinessProbe:<br>    httpGet:<br>      path: /health<br>      port: 8080<br>  ```<br>- Check application logs for health endpoint errors<br>- Ensure health endpoint path matches probe configuration<br>- For 5xx errors, fix application dependencies or internal issues<br>- For connection failures, verify port is listening and accessible<br>- Test endpoint manually: `curl http://POD_IP:PORT/health`<br>- Review probe timing settings (initialDelaySeconds, timeoutSeconds) |
+| **Example output (failed)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'app':`<br>`✗      Readiness Probe on HTTP://8080/health: ✗ HTTP 404 - Health check endpoint not found, verify path in deployment config`<br>`ℹ  Action: Update probe path or implement /health endpoint in application` |
+| **Example output (warning)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'app':`<br>`⚠      Readiness Probe on HTTP://8080/health: ⚠ HTTP 500 - Cannot complete check due to application error`<br>`⚠      Liveness Probe on HTTP://8080/health: ⚠ Connection failed (response: connection refused, exit code: 7)` |
+| **Example output (success)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'app':`<br>`✓      Readiness Probe on HTTP://8080/health: ✓ HTTP 200`<br>`✓      Liveness Probe on HTTP://8080/health: ✓ HTTP 200` |
 
 ---
 
@@ -272,7 +284,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Service port configuration issues |
 | **Common causes** | - Service targetPort doesn't match container port<br>- Container not listening on expected port<br>- Port protocol mismatch (TCP vs UDP)<br>- Named ports not defined in container |
 | **Possible solutions** | - Verify container is listening on targetPort<br>- Check container port in deployment matches service targetPort<br>- Test port connectivity from within pod<br>- Review application logs for port binding issues<br>- Ensure protocol (TCP/UDP) matches application |
-| **Example output (failure)** | `✗ Service web-app-service: Port configuration issue`<br>`  Port: 80 → targetPort: 8080 (http)`<br>`✗  Container port 8080 not found`<br>`⚠  Available container ports: 3000`<br>`ℹ  Action: Update service targetPort to 3000 or change container port` |
+| **Example output (failure)** | `✗  Port 80 -> 8080 (http): Container port 8080 not found`<br>`⚠    Available ports by container: app: 3000,9090`<br>`ℹ    Action: Update service targetPort to match container port or fix container port` |
 | **Example output (success)** | `✓ Service web-app-service port configuration:`<br>`  Port 80 → 8080 (http): OK` |
 
 ### 5. service_type_validation
@@ -282,7 +294,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **What it detects** | Invalid or unsupported service types |
 | **Common causes** | - Using LoadBalancer type without cloud provider support<br>- NodePort outside allowed range<br>- Attempting to use ExternalName with selectors<br>- LoadBalancer stuck in pending state |
 | **Possible solutions** | - Use appropriate service type for your environment<br>- For LoadBalancer without cloud provider, use NodePort or Ingress<br>- Verify cloud provider integration is configured<br>- Check NodePort is in valid range (30000-32767)<br>- Review cloud provider load balancer logs |
-| **Example output (failure)** | `✗ Service web-app-service: Type=LoadBalancer`<br>`⚠  LoadBalancer IP/Hostname is Pending`<br>`ℹ  This may take a few minutes to provision` |
+| **Example output (failure)** | `ℹ Service web-app-service: Type=LoadBalancer`<br>`⚠  LoadBalancer IP/Hostname is Pending`<br>`ℹ    This may take a few minutes to provision`<br>`ℹ    Action: Wait for provisioning or check cloud provider logs for errors` |
 | **Example output (success)** | `✓ Service web-app-service: Type=ClusterIP`<br>`  Internal service with ClusterIP: 10.96.100.50` |
 
 
@@ -293,7 +305,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 
 | **Category** | **Checks** | **Common Root Causes** |
 |--------------|------------|------------------------|
-| **Pod Issues** | container_crash_detection, image_pull_status, pod_readiness, container_port_health | Application errors, configuration issues, image problems, port misconfigurations |
+| **Pod Issues** | container_crash_detection, image_pull_status, pod_readiness, container_port_health, health_probe_endpoints | Application errors, configuration issues, image problems, port misconfigurations, health check failures |
 | **Resource Issues** | memory_limits_check, resource_availability, storage_mounting | Insufficient resources, missing limits, capacity planning |
 | **Service Routing** | service_existence, service_selector_match, service_endpoints | Label mismatches, configuration errors, no healthy pods |
 | **Ingress/Networking** | ingress_existence, ingress_class_validation, ingress_controller_sync | Missing resources, controller issues, backend problems |
