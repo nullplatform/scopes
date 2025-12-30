@@ -1,35 +1,35 @@
 steps:
-  - name: ingress_existence
+  - name: Ingress Existence
     description: Verifies that ingress resources exist in the namespace
     category: Networking
     type: script
     file: "$SERVICE_PATH/diagnose/networking/ingress_existence"
-  - name: ingress_class_validation
+  - name: Ingress Class
     description: Validates ingress class is correctly configured
     category: Networking
     type: script
     file: "$SERVICE_PATH/diagnose/networking/ingress_class_validation"
-  - name: ingress_backend_service
+  - name: Ingress Backend Service
     description: Checks if ingress backend services exist and are reachable
     category: Networking
     type: script
     file: "$SERVICE_PATH/diagnose/networking/ingress_backend_service"
-  - name: ingress_tls_configuration
+  - name: TLS Configuration
     description: Validates TLS/SSL certificate configuration
     category: Networking
     type: script
     file: "$SERVICE_PATH/diagnose/networking/ingress_tls_configuration"
-  - name: ingress_host_rules
+  - name: Host & Path Rules
     description: Verifies host and path rules are properly configured
     category: Networking
     type: script
     file: "$SERVICE_PATH/diagnose/networking/ingress_host_rules"
-  - name: ingress_controller_sync
+  - name: Ingress Controller Sync
     description: Verifies ALB ingress controller has synchronized successfully
     category: Networking
     type: script
     file: "$SERVICE_PATH/diagnose/networking/ingress_controller_sync"
-  - name: alb_capacity_check
+  - name: ALB Capacity
     description: Checks for common ALB issues (IP exhaustion, certificate problems)
     category: Networking
     type: script

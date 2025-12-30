@@ -20,12 +20,17 @@ for SERVICE_NAME in $SERVICES; do
         continue
     fi
 
-    # Check if endpoints has any addresses
-    ADDRESSES=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.addresses[]?.ip' 2>/dev/null)
-    NOT_READY_ADDRESSES=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.notReadyAddresses[]?.ip' 2>/dev/null)
+    # Check if endpoints has any addresses with detailed info
+    # Get ports for this subset
+    PORTS=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[0]?.ports[]? | "\(.port):\(.name // "unnamed")"' 2>/dev/null | head -1)
+    PORT_NUMBER=$(echo "$PORTS" | cut -d':' -f1)
+    PORT_NAME=$(echo "$PORTS" | cut -d':' -f2)
 
-    READY_COUNT=$(echo "$ADDRESSES" | grep -c '^' 2>/dev/null || echo 0)
-    NOT_READY_COUNT=$(echo "$NOT_READY_ADDRESSES" | grep -c '^' 2>/dev/null || echo 0)
+    READY_ENDPOINTS=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.addresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
+    NOT_READY_ENDPOINTS=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.notReadyAddresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
+
+    READY_COUNT=$(echo "$READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
+    NOT_READY_COUNT=$(echo "$NOT_READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
 
     if [[ $READY_COUNT -eq 0 ]]; then
         HAS_ISSUES=1
@@ -33,6 +38,16 @@ for SERVICE_NAME in $SERVICES; do
 
         if [[ $NOT_READY_COUNT -gt 0 ]]; then
             print_warning "  Not ready endpoints: $NOT_READY_COUNT"
+            # Show details of not ready endpoints
+            echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
+                if [[ -n "$IP" ]]; then
+                    if [[ -n "$PORT_NUMBER" ]]; then
+                        print_warning "    - $POD_NAME -> $IP:$PORT_NUMBER"
+                    else
+                        print_warning "    - $POD_NAME -> $IP"
+                    fi
+                fi
+            done
             print_action "Check pod readiness probes and pod status"
         else
             print_warning "  No endpoints at all"
@@ -41,8 +56,30 @@ for SERVICE_NAME in $SERVICES; do
     else
         print_success "Service $SERVICE_NAME: $READY_COUNT ready endpoint(s)"
 
+        # Show details of ready endpoints
+        echo "$READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
+            if [[ -n "$IP" ]]; then
+                if [[ -n "$PORT_NUMBER" ]]; then
+                    print_success "  - $POD_NAME -> $IP:$PORT_NUMBER"
+                else
+                    print_success "  - $POD_NAME -> $IP"
+                fi
+            fi
+        done
+
         if [[ $NOT_READY_COUNT -gt 0 ]]; then
             print_warning "  Also has $NOT_READY_COUNT not ready endpoint(s)"
+            # Show details of not ready endpoints
+            echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
+                if [[ -n "$IP" ]]; then
+                    if [[ -n "$PORT_NUMBER" ]]; then
+                        print_warning "    - $POD_NAME -> $IP:$PORT_NUMBER"
+                    else
+                        print_warning "    - $POD_NAME -> $IP"
+                    fi
+                fi
+            done
+            print_action "Check pod readiness probes and pod status"
         fi
     fi
 done

@@ -58,15 +58,67 @@ for INGRESS_NAME in $INGRESSES; do
         if [[ -n "$SERVICE_INFO" && "$SERVICE_INFO" != "null" ]]; then
             # Check if service has endpoints from pre-collected data
             ENDPOINT_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
-            ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[].addresses[].ip' 2>/dev/null | tr '\n' ' ')
+            READY_ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[]?.addresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
+            NOT_READY_ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[]?.notReadyAddresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
 
-            if [[ -n "$ENDPOINTS" ]]; then
-                ENDPOINT_COUNT=$(echo "$ENDPOINTS" | wc -w)
-                print_success "  Backend: $SERVICE_NAME:$SERVICE_PORT ($ENDPOINT_COUNT endpoint(s))"
+            # Get port info
+            PORT_NUMBER=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[0]?.ports[0]?.port // empty' 2>/dev/null)
+
+            READY_COUNT=$(echo "$READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
+            NOT_READY_COUNT=$(echo "$NOT_READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
+
+            if [[ $READY_COUNT -gt 0 ]]; then
+                print_success "  Backend: $SERVICE_NAME:$SERVICE_PORT ($READY_COUNT ready endpoint(s))"
+                echo "$READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
+                    [[ -n "$IP" ]] && print_success "    - $POD_NAME -> $IP:$PORT_NUMBER"
+                done
+
+                if [[ $NOT_READY_COUNT -gt 0 ]]; then
+                    print_warning "    Also has $NOT_READY_COUNT not ready endpoint(s)"
+                    echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
+                        [[ -n "$IP" ]] && print_warning "      - $POD_NAME -> $IP:$PORT_NUMBER"
+                    done
+                fi
             else
                 HAS_ISSUES=1
-                print_error "  Backend: $SERVICE_NAME:$SERVICE_PORT (no endpoints)"
-                print_action "Verify pods are running and service selector matches"
+                print_error "  Backend: $SERVICE_NAME:$SERVICE_PORT (no ready endpoints)"
+
+                # Get service selector to help debug
+                SERVICE_SELECTOR=$(echo "$SERVICE_INFO" | jq -c '.spec.selector // {}' 2>/dev/null)
+                print_info "    Service selector: $SERVICE_SELECTOR"
+
+                if [[ $NOT_READY_COUNT -gt 0 ]]; then
+                    print_warning "    Found $NOT_READY_COUNT not ready endpoint(s):"
+                    echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
+                        [[ -n "$IP" ]] && print_warning "      - $POD_NAME -> $IP:$PORT_NUMBER (not ready)"
+                    done
+                    print_action "Check pod readiness - pods exist but are not ready to serve traffic"
+                else
+                    # Check if there are any pods matching the selector
+                    if [[ "$SERVICE_SELECTOR" != "{}" && "$SERVICE_SELECTOR" != "null" ]]; then
+                        MATCHING_PODS=$(jq -r --argjson selectors "$SERVICE_SELECTOR" '
+                            .items[] |
+                            . as $pod |
+                            select(
+                              $selectors | to_entries | all(.key as $k | .value as $v |
+                                $pod.metadata.labels[$k] == $v
+                              )
+                            ) |
+                            .metadata.name
+                        ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+                        if [[ -n "$MATCHING_PODS" ]]; then
+                            print_warning "    Found pods matching selector but no endpoints: $MATCHING_PODS"
+                            print_action "Pods exist but endpoints not created - check pod readiness probes and status"
+                        else
+                            print_warning "    No pods found matching service selector"
+                            print_action "Create pods with labels matching the service selector: $SERVICE_SELECTOR"
+                        fi
+                    else
+                        print_warning "    Service has no selector defined"
+                        print_action "Add selector to service or check if this is a headless/ExternalName service"
+                    fi
+                fi
             fi
 
             # Verify port exists in service from pre-collected data
