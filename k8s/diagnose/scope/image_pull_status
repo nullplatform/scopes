@@ -26,7 +26,7 @@ for POD_NAME in $PODS; do
               print_warning "  Image: $IMAGE"
               print_warning "  Reason: $MESSAGE"
           done
-          print_info "  Action: Verify image exists and imagePullSecrets are configured for private registries"
+          print_action "Verify image exists and imagePullSecrets are configured for private registries"
       fi
 done
 

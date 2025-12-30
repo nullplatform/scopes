@@ -36,7 +36,7 @@ for INGRESS_NAME in $INGRESSES; do
         else
             HAS_ISSUES=1
             print_error "  No rules and no default backend configured"
-            print_info "  Action: Add at least one rule or configure default backend"
+            print_action "Add at least one rule or configure default backend"
         fi
         continue
     fi
@@ -61,7 +61,7 @@ for INGRESS_NAME in $INGRESSES; do
         if [[ -z "$PATHS" ]]; then
             HAS_ISSUES=1
             print_error "    No paths defined for host $HOST"
-            print_info "    Action: Define at least one path for this host"
+            print_action "Define at least one path for this host"
             continue
         fi
 
@@ -78,7 +78,7 @@ for INGRESS_NAME in $INGRESSES; do
             if [[ "$PATH_TYPE" != "Exact" && "$PATH_TYPE" != "Prefix" && "$PATH_TYPE" != "ImplementationSpecific" ]]; then
                 HAS_ISSUES=1
                 print_error "      Invalid pathType: $PATH_TYPE (must be Exact, Prefix, or ImplementationSpecific)"
-                print_info "      Action: Use valid pathType value"
+                print_action "Use valid pathType value"
             fi
 
             # Warn about path conventions

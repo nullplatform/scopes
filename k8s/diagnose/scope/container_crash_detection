@@ -35,7 +35,7 @@ for POD_NAME in $PODS; do
 
           print_info "Last logs from $POD_NAME:"
           kubectl logs "$POD_NAME" -n "$NAMESPACE" --tail=10 2>&1 | sed 's/^/  /'
-          print_info "  Action: Check container logs and fix application startup issues"
+          print_action "Check container logs and fix application startup issues"
       fi
 done
 

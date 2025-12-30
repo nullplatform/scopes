@@ -29,7 +29,7 @@ if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
                 if ! echo "$IP_ERRORS" | tail -n 3 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
                     print_warning "    [Log details could not be displayed]"
                 fi
-                print_info "  Action: Check subnet CIDR ranges and consider expanding or using different subnets"
+                print_action "Check subnet CIDR ranges and consider expanding or using different subnets"
                 print_info "  Annotation: alb.ingress.kubernetes.io/subnets=<subnet-ids>"
                 break
             fi
@@ -78,7 +78,7 @@ for INGRESS_NAME in $INGRESSES; do
                             if ! echo "$CERT_ERRORS" | tail -n 2 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/      /' 2>/dev/null; then
                                 print_warning "      [Certificate error details could not be displayed]"
                             fi
-                            print_info "    Action: Verify certificate ARN exists in ACM and covers the required domains"
+                            print_action "Verify certificate ARN exists in ACM and covers the required domains"
                         fi
                     fi
                 done
@@ -91,7 +91,7 @@ for INGRESS_NAME in $INGRESSES; do
                 if ! echo "$TLS_HOSTS" | grep -qw "$HOST"; then
                     HAS_ISSUES=1
                     print_error "    Host '$HOST' in rules but not in TLS configuration"
-                    print_info "    Action: Add host to spec.tls or ensure certificate covers this domain"
+                    print_action "Add host to spec.tls or ensure certificate covers this domain"
                 fi
             done
         fi

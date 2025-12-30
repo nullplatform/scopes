@@ -78,7 +78,7 @@ for SERVICE_NAME in $SERVICES; do
                 AVAILABLE_PORTS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | "\(.name): \([.ports[]?.containerPort] | join(","))"' | tr '\n' '; ')
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Container port $TARGET_PORT not found"
                 print_warning "    Available ports by container: $AVAILABLE_PORTS"
-                print_info "    Action: Update service targetPort to match container port or fix container port"
+                print_action "Update service targetPort to match container port or fix container port"
                 continue
             fi
         else
@@ -96,7 +96,7 @@ for SERVICE_NAME in $SERVICES; do
             else
                 HAS_PORT_ISSUES=1
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Named port not found in containers"
-                print_info "    Action: Define named port in container spec or use numeric targetPort"
+                print_action "Define named port in container spec or use numeric targetPort"
                 continue
             fi
         fi

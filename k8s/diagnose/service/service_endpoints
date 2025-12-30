@@ -33,10 +33,10 @@ for SERVICE_NAME in $SERVICES; do
 
         if [[ $NOT_READY_COUNT -gt 0 ]]; then
             print_warning "  Not ready endpoints: $NOT_READY_COUNT"
-            print_info "  Action: Check pod readiness probes and pod status"
+            print_action "Check pod readiness probes and pod status"
         else
             print_warning "  No endpoints at all"
-            print_info "  Action: Verify service selector matches pod labels"
+            print_action "Verify service selector matches pod labels"
         fi
     else
         print_success "Service $SERVICE_NAME: $READY_COUNT ready endpoint(s)"

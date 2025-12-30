@@ -125,7 +125,7 @@ for INGRESS_NAME in $INGRESSES; do
     if [[ -z "$INGRESS_ADDRESS" ]]; then
         HAS_ISSUES=1
         print_error "  ALB address not assigned yet (sync may be in progress or failing)"
-        print_info "  Action: Check ingress controller logs and verify backend services are healthy"
+        print_action "Check ingress controller logs and verify backend services are healthy"
     else
         print_success "  ALB address assigned: $INGRESS_ADDRESS"
     fi

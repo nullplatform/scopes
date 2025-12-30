@@ -79,7 +79,7 @@ for INGRESS_NAME in $INGRESSES; do
         else
             HAS_ISSUES=1
             print_error "  TLS Secret: '$SECRET_NAME' not found in namespace"
-            print_info "    Action: Create TLS secret or update ingress configuration"
+            print_action "Create TLS secret or update ingress configuration"
         fi
     done < <(echo "$TLS_SECRETS")
 done

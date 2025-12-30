@@ -6,7 +6,7 @@ SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n'
 
 if [[ -z "$SERVICES" ]]; then
     print_error "No services found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
-    print_info "  Action: Create service resource or verify label selectors"
+    print_action "Create service resource or verify label selectors"
     update_check_result --status "failed" --evidence "{}"
     return 1
 fi

@@ -66,7 +66,7 @@ for INGRESS_NAME in $INGRESSES; do
             else
                 HAS_ISSUES=1
                 print_error "  Backend: $SERVICE_NAME:$SERVICE_PORT (no endpoints)"
-                print_info "    Action: Verify pods are running and service selector matches"
+                print_action "Verify pods are running and service selector matches"
             fi
 
             # Verify port exists in service from pre-collected data
