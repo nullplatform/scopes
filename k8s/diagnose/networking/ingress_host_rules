@@ -44,7 +44,8 @@ for INGRESS_NAME in $INGRESSES; do
     # Check each rule
     RULES=$(echo "$INGRESS_INFO" | jq -c '.spec.rules[]' 2>/dev/null)
 
-    echo "$RULES" | while read -r RULE; do
+    # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
+    while read -r RULE; do
         HOST=$(echo "$RULE" | jq -r '.host // "*"')
 
         # Check if host is defined
@@ -64,7 +65,8 @@ for INGRESS_NAME in $INGRESSES; do
             continue
         fi
 
-        echo "$PATHS" | while read -r PATH_RULE; do
+        # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
+        while read -r PATH_RULE; do
             PATH_VALUE=$(echo "$PATH_RULE" | jq -r '.path // "/"')
             PATH_TYPE=$(echo "$PATH_RULE" | jq -r '.pathType // "Prefix"')
             BACKEND_SERVICE=$(echo "$PATH_RULE" | jq -r '.backend.service.name')
@@ -83,8 +85,8 @@ for INGRESS_NAME in $INGRESSES; do
             if [[ "$PATH_TYPE" == "Prefix" && "$PATH_VALUE" != "/" && ! "$PATH" =~ ^/.*[^/]$ ]]; then
                 print_warning "      Path ends with '/' - this may cause routing issues with Prefix type"
             fi
-        done
-    done
+        done < <(echo "$PATHS")
+    done < <(echo "$RULES")
 
     # Check for conflicting rules
     HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].host' 2>/dev/null | sort)
