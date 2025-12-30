@@ -117,6 +117,36 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
+TRAFFIC_MANAGER_CONFIG_MAP=${TRAFFIC_MANAGER_CONFIG_MAP:-""}
+
+if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
+    echo "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
+
+    # Check if the ConfigMap exists
+    if ! kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" &>/dev/null; then
+        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        exit 1
+    fi
+    echo "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
+
+    # Check for required keys (subPaths)
+    REQUIRED_KEYS=("nginx.conf" "default.conf")
+
+    # Get all keys from the ConfigMap data
+    CONFIGMAP_KEYS=$(kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}')
+
+    for key in "${REQUIRED_KEYS[@]}"; do
+        if ! echo "$CONFIGMAP_KEYS" | grep -qx "$key"; then
+            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
+            echo "💡 The ConfigMap must contain data entries for: ${REQUIRED_KEYS[*]}"
+            exit 1
+        fi
+        echo "✅ Found required key '$key' in ConfigMap"
+    done
+
+    echo "🎉 ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+fi
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
           --arg blue_replicas "$BLUE_REPLICAS" \
@@ -127,6 +157,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg pdb_enabled "$PDB_ENABLED" \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
           --arg service_account_name "$SERVICE_ACCOUNT_NAME" \
+          --arg traffic_manager_config_map "$TRAFFIC_MANAGER_CONFIG_MAP" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -135,7 +166,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 traffic_image: $traffic_image,
                 pdb_enabled: $pdb_enabled,
                 pdb_max_unavailable: $pdb_max_unavailable,
-                service_account_name: $service_account_name
+                service_account_name: $service_account_name,
+                traffic_manager_config_map: $traffic_manager_config_map
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
