@@ -50,7 +50,7 @@ for SERVICE_NAME in $SERVICES; do
                     print_info "    Recent events:"
                     echo "$LB_EVENTS" | sed 's/^/      /'
                 fi
-                print_info "    Action: Wait for provisioning or check cloud provider logs for errors"
+                print_action "Wait for provisioning or check cloud provider logs for errors"
             else
                 print_success "  LoadBalancer available at: $EXTERNAL_IP"
             fi
@@ -64,7 +64,7 @@ for SERVICE_NAME in $SERVICES; do
         *)
             HAS_ISSUES=1
             print_error "  Unknown service type: $SERVICE_TYPE"
-            print_info "    Action: Use valid service type (ClusterIP, NodePort, LoadBalancer, or ExternalName)"
+            print_action "Use valid service type (ClusterIP, NodePort, LoadBalancer, or ExternalName)"
             ;;
     esac
 done

@@ -27,7 +27,7 @@ for POD_NAME in $PODS; do
             print_warning "  Container: $CONTAINER"
             print_warning "  Memory Limit: $MEMORY_LIMIT"
             print_warning "  Memory Request: $MEMORY_REQUEST"
-            print_info "  Action: Increase memory limits or optimize application memory usage"
+            print_action "Increase memory limits or optimize application memory usage"
         done
     fi
 done

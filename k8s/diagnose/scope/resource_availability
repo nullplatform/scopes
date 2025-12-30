@@ -31,7 +31,7 @@ for POD_NAME in $PODS; do
                 print_warning "  Issue: Insufficient memory in cluster"
             fi
 
-            print_info "  Action: Reduce resource requests or add more nodes to cluster"
+            print_action "Reduce resource requests or add more nodes to cluster"
         fi
     fi
 done

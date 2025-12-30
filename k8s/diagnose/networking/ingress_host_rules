@@ -36,7 +36,7 @@ for INGRESS_NAME in $INGRESSES; do
         else
             HAS_ISSUES=1
             print_error "  No rules and no default backend configured"
-            print_info "  Action: Add at least one rule or configure default backend"
+            print_action "Add at least one rule or configure default backend"
         fi
         continue
     fi
@@ -44,7 +44,8 @@ for INGRESS_NAME in $INGRESSES; do
     # Check each rule
     RULES=$(echo "$INGRESS_INFO" | jq -c '.spec.rules[]' 2>/dev/null)
 
-    echo "$RULES" | while read -r RULE; do
+    # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
+    while read -r RULE; do
         HOST=$(echo "$RULE" | jq -r '.host // "*"')
 
         # Check if host is defined
@@ -60,11 +61,12 @@ for INGRESS_NAME in $INGRESSES; do
         if [[ -z "$PATHS" ]]; then
             HAS_ISSUES=1
             print_error "    No paths defined for host $HOST"
-            print_info "    Action: Define at least one path for this host"
+            print_action "Define at least one path for this host"
             continue
         fi
 
-        echo "$PATHS" | while read -r PATH_RULE; do
+        # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
+        while read -r PATH_RULE; do
             PATH_VALUE=$(echo "$PATH_RULE" | jq -r '.path // "/"')
             PATH_TYPE=$(echo "$PATH_RULE" | jq -r '.pathType // "Prefix"')
             BACKEND_SERVICE=$(echo "$PATH_RULE" | jq -r '.backend.service.name')
@@ -76,15 +78,15 @@ for INGRESS_NAME in $INGRESSES; do
             if [[ "$PATH_TYPE" != "Exact" && "$PATH_TYPE" != "Prefix" && "$PATH_TYPE" != "ImplementationSpecific" ]]; then
                 HAS_ISSUES=1
                 print_error "      Invalid pathType: $PATH_TYPE (must be Exact, Prefix, or ImplementationSpecific)"
-                print_info "      Action: Use valid pathType value"
+                print_action "Use valid pathType value"
             fi
 
             # Warn about path conventions
             if [[ "$PATH_TYPE" == "Prefix" && "$PATH_VALUE" != "/" && ! "$PATH" =~ ^/.*[^/]$ ]]; then
                 print_warning "      Path ends with '/' - this may cause routing issues with Prefix type"
             fi
-        done
-    done
+        done < <(echo "$PATHS")
+    done < <(echo "$RULES")
 
     # Check for conflicting rules
     HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].host' 2>/dev/null | sort)
