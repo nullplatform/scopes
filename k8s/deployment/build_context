@@ -49,8 +49,7 @@ validate_status() {
       ;;
   esac
 
-  echo "🔄 Running action '$action', deployment status must be: $expected_status"
-  echo "📋 Current deployment status: '$status'"
+  echo "🔄 Running action '$action' (current status: '$status', expected: $expected_status)"
 
   case "$action" in
     start-initial|start-blue-green)
@@ -75,8 +74,6 @@ if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
   echo "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'" >&2
   exit 1
 fi
-
-echo "✅ Deployment status validation passed"
 
 if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; then
   GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
