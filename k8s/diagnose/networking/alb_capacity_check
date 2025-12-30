@@ -18,12 +18,15 @@ if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
         # Look for IP exhaustion errors in pre-collected controller logs
         LOG_FILE="$ALB_CONTROLLER_LOGS_DIR/${POD}.log"
         if [[ -f "$LOG_FILE" ]] && [[ -r "$LOG_FILE" ]]; then
-            IP_ERRORS=$(grep -iE "no available ip|insufficient ip|ip address.*(exhausted|unavailable)" "$LOG_FILE" 2>/dev/null || true)
+            # Use tail and awk to handle massive log lines efficiently
+            IP_ERRORS=$(tail -n 500 "$LOG_FILE" 2>/dev/null | \
+                awk 'length <= 10000' 2>/dev/null | \
+                grep -iE "no available ip|insufficient ip|ip address.*(exhausted|unavailable)" 2>/dev/null || true)
 
             if [[ -n "$IP_ERRORS" ]]; then
                 HAS_ISSUES=1
                 print_error "  ALB subnet IP exhaustion detected, Recent logs:"
-                if ! echo "$IP_ERRORS" | tail -n 3 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
+                if ! echo "$IP_ERRORS" | tail -n 3 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
                     print_warning "    [Log details could not be displayed]"
                 fi
                 print_info "  Action: Check subnet CIDR ranges and consider expanding or using different subnets"
@@ -63,12 +66,16 @@ for INGRESS_NAME in $INGRESSES; do
                 for POD in $ALB_CONTROLLER_PODS; do
                     LOG_FILE="$ALB_CONTROLLER_LOGS_DIR/${POD}.log"
                     if [[ -f "$LOG_FILE" ]] && [[ -r "$LOG_FILE" ]]; then
-                        CERT_ERRORS=$(grep -i "$INGRESS_NAME" "$LOG_FILE" 2>/dev/null | grep -iE "certificate.*(not found|invalid|failed|error)" 2>/dev/null || true)
+                        # Use tail and awk to handle massive log lines efficiently
+                        CERT_ERRORS=$(tail -n 500 "$LOG_FILE" 2>/dev/null | \
+                            awk 'length <= 10000' 2>/dev/null | \
+                            grep -iF "$INGRESS_NAME" 2>/dev/null | \
+                            grep -iE "certificate.*(not found|invalid|failed|error)" 2>/dev/null || true)
 
                         if [[ -n "$CERT_ERRORS" ]]; then
                             HAS_ISSUES=1
                             print_error "    Certificate validation errors found:"
-                            if ! echo "$CERT_ERRORS" | tail -n 2 2>/dev/null | sed 's/^/      /' 2>/dev/null; then
+                            if ! echo "$CERT_ERRORS" | tail -n 2 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/      /' 2>/dev/null; then
                                 print_warning "      [Certificate error details could not be displayed]"
                             fi
                             print_info "    Action: Verify certificate ARN exists in ACM and covers the required domains"

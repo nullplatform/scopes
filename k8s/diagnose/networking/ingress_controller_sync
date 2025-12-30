@@ -87,22 +87,31 @@ for INGRESS_NAME in $INGRESSES; do
             # Get recent logs related to this ingress from pre-collected logs
             LOG_FILE="$ALB_CONTROLLER_LOGS_DIR/${POD}.log"
             if [[ -f "$LOG_FILE" ]] && [[ -r "$LOG_FILE" ]]; then
-                CONTROLLER_LOGS=$(grep -i "$INGRESS_NAME" "$LOG_FILE" 2>/dev/null || true)
+                # Use tail to limit log size and grep with line-buffered to avoid memory issues
+                # Skip lines longer than 10000 chars to avoid processing massive JSON lines
+                CONTROLLER_LOGS=$(tail -n 500 "$LOG_FILE" 2>/dev/null | \
+                    awk 'length <= 10000' 2>/dev/null | \
+                    grep -iF "$INGRESS_NAME" 2>/dev/null || true)
 
                 if [[ -n "$CONTROLLER_LOGS" ]]; then
-                    # Look for errors in controller logs
-                    ERROR_LOGS=$(echo "$CONTROLLER_LOGS" | grep -iE "error|failed|warning" 2>/dev/null || true)
+                    # Look for errors in controller logs (excluding "successfully built model" info logs)
+                    ERROR_LOGS=$(echo "$CONTROLLER_LOGS" | \
+                        grep -ivE "successfully built model|successfully reconciled" 2>/dev/null | \
+                        grep -iE "level.*error|level.*warn|failed|warning" 2>/dev/null | \
+                        head -n 5 || true)
 
                     if [[ -n "$ERROR_LOGS" ]]; then
                         HAS_ISSUES=1
                         print_error "  Found errors in ALB controller logs:"
-                        # Safely print error logs with proper error handling
-                        if ! echo "$ERROR_LOGS" | tail -n 3 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
+                        # Safely print error logs with proper error handling and truncation
+                        if ! echo "$ERROR_LOGS" | head -n 3 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
                             print_warning "    [Error logs could not be displayed due to formatting issues]"
                         fi
                     else
                         print_success "  No errors in ALB controller logs for this ingress"
                     fi
+                else
+                    print_info "  No relevant logs found for this ingress in controller"
                 fi
             elif [[ -e "$LOG_FILE" ]] && [[ ! -r "$LOG_FILE" ]]; then
                 print_warning "  Cannot read ALB controller log file (permission denied): ${POD}.log"
