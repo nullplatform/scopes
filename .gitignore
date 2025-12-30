@@ -135,3 +135,6 @@ dist
 k8s/output
 np-agent-manifest.yaml
 .minikube_mount_pid
+
+amplify/deployment/module/.terraform
+amplify/deployment/module/.terraform.lock.hcl
