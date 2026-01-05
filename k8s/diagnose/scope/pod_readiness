@@ -14,18 +14,11 @@ READY_PODS=0
 SUCCEEDED_PODS=0
 NOT_READY_PODS=0
 TERMINATING_PODS=0
-
-# Time thresholds (in seconds)
-RECENT_POD_THRESHOLD=300  # 5 minutes
-OLD_POD_THRESHOLD=300     # 5 minutes
+STARTING_PODS=0
 
 # Deployment state detection
-HAS_RECENT_PODS=0
 HAS_TERMINATING_PODS=0
-HAS_OLD_UNREADY_PODS=0
-
-# Current timestamp
-CURRENT_TIME=$(date +%s)
+HAS_STARTING_PODS=0
 
 for POD_NAME in $PODS; do
       TOTAL_PODS=$((TOTAL_PODS + 1))
@@ -44,51 +37,76 @@ for POD_NAME in $PODS; do
           continue
       fi
 
-      # Calculate pod age
-      POD_START_TIME=$(echo "$POD_INFO" | jq -r '.status.startTime // empty')
-      if [[ -n "$POD_START_TIME" ]]; then
-          # Remove microseconds from timestamp if present (e.g., 2024-12-30T20:30:00.123456Z -> 2024-12-30T20:30:00Z)
-          POD_START_TIME_CLEAN="${POD_START_TIME%.*}Z"
-          # If there were no microseconds, restore original (handles both cases)
-          if [[ "$POD_START_TIME_CLEAN" == *"ZZ" ]]; then
-              POD_START_TIME_CLEAN="$POD_START_TIME"
-          fi
-
-          # Try parsing with macOS date format, then Linux format
-          POD_START_TIMESTAMP=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$POD_START_TIME_CLEAN" +%s 2>/dev/null || \
-                                date -d "$POD_START_TIME_CLEAN" +%s 2>/dev/null || \
-                                echo "$CURRENT_TIME")
-
-          POD_AGE=$((CURRENT_TIME - POD_START_TIMESTAMP))
-      else
-          POD_AGE=0
-      fi
-
-      # Format age for display
-      if [[ $POD_AGE -lt 60 ]]; then
-          AGE_DISPLAY="${POD_AGE}s"
-      elif [[ $POD_AGE -lt 3600 ]]; then
-          AGE_DISPLAY="$((POD_AGE / 60))m"
-      else
-          AGE_DISPLAY="$((POD_AGE / 3600))h"
-      fi
-
       if [[ "$POD_PHASE" == "Running" && "$POD_READY" == "True" ]]; then
           READY_PODS=$((READY_PODS + 1))
-          print_success "Pod $POD_NAME: Running and Ready (age: $AGE_DISPLAY)"
+          print_success "Pod $POD_NAME: Running and Ready"
       elif [[ "$POD_PHASE" == "Succeeded" ]]; then
           SUCCEEDED_PODS=$((SUCCEEDED_PODS + 1))
           print_success "Pod $POD_NAME: Completed successfully"
       else
           NOT_READY_PODS=$((NOT_READY_PODS + 1))
 
-          # Detect if this is a recent pod (potential new deployment)
-          if [[ $POD_AGE -lt $RECENT_POD_THRESHOLD ]]; then
-              HAS_RECENT_PODS=1
-              print_info "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY (age: $AGE_DISPLAY, starting up)"
+          # Detect if pod is in normal startup state and collect reasons
+          IS_STARTING=0
+          STARTUP_INFO=""
+
+          # Check if pod is in Pending phase (normal during startup)
+          if [[ "$POD_PHASE" == "Pending" ]]; then
+              IS_STARTING=1
+          fi
+
+          # Check init containers first
+          INIT_CONTAINER_INFO=$(echo "$POD_INFO" | jq -r '
+              .status.initContainerStatuses[]? |
+              select(.state.waiting or .state.running) |
+              if .state.running then
+                  "\(.name): Running"
+              else
+                  "\(.name): \(.state.waiting.reason)"
+              end
+          ' 2>/dev/null)
+
+          if [[ -n "$INIT_CONTAINER_INFO" ]]; then
+              IS_STARTING=1
+              STARTUP_INFO="Init: $(echo "$INIT_CONTAINER_INFO" | paste -sd ',' - | sed 's/,/, /g')"
+          fi
+
+          # Check for normal container startup reasons with details
+          CONTAINER_STARTUP_INFO=$(echo "$POD_INFO" | jq -r '
+              .status.containerStatuses[]? |
+              select(.state.waiting) |
+              "\(.name): \(.state.waiting.reason)"
+          ' 2>/dev/null)
+
+          if [[ -n "$CONTAINER_STARTUP_INFO" ]]; then
+              # Check if any are normal startup reasons
+              while IFS= read -r CONTAINER_LINE; do
+                  REASON=$(echo "$CONTAINER_LINE" | cut -d':' -f2 | xargs)
+                  case "$REASON" in
+                      ContainerCreating|PodInitializing|Pulling|ErrImagePull|ImagePullBackOff)
+                          IS_STARTING=1
+                          ;;
+                  esac
+              done <<< "$CONTAINER_STARTUP_INFO"
+
+              CONTAINER_INFO_FORMATTED=$(echo "$CONTAINER_STARTUP_INFO" | paste -sd ',' - | sed 's/,/, /g')
+              if [[ -n "$STARTUP_INFO" ]]; then
+                  STARTUP_INFO="$STARTUP_INFO | Containers: $CONTAINER_INFO_FORMATTED"
+              else
+                  STARTUP_INFO="Containers: $CONTAINER_INFO_FORMATTED"
+              fi
+          fi
+
+          if [[ $IS_STARTING -eq 1 ]]; then
+              STARTING_PODS=$((STARTING_PODS + 1))
+              HAS_STARTING_PODS=1
+              if [[ -n "$STARTUP_INFO" ]]; then
+                  print_info "Pod $POD_NAME: Starting up - $STARTUP_INFO"
+              else
+                  print_info "Pod $POD_NAME: Phase=$POD_PHASE (starting up)"
+              fi
           else
-              HAS_OLD_UNREADY_PODS=1
-              print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY (age: $AGE_DISPLAY, not ready for too long)"
+              print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
           fi
 
           # Get detailed condition information
@@ -124,18 +142,12 @@ for POD_NAME in $PODS; do
               done
           fi
 
-          # Only show action for old unready pods
-          if [[ $POD_AGE -ge $OLD_POD_THRESHOLD ]]; then
+          # Only show action if not in normal startup state
+          if [[ $IS_STARTING -eq 0 ]]; then
               print_action "Check application health endpoint and ensure dependencies are available"
           fi
       fi
 done
-
-# Determine final status based on context
-DEPLOYMENT_IN_PROGRESS=0
-if [[ $HAS_RECENT_PODS -eq 1 || $HAS_TERMINATING_PODS -eq 1 ]]; then
-    DEPLOYMENT_IN_PROGRESS=1
-fi
 
 # Print summary
 echo ""
@@ -145,19 +157,16 @@ if [[ $TOTAL_PODS -eq 0 ]]; then
 elif [[ $READY_PODS -eq $TOTAL_PODS ]] || [[ $((READY_PODS + SUCCEEDED_PODS)) -eq $TOTAL_PODS ]]; then
     print_success "All pods ready: $READY_PODS/$TOTAL_PODS running and ready"
     update_check_result --status "success" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
-elif [[ $DEPLOYMENT_IN_PROGRESS -eq 1 && $HAS_OLD_UNREADY_PODS -eq 0 ]]; then
-    # Deployment in progress but no old unready pods - this is normal
-    print_info "Deployment in progress: $READY_PODS/$TOTAL_PODS pods ready (recent pods still starting up)"
-    if [[ $HAS_TERMINATING_PODS -eq 1 ]]; then
-        print_info "Detected terminating pods - rollout in progress"
-    fi
-    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"deployment_in_progress\":true}"
-elif [[ $HAS_OLD_UNREADY_PODS -eq 1 ]]; then
-    # Pods have been unready for too long - this is a problem
-    print_error "Pods not ready: $READY_PODS/$TOTAL_PODS ready (some pods not ready for more than 5 minutes)"
-    update_check_result --status "failed" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"old_unready_pods\":true}"
+elif [[ $HAS_TERMINATING_PODS -eq 1 ]]; then
+    # Pods are terminating - deployment/rollout in progress
+    print_info "Deployment in progress: $READY_PODS/$TOTAL_PODS pods ready (rollout in progress with terminating pods)"
+    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"terminating\":$TERMINATING_PODS,\"deployment_in_progress\":true}"
+elif [[ $HAS_STARTING_PODS -eq 1 ]]; then
+    # Pods are starting up normally - new deployment in progress
+    print_info "Deployment in progress: $READY_PODS/$TOTAL_PODS pods ready, $STARTING_PODS starting up"
+    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"starting\":$STARTING_PODS,\"not_ready\":$NOT_READY_PODS,\"deployment_in_progress\":true}"
 else
-    # Some pods not ready but we're not sure why
-    print_warning "Pods not ready: $READY_PODS/$TOTAL_PODS ready"
-    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
+    # Some pods not ready and no clear sign of deployment in progress - this is a problem
+    print_error "Pods not ready: $READY_PODS/$TOTAL_PODS ready (pods have issues)"
+    update_check_result --status "failed" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
 fi
