@@ -35,13 +35,13 @@ validate_status() {
       expected_status="running or waiting_for_instances"
       ;;
     rollback-deployment)
-      expected_status="rolling_back"
+      expected_status="rolling_back or cancelling"
       ;;
     finalize-blue-green)
       expected_status="finalizing"
       ;;
     delete-deployment)
-      expected_status="deleting"
+      expected_status="deleting, rolling_back or cancelling"
       ;;
     *)
       echo "🔄 Running action '$action', any deployment status is accepted"
@@ -65,7 +65,7 @@ validate_status() {
       [[ "$status" == "finalizing" || "$status" == "cancelling" ]]
       ;;
     delete-deployment)
-      [[ "$status" == "deleting" || "$status" == "cancelling" ]]
+      [[ "$status" == "deleting" || "$status" == "cancelling" || "$status" == "rolling_back" ]]
       ;;
   esac
 }
