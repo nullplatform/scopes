@@ -12,7 +12,7 @@
         ],
         "properties": {
           "scope_id": {
-            "type": "string",
+            "type": "number",
             "readOnly": true
           }
         }

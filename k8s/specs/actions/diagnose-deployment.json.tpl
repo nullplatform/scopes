@@ -13,11 +13,11 @@
       ],
       "properties": {
         "scope_id": {
-          "type": "string",
+          "type": "number",
           "readOnly": true
         },
         "deployment_id": {
-          "type": "string",
+          "type": "number",
           "readOnly": true
         }
       }
