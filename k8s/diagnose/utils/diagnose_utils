@@ -36,8 +36,8 @@ require_resources() {
     local namespace="$4"
 
     if [[ -z "$resource_names" ]]; then
-        print_warning "No ${resource_type} found with labels $label_selector in namespace $namespace"
-        update_check_result --status "warning" --evidence "{}"
+        print_warning "No ${resource_type} found with labels $label_selector in namespace $namespace, check was skipped."
+        update_check_result --status "skipped" --evidence "{}"
         return 1
     fi
 
@@ -165,7 +165,9 @@ notify_results() {
             pending: (map(select((.status // "UNKNOWN") == "pending")) | length),
             running: (map(select((.status // "UNKNOWN") == "running")) | length),
             success: (map(select((.status // "UNKNOWN") == "success")) | length),
-            failed:  (map(select((.status // "UNKNOWN") == "failed"))  | length)
+            failed:  (map(select((.status // "UNKNOWN") == "failed"))  | length),
+            warning: (map(select((.status // "UNKNOWN") == "warning"))  | length),
+            skipped: (map(select((.status // "UNKNOWN") == "skipped"))  | length)
           },
           checks: .
         })
