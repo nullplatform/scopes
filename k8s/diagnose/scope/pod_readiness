@@ -8,21 +8,77 @@ require_pods || return 0
 # Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-ALL_READY=1
+# Counters for summary
+TOTAL_PODS=0
+READY_PODS=0
+SUCCEEDED_PODS=0
+NOT_READY_PODS=0
+TERMINATING_PODS=0
+
+# Time thresholds (in seconds)
+RECENT_POD_THRESHOLD=300  # 5 minutes
+OLD_POD_THRESHOLD=300     # 5 minutes
+
+# Deployment state detection
+HAS_RECENT_PODS=0
+HAS_TERMINATING_PODS=0
+HAS_OLD_UNREADY_PODS=0
+
+# Current timestamp
+CURRENT_TIME=$(date +%s)
 
 for POD_NAME in $PODS; do
+      TOTAL_PODS=$((TOTAL_PODS + 1))
+
       # Get pod info from pre-collected data
       POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
       POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
       POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
 
+      # Check if pod is terminating
+      DELETION_TIMESTAMP=$(echo "$POD_INFO" | jq -r '.metadata.deletionTimestamp // empty')
+      if [[ -n "$DELETION_TIMESTAMP" ]]; then
+          TERMINATING_PODS=$((TERMINATING_PODS + 1))
+          HAS_TERMINATING_PODS=1
+          print_info "Pod $POD_NAME: Terminating (rollout in progress)"
+          continue
+      fi
+
+      # Calculate pod age
+      POD_START_TIME=$(echo "$POD_INFO" | jq -r '.status.startTime // empty')
+      if [[ -n "$POD_START_TIME" ]]; then
+          POD_START_TIMESTAMP=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$POD_START_TIME" +%s 2>/dev/null || date -d "$POD_START_TIME" +%s 2>/dev/null || echo 0)
+          POD_AGE=$((CURRENT_TIME - POD_START_TIMESTAMP))
+      else
+          POD_AGE=0
+      fi
+
+      # Format age for display
+      if [[ $POD_AGE -lt 60 ]]; then
+          AGE_DISPLAY="${POD_AGE}s"
+      elif [[ $POD_AGE -lt 3600 ]]; then
+          AGE_DISPLAY="$((POD_AGE / 60))m"
+      else
+          AGE_DISPLAY="$((POD_AGE / 3600))h"
+      fi
+
       if [[ "$POD_PHASE" == "Running" && "$POD_READY" == "True" ]]; then
-          print_success "Pod $POD_NAME: Running and Ready"
+          READY_PODS=$((READY_PODS + 1))
+          print_success "Pod $POD_NAME: Running and Ready (age: $AGE_DISPLAY)"
       elif [[ "$POD_PHASE" == "Succeeded" ]]; then
+          SUCCEEDED_PODS=$((SUCCEEDED_PODS + 1))
           print_success "Pod $POD_NAME: Completed successfully"
       else
-          ALL_READY=0
-          print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
+          NOT_READY_PODS=$((NOT_READY_PODS + 1))
+
+          # Detect if this is a recent pod (potential new deployment)
+          if [[ $POD_AGE -lt $RECENT_POD_THRESHOLD ]]; then
+              HAS_RECENT_PODS=1
+              print_info "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY (age: $AGE_DISPLAY, starting up)"
+          else
+              HAS_OLD_UNREADY_PODS=1
+              print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY (age: $AGE_DISPLAY, not ready for too long)"
+          fi
 
           # Get detailed condition information
           READY_CONDITION=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready")')
@@ -57,12 +113,40 @@ for POD_NAME in $PODS; do
               done
           fi
 
-          print_action "Check application health endpoint and ensure dependencies are available"
+          # Only show action for old unready pods
+          if [[ $POD_AGE -ge $OLD_POD_THRESHOLD ]]; then
+              print_action "Check application health endpoint and ensure dependencies are available"
+          fi
       fi
 done
 
-if [[ $ALL_READY -eq 1 ]]; then
-    update_check_result --status "success" --evidence "{}"
+# Determine final status based on context
+DEPLOYMENT_IN_PROGRESS=0
+if [[ $HAS_RECENT_PODS -eq 1 || $HAS_TERMINATING_PODS -eq 1 ]]; then
+    DEPLOYMENT_IN_PROGRESS=1
+fi
+
+# Print summary
+echo ""
+if [[ $TOTAL_PODS -eq 0 ]]; then
+    print_warning "No pods found"
+    update_check_result --status "failed" --evidence "{\"ready\":0,\"total\":0}"
+elif [[ $READY_PODS -eq $TOTAL_PODS ]] || [[ $((READY_PODS + SUCCEEDED_PODS)) -eq $TOTAL_PODS ]]; then
+    print_success "All pods ready: $READY_PODS/$TOTAL_PODS running and ready"
+    update_check_result --status "success" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
+elif [[ $DEPLOYMENT_IN_PROGRESS -eq 1 && $HAS_OLD_UNREADY_PODS -eq 0 ]]; then
+    # Deployment in progress but no old unready pods - this is normal
+    print_info "Deployment in progress: $READY_PODS/$TOTAL_PODS pods ready (recent pods still starting up)"
+    if [[ $HAS_TERMINATING_PODS -eq 1 ]]; then
+        print_info "Detected terminating pods - rollout in progress"
+    fi
+    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"deployment_in_progress\":true}"
+elif [[ $HAS_OLD_UNREADY_PODS -eq 1 ]]; then
+    # Pods have been unready for too long - this is a problem
+    print_error "Pods not ready: $READY_PODS/$TOTAL_PODS ready (some pods not ready for more than 5 minutes)"
+    update_check_result --status "failed" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"old_unready_pods\":true}"
 else
-    update_check_result --status "failed" --evidence "{}"
+    # Some pods not ready but we're not sure why
+    print_warning "Pods not ready: $READY_PODS/$TOTAL_PODS ready"
+    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
 fi
