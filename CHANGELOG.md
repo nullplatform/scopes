@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - Add **k8s/diagnose** documentation && new checks
 - Fix **k8s/diagnose** checks, adding logs && improvements
+- Add support for `NAMESPACE_OVERRIDE` configuration in k8s scope and deployment actions.
 - Change delete cluster objects to maintain only one deployment_id per scope
 - Do not execute actions that are not valid for current deployment status
 
