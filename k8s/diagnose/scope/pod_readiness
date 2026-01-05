@@ -47,7 +47,18 @@ for POD_NAME in $PODS; do
       # Calculate pod age
       POD_START_TIME=$(echo "$POD_INFO" | jq -r '.status.startTime // empty')
       if [[ -n "$POD_START_TIME" ]]; then
-          POD_START_TIMESTAMP=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$POD_START_TIME" +%s 2>/dev/null || date -d "$POD_START_TIME" +%s 2>/dev/null || echo 0)
+          # Remove microseconds from timestamp if present (e.g., 2024-12-30T20:30:00.123456Z -> 2024-12-30T20:30:00Z)
+          POD_START_TIME_CLEAN="${POD_START_TIME%.*}Z"
+          # If there were no microseconds, restore original (handles both cases)
+          if [[ "$POD_START_TIME_CLEAN" == *"ZZ" ]]; then
+              POD_START_TIME_CLEAN="$POD_START_TIME"
+          fi
+
+          # Try parsing with macOS date format, then Linux format
+          POD_START_TIMESTAMP=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$POD_START_TIME_CLEAN" +%s 2>/dev/null || \
+                                date -d "$POD_START_TIME_CLEAN" +%s 2>/dev/null || \
+                                echo "$CURRENT_TIME")
+
           POD_AGE=$((CURRENT_TIME - POD_START_TIMESTAMP))
       else
           POD_AGE=0
