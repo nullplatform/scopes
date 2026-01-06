@@ -119,6 +119,12 @@ for POD_NAME in $PODS; do
         # Container has probes and is testable
         CONTAINERS_TESTED=$((CONTAINERS_TESTED + 1))
 
+        # Track issues for this container to avoid repetitive action messages
+        CONTAINER_HAS_CONNECTION_ISSUES=0
+        CONTAINER_HAS_4XX_ISSUES=0
+        CONTAINER_HAS_5XX_ISSUES=0
+        FAILED_PROBES_LIST=""
+
         # Check Readiness Probe
         if [[ -n "$HAS_READINESS" ]]; then
             PROBE_TYPE=$(echo "$CONTAINER_DATA" | jq -r 'if .readinessProbe.httpGet then "httpGet" elif .readinessProbe.tcpSocket then "tcpSocket" elif .readinessProbe.exec then "exec" else "unknown" end')
@@ -170,18 +176,21 @@ for POD_NAME in $PODS; do
                     if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
                         HAS_PROBE_ISSUES=1
-                        print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
-                        print_action "Update probe path or implement $PROBE_PATH endpoint in application"
+                        CONTAINER_HAS_4XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Readiness"
+                        print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
                         # 5xx error: app has internal issues
                         HAS_PROBE_WARNINGS=1
-                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
-                        print_action "Check application logs and fix internal errors or dependencies"
+                        CONTAINER_HAS_5XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Readiness"
+                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Application error"
                     else
                         # Connection failed or other error (port not listening, network issue, etc)
                         HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_CONNECTION_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Readiness"
                         print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
-                        print_action "Verify port is listening and accessible from within cluster"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -244,18 +253,21 @@ for POD_NAME in $PODS; do
                     if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
                         HAS_PROBE_ISSUES=1
-                        print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
-                        print_action "Update probe path or implement $PROBE_PATH endpoint in application"
+                        CONTAINER_HAS_4XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Liveness"
+                        print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
                         # 5xx error: app has internal issues
                         HAS_PROBE_WARNINGS=1
-                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
-                        print_action "Check application logs and fix internal errors or dependencies"
+                        CONTAINER_HAS_5XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Liveness"
+                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Application error"
                     else
                         # Connection failed or other error (port not listening, network issue, etc)
                         HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_CONNECTION_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Liveness"
                         print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
-                        print_action "Verify port is listening and accessible from within cluster"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -318,18 +330,21 @@ for POD_NAME in $PODS; do
                     if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
                         # 4xx error: endpoint not found or bad config
                         HAS_PROBE_ISSUES=1
-                        print_error "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found, verify path in deployment config"
-                        print_action "Update probe path or implement $PROBE_PATH endpoint in application"
+                        CONTAINER_HAS_4XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Startup"
+                        print_error "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found"
                     elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
                         # 5xx error: app has internal issues
                         HAS_PROBE_WARNINGS=1
-                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Cannot complete check due to application error"
-                        print_action "Check application logs and fix internal errors or dependencies"
+                        CONTAINER_HAS_5XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Startup"
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Application error"
                     else
                         # Connection failed or other error (port not listening, network issue, etc)
                         HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_CONNECTION_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Startup"
                         print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
-                        print_action "Verify port is listening and accessible from within cluster"
                     fi
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
@@ -338,6 +353,25 @@ for POD_NAME in $PODS; do
             elif [[ "$PROBE_TYPE" == "exec" ]]; then
                 PROBE_COMMAND=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.exec.command | join(" ")')
                 print_info "    Startup Probe: Exec [$PROBE_COMMAND] (cannot test directly)"
+            fi
+        fi
+
+        # Print consolidated action message for this container (avoid repetition)
+        if [[ -n "$FAILED_PROBES_LIST" ]]; then
+            echo ""
+            # Trim leading space from the list
+            FAILED_PROBES_LIST=$(echo "$FAILED_PROBES_LIST" | xargs)
+
+            if [[ $CONTAINER_HAS_CONNECTION_ISSUES -eq 1 ]]; then
+                print_action "For $FAILED_PROBES_LIST probe(s): Verify port is listening and accessible from within cluster"
+            fi
+
+            if [[ $CONTAINER_HAS_4XX_ISSUES -eq 1 ]]; then
+                print_action "For $FAILED_PROBES_LIST probe(s): Update probe path or implement the endpoint in application"
+            fi
+
+            if [[ $CONTAINER_HAS_5XX_ISSUES -eq 1 ]]; then
+                print_action "For $FAILED_PROBES_LIST probe(s): Check application logs and fix internal errors or dependencies"
             fi
         fi
     done
