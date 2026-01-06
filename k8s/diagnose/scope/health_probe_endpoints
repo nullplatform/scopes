@@ -10,6 +10,8 @@ PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
 HAS_PROBE_ISSUES=0
 HAS_PROBE_WARNINGS=0
+CONTAINERS_TESTED=0
+CONTAINERS_SKIPPED=0
 
 for POD_NAME in $PODS; do
     # Get pod info from pre-collected data
@@ -40,6 +42,70 @@ for POD_NAME in $PODS; do
 
         print_info "  Container '$CONTAINER_NAME':"
 
+        # Check container status before testing probes
+        CONTAINER_STATUS=$(echo "$POD_INFO" | jq -r --arg name "$CONTAINER_NAME" '.status.containerStatuses[]? | select(.name == $name)')
+
+        if [[ -z "$CONTAINER_STATUS" ]]; then
+            print_warning "    Container status not found, skipping probe checks"
+            continue
+        fi
+
+        # Check if container is ready
+        CONTAINER_READY=$(echo "$CONTAINER_STATUS" | jq -r '.ready')
+        CONTAINER_STATE=$(echo "$CONTAINER_STATUS" | jq -r '
+            if .state.running then "running"
+            elif .state.waiting then "waiting"
+            elif .state.terminated then "terminated"
+            else "unknown"
+            end
+        ')
+
+        # If container is not running, explain why we can't test probes
+        if [[ "$CONTAINER_STATE" != "running" ]]; then
+            if [[ "$CONTAINER_STATE" == "waiting" ]]; then
+                WAITING_REASON=$(echo "$CONTAINER_STATUS" | jq -r '.state.waiting.reason // "Unknown"')
+                WAITING_MESSAGE=$(echo "$CONTAINER_STATUS" | jq -r '.state.waiting.message // ""')
+
+                # Check if it's a normal startup state or a problem
+                case "$WAITING_REASON" in
+                    ContainerCreating|PodInitializing|Pulling)
+                        CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                        print_info "    Container is starting ($WAITING_REASON) - skipping probe checks"
+                        continue
+                        ;;
+                    CrashLoopBackOff|ImagePullBackOff|ErrImagePull)
+                        CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                        print_warning "    Cannot test probes - container is in error state: $WAITING_REASON"
+                        if [[ -n "$WAITING_MESSAGE" ]]; then
+                            print_warning "    Message: $WAITING_MESSAGE"
+                        fi
+                        print_action "Fix container startup issues (check container_crash_detection results)"
+                        continue
+                        ;;
+                    *)
+                        CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                        print_warning "    Container waiting: $WAITING_REASON - skipping probe checks"
+                        continue
+                        ;;
+                esac
+            elif [[ "$CONTAINER_STATE" == "terminated" ]]; then
+                EXIT_CODE=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.exitCode // "N/A"')
+                TERMINATION_REASON=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.reason // "Unknown"')
+                CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                print_warning "    Cannot test probes - container terminated (Exit: $EXIT_CODE, Reason: $TERMINATION_REASON)"
+                print_action "Fix container termination (check container_crash_detection results)"
+                continue
+            else
+                print_warning "    Container in unknown state - skipping probe checks"
+                continue
+            fi
+        fi
+
+        # Container is running - check if it's ready
+        if [[ "$CONTAINER_READY" != "true" ]]; then
+            print_info "    Container is running but not ready - probe checks may show why"
+        fi
+
         # Check if container has any probes configured
         HAS_READINESS=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe // empty')
         HAS_LIVENESS=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe // empty')
@@ -49,6 +115,9 @@ for POD_NAME in $PODS; do
             print_warning "    No health probes configured (recommend adding readiness/liveness probes)"
             continue
         fi
+
+        # Container has probes and is testable
+        CONTAINERS_TESTED=$((CONTAINERS_TESTED + 1))
 
         # Check Readiness Probe
         if [[ -n "$HAS_READINESS" ]]; then
@@ -274,10 +343,25 @@ for POD_NAME in $PODS; do
     done
 done
 
-if [[ $HAS_PROBE_ISSUES -gt 0 ]]; then
-    update_check_result --status "failed" --evidence "{}"
+echo ""
+if [[ $CONTAINERS_TESTED -eq 0 ]]; then
+    # No containers were tested - all were skipped
+    print_info "All containers skipped - no probe checks could be performed"
+    update_check_result --status "skipped" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+elif [[ $HAS_PROBE_ISSUES -gt 0 ]]; then
+    # Some containers were tested and had issues
+    if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
+        print_warning "Probe issues found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
+    fi
+    update_check_result --status "failed" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
 elif [[ $HAS_PROBE_WARNINGS -gt 0 ]]; then
-    update_check_result --status "warning" --evidence "{}"
+    # Some containers were tested and had warnings
+    if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
+        print_info "Probe warnings found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
+    fi
+    update_check_result --status "warning" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
 else
-    update_check_result --status "success" --evidence "{}"
+    # All tested containers passed
+    print_success "Health probes verified on $CONTAINERS_TESTED container(s)"
+    update_check_result --status "success" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
 fi
