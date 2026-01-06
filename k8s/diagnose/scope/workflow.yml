@@ -29,11 +29,6 @@ steps:
     category: Scope
     type: script
     file: "$SERVICE_PATH/diagnose/scope/storage_mounting"
-  - name: Pod Readiness
-    description: Confirms pod is running and ready to serve traffic
-    category: Scope
-    type: script
-    file: "$SERVICE_PATH/diagnose/scope/pod_readiness"
   - name: Container Port Health
     description: Validates containers are listening on declared ports
     category: Scope
