@@ -8,21 +8,106 @@ require_pods || return 0
 # Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-ALL_READY=1
+# Counters for summary
+TOTAL_PODS=0
+READY_PODS=0
+SUCCEEDED_PODS=0
+NOT_READY_PODS=0
+TERMINATING_PODS=0
+STARTING_PODS=0
+
+# Deployment state detection
+HAS_TERMINATING_PODS=0
+HAS_STARTING_PODS=0
 
 for POD_NAME in $PODS; do
+      TOTAL_PODS=$((TOTAL_PODS + 1))
+
       # Get pod info from pre-collected data
       POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
       POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
       POD_READY=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready") | .status')
 
+      # Check if pod is terminating
+      DELETION_TIMESTAMP=$(echo "$POD_INFO" | jq -r '.metadata.deletionTimestamp // empty')
+      if [[ -n "$DELETION_TIMESTAMP" ]]; then
+          TERMINATING_PODS=$((TERMINATING_PODS + 1))
+          HAS_TERMINATING_PODS=1
+          print_info "Pod $POD_NAME: Terminating (rollout in progress)"
+          continue
+      fi
+
       if [[ "$POD_PHASE" == "Running" && "$POD_READY" == "True" ]]; then
+          READY_PODS=$((READY_PODS + 1))
           print_success "Pod $POD_NAME: Running and Ready"
       elif [[ "$POD_PHASE" == "Succeeded" ]]; then
+          SUCCEEDED_PODS=$((SUCCEEDED_PODS + 1))
           print_success "Pod $POD_NAME: Completed successfully"
       else
-          ALL_READY=0
-          print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
+          NOT_READY_PODS=$((NOT_READY_PODS + 1))
+
+          # Detect if pod is in normal startup state and collect reasons
+          IS_STARTING=0
+          STARTUP_INFO=""
+
+          # Check if pod is in Pending phase (normal during startup)
+          if [[ "$POD_PHASE" == "Pending" ]]; then
+              IS_STARTING=1
+          fi
+
+          # Check init containers first
+          INIT_CONTAINER_INFO=$(echo "$POD_INFO" | jq -r '
+              .status.initContainerStatuses[]? |
+              select(.state.waiting or .state.running) |
+              if .state.running then
+                  "\(.name): Running"
+              else
+                  "\(.name): \(.state.waiting.reason)"
+              end
+          ' 2>/dev/null)
+
+          if [[ -n "$INIT_CONTAINER_INFO" ]]; then
+              IS_STARTING=1
+              STARTUP_INFO="Init: $(echo "$INIT_CONTAINER_INFO" | paste -sd ',' - | sed 's/,/, /g')"
+          fi
+
+          # Check for normal container startup reasons with details
+          CONTAINER_STARTUP_INFO=$(echo "$POD_INFO" | jq -r '
+              .status.containerStatuses[]? |
+              select(.state.waiting) |
+              "\(.name): \(.state.waiting.reason)"
+          ' 2>/dev/null)
+
+          if [[ -n "$CONTAINER_STARTUP_INFO" ]]; then
+              # Check if any are normal startup reasons
+              while IFS= read -r CONTAINER_LINE; do
+                  REASON=$(echo "$CONTAINER_LINE" | cut -d':' -f2 | xargs)
+                  case "$REASON" in
+                      ContainerCreating|PodInitializing|Pulling|ErrImagePull|ImagePullBackOff)
+                          IS_STARTING=1
+                          ;;
+                  esac
+              done <<< "$CONTAINER_STARTUP_INFO"
+
+              CONTAINER_INFO_FORMATTED=$(echo "$CONTAINER_STARTUP_INFO" | paste -sd ',' - | sed 's/,/, /g')
+              if [[ -n "$STARTUP_INFO" ]]; then
+                  STARTUP_INFO="$STARTUP_INFO | Containers: $CONTAINER_INFO_FORMATTED"
+              else
+                  STARTUP_INFO="Containers: $CONTAINER_INFO_FORMATTED"
+              fi
+          fi
+
+          if [[ $IS_STARTING -eq 1 ]]; then
+              STARTING_PODS=$((STARTING_PODS + 1))
+              HAS_STARTING_PODS=1
+              if [[ -n "$STARTUP_INFO" ]]; then
+                  print_info "Pod $POD_NAME: Starting up - $STARTUP_INFO"
+              else
+                  print_info "Pod $POD_NAME: Phase=$POD_PHASE (starting up)"
+              fi
+          else
+              print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
+          fi
 
           # Get detailed condition information
           READY_CONDITION=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.type=="Ready")')
@@ -57,12 +142,31 @@ for POD_NAME in $PODS; do
               done
           fi
 
-          print_action "Check application health endpoint and ensure dependencies are available"
+          # Only show action if not in normal startup state
+          if [[ $IS_STARTING -eq 0 ]]; then
+              print_action "Check application health endpoint and ensure dependencies are available"
+          fi
       fi
 done
 
-if [[ $ALL_READY -eq 1 ]]; then
-    update_check_result --status "success" --evidence "{}"
+# Print summary
+echo ""
+if [[ $TOTAL_PODS -eq 0 ]]; then
+    print_warning "No pods found"
+    update_check_result --status "failed" --evidence "{\"ready\":0,\"total\":0}"
+elif [[ $READY_PODS -eq $TOTAL_PODS ]] || [[ $((READY_PODS + SUCCEEDED_PODS)) -eq $TOTAL_PODS ]]; then
+    print_success "All pods ready: $READY_PODS/$TOTAL_PODS running and ready"
+    update_check_result --status "success" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
+elif [[ $HAS_TERMINATING_PODS -eq 1 ]]; then
+    # Pods are terminating - deployment/rollout in progress
+    print_info "Deployment in progress: $READY_PODS/$TOTAL_PODS pods ready (rollout in progress with terminating pods)"
+    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"terminating\":$TERMINATING_PODS,\"deployment_in_progress\":true}"
+elif [[ $HAS_STARTING_PODS -eq 1 ]]; then
+    # Pods are starting up normally - new deployment in progress
+    print_info "Deployment in progress: $READY_PODS/$TOTAL_PODS pods ready, $STARTING_PODS starting up"
+    update_check_result --status "warning" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS,\"starting\":$STARTING_PODS,\"not_ready\":$NOT_READY_PODS,\"deployment_in_progress\":true}"
 else
-    update_check_result --status "failed" --evidence "{}"
+    # Some pods not ready and no clear sign of deployment in progress - this is a problem
+    print_error "Pods not ready: $READY_PODS/$TOTAL_PODS ready (pods have issues)"
+    update_check_result --status "failed" --evidence "{\"ready\":$READY_PODS,\"total\":$TOTAL_PODS}"
 fi

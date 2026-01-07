@@ -61,11 +61,10 @@ parallel to identify common networking, scope, and service-level issues in the c
 2. [container_crash_detection](#2-container_crash_detection) - `scope/container_crash_detection`
 3. [image_pull_status](#3-image_pull_status) - `scope/image_pull_status`
 4. [memory_limits_check](#4-memory_limits_check) - `scope/memory_limits_check`
-5. [pod_readiness](#5-pod_readiness) - `scope/pod_readiness`
-6. [resource_availability](#6-resource_availability) - `scope/resource_availability`
-7. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
-8. [container_port_health](#8-container_port_health) - `scope/container_port_health`
-9. [health_probe_endpoints](#9-health_probe_endpoints) - `scope/health_probe_endpoints`
+5. [resource_availability](#6-resource_availability) - `scope/resource_availability`
+6. [storage_mounting](#7-storage_mounting) - `scope/storage_mounting`
+7. [container_port_health](#8-container_port_health) - `scope/container_port_health`
+8. [health_probe_endpoints](#9-health_probe_endpoints) - `scope/health_probe_endpoints`
 
 ### Service checks (`k8s/diagnose/service/`)
 1. [service_existence](#1-service_existence) - `service/service_existence`
@@ -192,17 +191,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **Example output (failure)** | `✗ Pod web-app-123: Container app has no memory limits`<br>`ℹ  Current resources: requests.memory=128Mi, limits.memory=NONE`<br>`⚠  Risk: Container can consume all node memory`<br>`ℹ  Action: Add memory limits to prevent resource exhaustion` |
 | **Example output (success)** | `✓ No OOMKilled containers detected in 3 pod(s)` |
 
-### 5. pod_readiness
-
-| **Aspect** | **Details** |
-|------------|-------------|
-| **What it detects** | Pods that are not ready to serve traffic |
-| **Common causes** | - Readiness probe failing (HTTP endpoint returns non-2xx)<br>- Application not fully initialized<br>- Database connection failures<br>- Dependent services unavailable<br>- Readiness probe configured incorrectly<br>- Application port mismatch |
-| **Possible solutions** | - Check readiness probe endpoint responds correctly<br>- Review application logs for initialization errors<br>- Verify dependent services are accessible<br>- Adjust `initialDelaySeconds` to allow more startup time<br>- Check readiness probe configuration (path, port, timeout)<br>- Ensure application is listening on correct port |
-| **Example output (failure)** | `⚠ Pod web-app-123: Phase=Running, Ready=False`<br>`⚠  Reason: ContainersNotReady`<br>`⚠  Container Status:`<br>`    app: Ready=false, Restarts=0`<br>`ℹ  Action: Check application health endpoint and ensure dependencies are available` |
-| **Example output (success)** | `✓ Pod web-app-123: Running and Ready` |
-
-### 6. resource_availability
+### 5. resource_availability
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -212,7 +201,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **Example output (failure)** | `✗ Pod web-app-123: Cannot be scheduled`<br>`⚠  Reason: 0/3 nodes are available: 1 Insufficient cpu, 2 Insufficient memory`<br>`⚠  Issue: Insufficient CPU in cluster`<br>`⚠  Issue: Insufficient memory in cluster`<br>`ℹ  Action: Reduce resource requests or add more nodes to cluster` |
 | **Example output (success)** | `✓ All 3 pod(s) successfully scheduled with sufficient resources` |
 
-### 7. storage_mounting
+### 6. storage_mounting
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -222,7 +211,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **Example output (failure)** | `✗ Pod web-app-123: Volume mount failed`<br>`  Volume: data-volume (PersistentVolumeClaim)`<br>`  PVC: app-data-pvc`<br>`  Status: Pending`<br>`  Events:`<br>`    MountVolume.SetUp failed: PersistentVolumeClaim "app-data-pvc" not found`<br>`ℹ  Action: Create missing PVC or fix volume reference in deployment` |
 | **Example output (success)** | `✓ All volumes mounted successfully for 3 pod(s)` |
 
-### 8. container_port_health
+### 7. container_port_health
 
 | **Aspect** | **Details** |
 |------------|-------------|
@@ -232,7 +221,7 @@ parallel to identify common networking, scope, and service-level issues in the c
 | **Example output (failure)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`✗      Port 8080: ✗ Declared but not listening or unreachable`<br>`ℹ      Action: Check application configuration and ensure it listens on port 8080` |
 | **Example output (success)** | `ℹ  Checking pod web-app-123:`<br>`ℹ    Container 'application':`<br>`✓      Port 8080: ✓ Listening` |
 
-### 9. health_probe_endpoints
+### 8. health_probe_endpoints
 
 | **Aspect** | **Details** |
 |------------|-------------|
