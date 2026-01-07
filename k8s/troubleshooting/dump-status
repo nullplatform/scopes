@@ -1,0 +1,800 @@
+#!/bin/bash
+
+################################################################################
+# Kubernetes Deployment Status Dump Script
+#
+# Purpose: Print all Kubernetes objects and events for a specific deployment
+# Usage: ./dump-status --scope-id <id> --deployment-id <id> [--k8s-namespace <ns>]
+#
+# This script will:
+# - Fetch scope and deployment information from null CLI
+# - Print all k8s objects related to the deployment to stdout
+# - Print events for each object
+# - Print Gateway status for HTTPRoute objects
+# - Print ALB Ingress Controller logs for Ingress objects
+# - Handle missing objects gracefully (no failures)
+################################################################################
+
+set -eo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Script configuration
+SCOPE_ID=""
+DEPLOYMENT_ID=""
+NAMESPACE="nullplatform"
+
+################################################################################
+# Helper Functions
+################################################################################
+
+print_header() {
+    echo -e "\n${BOLD}${BLUE}========================================${NC}"
+    echo -e "${BOLD}${BLUE}$1${NC}"
+    echo -e "${BOLD}${BLUE}========================================${NC}\n"
+}
+
+print_section() {
+    echo -e "\n${BOLD}${CYAN}>>> $1${NC}\n"
+}
+
+print_subsection() {
+    echo -e "\n${BOLD}${MAGENTA}--- $1 ---${NC}\n"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+print_separator() {
+    echo -e "${BOLD}----------------------------------------${NC}"
+}
+
+print_file_marker() {
+    local marker_type="$1"  # START or END
+    local filename="$2"
+    echo "### FILE_${marker_type}: ${filename} ###"
+}
+
+usage() {
+    echo -e "${BOLD}Usage:${NC}"
+    echo "    $0 --deployment-id <deployment_id> [--scope-id <scope_id>] [--k8s-namespace <namespace>]"
+    echo "    $0 --scope-id <scope_id> --deployment-id <deployment_id> [--k8s-namespace <namespace>]"
+    echo ""
+    echo -e "${BOLD}Required Arguments:${NC}"
+    echo "    --deployment-id <id>     The deployment identifier (will be fetched from np CLI)"
+    echo ""
+    echo -e "${BOLD}Optional Arguments:${NC}"
+    echo "    --scope-id <id>          The scope identifier (optional if deployment-id is provided)"
+    echo "    --k8s-namespace <ns>     Kubernetes namespace (default: nullplatform)"
+    echo "    --help                   Show this help message"
+    echo ""
+    echo -e "${BOLD}Examples:${NC}"
+    echo "    # Using deployment ID only (scope will be fetched from deployment)"
+    echo "    $0 --deployment-id 2037314419"
+    echo ""
+    echo "    # Using both scope and deployment IDs"
+    echo "    $0 --scope-id 1827701756 --deployment-id 2037314419"
+    echo ""
+    echo "    # With custom namespace"
+    echo "    $0 --deployment-id 2037314419 --k8s-namespace production"
+    echo ""
+    echo -e "${BOLD}Requirements:${NC}"
+    echo "    - kubectl must be installed and configured"
+    echo "    - np CLI must be installed and authenticated"
+    echo ""
+    echo -e "${BOLD}Output:${NC}"
+    echo "    Prints all Kubernetes objects and their events to stdout"
+    exit 1
+}
+
+################################################################################
+# Parse command line arguments
+################################################################################
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --scope-id)
+                SCOPE_ID="$2"
+                shift 2
+                ;;
+            --deployment-id)
+                DEPLOYMENT_ID="$2"
+                shift 2
+                ;;
+            --k8s-namespace)
+                NAMESPACE="$2"
+                shift 2
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                print_error "Unknown argument: $1"
+                usage
+                ;;
+        esac
+    done
+}
+
+# Parse arguments
+parse_args "$@"
+
+# Validate required arguments
+if [[ -z "$DEPLOYMENT_ID" ]]; then
+    print_error "Missing required argument: --deployment-id"
+    usage
+fi
+
+# Check if kubectl is available
+if ! command -v kubectl &> /dev/null; then
+    print_error "kubectl is not installed or not in PATH"
+    exit 1
+fi
+
+# Check if np CLI is available
+if ! command -v np &> /dev/null; then
+    print_error "np CLI is not installed or not in PATH"
+    print_info "Install from: https://docs.nullplatform.com/cli"
+    exit 1
+fi
+
+# Check if jq is available
+if ! command -v jq &> /dev/null; then
+    print_error "jq is not installed or not in PATH"
+    print_info "Install jq for JSON parsing: https://stedolan.github.io/jq/"
+    exit 1
+fi
+
+################################################################################
+# Fetch scope and deployment information
+################################################################################
+
+print_header "Fetching Scope and Deployment Information"
+
+print_section "Fetching deployment information..."
+DEPLOYMENT_JSON=$(np deployment read --id "${DEPLOYMENT_ID}" --format json 2>&1)
+if [[ $? -ne 0 ]]; then
+    print_error "Failed to fetch deployment information"
+    echo "$DEPLOYMENT_JSON"
+    exit 1
+fi
+
+# Extract deployment information
+DEPLOYMENT_STATUS=$(echo "$DEPLOYMENT_JSON" | jq -r '.status')
+DEPLOYMENT_STATUS_IN_SCOPE=$(echo "$DEPLOYMENT_JSON" | jq -r '.status_in_scope')
+DEPLOYMENT_STRATEGY=$(echo "$DEPLOYMENT_JSON" | jq -r '.strategy')
+DEPLOYMENT_NRN=$(echo "$DEPLOYMENT_JSON" | jq -r '.nrn')
+RELEASE_ID=$(echo "$DEPLOYMENT_JSON" | jq -r '.release_id')
+
+# Extract scope_id from deployment if not provided
+if [[ -z "$SCOPE_ID" ]]; then
+    SCOPE_ID=$(echo "$DEPLOYMENT_JSON" | jq -r '.scope_id')
+    print_info "Scope ID extracted from deployment: ${SCOPE_ID}"
+fi
+
+print_section "Fetching scope information..."
+SCOPE_JSON=$(np scope read --id "${SCOPE_ID}" --format json 2>&1)
+if [[ $? -ne 0 ]]; then
+    print_error "Failed to fetch scope information"
+    echo "$SCOPE_JSON"
+    exit 1
+fi
+
+# Extract scope information
+SCOPE_SLUG=$(echo "$SCOPE_JSON" | jq -r '.slug')
+SCOPE_NAME=$(echo "$SCOPE_JSON" | jq -r '.name')
+SCOPE_STATUS=$(echo "$SCOPE_JSON" | jq -r '.status')
+SCOPE_NRN=$(echo "$SCOPE_JSON" | jq -r '.nrn')
+APPLICATION_ID=$(echo "$SCOPE_JSON" | jq -r '.application_id')
+
+print_success "Scope fetched: ${SCOPE_NAME} (${SCOPE_SLUG})"
+print_success "Deployment fetched: ${DEPLOYMENT_ID} (${DEPLOYMENT_STRATEGY})"
+
+################################################################################
+# Main Script
+################################################################################
+
+print_header "Kubernetes Deployment Status Dump"
+print_info "Timestamp: $(date)"
+echo ""
+print_info "Scope Information:"
+echo "  ID:          ${SCOPE_ID}"
+echo "  Name:        ${SCOPE_NAME}"
+echo "  Slug:        ${SCOPE_SLUG}"
+echo "  Status:      ${SCOPE_STATUS}"
+echo "  NRN:         ${SCOPE_NRN}"
+echo ""
+print_info "Deployment Information:"
+echo "  ID:          ${DEPLOYMENT_ID}"
+echo "  Status:      ${DEPLOYMENT_STATUS}"
+echo "  In Scope:    ${DEPLOYMENT_STATUS_IN_SCOPE}"
+echo "  Strategy:    ${DEPLOYMENT_STRATEGY}"
+echo "  Release ID:  ${RELEASE_ID}"
+echo "  NRN:         ${DEPLOYMENT_NRN}"
+echo ""
+print_info "Kubernetes Namespace: ${NAMESPACE}"
+
+# Object naming patterns based on analysis
+DEPLOYMENT_NAME="d-${SCOPE_ID}-${DEPLOYMENT_ID}"
+SECRET_NAME="s-${SCOPE_ID}-d-${DEPLOYMENT_ID}"
+HPA_NAME="hpa-d-${SCOPE_ID}-${DEPLOYMENT_ID}"
+PDB_NAME="pdb-d-${SCOPE_ID}-${DEPLOYMENT_ID}"
+
+# Labels for filtering
+LABEL_SELECTOR="scope_id=${SCOPE_ID},deployment_id=${DEPLOYMENT_ID}"
+
+print_info "K8s Deployment Name: ${DEPLOYMENT_NAME}"
+print_info "Label Selector: ${LABEL_SELECTOR}"
+
+################################################################################
+# Function to safely get and print a resource
+################################################################################
+get_and_print_resource() {
+    local resource_type="$1"
+    local resource_name="$2"
+
+    print_section "Resource: ${resource_type}/${resource_name}"
+
+    if kubectl get "${resource_type}" "${resource_name}" -n "${NAMESPACE}" &> /dev/null; then
+        kubectl get "${resource_type}" "${resource_name}" -n "${NAMESPACE}" -o yaml
+        print_separator
+
+        # Get events for this resource
+        print_subsection "Events for ${resource_type}/${resource_name}"
+        if kubectl get events -n "${NAMESPACE}" \
+            --field-selector involvedObject.name="${resource_name}" \
+            --sort-by='.lastTimestamp' 2>/dev/null | grep -v "^No resources found"; then
+            :
+        else
+            print_warning "No events found"
+        fi
+        print_separator
+
+        return 0
+    else
+        print_warning "${resource_type}/${resource_name} not found"
+        print_separator
+        return 1
+    fi
+}
+
+################################################################################
+# Function to get and print resources by label
+################################################################################
+get_and_print_resources_by_label() {
+    local resource_type="$1"
+
+    print_section "Resources: ${resource_type} (labels: ${LABEL_SELECTOR})"
+
+    resources=$(kubectl get "${resource_type}" -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" -o name 2>/dev/null || true)
+
+    if [[ -n "$resources" ]]; then
+        # Print all resources
+        kubectl get "${resource_type}" -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" -o yaml
+        print_separator
+
+        # Count and print events for each resource
+        count=$(echo "$resources" | wc -l | tr -d ' ')
+        print_info "Found ${count} ${resource_type}"
+
+        while IFS= read -r resource; do
+            if [[ -n "$resource" ]]; then
+                resource_name=$(echo "$resource" | cut -d'/' -f2)
+
+                print_subsection "Events for ${resource}"
+                if kubectl get events -n "${NAMESPACE}" \
+                    --field-selector involvedObject.name="${resource_name}" \
+                    --sort-by='.lastTimestamp' 2>/dev/null | grep -v "^No resources found"; then
+                    :
+                else
+                    print_warning "No events found"
+                fi
+                print_separator
+            fi
+        done <<< "$resources"
+
+        return 0
+    else
+        print_warning "No ${resource_type} found with label selector"
+        print_separator
+        return 1
+    fi
+}
+
+################################################################################
+# Function to get and print resources by scope_id only
+################################################################################
+get_and_print_resources_by_scope() {
+    local resource_type="$1"
+    local scope_label_selector="scope_id=${SCOPE_ID}"
+
+    print_section "Resources: ${resource_type} (labels: ${scope_label_selector})"
+
+    resources=$(kubectl get "${resource_type}" -n "${NAMESPACE}" -l "${scope_label_selector}" -o name 2>/dev/null || true)
+
+    if [[ -n "$resources" ]]; then
+        # Print all resources
+        kubectl get "${resource_type}" -n "${NAMESPACE}" -l "${scope_label_selector}" -o yaml
+        print_separator
+
+        # Count and print events for each resource
+        count=$(echo "$resources" | wc -l | tr -d ' ')
+        print_info "Found ${count} ${resource_type} (shared across all deployments in scope)"
+
+        while IFS= read -r resource; do
+            if [[ -n "$resource" ]]; then
+                resource_name=$(echo "$resource" | cut -d'/' -f2)
+
+                print_subsection "Events for ${resource}"
+                if kubectl get events -n "${NAMESPACE}" \
+                    --field-selector involvedObject.name="${resource_name}" \
+                    --sort-by='.lastTimestamp' 2>/dev/null | grep -v "^No resources found"; then
+                    :
+                else
+                    print_warning "No events found"
+                fi
+                print_separator
+            fi
+        done <<< "$resources"
+
+        return 0
+    else
+        print_warning "No ${resource_type} found with scope label selector"
+        print_separator
+        return 1
+    fi
+}
+
+################################################################################
+# Get Deployment
+################################################################################
+print_file_marker "START" "deployment.yaml"
+print_header "1. DEPLOYMENT"
+get_and_print_resource "deployment" "${DEPLOYMENT_NAME}" || true
+print_file_marker "END" "deployment.yaml"
+
+################################################################################
+# Get ReplicaSets (related to deployment)
+################################################################################
+print_file_marker "START" "replicasets.yaml"
+print_header "2. REPLICASETS"
+get_and_print_resources_by_label "replicaset" || true
+print_file_marker "END" "replicasets.yaml"
+
+################################################################################
+# Get Pods
+################################################################################
+print_file_marker "START" "pods.yaml"
+print_header "3. PODS"
+if get_and_print_resources_by_label "pod"; then
+    # Get detailed pod status
+    print_section "Pod Status (detailed)"
+    kubectl get pods -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" -o wide
+    print_separator
+
+    # Get pod logs for one representative pod (prioritize failed/restarted)
+    print_section "Pod Logs (representative pod)"
+
+    # Get all pods
+    pods=$(kubectl get pods -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" -o name 2>/dev/null || true)
+
+    if [[ -z "$pods" ]]; then
+        print_warning "No pods found for logs"
+    else
+        # Try to find a failed or restarted pod first
+        selected_pod=""
+
+        # Priority 1: Failed pods
+        failed_pod=$(kubectl get pods -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" \
+            --field-selector status.phase=Failed -o name 2>/dev/null | head -1 || true)
+
+        if [[ -n "$failed_pod" ]]; then
+            selected_pod="$failed_pod"
+            print_info "Selected failed pod for detailed logs"
+        else
+            # Priority 2: Pods with restarts
+            restarted_pod=$(kubectl get pods -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" -o json 2>/dev/null | \
+                jq -r '.items[] | select(.status.containerStatuses[]?.restartCount > 0) | .metadata.name' | head -1 || true)
+
+            if [[ -n "$restarted_pod" ]]; then
+                selected_pod="pod/${restarted_pod}"
+                print_info "Selected restarted pod for detailed logs"
+            else
+                # Priority 3: Any running pod
+                selected_pod=$(echo "$pods" | head -1)
+                print_info "Selected first available pod for detailed logs"
+            fi
+        fi
+
+        if [[ -n "$selected_pod" ]]; then
+            pod_name=$(echo "$selected_pod" | cut -d'/' -f2)
+
+            print_subsection "Pod: ${pod_name}"
+
+            # Get pod events
+            echo -e "${BOLD}${GREEN}Events:${NC}"
+            if kubectl get events -n "${NAMESPACE}" \
+                --field-selector involvedObject.name="${pod_name}",involvedObject.kind=Pod \
+                --sort-by='.lastTimestamp' 2>/dev/null | grep -v "^No resources found"; then
+                :
+            else
+                print_warning "No events found for this pod"
+            fi
+            print_separator
+
+            # Get pod describe
+            echo -e "${BOLD}${GREEN}Describe:${NC}"
+            kubectl describe pod "${pod_name}" -n "${NAMESPACE}" 2>&1 || true
+            print_separator
+        fi
+    fi
+fi
+print_file_marker "END" "pods.yaml"
+
+# Separate file for pod logs
+print_file_marker "START" "pod-logs.txt"
+if [[ -n "$pods" ]]; then
+    if [[ -n "$selected_pod" ]]; then
+        pod_name=$(echo "$selected_pod" | cut -d'/' -f2)
+        print_header "POD LOGS: ${pod_name}"
+
+        # Get all containers in the pod (both running and terminated)
+        containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || true)
+
+        # Get init containers as well
+        init_containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null || true)
+
+        # Process init containers first
+        if [[ -n "$init_containers" ]]; then
+            echo -e "${BOLD}${CYAN}Init Containers:${NC}"
+            for container in $init_containers; do
+                echo -e "${BOLD}${GREEN}Init Container: ${container}${NC}"
+                echo -e "${BOLD}Logs (last 100 lines):${NC}"
+                kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --tail=100 2>&1 || true
+                echo ""
+
+                # Try to get previous logs
+                if kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous &> /dev/null; then
+                    echo -e "${BOLD}${YELLOW}Previous logs (last 100 lines):${NC}"
+                    kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous --tail=100 2>&1 || true
+                    echo ""
+                fi
+                print_separator
+            done
+        fi
+
+        # Process regular containers
+        for container in $containers; do
+            echo -e "${BOLD}${GREEN}Container: ${container}${NC}"
+
+            # Check container state
+            container_state=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath="{.status.containerStatuses[?(@.name=='${container}')].state}" 2>/dev/null || true)
+
+            if [[ "$container_state" == *"terminated"* ]]; then
+                echo -e "${RED}Status: Terminated/Dead${NC}"
+            fi
+
+            echo -e "${BOLD}Logs (last 100 lines):${NC}"
+            kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --tail=100 2>&1 || true
+            echo ""
+
+            # Also get previous logs if pod restarted
+            if kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous &> /dev/null; then
+                echo -e "${BOLD}${YELLOW}Previous logs (last 100 lines):${NC}"
+                kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${container}" --previous --tail=100 2>&1 || true
+                echo ""
+            fi
+            print_separator
+        done
+
+        # Check for any terminated containers not in the current spec (containers that were removed)
+        terminated_containers=$(kubectl get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.status.containerStatuses[?(@.state.terminated)].name}' 2>/dev/null || true)
+
+        if [[ -n "$terminated_containers" ]]; then
+            for terminated in $terminated_containers; do
+                # Check if we already processed this container
+                if [[ ! " $containers " =~ " $terminated " ]]; then
+                    echo -e "${BOLD}${RED}Terminated Container: ${terminated}${NC}"
+                    echo -e "${RED}Status: Dead (not in current spec)${NC}"
+                    echo -e "${BOLD}Logs (last 100 lines):${NC}"
+                    kubectl logs "${pod_name}" -n "${NAMESPACE}" -c "${terminated}" --tail=100 2>&1 || true
+                    echo ""
+                    print_separator
+                fi
+            done
+        fi
+    fi
+fi
+print_file_marker "END" "pod-logs.txt"
+
+################################################################################
+# Get Services
+################################################################################
+print_file_marker "START" "services.yaml"
+print_header "4. SERVICES"
+# Main service
+get_and_print_resource "service" "${DEPLOYMENT_NAME}" || true
+
+# Additional services (HTTP and GRPC ports)
+get_and_print_resources_by_label "service" || true
+
+# Get service endpoints
+print_section "Service Endpoints"
+if kubectl get endpoints -n "${NAMESPACE}" -l "${LABEL_SELECTOR}" -o yaml 2>/dev/null; then
+    print_separator
+else
+    print_warning "No endpoints found"
+    print_separator
+fi
+print_file_marker "END" "services.yaml"
+
+################################################################################
+# Get Service Account
+################################################################################
+print_file_marker "START" "serviceaccount.yaml"
+print_header "5. SERVICE ACCOUNT"
+get_and_print_resource "serviceaccount" "${DEPLOYMENT_NAME}" || true
+print_file_marker "END" "serviceaccount.yaml"
+
+################################################################################
+# Get HorizontalPodAutoscaler
+################################################################################
+print_file_marker "START" "hpa.yaml"
+print_header "6. HORIZONTAL POD AUTOSCALER (HPA)"
+if get_and_print_resource "hpa" "${HPA_NAME}"; then
+    # Get HPA status
+    print_section "HPA Status (detailed)"
+    kubectl get hpa "${HPA_NAME}" -n "${NAMESPACE}" -o wide 2>&1 || true
+    print_separator
+fi
+print_file_marker "END" "hpa.yaml"
+
+################################################################################
+# Get PodDisruptionBudget
+################################################################################
+print_file_marker "START" "pdb.yaml"
+print_header "7. POD DISRUPTION BUDGET (PDB)"
+get_and_print_resource "poddisruptionbudget" "${PDB_NAME}" || true
+print_file_marker "END" "pdb.yaml"
+
+################################################################################
+# Get Ingress Objects
+################################################################################
+print_file_marker "START" "ingress.yaml"
+print_header "8. INGRESS"
+
+if get_and_print_resources_by_scope "ingress"; then
+    # Get Ingress status
+    print_section "Ingress Status (detailed)"
+    kubectl get ingress -n "${NAMESPACE}" -l "scope_id=${SCOPE_ID}" -o wide 2>&1 || true
+    print_separator
+fi
+print_file_marker "END" "ingress.yaml"
+
+# Separate file for ALB controller logs
+print_file_marker "START" "alb-controller-logs.txt"
+if get_and_print_resources_by_scope "ingress" &>/dev/null; then
+    print_header "ALB INGRESS CONTROLLER LOGS"
+    print_info "Searching for ALB Ingress Controller pods..."
+
+    found_alb=false
+    # Try common namespaces for ALB controller
+    for alb_namespace in kube-system aws-load-balancer-controller ingress-nginx; do
+        alb_pods=$(kubectl get pods -n "${alb_namespace}" -l app.kubernetes.io/name=aws-load-balancer-controller -o name 2>/dev/null || true)
+
+        if [[ -z "$alb_pods" ]]; then
+            # Try alternative label
+            alb_pods=$(kubectl get pods -n "${alb_namespace}" -l app=alb-ingress-controller -o name 2>/dev/null || true)
+        fi
+
+        if [[ -n "$alb_pods" ]]; then
+            print_success "Found ALB controller pods in namespace: ${alb_namespace}"
+            found_alb=true
+
+            while IFS= read -r alb_pod; do
+                if [[ -n "$alb_pod" ]]; then
+                    alb_pod_name=$(echo "$alb_pod" | cut -d'/' -f2)
+
+                    print_subsection "ALB Controller Pod: ${alb_pod_name}"
+                    echo -e "${BOLD}Last 30 lines:${NC}"
+                    kubectl logs "${alb_pod_name}" -n "${alb_namespace}" --tail=30 2>&1 || true
+                    print_separator
+                fi
+            done <<< "$alb_pods"
+
+            break
+        fi
+    done
+
+    if [[ "$found_alb" == "false" ]]; then
+        print_warning "ALB Ingress Controller pods not found in common namespaces"
+        print_separator
+    fi
+fi
+print_file_marker "END" "alb-controller-logs.txt"
+
+################################################################################
+# Get HTTPRoute Objects (Istio)
+################################################################################
+print_file_marker "START" "httproute.yaml"
+print_header "9. HTTPROUTE (Gateway API / Istio)"
+
+if get_and_print_resources_by_scope "httproute"; then
+    # Get HTTPRoute status
+    print_section "HTTPRoute Status (detailed)"
+    kubectl get httproute -n "${NAMESPACE}" -l "scope_id=${SCOPE_ID}" -o wide 2>&1 || true
+    print_separator
+
+    # Get Gateway status
+    print_section "Associated Gateways"
+    print_info "Searching for associated Gateways..."
+
+    # Extract gateway references from HTTPRoutes
+    httproutes=$(kubectl get httproute -n "${NAMESPACE}" -l "scope_id=${SCOPE_ID}" -o name 2>/dev/null || true)
+
+    gateways_found=""
+
+    while IFS= read -r httproute; do
+        if [[ -n "$httproute" ]]; then
+            httproute_name=$(echo "$httproute" | cut -d'/' -f2)
+
+            # Get gateway references
+            gateway_refs=$(kubectl get httproute "${httproute_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.parentRefs[*].name}' 2>/dev/null || true)
+
+            for gateway_ref in $gateway_refs; do
+                if [[ ! "$gateways_found" =~ $gateway_ref ]]; then
+                    gateways_found="${gateways_found} ${gateway_ref}"
+
+                    print_info "Found Gateway reference: ${gateway_ref}"
+
+                    # Try to get the gateway (might be in different namespace)
+                    gateway_ns=$(kubectl get httproute "${httproute_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.parentRefs[?(@.name=="'"${gateway_ref}"'")].namespace}' 2>/dev/null || echo "${NAMESPACE}")
+
+                    if [[ -z "$gateway_ns" ]]; then
+                        gateway_ns="${NAMESPACE}"
+                    fi
+
+                    if kubectl get gateway "${gateway_ref}" -n "${gateway_ns}" &> /dev/null; then
+                        print_subsection "Gateway: ${gateway_ref} (namespace: ${gateway_ns})"
+                        kubectl get gateway "${gateway_ref}" -n "${gateway_ns}" -o yaml 2>&1
+                        print_separator
+
+                        # Get gateway status
+                        echo -e "${BOLD}Gateway Status:${NC}"
+                        kubectl get gateway "${gateway_ref}" -n "${gateway_ns}" -o wide 2>&1 || true
+                        print_separator
+
+                        # Get gateway events
+                        echo -e "${BOLD}Gateway Events:${NC}"
+                        if kubectl get events -n "${gateway_ns}" \
+                            --field-selector involvedObject.name="${gateway_ref}",involvedObject.kind=Gateway \
+                            --sort-by='.lastTimestamp' 2>/dev/null | grep -v "^No resources found"; then
+                            :
+                        else
+                            print_warning "No events found"
+                        fi
+                        print_separator
+                    else
+                        print_warning "Gateway ${gateway_ref} not found in namespace ${gateway_ns}"
+                        print_separator
+                    fi
+                fi
+            done
+        fi
+    done <<< "$httproutes"
+
+    # Get Istio VirtualService (if exists)
+    print_section "Istio VirtualService"
+    get_and_print_resources_by_label "virtualservice" || true
+fi
+print_file_marker "END" "httproute.yaml"
+
+################################################################################
+# Get Route Objects (OpenShift)
+################################################################################
+print_file_marker "START" "route.yaml"
+print_header "10. ROUTE (OpenShift)"
+if get_and_print_resources_by_scope "route"; then
+    # Get Route status
+    print_section "Route Status (detailed)"
+    kubectl get route -n "${NAMESPACE}" -l "scope_id=${SCOPE_ID}" -o wide 2>&1 || true
+    print_separator
+fi
+print_file_marker "END" "route.yaml"
+
+################################################################################
+# Get DNSEndpoint Objects
+################################################################################
+print_file_marker "START" "dnsendpoint.yaml"
+print_header "11. DNSENDPOINT (External DNS)"
+get_and_print_resources_by_scope "dnsendpoint" || true
+print_file_marker "END" "dnsendpoint.yaml"
+
+################################################################################
+# Get NetworkPolicies
+################################################################################
+print_file_marker "START" "networkpolicies.yaml"
+print_header "12. NETWORK POLICIES"
+get_and_print_resources_by_label "networkpolicy" || true
+print_file_marker "END" "networkpolicies.yaml"
+
+################################################################################
+# Get All Events in Namespace (filtered by scope/deployment)
+################################################################################
+print_file_marker "START" "events.txt"
+print_header "13. ALL EVENTS"
+print_section "All events related to this deployment"
+
+kubectl get events -n "${NAMESPACE}" \
+    --sort-by='.lastTimestamp' \
+    --field-selector involvedObject.namespace="${NAMESPACE}" 2>/dev/null | \
+    grep -E "(${SCOPE_ID}|${DEPLOYMENT_ID}|${DEPLOYMENT_NAME})" || print_warning "No events found matching deployment"
+
+print_separator
+print_file_marker "END" "events.txt"
+
+################################################################################
+# Get Resource Quotas and Limit Ranges
+################################################################################
+print_file_marker "START" "quotas-limits.yaml"
+print_header "14. RESOURCE QUOTAS & LIMITS"
+
+print_section "ResourceQuotas"
+if kubectl get resourcequota -n "${NAMESPACE}" -o yaml 2>/dev/null | grep -v "^No resources found"; then
+    print_separator
+else
+    print_warning "No resource quotas found"
+    print_separator
+fi
+
+print_section "LimitRanges"
+if kubectl get limitrange -n "${NAMESPACE}" -o yaml 2>/dev/null | grep -v "^No resources found"; then
+    print_separator
+else
+    print_warning "No limit ranges found"
+    print_separator
+fi
+print_file_marker "END" "quotas-limits.yaml"
+
+################################################################################
+# Get Namespace Details
+################################################################################
+print_file_marker "START" "namespace.yaml"
+print_header "15. NAMESPACE"
+print_section "Namespace: ${NAMESPACE}"
+kubectl get namespace "${NAMESPACE}" -o yaml 2>&1 || true
+print_separator
+print_file_marker "END" "namespace.yaml"
+
+################################################################################
+# Summary
+################################################################################
+print_header "DUMP COMPLETE"
+print_success "All available objects for ${SCOPE_NAME} (${SCOPE_ID}) / Deployment ${DEPLOYMENT_ID} have been printed"
+print_info "Namespace: ${NAMESPACE}"
+print_info "Deployment Status: ${DEPLOYMENT_STATUS} (in scope: ${DEPLOYMENT_STATUS_IN_SCOPE})"
+print_info "Strategy: ${DEPLOYMENT_STRATEGY}"
+print_info "Timestamp: $(date)"
+
+exit 0
