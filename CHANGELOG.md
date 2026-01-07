@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Add support to configure the traffic manager nginx through a configmap.
 - Add **k8s/diagnose** documentation && new checks
 - Fix **k8s/diagnose** checks, adding logs && improvements
 - Add support for `NAMESPACE_OVERRIDE` configuration in k8s scope and deployment actions.
