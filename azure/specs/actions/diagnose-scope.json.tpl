@@ -13,7 +13,8 @@
         "properties": {
           "scope_id": {
             "type": "number",
-            "readOnly": true
+            "readOnly": true,
+            "visibleOn": ["read"]
           }
         }
       },
