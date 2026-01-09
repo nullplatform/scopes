@@ -8,7 +8,7 @@ hosting_project_id=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.project // em
 hosting_region=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.region // "us-central1"')
 
 if [ -z "$hosting_project_id" ]; then
-  echo "✗ GCP project not configured. Run tofu_state/gcp setup first."
+  echo "✗ GCP project not configured. Run provider/gcp setup first."
   exit 1
 fi
 

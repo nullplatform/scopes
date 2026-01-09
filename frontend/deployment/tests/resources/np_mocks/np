@@ -1,0 +1,18 @@
+#!/bin/bash
+# Mock np CLI for testing
+# Set NP_MOCK_RESPONSE to the path of the mock file to return
+# Set NP_MOCK_EXIT_CODE to the exit code (default: 0)
+
+if [ -z "$NP_MOCK_RESPONSE" ]; then
+  echo "NP_MOCK_RESPONSE not set" >&2
+  exit 1
+fi
+
+if [ -f "$NP_MOCK_RESPONSE" ]; then
+  cat "$NP_MOCK_RESPONSE"
+else
+  echo "Mock file not found: $NP_MOCK_RESPONSE" >&2
+  exit 1
+fi
+
+exit "${NP_MOCK_EXIT_CODE:-0}"

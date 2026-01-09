@@ -6,7 +6,7 @@
 network_project_id=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.project // empty')
 
 if [ -z "$network_project_id" ]; then
-  echo "✗ GCP project not configured. Run tofu_state/gcp setup first."
+  echo "✗ GCP project not configured. Run provider/gcp setup first."
   exit 1
 fi
 
