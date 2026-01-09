@@ -1,0 +1,20 @@
+{
+  "HostedZone": {
+    "Id": "/hostedzone/Z1234567890ABC",
+    "Name": "example.com.",
+    "CallerReference": "2024-01-15T10:30:00Z",
+    "Config": {
+      "Comment": "Production hosted zone",
+      "PrivateZone": false
+    },
+    "ResourceRecordSetCount": 42
+  },
+  "DelegationSet": {
+    "NameServers": [
+      "ns-1234.awsdns-12.org",
+      "ns-567.awsdns-34.com",
+      "ns-890.awsdns-56.co.uk",
+      "ns-123.awsdns-78.net"
+    ]
+  }
+}

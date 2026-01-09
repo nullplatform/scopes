@@ -1,0 +1,10 @@
+{
+  "HostedZone": {
+    "Id": "/hostedzone/Z1234567890ABC",
+    "Name": null,
+    "CallerReference": "2024-01-15T10:30:00Z",
+    "Config": {
+      "PrivateZone": false
+    }
+  }
+}

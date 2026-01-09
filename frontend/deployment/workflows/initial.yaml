@@ -7,9 +7,9 @@ steps:
     output:
       - name: TOFU_VARIABLES
         type: environment
-  - name: setup_tofu_state_layer
+  - name: setup_provider_layer
     type: script
-    file: "$SERVICE_PATH/deployment/tofu_state/$TOFU_STATE_PROVIDER/setup"
+    file: "$SERVICE_PATH/deployment/provider/$TOFU_PROVIDER/setup"
   - name: setup_network_layer
     type: script
     file: "$SERVICE_PATH/deployment/network/$NETWORK_LAYER/setup"

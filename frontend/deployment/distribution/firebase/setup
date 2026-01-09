@@ -7,7 +7,7 @@ hosting_environment=$(echo "$TOFU_VARIABLES" | jq -r '.scope_slug // "prod"')
 hosting_project_id=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.project // empty')
 
 if [ -z "$hosting_project_id" ]; then
-  echo "✗ GCP project not configured. Run tofu_state/gcp setup first."
+  echo "✗ GCP project not configured. Run provider/gcp setup first."
   exit 1
 fi
 

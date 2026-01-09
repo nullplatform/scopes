@@ -10,22 +10,22 @@ if [ -z "${GCP_REGION:-}" ]; then
   exit 1
 fi
 
-if [ -z "${TOFU_STATE_BUCKET:-}" ]; then
-  echo "✗ TOFU_STATE_BUCKET is not set"
+if [ -z "${TOFU_PROVIDER_BUCKET:-}" ]; then
+  echo "✗ TOFU_PROVIDER_BUCKET is not set"
   exit 1
 fi
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg project "$GCP_PROJECT" \
   --arg region "$GCP_REGION" \
-  --arg bucket "$TOFU_STATE_BUCKET" \
+  --arg bucket "$TOFU_PROVIDER_BUCKET" \
   '. + {gcp_provider: {
     project: $project,
     region: $region,
     bucket: $bucket
   }}')
 
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"bucket=$TOFU_STATE_BUCKET\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"bucket=$TOFU_PROVIDER_BUCKET\""
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 module_name="${script_dir}/modules"
