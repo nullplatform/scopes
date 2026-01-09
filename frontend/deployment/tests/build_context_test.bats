@@ -64,6 +64,33 @@ assert_contains() {
   fi
 }
 
+assert_not_empty() {
+  local value="$1"
+  local name="${2:-value}"
+  if [ -z "$value" ]; then
+    echo "Expected $name to be non-empty, but it was empty"
+    return 1
+  fi
+}
+
+assert_empty() {
+  local value="$1"
+  local name="${2:-value}"
+  if [ -n "$value" ]; then
+    echo "Expected $name to be empty"
+    echo "Actual: '$value'"
+    return 1
+  fi
+}
+
+assert_directory_exists() {
+  local dir="$1"
+  if [ ! -d "$dir" ]; then
+    echo "Expected directory to exist: '$dir'"
+    return 1
+  fi
+}
+
 # =============================================================================
 # Test: TOFU_VARIABLES - verifies the entire JSON structure
 # =============================================================================
@@ -138,7 +165,7 @@ assert_contains() {
 @test "TOFU_MODULE_DIR is created as directory" {
   run_build_context
 
-  [ -d "$TOFU_MODULE_DIR" ]
+  assert_directory_exists "$TOFU_MODULE_DIR"
 }
 
 # =============================================================================
@@ -148,7 +175,7 @@ assert_contains() {
   unset CUSTOM_TOFU_MODULES
   run_build_context
 
-  [ -z "$MODULES_TO_USE" ]
+  assert_empty "$MODULES_TO_USE" "MODULES_TO_USE"
 }
 
 @test "MODULES_TO_USE inherits from CUSTOM_TOFU_MODULES" {
@@ -164,17 +191,17 @@ assert_contains() {
 @test "exports TOFU_VARIABLES" {
   run_build_context
 
-  [ -n "$TOFU_VARIABLES" ]
+  assert_not_empty "$TOFU_VARIABLES" "TOFU_VARIABLES"
 }
 
 @test "exports TOFU_INIT_VARIABLES" {
   run_build_context
 
-  [ -n "$TOFU_INIT_VARIABLES" ]
+  assert_not_empty "$TOFU_INIT_VARIABLES" "TOFU_INIT_VARIABLES"
 }
 
 @test "exports TOFU_MODULE_DIR" {
   run_build_context
 
-  [ -n "$TOFU_MODULE_DIR" ]
+  assert_not_empty "$TOFU_MODULE_DIR" "TOFU_MODULE_DIR"
 }
