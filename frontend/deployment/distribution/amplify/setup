@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Amplify Hosting Setup
+# Adds amplify-specific variables to TOFU_VARIABLES
+
+hosting_app_name=$(echo "$TOFU_VARIABLES" | jq -r '.application_slug')
+hosting_repository_url=$(echo "$TOFU_VARIABLES" | jq -r '.repository_url')
+hosting_environment=$(echo "$TOFU_VARIABLES" | jq -r '.scope_slug // "prod"')
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg app_name "$hosting_app_name" \
+  --arg repository_url "$hosting_repository_url" \
+  --arg environment "$hosting_environment" \
+  '. + {
+    hosting_app_name: $app_name,
+    hosting_repository_url: $repository_url,
+    hosting_environment: $environment
+  }')
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir#*deployment/}"
+MODULES_TO_USE="${MODULES_TO_USE:+$MODULES_TO_USE,}$module_name"

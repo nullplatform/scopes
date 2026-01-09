@@ -1,0 +1,49 @@
+{
+  "results": [
+    {
+      "attributes": {
+        "bucket": {
+          "name": "assets-kwik-e-mart-main"
+        }
+      },
+      "category": "assets-repository",
+      "created_at": "2026-01-07T16:28:17.036Z",
+      "dimensions": {},
+      "groups": [],
+      "id": "4a7be073-92ee-4f66-91be-02d115bc3e7c",
+      "nrn": "organization=1255165411:account=95118862",
+      "specification_id": "85e164dc-3149-40c6-b85d-28bddf6e21e8",
+      "tags": [
+        {
+          "id": "ceb2021b-714e-4fa5-9202-6965c744ffd9",
+          "key": "bucket.name",
+          "value": "assets-kwik-e-mart-main"
+        }
+      ],
+      "updated_at": "2026-01-07T16:28:17.036Z"
+    },
+    {
+      "attributes": {
+        "ci": {
+          "access_key": "",
+          "region": "us-east-1",
+          "secret_key": ""
+        },
+        "setup": {
+          "naming_rule": "\"\\(.namespace.slug)/\\(.application.slug)\"",
+          "region": "us-east-1",
+          "role_arn": "arn:aws:iam::688720756067:role/null-application-manager"
+        }
+      },
+      "category": "assets-repository",
+      "created_at": "2024-10-25T12:47:52.552Z",
+      "dimensions": {},
+      "groups": [],
+      "id": "d397e46b-89b8-419d-ac14-2b483ace511c",
+      "nrn": "organization=1255165411:account=95118862",
+      "specification_id": "a6cf5ddf-ee3e-4960-b56a-ee9a13f8b5d2",
+      "tags": [],
+      "updated_at": "2025-08-21T01:58:19.844Z"
+    }
+  ]
+}
