@@ -50,6 +50,10 @@ for module in "${modules[@]}"; do
     prefix="${parent}_${leaf}_"
     for tf_file in "$module"/*.tf; do
       filename=$(basename "$tf_file")
+      # Skip test-only files (test_*.tf)
+      if [[ "$filename" == test_*.tf ]]; then
+        continue
+      fi
       cp "$tf_file" "$TOFU_MODULE_DIR/${prefix}${filename}"
     done
     echo "✓ Copied modules from: $module (prefix: $prefix)"

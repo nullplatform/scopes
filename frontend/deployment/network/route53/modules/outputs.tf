@@ -5,7 +5,7 @@ output "network_full_domain" {
 
 output "network_fqdn" {
   description = "Fully qualified domain name"
-  value       = local.hosting_record_type == "A" ? aws_route53_record.main_alias[0].fqdn : aws_route53_record.main_cname[0].fqdn
+  value       = local.distribution_record_type == "A" ? aws_route53_record.main_alias[0].fqdn : aws_route53_record.main_cname[0].fqdn
 }
 
 output "network_website_url" {
