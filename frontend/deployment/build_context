@@ -1,11 +1,8 @@
 #!/bin/bash
 
-# =============================================================================
-# Build Context - Initializes TOFU_VARIABLES and prepares module composition
-# =============================================================================
-
 application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
 scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
+namespace_slug=$(echo "$CONTEXT" | jq -r .namespace.slug)
 scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
 repository_url=$(echo "$CONTEXT" | jq -r .application.repository_url)
 application_version="$(echo "$CONTEXT" | jq -r .release.semver)"
@@ -42,7 +39,7 @@ TOFU_VARIABLES=$(jq -n \
     resource_tags_json: $resource_tags_json
   }')
 
-tf_state_key="amplify/$application_slug/$scope_slug-$scope_id"
+tf_state_key="frontend/$namespace_slug/$application_slug/$scope_slug-$scope_id"
 
 TOFU_INIT_VARIABLES="-backend-config=\"key=$tf_state_key\""
 
