@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Cloud DNS Setup
+# Configures DNS variables based on hosting output
+
+network_project_id=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.project // empty')
+
+if [ -z "$network_project_id" ]; then
+  echo "✗ GCP project not configured. Run tofu_state/gcp setup first."
+  exit 1
+fi
+
+managed_zone=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.managed_zone // empty')
+if [ -z "$managed_zone" ]; then
+  echo "✗ managed_zone is not set in context"
+  exit 1
+fi
+
+# Get domain from scope or context
+network_domain=$(echo "$TOFU_VARIABLES" | jq -r '.scope_domain // empty')
+if [ -z "$network_domain" ]; then
+  network_domain=$(echo "$CONTEXT" | jq -r '.scope.domain // empty')
+fi
+
+# Get target from hosting outputs (Load Balancer IP, etc.)
+network_target_ip=$(echo "$TOFU_VARIABLES" | jq -r '.hosting_load_balancer_ip // empty')
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg project_id "$network_project_id" \
+  --arg managed_zone "$managed_zone" \
+  --arg domain "$network_domain" \
+  --arg target_ip "$network_target_ip" \
+  '. + {
+    network_project_id: $project_id,
+    network_managed_zone: $managed_zone,
+    network_domain: $domain,
+    network_target_ip: $target_ip
+  }')
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir#*deployment/}"
+MODULES_TO_USE="${MODULES_TO_USE:+$MODULES_TO_USE,}$module_name"

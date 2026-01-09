@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# =============================================================================
+# Build Context - Initializes TOFU_VARIABLES and prepares module composition
+# =============================================================================
+
+application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
+scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
+scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
+repository_url=$(echo "$CONTEXT" | jq -r .application.repository_url)
+application_version="$(echo "$CONTEXT" | jq -r .release.semver)"
+env_vars_json=$(echo "$CONTEXT" | jq '.parameters.results | map({(.variable): .values[0].value}) | add')
+resource_tags_json=$(echo "$CONTEXT" | jq \
+     '{
+     nullplatform: "true",
+     account: .account.slug,
+     account_id: .account.id,
+     namespace: .namespace.slug,
+     namespace_id: .namespace.id,
+     application: .application.slug,
+     application_id: .application.id,
+     scope: .scope.slug,
+     scope_id: .scope.id,
+     deployment_id: .deployment.id
+     }')
+
+TOFU_VARIABLES=$(jq -n \
+  --arg application_slug "$application_slug" \
+  --arg scope_slug "$scope_slug" \
+  --arg scope_id "$scope_id" \
+  --arg repository_url "$repository_url" \
+  --arg application_version "$application_version" \
+  --argjson env_vars_json "$env_vars_json" \
+  --argjson resource_tags_json "$resource_tags_json" \
+  '{
+    application_slug: $application_slug,
+    scope_slug: $scope_slug,
+    scope_id: $scope_id,
+    repository_url: $repository_url,
+    application_version: $application_version,
+    env_vars_json: $env_vars_json,
+    resource_tags_json: $resource_tags_json
+  }')
+
+tf_state_key="amplify/$application_slug/$scope_slug-$scope_id"
+
+TOFU_INIT_VARIABLES="-backend-config=\"key=$tf_state_key\""
+
+TOFU_MODULE_DIR="$SERVICE_PATH/output/$scope_id"
+#if [ -n "${NP_OUTPUT_DIR:-}" ]; then
+#    TOFU_MODULE_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
+#fi
+
+mkdir -p "$TOFU_MODULE_DIR"
+
+# =============================================================================
+# Modules to compose (comma-separated list)
+# Initialized from CUSTOM_MODULES, extended by setup scripts
+# Available modules:
+#   - state/aws         : AWS S3 backend for terraform state
+#   - network/route_53  : AWS Route53 DNS configuration
+#   - hosting/amplify   : AWS Amplify hosting (coming soon)
+# =============================================================================
+MODULES_TO_USE="${CUSTOM_TOFU_MODULES:-}"
+
+export TOFU_VARIABLES
+export TOFU_INIT_VARIABLES
+export TOFU_MODULE_DIR
+export MODULES_TO_USE

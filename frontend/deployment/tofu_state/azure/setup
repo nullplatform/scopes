@@ -1,0 +1,46 @@
+#!/bin/bash
+
+if [ -z "${AZURE_SUBSCRIPTION_ID:-}" ]; then
+  echo "✗ AZURE_SUBSCRIPTION_ID is not set"
+  exit 1
+fi
+
+if [ -z "${TOFU_STATE_RESOURCE_GROUP:-}" ]; then
+  echo "✗ TOFU_STATE_RESOURCE_GROUP is not set"
+  exit 1
+fi
+
+if [ -z "${TOFU_STATE_STORAGE_ACCOUNT:-}" ]; then
+  echo "✗ TOFU_STATE_STORAGE_ACCOUNT is not set"
+  exit 1
+fi
+
+if [ -z "${TOFU_STATE_CONTAINER:-}" ]; then
+  echo "✗ TOFU_STATE_CONTAINER is not set"
+  exit 1
+fi
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg subscription_id "$AZURE_SUBSCRIPTION_ID" \
+  --arg resource_group "$TOFU_STATE_RESOURCE_GROUP" \
+  --arg storage_account "$TOFU_STATE_STORAGE_ACCOUNT" \
+  --arg container "$TOFU_STATE_CONTAINER" \
+  '. + {azure_provider: {
+    subscription_id: $subscription_id,
+    resource_group_name: $resource_group,
+    storage_account_name: $storage_account,
+    container_name: $container
+  }}')
+
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"resource_group_name=$TOFU_STATE_RESOURCE_GROUP\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"storage_account_name=$TOFU_STATE_STORAGE_ACCOUNT\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"container_name=$TOFU_STATE_CONTAINER\""
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir}/modules"
+
+if [[ -n $MODULES_TO_USE ]]; then
+  MODULES_TO_USE="$MODULES_TO_USE,$module_name"
+else
+  MODULES_TO_USE="$module_name"
+fi

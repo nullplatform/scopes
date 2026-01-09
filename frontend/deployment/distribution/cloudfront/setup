@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# S3 + CloudFront Hosting Setup
+
+application_slug=$(echo "$TOFU_VARIABLES" | jq -r '.application_slug')
+scope_slug=$(echo "$TOFU_VARIABLES" | jq -r '.scope_slug')
+scope_id=$(echo "$TOFU_VARIABLES" | jq -r '.scope_id')
+
+hosting_app_name="$application_slug-$scope_slug-$scope_id"
+
+# Fetch bucket name from assets-repository provider
+echo "🔍 Fetching assets-repository provider..."
+
+nrn=$(echo "$CONTEXT" | jq -r .scope.nrn)
+
+asset_repository=$(np provider list --nrn "$nrn" --categories assets-repository --format json 2>&1)
+np_exit_code=$?
+
+if [ $np_exit_code -ne 0 ]; then
+  echo ""
+  echo "❌ Failed to fetch assets-repository provider"
+  echo ""
+
+  if echo "$asset_repository" | grep -q "not found\|no providers"; then
+    echo "  🔎 Error: No assets-repository provider found"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • No assets-repository provider is configured for this scope"
+    echo "    • The provider category 'assets-repository' does not exist"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    1. Create an assets-repository provider in nullplatform"
+    echo "    2. Ensure it's linked to the scope with NRN: $nrn"
+
+  elif echo "$asset_repository" | grep -q "unauthorized\|forbidden\|401\|403"; then
+    echo "  🔒 Error: Permission denied"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The API token doesn't have permission to list providers"
+    echo "    • The token has expired"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    1. Check your NP_API_KEY is set and valid"
+    echo "    2. Ensure you have permissions to access providers"
+
+  elif echo "$asset_repository" | grep -q "command not found"; then
+    echo "  ⚠️  Error: 'np' CLI not found"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    Install the nullplatform CLI: npm install -g @nullplatform/cli"
+
+  else
+    echo "  📋 Error details:"
+    echo "$asset_repository" | sed 's/^/    /'
+  fi
+
+  echo ""
+  exit 1
+fi
+
+hosting_bucket_name=$(echo "$asset_repository" | jq -r '
+  [.results[] | select(.attributes.bucket.name != null)] | first | .attributes.bucket.name // empty
+')
+
+if [ -z "$hosting_bucket_name" ] || [ "$hosting_bucket_name" = "null" ]; then
+  echo ""
+  echo "❌ No S3 bucket found in assets-repository providers"
+  echo ""
+  echo "  🤔 Found $(echo "$asset_repository" | jq '.results | length') provider(s), but none contain bucket information"
+  echo ""
+  echo "  📋 Providers found:"
+  echo "$asset_repository" | jq -r '.results[] | "    • \(.name // .id // "unnamed") (type: \(.type // "unknown"))"' 2>/dev/null || echo "    (could not parse providers)"
+  echo ""
+  echo "  💡 Expected one provider with: attributes.bucket.name"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    1. Ensure an S3 bucket provider is configured in assets-repository category"
+  echo "    2. Verify the provider has the bucket_name attribute populated"
+  echo ""
+  exit 1
+fi
+
+echo "✅ Bucket name: $hosting_bucket_name"
+
+# S3 prefix for multi-scope bucket support
+# TODO: Replace with your prefix variable
+hosting_s3_prefix="/app"
+
+echo "📁 S3 prefix: ${hosting_s3_prefix:-"(root)"}"
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg bucket_name "$hosting_bucket_name" \
+  --arg app_name "$hosting_app_name" \
+  --arg s3_prefix "$hosting_s3_prefix" \
+  '. + {
+    hosting_bucket_name: $bucket_name,
+    hosting_app_name: $app_name,
+    hosting_s3_prefix: $s3_prefix
+  }')
+
+echo "✅ S3 + CloudFront hosting configured"
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir}/modules"
+
+if [[ -n $MODULES_TO_USE ]]; then
+  MODULES_TO_USE="$MODULES_TO_USE,$module_name"
+else
+  MODULES_TO_USE="$module_name"
+fi

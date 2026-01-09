@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Azure DNS Setup
+# Configures DNS variables based on hosting output
+
+network_resource_group=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.dns_resource_group // empty')
+network_zone_name=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.dns_zone_name // empty')
+
+if [ -z "$network_resource_group" ]; then
+  echo "✗ dns_resource_group is not set in context"
+  exit 1
+fi
+
+if [ -z "$network_zone_name" ]; then
+  echo "✗ dns_zone_name is not set in context"
+  exit 1
+fi
+
+# Get domain from scope or context
+network_domain=$(echo "$TOFU_VARIABLES" | jq -r '.scope_domain // empty')
+if [ -z "$network_domain" ]; then
+  network_domain=$(echo "$CONTEXT" | jq -r '.scope.domain // empty')
+fi
+
+# Get target from hosting outputs (CDN endpoint, Static Web App hostname, etc.)
+network_target_domain=$(echo "$TOFU_VARIABLES" | jq -r '.hosting_cdn_endpoint_hostname // .hosting_default_hostname // empty')
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg resource_group "$network_resource_group" \
+  --arg zone_name "$network_zone_name" \
+  --arg domain "$network_domain" \
+  --arg target_domain "$network_target_domain" \
+  '. + {
+    network_resource_group: $resource_group,
+    network_zone_name: $zone_name,
+    network_domain: $domain,
+    network_target_domain: $target_domain
+  }')
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir#*deployment/}"
+MODULES_TO_USE="${MODULES_TO_USE:+$MODULES_TO_USE,}$module_name"
