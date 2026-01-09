@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Compose Terraform modules dynamically
+# Usage: source compose_modules
+#
+# Required environment variables:
+#   MODULES_TO_USE  - Comma-separated list of modules (e.g., "state/aws,network/route_53,hosting/amplify")
+#   TOFU_MODULE_DIR - Target directory where .tf files will be copied
+#
+# Each module can have:
+#   - *.tf files: Copied to TOFU_MODULE_DIR (Terraform auto-merges all .tf files)
+#   - setup script: Sourced to configure TOFU_VARIABLES and TOFU_INIT_VARIABLES
+
+script_dir="$(dirname "${BASH_SOURCE[0]}")"
+modules_dir="$script_dir"
+
+if [ -z "${MODULES_TO_USE:-}" ]; then
+  echo "✗ MODULES_TO_USE is not set"
+  exit 1
+fi
+
+if [ -z "${TOFU_MODULE_DIR:-}" ]; then
+  echo "✗ TOFU_MODULE_DIR is not set"
+  exit 1
+fi
+
+mkdir -p "$TOFU_MODULE_DIR"
+
+echo "Composing modules: $MODULES_TO_USE"
+echo "Target directory: $TOFU_MODULE_DIR"
+echo ""
+
+IFS=',' read -ra modules <<< "$MODULES_TO_USE"
+for module in "${modules[@]}"; do
+  module=$(echo "$module" | xargs) # trim whitespace
+
+  echo $module
+
+  ls $module
+  if [ ! -d "$module" ]; then
+    echo "✗ Module not found: $module"
+    exit 1
+  fi
+
+  # Copy .tf files if they exist (with module prefix to avoid conflicts)
+  if ls "$module"/*.tf 1> /dev/null 2>&1; then
+    # Extract last two path components for prefix (e.g., "/path/to/state/aws" -> "state_aws_")
+    parent=$(basename "$(dirname "$module")")
+    leaf=$(basename "$module")
+    prefix="${parent}_${leaf}_"
+    for tf_file in "$module"/*.tf; do
+      filename=$(basename "$tf_file")
+      cp "$tf_file" "$TOFU_MODULE_DIR/${prefix}${filename}"
+    done
+    echo "✓ Copied modules from: $module (prefix: $prefix)"
+  fi
+
+  # Source setup script if it exists
+  if [ -f "$module/setup" ]; then
+    echo "  Running setup for: $module"
+    source "$module/setup"
+    if [ $? -ne 0 ]; then
+      echo "✗ Setup failed for module: $module"
+      exit 1
+    fi
+    echo "✓ Setup completed for: $module"
+  fi
+
+  echo ""
+done
+
+echo "✓ All modules composed successfully"
