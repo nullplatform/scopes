@@ -1,0 +1,22 @@
+steps:
+  - name: build_context
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/build_context"
+  - name: validate_repository_does_not_exist
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/validate_repository_does_not_exist"
+  - name: create_repository
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/create_repository"
+  - name: add_collaborators
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/add_collaborators"
+  - name: generate_secrets
+    type: script
+    file: "application/scripts/code-repo/generate_secrets"
+  - name: create_secrets
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/create_secrets"
+  - name: run_first_build
+    type: script
+    file: "$CODE_REPOSITORY_SCRIPT_PATH/run_first_build"

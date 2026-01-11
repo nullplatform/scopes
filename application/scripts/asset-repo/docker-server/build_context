@@ -1,0 +1,27 @@
+#!/bin/bash
+
+if [[ -n "$DOCKER_SERVER_URL" ]]; then
+  echo "Using DOCKER_SERVER_URL from environment: $DOCKER_SERVER_URL"
+else
+  DOCKER_SERVER_URL=$(echo "$ASSET_REPOSITORY" | jq -r '.attributes.setup.server')
+  echo "No DOCKER_SERVER_URL in environment, using value from platform: $DOCKER_SERVER_URL"
+fi
+
+if [[ -n "$DOCKER_SERVER_PATH" ]]; then
+  echo "Using DOCKER_SERVER_PATH from environment: $DOCKER_SERVER_PATH"
+else
+  DOCKER_SERVER_PATH=$(echo "$ASSET_REPOSITORY" | jq -r '.attributes.setup.path')
+  echo "No DOCKER_SERVER_PATH in environment, using value from platform: $DOCKER_SERVER_PATH"
+fi
+
+if [[ -n "$DOCKER_SERVER_USE_NAMESPACE" ]]; then
+  echo "Using DOCKER_SERVER_USE_NAMESPACE from environment: $DOCKER_SERVER_USE_NAMESPACE"
+else
+  DOCKER_SERVER_USE_NAMESPACE=$(echo "$ASSET_REPOSITORY" | jq -r '.attributes.setup.use_namespace')
+  echo "No DOCKER_SERVER_USE_NAMESPACE in environment, using value from platform: $DOCKER_SERVER_USE_NAMESPACE"
+fi
+
+
+export DOCKER_SERVER_URL
+export DOCKER_SERVER_PATH
+export DOCKER_SERVER_USE_NAMESPACE

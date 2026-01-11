@@ -1,0 +1,10 @@
+steps:
+  - name: base_context
+    type: script
+    file: application/scripts/base_context
+  - name: create_code_repository
+    type: script
+    file: application/scripts/code-repo/create_code_repository
+  - name: create_asset_repository
+    type: script
+    file: application/scripts/asset-repo/create_asset_repository

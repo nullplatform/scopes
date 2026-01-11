@@ -198,13 +198,28 @@ build_query() {
 query_prometheus() {
   local query="$1"
   local start_time="$2"
-  local end_time="$3"
+  #local end_time="$3"
+  local end_time=$(date +%s)
   local step="$4"
 
   local url="${PROM_URL}/api/v1/query_range"
-  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
 
-  curl -s -G "$url" --data-urlencode "query=$query" --data-urlencode "start=$start_time" --data-urlencode "end=$end_time" --data-urlencode "step=${step}s"
+  local params="query=$(urlencode "$query")&start=$start_time&end=$end_time&step=${step}s"
+   
+  
+  if [[ -n "$PROMETHEUS_TOKEN" ]]; then
+    curl -v -k -H "Authorization: Bearer $PROMETHEUS_TOKEN" -G "$url" \
+      --data-urlencode "query=$query" \
+      --data-urlencode "start=$start_time" \
+      --data-urlencode "end=$end_time" \
+      --data-urlencode "step=${step}s"
+  else
+    curl -v -k -G "$url" \
+      --data-urlencode "query=$query" \
+      --data-urlencode "start=$start_time" \
+      --data-urlencode "end=$end_time" \
+      --data-urlencode "step=${step}s"
+  fi
 }
 
 urlencode() {
@@ -230,7 +245,16 @@ if [[ -n "$START_TIME" && -n "$END_TIME" ]]; then
   start_time=$(echo "$START_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
   now=$(echo "$END_TIME" | sed 's/T/ /' | sed 's/\.[0-9]*Z$//' | xargs -I {} date -u -d "{}" +%s 2>/dev/null || echo "0")
   step=${PERIOD:-60}
+  ##add
+  current_time=$(date +%s)
+  if [[ $end_time -gt $current_time ]]; then
+    now=$current_time
+  else
+    now=$end_time
+  fi
+  ###end
   # Calculate interval like JavaScript service: period/60 + "m"
+
   if [[ -n "$PERIOD" && "$PERIOD" -gt 0 ]]; then
     interval_minutes=$((PERIOD / 60))
     if [[ $interval_minutes -lt 1 ]]; then
@@ -296,9 +320,13 @@ query=$(build_query "$METRIC_NAME" "$filters" "$INTERVAL")
 
 response=$(query_prometheus "$query" "$start_time" "$now" "$step")
 
+
+
+
 transform_response() {
   local response="$1"
   local status=$(echo "$response" | jq -r '.status')
+
 
   if [[ "$status" != "success" ]]; then
     echo "[]"
@@ -322,5 +350,7 @@ transform_response() {
 }
 
 transformed_results=$(transform_response "$response")
+
+
 
 echo "{\"metric\":\"$METRIC_NAME\",\"type\":\"$metric_type\",\"period_in_seconds\":$step,\"unit\":\"$unit\",\"results\":$transformed_results}"

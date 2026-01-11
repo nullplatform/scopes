@@ -7,6 +7,7 @@ echo "DNS Type: $DNS_TYPE"
 echo "Action: $ACTION"
 echo "Scope Domain: $SCOPE_DOMAIN"
 
+
 if [[ "$ACTION" == "DELETE" ]] && [[ -z "${SCOPE_DOMAIN:-}" || "${SCOPE_DOMAIN:-}" == "To be defined" ]]; then
     echo "Skipping route53 action as the scope has no domain"
     return 0
@@ -21,11 +22,33 @@ case "$DNS_TYPE" in
     }
     ;;
   azure)
+    # TODO(federico.maleh) azure creates just one record (public or private), aro always creates private and optionally public. Make this work for both scenarios
     if [ "$SCOPE_VISIBILITY" = "public" ]; then
       GATEWAY_NAME="$PUBLIC_GATEWAY_NAME"
-    else
-      GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
+      HOSTED_ZONE_NAME="$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_name')"
+      HOSTED_ZONE_RG="$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_resource_group_name')"
+
+        echo "Using Azure DNS; Creating public dns record"
+        echo "HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME"
+        echo "HOSTED_ZONE_RG = $HOSTED_ZONE_RG"
+
+        source "$SERVICE_PATH/scope/networking/dns/az-records/manage_route" \
+          --action="$ACTION" \
+          --resource-group="$RESOURCE_GROUP" \
+          --subscription-id="$AZURE_SUBSCRIPTION_ID" \
+          --gateway-name="$GATEWAY_NAME" \
+          --hosted-zone-name="$HOSTED_ZONE_NAME" \
+          --hosted-zone-rg="$HOSTED_ZONE_RG" \
+          --visibility="public"
     fi
+
+    GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
+    HOSTED_ZONE_NAME="$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.private_dns_zone_name')"
+    HOSTED_ZONE_RG="$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.private_dns_zone_resource_group_name')"
+
+    echo "Using Azure DNS; Creating private dns record"
+    echo "HOSTED_ZONE_NAME = $HOSTED_ZONE_NAME"
+    echo "HOSTED_ZONE_RG = $HOSTED_ZONE_RG"
     
     source "$SERVICE_PATH/scope/networking/dns/az-records/manage_route" \
       --action="$ACTION" \
@@ -33,7 +56,8 @@ case "$DNS_TYPE" in
       --subscription-id="$AZURE_SUBSCRIPTION_ID" \
       --gateway-name="$GATEWAY_NAME" \
       --hosted-zone-name="$HOSTED_ZONE_NAME" \
-      --hosted-zone-rg="$HOSTED_ZONE_RG"
+      --hosted-zone-rg="$HOSTED_ZONE_RG" \
+      --visibility="internal"
     ;;
   external_dns)
     echo "Using external_dns provider"
