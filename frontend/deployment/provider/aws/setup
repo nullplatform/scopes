@@ -15,15 +15,27 @@ if [ -z "${TOFU_LOCK_TABLE:-}" ]; then
   exit 1
 fi
 
+RESOURCE_TAGS_JSON=${RESOURCE_TAGS_JSON:-"{}"}
+
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg aws_region "$AWS_REGION" \
   --arg tf_state_bucket "$TOFU_PROVIDER_BUCKET" \
+  --argjson resource_tags_json "$RESOURCE_TAGS_JSON" \
   --arg tf_lock_table "$TOFU_LOCK_TABLE" \
-  '. + {aws_provider: {region: $aws_region, state_bucket: $tf_state_bucket, lock_table: $tf_lock_table}}')
+  '. + {aws_provider: {region: $aws_region, state_bucket: $tf_state_bucket, lock_table: $tf_lock_table}, provider_resource_tags_json: $resource_tags_json}')
 
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"bucket=$TOFU_PROVIDER_BUCKET\""
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"region=$AWS_REGION\""
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"dynamodb_table=$TOFU_LOCK_TABLE\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=bucket=$TOFU_PROVIDER_BUCKET"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=region=$AWS_REGION"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=dynamodb_table=$TOFU_LOCK_TABLE"
+
+# TODO(federico.maleh) this is necessary for the integration tests, tests should not make us change the production code
+if [ -n "${AWS_ENDPOINT_URL:-}" ]; then
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=force_path_style=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_credentials_validation=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_metadata_api_check=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_region_validation=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=endpoints={s3=\"$AWS_ENDPOINT_URL\",dynamodb=\"$AWS_ENDPOINT_URL\"}"
+fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 module_name="${script_dir}/modules"

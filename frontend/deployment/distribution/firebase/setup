@@ -2,23 +2,23 @@
 
 # Firebase Hosting Setup
 
-hosting_app_name=$(echo "$TOFU_VARIABLES" | jq -r '.application_slug')
-hosting_environment=$(echo "$TOFU_VARIABLES" | jq -r '.scope_slug // "prod"')
-hosting_project_id=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.project // empty')
+distribution_app_name=$(echo "$CONTEXT" | jq -r .application.slug)
+distribution_environment=$(echo "$CONTEXT" | jq -r .scope.slug)
+distribution_project_id="must fill this value"
 
-if [ -z "$hosting_project_id" ]; then
+if [ -z "$distribution_project_id" ]; then
   echo "✗ GCP project not configured. Run provider/gcp setup first."
   exit 1
 fi
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
-  --arg app_name "$hosting_app_name" \
-  --arg environment "$hosting_environment" \
-  --arg project_id "$hosting_project_id" \
+  --arg app_name "$distribution_app_name" \
+  --arg environment "$distribution_environment" \
+  --arg project_id "$distribution_project_id" \
   '. + {
-    hosting_app_name: $app_name,
-    hosting_environment: $environment,
-    hosting_project_id: $project_id
+    distribution_app_name: $app_name,
+    distribution_environment: $environment,
+    distribution_project_id: $project_id
   }')
 
 # Add module to composition list

@@ -23,7 +23,7 @@ if [ -z "$network_domain" ]; then
 fi
 
 # Get target from hosting outputs (CDN endpoint, Static Web App hostname, etc.)
-network_target_domain=$(echo "$TOFU_VARIABLES" | jq -r '.hosting_cdn_endpoint_hostname // .hosting_default_hostname // empty')
+network_target_domain=$(echo "$TOFU_VARIABLES" | jq -r '.distribution_cdn_endpoint_hostname // .distribution_default_hostname // empty')
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg resource_group "$network_resource_group" \

@@ -1,54 +1,54 @@
 # GCP Cloud Storage + Cloud CDN Hosting
 # Resources for GCS static hosting with Cloud CDN
 
-variable "hosting_project_id" {
+variable "distribution_project_id" {
   description = "GCP project ID"
   type        = string
 }
 
-variable "hosting_app_name" {
+variable "distribution_app_name" {
   description = "Application name"
   type        = string
 }
 
-variable "hosting_environment" {
+variable "distribution_environment" {
   description = "Environment (dev, staging, prod)"
   type        = string
   default     = "prod"
 }
 
-variable "hosting_region" {
+variable "distribution_region" {
   description = "GCP region"
   type        = string
   default     = "us-central1"
 }
 
-variable "hosting_custom_domain" {
+variable "distribution_custom_domain" {
   description = "Custom domain (e.g., app.example.com)"
   type        = string
   default     = null
 }
 
-variable "hosting_labels" {
+variable "distribution_labels" {
   description = "Resource labels"
   type        = map(string)
   default     = {}
 }
 
 locals {
-  hosting_bucket_name = "${var.hosting_app_name}-${var.hosting_environment}-static-${var.hosting_project_id}"
+  distribution_bucket_name = "${var.distribution_app_name}-${var.distribution_environment}-static-${var.distribution_project_id}"
 
-  hosting_default_labels = merge(var.hosting_labels, {
-    application = var.hosting_app_name
-    environment = var.hosting_environment
+  distribution_default_labels = merge(var.distribution_labels, {
+    application = var.distribution_app_name
+    environment = var.distribution_environment
     managed_by  = "terraform"
   })
 }
 
 resource "google_storage_bucket" "static" {
-  name          = local.hosting_bucket_name
-  project       = var.hosting_project_id
-  location      = var.hosting_region
+  name          = local.distribution_bucket_name
+  project       = var.distribution_project_id
+  location      = var.distribution_region
   force_destroy = false
 
   website {
@@ -69,7 +69,7 @@ resource "google_storage_bucket" "static" {
 
   uniform_bucket_level_access = true
 
-  labels = local.hosting_default_labels
+  labels = local.distribution_default_labels
 }
 
 resource "google_storage_bucket_iam_member" "public_read" {
@@ -79,8 +79,8 @@ resource "google_storage_bucket_iam_member" "public_read" {
 }
 
 resource "google_compute_backend_bucket" "static" {
-  name        = "${var.hosting_app_name}-${var.hosting_environment}-backend"
-  project     = var.hosting_project_id
+  name        = "${var.distribution_app_name}-${var.distribution_environment}-backend"
+  project     = var.distribution_project_id
   bucket_name = google_storage_bucket.static.name
 
   enable_cdn = true
@@ -101,38 +101,38 @@ resource "google_compute_backend_bucket" "static" {
 }
 
 resource "google_compute_url_map" "static" {
-  name            = "${var.hosting_app_name}-${var.hosting_environment}-urlmap"
-  project         = var.hosting_project_id
+  name            = "${var.distribution_app_name}-${var.distribution_environment}-urlmap"
+  project         = var.distribution_project_id
   default_service = google_compute_backend_bucket.static.id
 }
 
 resource "google_compute_managed_ssl_certificate" "static" {
-  count   = var.hosting_custom_domain != null ? 1 : 0
-  name    = "${var.hosting_app_name}-${var.hosting_environment}-cert"
-  project = var.hosting_project_id
+  count   = var.distribution_custom_domain != null ? 1 : 0
+  name    = "${var.distribution_app_name}-${var.distribution_environment}-cert"
+  project = var.distribution_project_id
 
   managed {
-    domains = [var.hosting_custom_domain]
+    domains = [var.distribution_custom_domain]
   }
 }
 
 resource "google_compute_target_https_proxy" "static" {
-  count            = var.hosting_custom_domain != null ? 1 : 0
-  name             = "${var.hosting_app_name}-${var.hosting_environment}-https-proxy"
-  project          = var.hosting_project_id
+  count            = var.distribution_custom_domain != null ? 1 : 0
+  name             = "${var.distribution_app_name}-${var.distribution_environment}-https-proxy"
+  project          = var.distribution_project_id
   url_map          = google_compute_url_map.static.id
   ssl_certificates = [google_compute_managed_ssl_certificate.static[0].id]
 }
 
 resource "google_compute_target_http_proxy" "static" {
-  name    = "${var.hosting_app_name}-${var.hosting_environment}-http-proxy"
-  project = var.hosting_project_id
+  name    = "${var.distribution_app_name}-${var.distribution_environment}-http-proxy"
+  project = var.distribution_project_id
   url_map = google_compute_url_map.http_redirect.id
 }
 
 resource "google_compute_url_map" "http_redirect" {
-  name    = "${var.hosting_app_name}-${var.hosting_environment}-http-redirect"
-  project = var.hosting_project_id
+  name    = "${var.distribution_app_name}-${var.distribution_environment}-http-redirect"
+  project = var.distribution_project_id
 
   default_url_redirect {
     https_redirect         = true
@@ -142,14 +142,14 @@ resource "google_compute_url_map" "http_redirect" {
 }
 
 resource "google_compute_global_address" "static" {
-  name    = "${var.hosting_app_name}-${var.hosting_environment}-ip"
-  project = var.hosting_project_id
+  name    = "${var.distribution_app_name}-${var.distribution_environment}-ip"
+  project = var.distribution_project_id
 }
 
 resource "google_compute_global_forwarding_rule" "https" {
-  count                 = var.hosting_custom_domain != null ? 1 : 0
-  name                  = "${var.hosting_app_name}-${var.hosting_environment}-https-rule"
-  project               = var.hosting_project_id
+  count                 = var.distribution_custom_domain != null ? 1 : 0
+  name                  = "${var.distribution_app_name}-${var.distribution_environment}-https-rule"
+  project               = var.distribution_project_id
   ip_address            = google_compute_global_address.static.address
   ip_protocol           = "TCP"
   port_range            = "443"
@@ -158,8 +158,8 @@ resource "google_compute_global_forwarding_rule" "https" {
 }
 
 resource "google_compute_global_forwarding_rule" "http" {
-  name                  = "${var.hosting_app_name}-${var.hosting_environment}-http-rule"
-  project               = var.hosting_project_id
+  name                  = "${var.distribution_app_name}-${var.distribution_environment}-http-rule"
+  project               = var.distribution_project_id
   ip_address            = google_compute_global_address.static.address
   ip_protocol           = "TCP"
   port_range            = "80"
@@ -167,27 +167,27 @@ resource "google_compute_global_forwarding_rule" "http" {
   load_balancing_scheme = "EXTERNAL_MANAGED"
 }
 
-output "hosting_bucket_name" {
+output "distribution_bucket_name" {
   description = "GCS bucket name"
   value       = google_storage_bucket.static.name
 }
 
-output "hosting_bucket_url" {
+output "distribution_bucket_url" {
   description = "GCS bucket URL"
   value       = google_storage_bucket.static.url
 }
 
-output "hosting_load_balancer_ip" {
+output "distribution_load_balancer_ip" {
   description = "Load Balancer IP"
   value       = google_compute_global_address.static.address
 }
 
-output "hosting_website_url" {
+output "distribution_website_url" {
   description = "Website URL"
-  value       = var.hosting_custom_domain != null ? "https://${var.hosting_custom_domain}" : "http://${google_compute_global_address.static.address}"
+  value       = var.distribution_custom_domain != null ? "https://${var.distribution_custom_domain}" : "http://${google_compute_global_address.static.address}"
 }
 
-output "hosting_upload_command" {
+output "distribution_upload_command" {
   description = "Command to upload files"
   value       = "gsutil -m rsync -r ./dist gs://${google_storage_bucket.static.name}"
 }

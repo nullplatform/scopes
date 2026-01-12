@@ -64,9 +64,10 @@ set_np_mock() {
   "application_slug": "automation",
   "scope_slug": "development-tools",
   "scope_id": "7",
-  "hosting_bucket_name": "assets-kwik-e-mart-main",
-  "hosting_app_name": "automation-development-tools-7",
-  "hosting_s3_prefix": "/app"
+  "distribution_bucket_name": "assets-bucket",
+  "distribution_app_name": "automation-development-tools-7",
+  "distribution_resource_tags_json": {},
+  "distribution_s3_prefix": "/app"
 }'
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
@@ -150,5 +151,27 @@ set_np_mock() {
   run source "$SCRIPT_PATH"
 
   assert_contains "$output" "Found 0 provider(s)"
+}
+
+# =============================================================================
+# Test: Custom resource tags
+# =============================================================================
+@test "TOFU_VARIABLES includes custom resource tags" {
+  set_np_mock "success.json"
+  export RESOURCE_TAGS_JSON='{"Environment": "production", "Team": "platform"}'
+
+  run_cloudfront_setup
+
+  local expected='{
+  "application_slug": "automation",
+  "scope_slug": "development-tools",
+  "scope_id": "7",
+  "distribution_bucket_name": "assets-bucket",
+  "distribution_app_name": "automation-development-tools-7",
+  "distribution_resource_tags_json": {"Environment": "production", "Team": "platform"},
+  "distribution_s3_prefix": "/app"
+}'
+
+  assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
 }
 

@@ -3,7 +3,7 @@
     {
       "attributes": {
         "bucket": {
-          "name": "assets-kwik-e-mart-main"
+          "name": "assets-bucket"
         }
       },
       "category": "assets-repository",
@@ -17,7 +17,7 @@
         {
           "id": "ceb2021b-714e-4fa5-9202-6965c744ffd9",
           "key": "bucket.name",
-          "value": "assets-kwik-e-mart-main"
+          "value": "assets-bucket"
         }
       ],
       "updated_at": "2026-01-07T16:28:17.036Z"

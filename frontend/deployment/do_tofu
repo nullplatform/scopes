@@ -1,35 +1,23 @@
 #!/bin/bash
 
-#echo $TOFU_VARIABLES | jq .
+set -eou pipefail
 
-echo "$TOFU_INIT_VARIABLES"
-echo "$TOFU_VARIABLES"
-echo "$MODULES_TO_USE"
-#set -eou pipefail
-#
-#CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
-#
-#cd "$CURRENT_DIR"
-#
-#AWS_REGION="${AWS_REGION:-us-east-1}"
-#TF_STATE_BUCKET="test-static-null2"
-#TF_LOCK_TABLE="service-provisioning-terraform-state-lock"
-## You need to export the GITHUB_TOKEN as an env var in the agent
-##GITHUB_TOKEN=""
-#
-#HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id')
-#
-#DOMAIN=$(aws route53 get-hosted-zone --id "$HOSTED_PUBLIC_ZONE_ID" --query 'HostedZone.Name' --output text | sed 's/\.$//')
-#SUBDOMAIN="$APPLICATION_SLUG-$SCOPE_SLUG"
-#
-#np scope patch --id "$SCOPE_ID" --body "{\"domain\":\"$SUBDOMAIN.$DOMAIN\"}"
-#
-#tofu init \
+CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
+
+cd "$CURRENT_DIR"
+
+#np scope patchtofu init \
 #  -backend-config="bucket=${TF_STATE_BUCKET}" \
 #  -backend-config="key=amplify/$APPLICATION_SLUG/$SCOPE_SLUG-$SCOPE_ID" \
 #  -backend-config="region=${AWS_REGION}" \
-#  -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
-#
+#  -backend-config="dynamodb_table=${TF_LOCK_TABLE}" --id "$SCOPE_ID" --body "{\"domain\":\"$SUBDOMAIN.$DOMAIN\"}"
+# Write variables to a temp file for tofu
+TOFU_VAR_FILE="$TOFU_MODULE_DIR/.tfvars.json"
+echo "$TOFU_VARIABLES" > "$TOFU_VAR_FILE"
+
+tofu -chdir="$TOFU_MODULE_DIR" init -input=false $TOFU_INIT_VARIABLES
+tofu -chdir="$TOFU_MODULE_DIR" "$ACTION" -auto-approve -var-file="$TOFU_VAR_FILE"
+
 #tofu $ACTION -auto-approve \
 #  -var="aws_region=${AWS_REGION}" \
 #  -var="github_token=${GITHUB_TOKEN}" \

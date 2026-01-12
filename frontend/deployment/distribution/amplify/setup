@@ -3,18 +3,18 @@
 # Amplify Hosting Setup
 # Adds amplify-specific variables to TOFU_VARIABLES
 
-hosting_app_name=$(echo "$TOFU_VARIABLES" | jq -r '.application_slug')
-hosting_repository_url=$(echo "$TOFU_VARIABLES" | jq -r '.repository_url')
-hosting_environment=$(echo "$TOFU_VARIABLES" | jq -r '.scope_slug // "prod"')
+distribution_app_name=$(echo "$CONTEXT" | jq -r .application.slug)
+distribution_repository_url=$(echo "$CONTEXT" | jq -r .application.repository_url)
+distribution_environment=$(echo "$CONTEXT" | jq -r .scope.slug)
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
-  --arg app_name "$hosting_app_name" \
-  --arg repository_url "$hosting_repository_url" \
-  --arg environment "$hosting_environment" \
+  --arg app_name "$distribution_app_name" \
+  --arg repository_url "$distribution_repository_url" \
+  --arg environment "$distribution_environment" \
   '. + {
-    hosting_app_name: $app_name,
-    hosting_repository_url: $repository_url,
-    hosting_environment: $environment
+    distribution_app_name: $app_name,
+    distribution_repository_url: $repository_url,
+    distribution_environment: $environment
   }')
 
 # Add module to composition list
