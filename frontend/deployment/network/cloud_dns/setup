@@ -3,7 +3,7 @@
 # Cloud DNS Setup
 # Configures DNS variables based on hosting output
 
-network_project_id=$(echo "$TOFU_VARIABLES" | jq -r '.gcp_provider.project // empty')
+network_project_id="must fill this value"
 
 if [ -z "$network_project_id" ]; then
   echo "✗ GCP project not configured. Run provider/gcp setup first."
@@ -23,7 +23,7 @@ if [ -z "$network_domain" ]; then
 fi
 
 # Get target from hosting outputs (Load Balancer IP, etc.)
-network_target_ip=$(echo "$TOFU_VARIABLES" | jq -r '.hosting_load_balancer_ip // empty')
+network_target_ip=$(echo "$TOFU_VARIABLES" | jq -r '.distribution_load_balancer_ip // empty')
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg project_id "$network_project_id" \

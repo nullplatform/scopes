@@ -2,15 +2,15 @@
 
 # Azure Static Web Apps Hosting Setup
 
-hosting_app_name=$(echo "$TOFU_VARIABLES" | jq -r '.application_slug')
-hosting_environment=$(echo "$TOFU_VARIABLES" | jq -r '.scope_slug // "prod"')
+distribution_app_name=$(echo "$CONTEXT" | jq -r .application.slug)
+distribution_environment=$(echo "$CONTEXT" | jq -r .scope.slug)
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
-  --arg app_name "$hosting_app_name" \
-  --arg environment "$hosting_environment" \
+  --arg app_name "$distribution_app_name" \
+  --arg environment "$distribution_environment" \
   '. + {
-    hosting_app_name: $app_name,
-    hosting_environment: $environment
+    distribution_app_name: $app_name,
+    distribution_environment: $environment
   }')
 
 # Add module to composition list

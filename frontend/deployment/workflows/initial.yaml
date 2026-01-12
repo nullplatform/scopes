@@ -16,9 +16,6 @@ steps:
   - name: setup_distribution_layer
     type: script
     file: "$SERVICE_PATH/deployment/distribution/$DISTRIBUTION_LAYER/setup"
-#  - name: setup_data_layer
-#    type: script
-#    file: "$SERVICE_PATH/deployment/data/$DATA_LAYER/setup"
   - name: build_modules
     type: script
     file: "$SERVICE_PATH/deployment/compose_modules"

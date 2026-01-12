@@ -1,87 +1,87 @@
 # Firebase Hosting
 # Resources for Firebase static hosting
 
-variable "hosting_project_id" {
+variable "distribution_project_id" {
   description = "GCP/Firebase project ID"
   type        = string
 }
 
-variable "hosting_app_name" {
+variable "distribution_app_name" {
   description = "Application name"
   type        = string
 }
 
-variable "hosting_environment" {
+variable "distribution_environment" {
   description = "Environment (dev, staging, prod)"
   type        = string
   default     = "prod"
 }
 
-variable "hosting_custom_domains" {
+variable "distribution_custom_domains" {
   description = "List of custom domains"
   type        = list(string)
   default     = []
 }
 
-variable "hosting_labels" {
+variable "distribution_labels" {
   description = "Resource labels"
   type        = map(string)
   default     = {}
 }
 
 locals {
-  hosting_site_id = "${var.hosting_app_name}-${var.hosting_environment}"
+  distribution_site_id = "${var.distribution_app_name}-${var.distribution_environment}"
 
-  hosting_default_labels = merge(var.hosting_labels, {
-    application = replace(var.hosting_app_name, "-", "_")
-    environment = var.hosting_environment
+  distribution_default_labels = merge(var.distribution_labels, {
+    application = replace(var.distribution_app_name, "-", "_")
+    environment = var.distribution_environment
     managed_by  = "terraform"
   })
 }
 
 resource "google_firebase_project" "default" {
   provider = google-beta
-  project  = var.hosting_project_id
+  project  = var.distribution_project_id
 }
 
-resource "google_firebase_hosting_site" "default" {
+resource "google_firebase_distribution_site" "default" {
   provider = google-beta
   project  = google_firebase_project.default.project
-  site_id  = local.hosting_site_id
+  site_id  = local.distribution_site_id
 }
 
-resource "google_firebase_hosting_custom_domain" "domains" {
-  for_each = toset(var.hosting_custom_domains)
+resource "google_firebase_distribution_custom_domain" "domains" {
+  for_each = toset(var.distribution_custom_domains)
 
   provider      = google-beta
   project       = google_firebase_project.default.project
-  site_id       = google_firebase_hosting_site.default.site_id
+  site_id       = google_firebase_distribution_site.default.site_id
   custom_domain = each.value
 
   wait_dns_verification = false
 }
 
-output "hosting_project_id" {
+output "distribution_project_id" {
   description = "Firebase project ID"
   value       = google_firebase_project.default.project
 }
 
-output "hosting_site_id" {
+output "distribution_site_id" {
   description = "Firebase Hosting site ID"
-  value       = google_firebase_hosting_site.default.site_id
+  value       = google_firebase_distribution_site.default.site_id
 }
 
-output "hosting_default_url" {
+output "distribution_default_url" {
   description = "Firebase Hosting default URL"
-  value       = "https://${google_firebase_hosting_site.default.site_id}.web.app"
+  value       = "https://${google_firebase_distribution_site.default.site_id}.web.app"
 }
 
-output "hosting_firebaseapp_url" {
+output "distribution_firebaseapp_url" {
   description = "Firebase alternative URL"
-  value       = "https://${google_firebase_hosting_site.default.site_id}.firebaseapp.com"
+  value       = "https://${google_firebase_distribution_site.default.site_id}.firebaseapp.com"
 }
 
-output "hosting_website_url" {
+output "distribution_website_url" {
   description = "Website URL"
-  value       = length(var.hosting_custom_domains) > 0 ? "https://${var.hosting_custom_domains[0]}" : "https://${google_firebase_hosting_site.default.site_id}.web.app"
+  value       = length(var.distribution_custom_domains) > 0 ? "https://${var.distribution_custom_domains[0]}" : "https://${google_firebase_distribution_site.default.site_id}.web.app"
 }

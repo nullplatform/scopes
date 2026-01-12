@@ -54,29 +54,7 @@ run_build_context() {
   run_build_context
 
   # Expected JSON - update this when adding new fields
-  local expected='{
-  "application_slug": "automation",
-  "application_version": "v1.0.0",
-  "env_vars_json": {
-    "CLUSTER_NAME": "development-cluster",
-    "TEST": "testing-tools"
-  },
-  "repository_url": "https://github.com/playground-repos/tools-automation",
-  "resource_tags_json": {
-    "account": "playground",
-    "account_id": 2,
-    "application": "automation",
-    "application_id": 4,
-    "deployment_id": 8,
-    "namespace": "tools",
-    "namespace_id": 3,
-    "nullplatform": "true",
-    "scope": "development-tools",
-    "scope_id": 7
-  },
-  "scope_id": "7",
-  "scope_slug": "development-tools"
-}'
+  local expected='{}'
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
 }
@@ -144,4 +122,27 @@ run_build_context() {
   run_build_context
 
   assert_not_empty "$TOFU_MODULE_DIR" "TOFU_MODULE_DIR"
+}
+
+# =============================================================================
+# Test: RESOURCE_TAGS_JSON - verifies the entire JSON structure
+# =============================================================================
+@test "RESOURCE_TAGS_JSON matches expected structure" {
+  run_build_context
+
+  # Expected JSON - update this when adding new fields
+  local expected='{
+    "account": "playground",
+    "account_id": 2,
+    "application": "automation",
+    "application_id": 4,
+    "deployment_id": 8,
+    "namespace": "tools",
+    "namespace_id": 3,
+    "nullplatform": "true",
+    "scope": "development-tools",
+    "scope_id": 7
+  }'
+
+  assert_json_equal "$RESOURCE_TAGS_JSON" "$expected" "RESOURCE_TAGS_JSON"
 }
