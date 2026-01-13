@@ -86,3 +86,72 @@ assert_json_equal() {
     return 1
   fi
 }
+
+# =============================================================================
+# Help / Documentation
+# =============================================================================
+
+# Display help for all available unit test assertion utilities
+test_help() {
+  cat <<'EOF'
+================================================================================
+                      Unit Test Assertions Reference
+================================================================================
+
+VALUE ASSERTIONS
+----------------
+  assert_equal "<actual>" "<expected>"
+      Assert two string values are equal.
+      Example: assert_equal "$result" "expected_value"
+
+  assert_contains "<haystack>" "<needle>"
+      Assert a string contains a substring.
+      Example: assert_contains "$output" "success"
+
+  assert_not_empty "<value>" ["<name>"]
+      Assert a value is not empty.
+      Example: assert_not_empty "$result" "API response"
+
+  assert_empty "<value>" ["<name>"]
+      Assert a value is empty.
+      Example: assert_empty "$error" "error message"
+
+FILE SYSTEM ASSERTIONS
+----------------------
+  assert_file_exists "<path>"
+      Assert a file exists.
+      Example: assert_file_exists "/tmp/output.json"
+
+  assert_directory_exists "<path>"
+      Assert a directory exists.
+      Example: assert_directory_exists "/tmp/output"
+
+JSON ASSERTIONS
+---------------
+  assert_json_equal "<actual>" "<expected>" ["<name>"]
+      Assert two JSON structures are equal (order-independent).
+      Example: assert_json_equal "$response" '{"status": "ok"}'
+
+BATS BUILT-IN HELPERS
+---------------------
+  run <command>
+      Run a command and capture output in $output and exit code in $status.
+      Example: run my_function "arg1" "arg2"
+
+  [ "$status" -eq 0 ]
+      Check exit code after 'run'.
+
+  [[ "$output" == *"expected"* ]]
+      Check output contains expected string.
+
+USAGE IN TESTS
+--------------
+  Add this to your test file's setup() function:
+
+    setup() {
+      source "$PROJECT_ROOT/testing/assertions.sh"
+    }
+
+================================================================================
+EOF
+}

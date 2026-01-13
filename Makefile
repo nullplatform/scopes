@@ -35,9 +35,9 @@ endif
 # Run integration tests
 test-integration:
 ifdef MODULE
-	@./testing/run_integration_tests.sh $(MODULE) $(INTEGRATION_ARGS)
+	@./testing/run_integration_tests.sh $(MODULE)
 else
-	@./testing/run_integration_tests.sh $(INTEGRATION_ARGS)
+	@./testing/run_integration_tests.sh
 endif
 
 # Help
@@ -50,5 +50,4 @@ help:
 	@echo "  test-integration  Run integration tests"
 	@echo ""
 	@echo "Options:"
-	@echo "  MODULE=<name>              Run tests for specific module (e.g., MODULE=frontend)"
-	@echo "  INTEGRATION_ARGS=<args>    Extra args for integration tests (e.g., --no-localstack)"
+	@echo "  MODULE=<name>     Run tests for specific module (e.g., MODULE=frontend)"

@@ -1,0 +1,41 @@
+# =============================================================================
+# Integration Test Runner Container
+#
+# Contains all tools needed to run integration tests:
+# - bats-core (test framework)
+# - aws-cli (for LocalStack/Moto assertions)
+# - jq (JSON processing)
+# - curl (HTTP requests)
+# - np CLI (nullplatform CLI)
+# - opentofu (infrastructure as code)
+# =============================================================================
+
+FROM alpine:3.19
+
+# Install base dependencies
+RUN apk add --no-cache \
+    bash \
+    curl \
+    jq \
+    git \
+    openssh \
+    docker-cli \
+    aws-cli \
+    ca-certificates \
+    ncurses
+
+# Install bats-core
+RUN apk add --no-cache bats
+
+# Install OpenTofu
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community opentofu
+
+# Install nullplatform CLI and add to PATH
+RUN curl -fsSL https://cli.nullplatform.com/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Default command - run bats tests
+ENTRYPOINT ["/bin/bash"]

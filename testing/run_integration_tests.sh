@@ -1,12 +1,16 @@
 #!/bin/bash
 # =============================================================================
-# Test runner for all integration tests across all modules
+# Test runner for all integration tests (BATS) across all modules
+#
+# Tests run inside a Docker container with:
+# - LocalStack for AWS emulation
+# - Moto for CloudFront emulation
+# - Smocker for nullplatform API mocking
 #
 # Usage:
 #   ./testing/run_integration_tests.sh                    # Run all tests
 #   ./testing/run_integration_tests.sh frontend           # Run tests for frontend module only
-#   ./testing/run_integration_tests.sh --no-localstack    # Skip LocalStack management
-#   ./testing/run_integration_tests.sh frontend --no-localstack
+#   ./testing/run_integration_tests.sh --build            # Rebuild containers before running
 # =============================================================================
 
 set -e
@@ -23,19 +27,22 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Parse arguments
-MANAGE_LOCALSTACK=true
 MODULE=""
+BUILD_FLAG=""
 
 for arg in "$@"; do
   case $arg in
-    --no-localstack)
-      MANAGE_LOCALSTACK=false
+    --build)
+      BUILD_FLAG="--build"
       ;;
     *)
       MODULE="$arg"
       ;;
   esac
 done
+
+# Docker compose file location
+COMPOSE_FILE="$SCRIPT_DIR/docker/docker-compose.integration.yml"
 
 # Check if docker is installed
 if ! command -v docker &> /dev/null; then
@@ -49,51 +56,9 @@ if ! command -v docker &> /dev/null; then
   exit 1
 fi
 
-# Check if docker compose is available
-if ! command -v docker compose &> /dev/null && ! command -v docker-compose &> /dev/null; then
-  echo -e "${RED}docker compose is not installed${NC}"
-  echo ""
-  echo "Install with:"
-  echo "  Docker Desktop includes docker compose"
-  echo "  Or install separately: https://docs.docker.com/compose/install/"
-  exit 1
-fi
-
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-  echo -e "${RED}jq is not installed${NC}"
-  echo ""
-  echo "Install with:"
-  echo "  brew install jq           # macOS"
-  echo "  apt install jq            # Ubuntu/Debian"
-  echo "  apk add jq                # Alpine"
-  echo "  choco install jq          # Windows"
-  exit 1
-fi
-
-# Check if aws cli is installed
-if ! command -v aws &> /dev/null; then
-  echo -e "${RED}aws-cli is not installed${NC}"
-  echo ""
-  echo "Install with:"
-  echo "  brew install awscli       # macOS"
-  echo "  apt install awscli        # Ubuntu/Debian"
-  echo "  apk add aws-cli           # Alpine"
-  echo "  choco install awscli      # Windows"
-  exit 1
-fi
-
-# Check if shunit2 is installed
-if ! command -v shunit2 &> /dev/null && \
-   [ ! -f "/usr/local/bin/shunit2" ] && \
-   [ ! -f "/usr/share/shunit2/shunit2" ] && \
-   [ ! -f "/opt/homebrew/bin/shunit2" ]; then
-  echo -e "${RED}shunit2 is not installed${NC}"
-  echo ""
-  echo "Install with:"
-  echo "  brew install shunit2      # macOS"
-  echo "  apt install shunit2       # Ubuntu/Debian"
-  echo "  apk add shunit2           # Alpine"
+# Check if docker compose file exists
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo -e "${RED}Docker compose file not found: $COMPOSE_FILE${NC}"
   exit 1
 fi
 
@@ -108,161 +73,80 @@ get_module_name() {
   echo "$path" | sed 's|^\./||' | cut -d'/' -f1
 }
 
-# Find docker-compose.yml for a test directory (search up the tree)
-find_docker_compose() {
-  local dir="$1"
-  local current="$dir"
-
-  while [ "$current" != "$PROJECT_ROOT" ] && [ "$current" != "/" ]; do
-    if [ -f "$current/docker-compose.yml" ]; then
-      echo "$current/docker-compose.yml"
-      return 0
-    fi
-    current="$(dirname "$current")"
-  done
-
-  return 1
-}
-
-# Start LocalStack
-start_localstack() {
-  local compose_file="$1"
-
-  if [ -z "$compose_file" ]; then
-    echo -e "${YELLOW}No docker-compose.yml found, skipping LocalStack${NC}"
-    return 0
-  fi
-
-  echo -e "${CYAN}Starting LocalStack...${NC}"
-  docker compose -f "$compose_file" up -d
-
-  echo "Waiting for LocalStack to be ready..."
-  local max_attempts=30
-  local attempt=0
-
-  while [ $attempt -lt $max_attempts ]; do
-    if curl -s "http://localhost:4566/_localstack/health" | jq -e '.services.s3 == "running"' > /dev/null 2>&1; then
-      echo -e "${GREEN}LocalStack is ready${NC}"
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    sleep 2
-    echo -n "."
-  done
-
+# Cleanup function
+cleanup() {
   echo ""
-  echo -e "${RED}LocalStack failed to start${NC}"
-  return 1
-}
-
-# Stop LocalStack
-stop_localstack() {
-  local compose_file="$1"
-
-  if [ -n "$compose_file" ] && [ -f "$compose_file" ]; then
-    echo -e "${CYAN}Stopping LocalStack...${NC}"
-    docker compose -f "$compose_file" down -v 2>/dev/null || true
-  fi
-}
-
-# Run a single test file
-run_test_file() {
-  local test_file="$1"
-  local test_name=$(basename "$test_file" .sh)
-
-  echo ""
-  echo -e "${CYAN}Running: $test_name${NC}"
-  echo "----------------------------------------"
-
-  if bash "$test_file"; then
-    echo -e "${GREEN}PASSED: $test_name${NC}"
-    return 0
-  else
-    echo -e "${RED}FAILED: $test_name${NC}"
-    return 1
-  fi
-}
-
-# Run tests in a specific directory
-run_tests_in_dir() {
-  local test_dir="$1"
-  local module_name=$(get_module_name "$test_dir")
-  local passed=0
-  local failed=0
-
-  # Find test files
-  local test_files=$(find "$test_dir" -maxdepth 1 -name "*_test.sh" 2>/dev/null | sort)
-
-  if [ -z "$test_files" ]; then
-    return 0
-  fi
-
-  echo -e "${CYAN}[$module_name]${NC} Running integration tests in $test_dir"
-  echo ""
-
-  for test_file in $test_files; do
-    if [ -f "$test_file" ]; then
-      if run_test_file "$test_file"; then
-        passed=$((passed + 1))
-      else
-        failed=$((failed + 1))
-      fi
-    fi
-  done
-
-  echo ""
-  echo "  Passed: $passed, Failed: $failed"
-  echo ""
-
-  # Return failure if any test failed
-  [ $failed -eq 0 ]
+  echo -e "${CYAN}Stopping containers...${NC}"
+  docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
 }
 
 echo ""
 echo "========================================"
-echo "  Integration Tests"
+echo "  Integration Tests (Containerized)"
 echo "========================================"
 echo ""
 
-# Find docker-compose file for LocalStack
-COMPOSE_FILE=""
-if [ -n "$MODULE" ]; then
-  # Look for docker-compose in the specified module
-  for dir in $(find "$MODULE" -type d -name "integration" -path "*/tests/*" 2>/dev/null | head -1); do
-    COMPOSE_FILE=$(find_docker_compose "$dir") || true
+# Print available test helpers reference
+source "$SCRIPT_DIR/integration_helpers.sh"
+test_help
+echo ""
+
+# Set trap for cleanup
+trap cleanup EXIT
+
+# Build test runner image if needed
+echo -e "${CYAN}Building test runner container...${NC}"
+docker compose -f "$COMPOSE_FILE" build $BUILD_FLAG test-runner 2>&1 | grep -v "^$" || true
+echo ""
+
+# Start infrastructure services
+echo -e "${CYAN}Starting infrastructure services...${NC}"
+docker compose -f "$COMPOSE_FILE" up -d localstack moto smocker nginx-proxy 2>&1 | grep -v "^$" || true
+
+# Wait for services to be healthy
+echo -n "Waiting for services to be ready"
+max_attempts=30
+attempt=0
+
+while [ $attempt -lt $max_attempts ]; do
+  # Check health via curl (most reliable)
+  localstack_ok=$(curl -s "http://localhost:4566/_localstack/health" 2>/dev/null | jq -e '.services.s3 == "running"' >/dev/null 2>&1 && echo "yes" || echo "no")
+  moto_ok=$(curl -s "http://localhost:5555/moto-api/" >/dev/null 2>&1 && echo "yes" || echo "no")
+  smocker_ok=$(curl -s "http://localhost:8081/version" >/dev/null 2>&1 && echo "yes" || echo "no")
+  nginx_ok=$(curl -sk "https://localhost:8443/mocks" >/dev/null 2>&1 && echo "yes" || echo "no")
+
+  if [[ "$localstack_ok" == "yes" ]] && [[ "$moto_ok" == "yes" ]] && [[ "$smocker_ok" == "yes" ]] && [[ "$nginx_ok" == "yes" ]]; then
+    echo ""
+    echo -e "${GREEN}All services ready${NC}"
     break
-  done
-else
-  # Look for docker-compose in first integration dir found
-  for dir in $(find_test_dirs | head -1); do
-    COMPOSE_FILE=$(find_docker_compose "$dir") || true
-    break
-  done
+  fi
+
+  attempt=$((attempt + 1))
+  sleep 2
+  echo -n "."
+done
+
+if [ $attempt -eq $max_attempts ]; then
+  echo ""
+  echo -e "${RED}Services failed to start${NC}"
+  docker compose -f "$COMPOSE_FILE" logs
+  exit 1
 fi
 
-# Manage LocalStack if requested
-if [ "$MANAGE_LOCALSTACK" = true ] && [ -n "$COMPOSE_FILE" ]; then
-  trap "stop_localstack '$COMPOSE_FILE'" EXIT
-  start_localstack "$COMPOSE_FILE"
-fi
+echo ""
 
-# Track overall results
-TOTAL_FAILED=0
+# Get smocker container IP for DNS resolution
+SMOCKER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' integration-smocker 2>/dev/null || echo "172.28.0.10")
+export SMOCKER_IP
 
+# Determine which tests to run
 if [ -n "$MODULE" ]; then
-  # Run tests for specific module or directory
   if [ -d "$MODULE" ]; then
-    # Find all integration test directories under the module
-    module_test_dirs=$(find "$MODULE" -type d -name "integration" -path "*/tests/*" 2>/dev/null | sort)
-    if [ -z "$module_test_dirs" ]; then
+    TEST_PATHS=$(find "$MODULE" -type d -name "integration" -path "*/tests/*" 2>/dev/null | sort)
+    if [ -z "$TEST_PATHS" ]; then
       echo -e "${RED}No integration test directories found in: $MODULE${NC}"
       exit 1
     fi
-    for test_dir in $module_test_dirs; do
-      if ! run_tests_in_dir "$test_dir"; then
-        TOTAL_FAILED=$((TOTAL_FAILED + 1))
-      fi
-    done
   else
     echo -e "${RED}Directory not found: $MODULE${NC}"
     echo ""
@@ -273,20 +157,43 @@ if [ -n "$MODULE" ]; then
     exit 1
   fi
 else
-  # Run all tests
-  test_dirs=$(find_test_dirs)
-
-  if [ -z "$test_dirs" ]; then
+  TEST_PATHS=$(find_test_dirs)
+  if [ -z "$TEST_PATHS" ]; then
     echo -e "${YELLOW}No integration test directories found${NC}"
     exit 0
   fi
-
-  for test_dir in $test_dirs; do
-    if ! run_tests_in_dir "$test_dir"; then
-      TOTAL_FAILED=$((TOTAL_FAILED + 1))
-    fi
-  done
 fi
+
+# Run tests for each directory
+TOTAL_FAILED=0
+
+for test_dir in $TEST_PATHS; do
+  module_name=$(get_module_name "$test_dir")
+
+  # Find .bats files
+  bats_files=$(find "$test_dir" -maxdepth 1 -name "*.bats" 2>/dev/null | sort)
+  if [ -z "$bats_files" ]; then
+    continue
+  fi
+
+  echo -e "${CYAN}[$module_name]${NC} Running integration tests in $test_dir"
+  echo ""
+
+  # Run tests inside the container
+  # Strip leading ./ from test_dir for cleaner paths
+  container_test_dir="${test_dir#./}"
+
+  docker compose -f "$COMPOSE_FILE" run --rm \
+    -e PROJECT_ROOT=/workspace \
+    -e SMOCKER_HOST=http://smocker:8081 \
+    -e LOCALSTACK_ENDPOINT=http://localstack:4566 \
+    -e MOTO_ENDPOINT=http://moto:5000 \
+    -e AWS_ENDPOINT_URL=http://localstack:4566 \
+    test-runner \
+    -c "update-ca-certificates 2>/dev/null; bats --formatter pretty --show-output-of-passing-tests /workspace/${container_test_dir}/*.bats" || TOTAL_FAILED=$((TOTAL_FAILED + 1))
+
+  echo ""
+done
 
 if [ $TOTAL_FAILED -gt 0 ]; then
   echo -e "${RED}Some integration tests failed${NC}"

@@ -61,8 +61,8 @@ run_tests_in_dir() {
   local test_dir="$1"
   local module_name=$(get_module_name "$test_dir")
 
-  # Find all .bats files recursively
-  local bats_files=$(find "$test_dir" -name "*.bats" 2>/dev/null)
+  # Find all .bats files, excluding integration directory (integration tests are run separately)
+  local bats_files=$(find "$test_dir" -name "*.bats" -not -path "*/integration/*" 2>/dev/null)
 
   if [ -z "$bats_files" ]; then
     return 0
@@ -74,7 +74,8 @@ run_tests_in_dir() {
   (
     cd "$test_dir"
     # Use script to force TTY for colored output
-    script -q /dev/null bats --formatter pretty $(find . -name "*.bats" | sort)
+    # Exclude integration directory - those tests are run by run_integration_tests.sh
+    script -q /dev/null bats --formatter pretty $(find . -name "*.bats" -not -path "*/integration/*" | sort)
   )
 
   echo ""
@@ -82,9 +83,17 @@ run_tests_in_dir() {
 
 echo ""
 echo "========================================"
-echo "  BATS Tests"
+echo "  BATS Tests (Unit)"
 echo "========================================"
 echo ""
+
+# Print available test helpers reference
+source "$SCRIPT_DIR/assertions.sh"
+test_help
+echo ""
+
+# Export BASH_ENV to auto-source assertions.sh in all bats test subshells
+export BASH_ENV="$SCRIPT_DIR/assertions.sh"
 
 if [ -n "$1" ]; then
   # Run tests for specific module or directory
