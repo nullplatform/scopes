@@ -69,14 +69,14 @@ integration_setup() {
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case $1 in
-      --cloud-provider)
-        cloud_provider="$2"
-        shift 2
-        ;;
-      *)
-        echo -e "${INTEGRATION_RED}Unknown argument: $1${INTEGRATION_NC}"
-        return 1
-        ;;
+    --cloud-provider)
+      cloud_provider="$2"
+      shift 2
+      ;;
+    *)
+      echo -e "${INTEGRATION_RED}Unknown argument: $1${INTEGRATION_NC}"
+      return 1
+      ;;
     esac
   done
 
@@ -88,14 +88,14 @@ integration_setup() {
   fi
 
   case "$cloud_provider" in
-    aws|azure|gcp)
-      INTEGRATION_CLOUD_PROVIDER="$cloud_provider"
-      ;;
-    *)
-      echo -e "${INTEGRATION_RED}Error: Unsupported cloud provider: $cloud_provider${INTEGRATION_NC}"
-      echo "Supported providers: aws, azure, gcp"
-      return 1
-      ;;
+  aws|azure|gcp)
+    INTEGRATION_CLOUD_PROVIDER="$cloud_provider"
+    ;;
+  *)
+    echo -e "${INTEGRATION_RED}Error: Unsupported cloud provider: $cloud_provider${INTEGRATION_NC}"
+    echo "Supported providers: aws, azure, gcp"
+    return 1
+    ;;
   esac
 
   export INTEGRATION_CLOUD_PROVIDER
@@ -111,15 +111,15 @@ integration_setup() {
 
   # Call provider-specific setup
   case "$INTEGRATION_CLOUD_PROVIDER" in
-    aws)
-      _setup_aws
-      ;;
-    azure)
-      _setup_azure
-      ;;
-    gcp)
-      _setup_gcp
-      ;;
+  aws)
+    _setup_aws
+    ;;
+  azure)
+    _setup_azure
+    ;;
+  gcp)
+    _setup_gcp
+    ;;
   esac
 }
 
@@ -129,15 +129,15 @@ integration_teardown() {
 
   # Call provider-specific teardown
   case "$INTEGRATION_CLOUD_PROVIDER" in
-    aws)
-      _teardown_aws
-      ;;
-    azure)
-      _teardown_azure
-      ;;
-    gcp)
-      _teardown_gcp
-      ;;
+  aws)
+    _teardown_aws
+    ;;
+  azure)
+    _teardown_azure
+    ;;
+  gcp)
+    _teardown_gcp
+    ;;
   esac
 }
 
@@ -607,7 +607,7 @@ _setup_default_mocks() {
   }
 }]
 EOF
-)
+  )
   curl -s -X POST "${SMOCKER_HOST}/mocks" \
     -H "Content-Type: application/json" \
     -d "$token_mock" >/dev/null 2>&1

@@ -1,0 +1,14 @@
+{
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "id": "s3-asset-repository-spec-id",
+        "slug": "s3-assets",
+        "categories": [
+          {"slug": "assets-repository"}
+        ]
+      }
+    ]
+  }
+}
