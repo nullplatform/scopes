@@ -235,19 +235,33 @@ run_workflow_step() {
 # AWS Resource Assertions (against LocalStack)
 # =============================================================================
 
+# Colors for assertions
+ASSERT_GREEN='\033[0;32m'
+ASSERT_RED='\033[0;31m'
+ASSERT_CYAN='\033[0;36m'
+ASSERT_NC='\033[0m'
+
 aws_local() {
   aws --endpoint-url="$LOCALSTACK_ENDPOINT" --no-cli-pager --no-cli-auto-prompt "$@"
+}
+
+assert_pass() {
+  echo -e "${ASSERT_GREEN}PASS${ASSERT_NC}"
+}
+
+assert_fail() {
+  echo -e "${ASSERT_RED}FAIL${ASSERT_NC}"
 }
 
 assert_s3_bucket_exists() {
   local bucket="$1"
 
-  echo -n "  Checking S3 bucket '$bucket' exists... "
-  if aws_local s3api head-bucket --bucket "$bucket" 2>/dev/null; then
-    echo "✓"
+  echo -ne "  ${ASSERT_CYAN}Assert:${ASSERT_NC} S3 bucket '${bucket}' exists ... "
+  if aws_local s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
+    assert_pass
     return 0
   else
-    echo "✗"
+    assert_fail
     fail "S3 bucket does not exist: $bucket"
     return 1
   fi
@@ -256,13 +270,13 @@ assert_s3_bucket_exists() {
 assert_s3_bucket_not_exists() {
   local bucket="$1"
 
-  echo -n "  Checking S3 bucket '$bucket' does not exist... "
-  if aws_local s3api head-bucket --bucket "$bucket" 2>/dev/null; then
-    echo "✗"
+  echo -ne "  ${ASSERT_CYAN}Assert:${ASSERT_NC} S3 bucket '${bucket}' does not exist ... "
+  if aws_local s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
+    assert_fail
     fail "S3 bucket should not exist: $bucket"
     return 1
   else
-    echo "✓"
+    assert_pass
     return 0
   fi
 }
@@ -270,7 +284,7 @@ assert_s3_bucket_not_exists() {
 assert_cloudfront_distribution_exists() {
   local comment="$1"
 
-  echo -n "  Checking CloudFront distribution with comment '$comment' exists... "
+  echo -ne "  ${ASSERT_CYAN}Assert:${ASSERT_NC} CloudFront distribution '${comment}' exists ... "
   # CloudFront uses Moto endpoint, not LocalStack
   local distribution
   distribution=$(aws --endpoint-url="$MOTO_ENDPOINT" --no-cli-pager cloudfront list-distributions \
@@ -278,10 +292,10 @@ assert_cloudfront_distribution_exists() {
     --output text 2>/dev/null)
 
   if [ -n "$distribution" ] && [ "$distribution" != "None" ]; then
-    echo "✓"
+    assert_pass
     return 0
   else
-    echo "✗"
+    assert_fail
     fail "CloudFront distribution does not exist with comment: $comment"
     return 1
   fi
@@ -290,7 +304,7 @@ assert_cloudfront_distribution_exists() {
 assert_cloudfront_distribution_not_exists() {
   local comment="$1"
 
-  echo -n "  Checking CloudFront distribution with comment '$comment' does not exist... "
+  echo -ne "  ${ASSERT_CYAN}Assert:${ASSERT_NC} CloudFront distribution '${comment}' does not exist ... "
   # CloudFront uses Moto endpoint, not LocalStack
   local distribution
   distribution=$(aws --endpoint-url="$MOTO_ENDPOINT" --no-cli-pager cloudfront list-distributions \
@@ -298,10 +312,10 @@ assert_cloudfront_distribution_not_exists() {
     --output text 2>/dev/null)
 
   if [ -z "$distribution" ] || [ "$distribution" == "None" ]; then
-    echo "✓"
+    assert_pass
     return 0
   else
-    echo "✗"
+    assert_fail
     fail "CloudFront distribution should not exist with comment: $comment"
     return 1
   fi
@@ -311,7 +325,7 @@ assert_route53_record_exists() {
   local record_name="$1"
   local record_type="$2"
 
-  echo -n "  Checking Route53 record '$record_name' ($record_type) exists... "
+  echo -ne "  ${ASSERT_CYAN}Assert:${ASSERT_NC} Route53 ${record_type} record '${record_name}' exists ... "
 
   # Ensure record name ends with a dot
   [[ "$record_name" != *. ]] && record_name="$record_name."
@@ -323,7 +337,7 @@ assert_route53_record_exists() {
     --output text 2>/dev/null | sed 's|/hostedzone/||')
 
   if [ -z "$zone_id" ] || [ "$zone_id" == "None" ]; then
-    echo "✗"
+    assert_fail
     fail "No Route53 hosted zones found"
     return 1
   fi
@@ -335,10 +349,10 @@ assert_route53_record_exists() {
     --output text 2>/dev/null)
 
   if [ -n "$record" ] && [ "$record" != "None" ]; then
-    echo "✓"
+    assert_pass
     return 0
   else
-    echo "✗"
+    assert_fail
     fail "Route53 record does not exist: $record_name ($record_type) in zone $zone_id"
     return 1
   fi
@@ -348,7 +362,7 @@ assert_route53_record_not_exists() {
   local record_name="$1"
   local record_type="$2"
 
-  echo -n "  Checking Route53 record '$record_name' ($record_type) does not exist... "
+  echo -ne "  ${ASSERT_CYAN}Assert:${ASSERT_NC} Route53 ${record_type} record '${record_name}' does not exist ... "
 
   # Ensure record name ends with a dot
   [[ "$record_name" != *. ]] && record_name="$record_name."
@@ -361,7 +375,7 @@ assert_route53_record_not_exists() {
 
   if [ -z "$zone_id" ] || [ "$zone_id" == "None" ]; then
     # No zones means no records, so assertion passes
-    echo "✓"
+    assert_pass
     return 0
   fi
 
@@ -372,10 +386,10 @@ assert_route53_record_not_exists() {
     --output text 2>/dev/null)
 
   if [ -z "$record" ] || [ "$record" == "None" ]; then
-    echo "✓"
+    assert_pass
     return 0
   else
-    echo "✗"
+    assert_fail
     fail "Route53 record should not exist: $record_name ($record_type) in zone $zone_id"
     return 1
   fi
@@ -390,7 +404,9 @@ run_assertions() {
   local assertions=$(get_step_assertions "$step_index")
   local assertion_count=$(echo "$assertions" | jq -r 'length')
 
-  echo "Running $assertion_count assertions..."
+  echo ""
+  echo -e "${ASSERT_CYAN}Running ${assertion_count} assertion(s)${ASSERT_NC}"
+  echo ""
 
   for i in $(seq 0 $((assertion_count - 1))); do
     local assertion=$(echo "$assertions" | jq -r ".[$i]")
