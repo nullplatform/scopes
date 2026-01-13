@@ -3,15 +3,16 @@
 # Test runner for all BATS tests across all modules
 #
 # Usage:
-#   ./run_tests.sh                    # Run all tests
-#   ./run_tests.sh frontend           # Run tests for frontend module only
-#   ./run_tests.sh frontend/deployment/tests/aws  # Run specific test directory
+#   ./testing/run_bats_tests.sh                    # Run all tests
+#   ./testing/run_bats_tests.sh frontend           # Run tests for frontend module only
+#   ./testing/run_bats_tests.sh frontend/deployment/tests  # Run specific test directory
 # =============================================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 # Colors
 RED='\033[0;31m'
@@ -27,6 +28,8 @@ if ! command -v bats &> /dev/null; then
   echo "Install with:"
   echo "  brew install bats-core    # macOS"
   echo "  apt install bats          # Ubuntu/Debian"
+  echo "  apk add bats              # Alpine"
+  echo "  choco install bats        # Windows"
   exit 1
 fi
 
@@ -35,14 +38,16 @@ if ! command -v jq &> /dev/null; then
   echo -e "${RED}jq is not installed${NC}"
   echo ""
   echo "Install with:"
-  echo "  brew install jq    # macOS"
-  echo "  apt install jq     # Ubuntu/Debian"
+  echo "  brew install jq           # macOS"
+  echo "  apt install jq            # Ubuntu/Debian"
+  echo "  apk add jq                # Alpine"
+  echo "  choco install jq          # Windows"
   exit 1
 fi
 
 # Find all test directories
 find_test_dirs() {
-  find . -type d -name "tests" -path "*/deployment/*" 2>/dev/null | sort
+  find . -mindepth 3 -maxdepth 3 -type d -name "tests" -not -path "*/node_modules/*" 2>/dev/null | sort
 }
 
 # Get module name from test path
@@ -83,19 +88,26 @@ echo ""
 
 if [ -n "$1" ]; then
   # Run tests for specific module or directory
-  if [ -d "$1" ]; then
-    # Direct directory path
+  if [ -d "$1" ] && [[ "$1" == *"/tests"* || "$1" == *"/tests" ]]; then
+    # Direct test directory path
     run_tests_in_dir "$1"
-  elif [ -d "$1/deployment/tests" ]; then
-    # Module name (e.g., "frontend")
-    run_tests_in_dir "$1/deployment/tests"
+  elif [ -d "$1" ]; then
+    # Module name (e.g., "frontend") - find all test directories under it
+    module_test_dirs=$(find "$1" -mindepth 2 -maxdepth 2 -type d -name "tests" 2>/dev/null | sort)
+    if [ -z "$module_test_dirs" ]; then
+      echo -e "${RED}No test directories found in: $1${NC}"
+      exit 1
+    fi
+    for test_dir in $module_test_dirs; do
+      run_tests_in_dir "$test_dir"
+    done
   else
-    echo -e "${RED}Test directory not found: $1${NC}"
+    echo -e "${RED}Directory not found: $1${NC}"
     echo ""
     echo "Available modules with tests:"
     for dir in $(find_test_dirs); do
       echo "  - $(get_module_name "$dir")"
-    done
+    done | sort -u
     exit 1
   fi
 else

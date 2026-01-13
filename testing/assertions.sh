@@ -1,10 +1,8 @@
 # =============================================================================
-# Shared test utilities for BATS tests
+# Shared assertion functions for BATS tests
 #
 # Usage: Add this line at the top of your .bats file's setup() function:
-#   source "$TEST_DIR/test_utils.bash"
-#   # or if in a subdirectory:
-#   source "$TEST_DIR/../test_utils.bash"
+#   source "$PROJECT_ROOT/testing/assertions.sh"
 # =============================================================================
 
 # =============================================================================

@@ -14,11 +14,12 @@
 setup() {
   TEST_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
   PROJECT_DIR="$(cd "$TEST_DIR/../../.." && pwd)"
+  PROJECT_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
   SCRIPT_PATH="$PROJECT_DIR/provider/aws/setup"
   RESOURCES_DIR="$PROJECT_DIR/tests/resources"
 
   # Load shared test utilities
-  source "$PROJECT_DIR/tests/test_utils.bash"
+  source "$PROJECT_ROOT/testing/assertions.sh"
 
   # Initialize required environment variables
   export AWS_REGION="us-east-1"
@@ -34,6 +35,9 @@ setup() {
 
   export TOFU_INIT_VARIABLES=""
   export MODULES_TO_USE=""
+
+  # Clear LocalStack endpoint
+  unset AWS_ENDPOINT_URL
 }
 
 # =============================================================================
