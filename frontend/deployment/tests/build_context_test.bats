@@ -20,9 +20,10 @@ setup() {
   # Get the directory of the test file
   TEST_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
   PROJECT_DIR="$(cd "$TEST_DIR/.." && pwd)"
+  PROJECT_ROOT="$(cd "$TEST_DIR/../../.." && pwd)"
 
   # Load shared test utilities
-  source "$TEST_DIR/test_utils.bash"
+  source "$PROJECT_ROOT/testing/assertions.sh"
 
   CONTEXT=$(cat "$TEST_DIR/resources/context.json")
   SERVICE_PATH="$PROJECT_DIR"

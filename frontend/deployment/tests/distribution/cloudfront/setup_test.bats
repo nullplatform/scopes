@@ -14,12 +14,13 @@
 setup() {
   TEST_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
   PROJECT_DIR="$(cd "$TEST_DIR/../../.." && pwd)"
+  PROJECT_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
   SCRIPT_PATH="$PROJECT_DIR/distribution/cloudfront/setup"
   RESOURCES_DIR="$PROJECT_DIR/tests/resources"
   MOCKS_DIR="$RESOURCES_DIR/np_mocks"
 
   # Load shared test utilities
-  source "$PROJECT_DIR/tests/test_utils.bash"
+  source "$PROJECT_ROOT/testing/assertions.sh"
 
   # Add mock np to PATH (must be first)
   export PATH="$MOCKS_DIR:$PATH"
@@ -174,4 +175,3 @@ set_np_mock() {
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
 }
-

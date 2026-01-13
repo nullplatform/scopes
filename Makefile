@@ -39,6 +39,9 @@ ifdef MODULE
 else
 	@./testing/run_integration_tests.sh $(if $(VERBOSE),-v)
 endif
+# Run integration tests (placeholder)
+test-integration:
+	@./run_integration_tests.sh
 
 # Help
 help:
