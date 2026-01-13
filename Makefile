@@ -32,9 +32,13 @@ else
 	@./testing/run_tofu_tests.sh
 endif
 
-# Run integration tests (placeholder)
+# Run integration tests
 test-integration:
-	@./run_integration_tests.sh
+ifdef MODULE
+	@./testing/run_integration_tests.sh $(MODULE) $(INTEGRATION_ARGS)
+else
+	@./testing/run_integration_tests.sh $(INTEGRATION_ARGS)
+endif
 
 # Help
 help:
@@ -46,4 +50,5 @@ help:
 	@echo "  test-integration  Run integration tests"
 	@echo ""
 	@echo "Options:"
-	@echo "  MODULE=<name>     Run tests for specific module (e.g., MODULE=frontend)"
+	@echo "  MODULE=<name>              Run tests for specific module (e.g., MODULE=frontend)"
+	@echo "  INTEGRATION_ARGS=<args>    Extra args for integration tests (e.g., --no-localstack)"
