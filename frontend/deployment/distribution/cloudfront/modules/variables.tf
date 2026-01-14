@@ -18,3 +18,9 @@ variable "distribution_resource_tags_json" {
   type        = map(string)
   default     = {}
 }
+
+variable "distribution_cloudfront_endpoint_url" {
+  description = "Custom CloudFront endpoint URL for AWS CLI (used for testing with moto)"
+  type        = string
+  default     = ""
+}
