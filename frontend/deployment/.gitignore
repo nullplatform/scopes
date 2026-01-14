@@ -12,5 +12,4 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Test-only terraform files
-**/test_*.tf
+
