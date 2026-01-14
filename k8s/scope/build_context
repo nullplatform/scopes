@@ -37,13 +37,13 @@ REGION=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].account.region /
 
 SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 
-if [ "$SCOPE_VISIBILITY" = "public" ]; then
-    DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
-      .providers["cloud-providers"].networking.domain_name // $default
-    ')
-else
+if [ "$SCOPE_VISIBILITY" = "internal" ]; then
     DOMAIN=$(echo "$CONTEXT" | jq -r --arg private_default "$PRIVATE_DOMAIN" --arg default "$DOMAIN" '
       (.providers["cloud-providers"].networking.private_domain_name // $private_default | if . == "" then empty else . end) // .providers["cloud-providers"].networking.domain_name // $default
+    ')
+else
+    DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
+      .providers["cloud-providers"].networking.domain_name // $default
     ')
 fi
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
@@ -68,6 +68,10 @@ else
     export INGRESS_VISIBILITY="internal"
     GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
     export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.private_name // $default')
+else
+    export INGRESS_VISIBILITY="internet-facing"
+    GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
+    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.public_name // $default')
 fi
 
 K8S_MODIFIERS="${K8S_MODIFIERS:-"{}"}"

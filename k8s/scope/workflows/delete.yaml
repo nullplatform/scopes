@@ -13,6 +13,14 @@ steps:
         type: environment
       - name: OUTPUT_DIR
         type: environment
+  - name: security
+    type: workflow
+    steps:
+      - name: delete jwt authentication
+        type: script
+        file: "$SERVICE_PATH/scope/security/manage_jwt_auth"
+        configuration:
+          ACTION: delete
   - name: networking
     type: workflow
     steps:

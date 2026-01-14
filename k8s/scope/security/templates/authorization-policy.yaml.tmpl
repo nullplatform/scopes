@@ -1,0 +1,28 @@
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ .authz_policy_name }}
+  namespace: {{ .gateway_namespace }}
+  labels:
+    nullplatform.com/managed-by: endpoint-exposer
+    nullplatform.com/scope-id: "{{ .scope.id }}"
+spec:
+  action: DENY
+  selector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .gateway_name }}
+  rules:
+  # Deny requests to this scope's domain without valid JWT
+  - to:
+    - operation:
+        hosts:
+        - "{{ .scope_domain }}"
+        ports: ["443"]
+        notPaths:
+        - /health
+        - /ready
+        - /metrics
+    when:
+    - key: request.auth.claims[aud]
+      notValues: ["{{ .scope_domain }}"]

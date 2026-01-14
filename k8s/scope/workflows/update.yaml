@@ -6,3 +6,11 @@ steps:
     steps:
       - name: generate domain
         action: skip
+  - name: security
+    type: workflow
+    steps:
+      - name: setup jwt authentication
+        type: script
+        file: "$SERVICE_PATH/scope/security/manage_jwt_auth"
+        configuration:
+          ACTION: apply
