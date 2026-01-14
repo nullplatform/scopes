@@ -10,18 +10,19 @@ GATEWAY_NAMESPACE=${GATEWAY_NAMESPACE:-"gateways"}
 JWT_ISSUER=${JWT_ISSUER:-"https://api.nullplatform.com/scope"}
 JWT_JWKS_URI=${JWT_JWKS_URI:-"https://api.nullplatform.com/scope/.well-known/jwks.json"}
 
+echo "JWT authorization enabled: $JWT_AUTHORIZATION_ENABLED"
+
+# Only proceed if JWT authorization is enabled
+if [ "$JWT_AUTHORIZATION_ENABLED" != "true" ]; then
+  echo "JWT authorization is not enabled for this scope, skipping JWT authentication setup"
+  exit 0
+fi
+
 echo "Managing JWT authentication for scope: $SCOPE_ID"
 echo "Action: $ACTION"
-echo "Scope visibility: $SCOPE_VISIBILITY"
 echo "Scope domain: $SCOPE_DOMAIN"
 echo "Gateway name: $GATEWAY_NAME"
 echo "Gateway namespace: $GATEWAY_NAMESPACE"
-
-# Only proceed if scope visibility is "exposer"
-if [ "$SCOPE_VISIBILITY" != "exposer" ]; then
-  echo "Scope visibility is not 'exposer', skipping JWT authentication setup"
-  return 0
-fi
 
 # Ensure templates directory exists
 TEMPLATE_DIR="$SERVICE_PATH/scope/security/templates"
