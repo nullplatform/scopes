@@ -1,5 +1,6 @@
 locals {
-  distribution_origin_id = "S3-${var.distribution_bucket_name}"
+  distribution_origin_id       = "S3-${var.distribution_bucket_name}"
+  distribution_aws_endpoint_url_param = var.distribution_cloudfront_endpoint_url != "" ? "--endpoint-url ${var.distribution_cloudfront_endpoint_url}" : ""
 
   # Use network_full_domain from network layer (provided via cross-module locals when composed)
   distribution_aliases = local.network_full_domain != "" ? [local.network_full_domain] : []

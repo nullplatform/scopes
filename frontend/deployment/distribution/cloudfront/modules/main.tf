@@ -123,3 +123,17 @@ resource "aws_cloudfront_distribution" "static" {
 
   tags = local.distribution_default_tags
 }
+
+# Invalidate CloudFront cache on every deployment (when origin path changes)
+resource "terraform_data" "cloudfront_invalidation" {
+  # Trigger invalidation whenever the origin path changes
+  triggers_replace = [
+    local.distribution_origin_path
+  ]
+
+  provisioner "local-exec" {
+    command = "aws cloudfront create-invalidation ${local.distribution_aws_endpoint_url_param} --distribution-id ${aws_cloudfront_distribution.static.id} --paths '/*'"
+  }
+
+  depends_on = [aws_cloudfront_distribution.static]
+}
