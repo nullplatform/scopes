@@ -17,18 +17,19 @@ setup() {
   PROJECT_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
   SCRIPT_PATH="$PROJECT_DIR/network/route53/setup"
   RESOURCES_DIR="$PROJECT_DIR/tests/resources"
-  MOCKS_DIR="$RESOURCES_DIR/aws_mocks"
+  AWS_MOCKS_DIR="$RESOURCES_DIR/aws_mocks"
+  NP_MOCKS_DIR="$RESOURCES_DIR/np_mocks"
 
   # Load shared test utilities
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  # Add mock aws to PATH (must be first)
-  export PATH="$MOCKS_DIR:$PATH"
+  # Add mock aws and np to PATH (must be first)
+  export PATH="$AWS_MOCKS_DIR:$NP_MOCKS_DIR:$PATH"
 
   # Load context with hosted_public_zone_id
   export CONTEXT='{
     "application": {"slug": "automation"},
-    "scope": {"slug": "development-tools"},
+    "scope": {"slug": "development-tools", "id": "7"},
     "providers": {
       "cloud-providers": {
         "networking": {
@@ -46,6 +47,10 @@ setup() {
   }'
 
   export MODULES_TO_USE=""
+
+  # Set default np scope patch mock (success)
+  export NP_MOCK_SCOPE_PATCH_RESPONSE="$NP_MOCKS_DIR/scope/patch/success.json"
+  export NP_MOCK_SCOPE_PATCH_EXIT_CODE="0"
 }
 
 # =============================================================================
@@ -58,8 +63,15 @@ run_route53_setup() {
 set_aws_mock() {
   local mock_file="$1"
   local exit_code="${2:-0}"
-  export AWS_MOCK_RESPONSE="$MOCKS_DIR/route53/$mock_file"
+  export AWS_MOCK_RESPONSE="$AWS_MOCKS_DIR/route53/$mock_file"
   export AWS_MOCK_EXIT_CODE="$exit_code"
+}
+
+set_np_scope_patch_mock() {
+  local mock_file="$1"
+  local exit_code="${2:-0}"
+  export NP_MOCK_SCOPE_PATCH_RESPONSE="$NP_MOCKS_DIR/scope/patch/$mock_file"
+  export NP_MOCK_SCOPE_PATCH_EXIT_CODE="$exit_code"
 }
 
 # =============================================================================
@@ -213,4 +225,48 @@ set_aws_mock() {
 
   assert_equal "$status" "1"
   assert_contains "$output" "Failed to extract domain name from hosted zone response"
+}
+
+# =============================================================================
+# Test: Scope patch success
+# =============================================================================
+@test "shows setting scope domain message" {
+  set_aws_mock "success.json"
+  set_np_scope_patch_mock "success.json"
+
+  run source "$SCRIPT_PATH"
+
+  assert_contains "$output" "Setting scope domain"
+}
+
+@test "shows scope domain set successfully message" {
+  set_aws_mock "success.json"
+  set_np_scope_patch_mock "success.json"
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "Scope domain set successfully"
+}
+
+# =============================================================================
+# Test: Scope patch auth error
+# =============================================================================
+@test "fails when scope patch returns auth error" {
+  set_aws_mock "success.json"
+  set_np_scope_patch_mock "auth_error.json" 1
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "Failed to update scope domain"
+}
+
+@test "shows permission denied message for scope patch auth error" {
+  set_aws_mock "success.json"
+  set_np_scope_patch_mock "auth_error.json" 1
+
+  run source "$SCRIPT_PATH"
+
+  assert_contains "$output" "Permission denied"
 }

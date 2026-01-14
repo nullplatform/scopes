@@ -1,18 +1,33 @@
 #!/bin/bash
 # Mock np CLI for testing
-# Set NP_MOCK_RESPONSE to the path of the mock file to return
-# Set NP_MOCK_EXIT_CODE to the exit code (default: 0)
+#
+# Supports command-specific mocks:
+#   - NP_MOCK_SCOPE_PATCH_RESPONSE / NP_MOCK_SCOPE_PATCH_EXIT_CODE for "np scope patch"
+#   - NP_MOCK_PROVIDER_LIST_RESPONSE / NP_MOCK_PROVIDER_LIST_EXIT_CODE for "np provider list"
+#   - NP_MOCK_RESPONSE / NP_MOCK_EXIT_CODE as fallback for any command
 
-if [ -z "$NP_MOCK_RESPONSE" ]; then
-  echo "NP_MOCK_RESPONSE not set" >&2
-  exit 1
-fi
-
-if [ -f "$NP_MOCK_RESPONSE" ]; then
-  cat "$NP_MOCK_RESPONSE"
+# Detect which command is being called
+if [[ "$1" == "scope" && "$2" == "patch" ]]; then
+  MOCK_RESPONSE="${NP_MOCK_SCOPE_PATCH_RESPONSE:-$NP_MOCK_RESPONSE}"
+  MOCK_EXIT_CODE="${NP_MOCK_SCOPE_PATCH_EXIT_CODE:-${NP_MOCK_EXIT_CODE:-0}}"
+elif [[ "$1" == "provider" && "$2" == "list" ]]; then
+  MOCK_RESPONSE="${NP_MOCK_PROVIDER_LIST_RESPONSE:-$NP_MOCK_RESPONSE}"
+  MOCK_EXIT_CODE="${NP_MOCK_PROVIDER_LIST_EXIT_CODE:-${NP_MOCK_EXIT_CODE:-0}}"
 else
-  echo "Mock file not found: $NP_MOCK_RESPONSE" >&2
+  MOCK_RESPONSE="$NP_MOCK_RESPONSE"
+  MOCK_EXIT_CODE="${NP_MOCK_EXIT_CODE:-0}"
+fi
+
+if [ -z "$MOCK_RESPONSE" ]; then
+  echo "No mock response configured for: np $*" >&2
   exit 1
 fi
 
-exit "${NP_MOCK_EXIT_CODE:-0}"
+if [ -f "$MOCK_RESPONSE" ]; then
+  cat "$MOCK_RESPONSE"
+else
+  echo "Mock file not found: $MOCK_RESPONSE" >&2
+  exit 1
+fi
+
+exit "$MOCK_EXIT_CODE"
