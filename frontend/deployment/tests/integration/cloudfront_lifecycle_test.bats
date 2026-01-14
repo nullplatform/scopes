@@ -7,8 +7,9 @@
 # =============================================================================
 
 setup_file() {
-  # Load integration helpers
+  # Load integration helpers and initialize AWS/LocalStack configuration
   source "${PROJECT_ROOT}/testing/integration_helpers.sh"
+  integration_setup --cloud-provider aws
 
   # Clear any existing mocks
   clear_mocks
@@ -35,6 +36,7 @@ setup_file() {
 teardown_file() {
   source "${PROJECT_ROOT}/testing/integration_helpers.sh"
   clear_mocks
+  integration_teardown
 }
 
 # Setup runs before each test
