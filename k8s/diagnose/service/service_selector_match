@@ -90,7 +90,7 @@ for SERVICE_NAME in $SERVICES; do
                 print_info "  Debug result: $DEBUG_RESULT"
             fi
 
-            print_info "  Action: Verify pod labels match service selector"
+            print_action "Verify pod labels match service selector"
         fi
     else
         POD_COUNT=$(echo "$MATCHING_PODS" | wc -w)

@@ -36,7 +36,7 @@ for INGRESS_NAME in $INGRESSES; do
         else
             HAS_ISSUES=1
             print_error "Ingress $INGRESS_NAME: No IngressClass specified and no default found"
-            print_info "  Action: Specify ingressClassName or set a default IngressClass"
+            print_action "Specify ingressClassName or set a default IngressClass"
         fi
     else
         # Verify the class exists
@@ -56,6 +56,8 @@ for INGRESS_NAME in $INGRESSES; do
 done
 
 if [[ $HAS_ISSUES -eq 0 ]]; then
+    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+    print_success "All $INGRESS_COUNT ingress(es) have valid IngressClass configuration"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

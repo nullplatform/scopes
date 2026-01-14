@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Add support to configure the traffic manager nginx through a configmap.
+- Add **k8s/diagnose** documentation && new checks
+- Fix **k8s/diagnose** checks, adding logs && improvements
+- Add support for `NAMESPACE_OVERRIDE` configuration in k8s scope and deployment actions.
+- Change delete cluster objects to maintain only one deployment_id per scope
+- Do not execute actions that are not valid for current deployment status
+- Upgrade libs versions in k8s/log/kube-logger-go
+
 ## [1.9.0] - 2025-12-17
 - Add namespace validation and auto-creation
 - Add deployment hints for failed deployments

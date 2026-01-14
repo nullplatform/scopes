@@ -1,0 +1,16 @@
+#!/bin/bash
+# Check: Pod Existence
+# Verifies that pods resources exist in the namespace
+
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+if [[ -z "$PODS" ]]; then
+    print_error "No pods found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
+    print_action "Check deployment status and verify label selectors match"
+    update_check_result --status "failed" --evidence "{}"
+    return 1
+fi
+
+PODS_COUNT=$(echo "$PODS" | wc -w)
+print_success "Found $PODS_COUNT pod(s): $PODS"
+update_check_result --status "success" --evidence "{}"

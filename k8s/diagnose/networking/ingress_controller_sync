@@ -23,39 +23,58 @@ fi
 for INGRESS_NAME in $INGRESSES; do
     print_info "Checking sync status for ingress: $INGRESS_NAME"
 
-    # Get ingress events from pre-collected data
-    INGRESS_EVENTS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.involvedObject.name == $name) | "\(.lastTimestamp) \(.type) \(.reason) \(.message)"' "$EVENTS_FILE" 2>/dev/null | tail -n 20)
+    # Get ingress events from pre-collected data - sorted by timestamp, most recent first
+    INGRESS_EVENTS_JSON=$(jq --arg name "$INGRESS_NAME" --arg kind "Ingress" '
+        .items
+        | map(select(.involvedObject.name == $name and .involvedObject.kind == $kind))
+        | sort_by(.lastTimestamp)
+        | reverse
+    ' "$EVENTS_FILE" 2>/dev/null)
 
-    if [[ -n "$INGRESS_EVENTS" ]]; then
-        # Look for error/warning events
-        ERROR_EVENTS=$(echo "$INGRESS_EVENTS" | grep -iE "error|failed|warning" || true)
+    EVENT_COUNT=$(echo "$INGRESS_EVENTS_JSON" | jq 'length' 2>/dev/null)
 
-        if [[ -n "$ERROR_EVENTS" ]]; then
-            HAS_ISSUES=1
-            print_error "  Found error/warning events:"
-            echo "$ERROR_EVENTS" | tail -n 5 | sed 's/^/    /'
+    if [[ "$EVENT_COUNT" -gt 0 ]]; then
+        # Get the most recent event
+        NEWEST_EVENT=$(echo "$INGRESS_EVENTS_JSON" | jq -r 'first')
+        EVENT_TYPE=$(echo "$NEWEST_EVENT" | jq -r '.type')
+        EVENT_REASON=$(echo "$NEWEST_EVENT" | jq -r '.reason')
+        EVENT_MESSAGE=$(echo "$NEWEST_EVENT" | jq -r '.message')
+        EVENT_TIMESTAMP=$(echo "$NEWEST_EVENT" | jq -r '.lastTimestamp')
 
-            # Check for specific ALB errors
-            if echo "$ERROR_EVENTS" | grep -qi "failed to reconcile"; then
-                print_error "  Issue: Failed to reconcile ingress"
-            fi
-
-            if echo "$ERROR_EVENTS" | grep -qi "no available ip"; then
-                print_error "  Issue: No available IPs in subnet (see alb_capacity_check)"
-            fi
-
-            if echo "$ERROR_EVENTS" | grep -qi "certificate"; then
-                print_error "  Issue: Certificate problem detected (see alb_capacity_check)"
-            fi
+        # Check for successful reconciliation first
+        if [[ "$EVENT_REASON" == "SuccessfullyReconciled" ]]; then
+            print_success "  ✓ Successfully reconciled at $EVENT_TIMESTAMP"
+        elif [[ "$EVENT_TYPE" == "Normal" ]] && echo "$EVENT_REASON" | grep -qiE "ensured|synced"; then
+            print_success "  ✓ Last event: $EVENT_REASON at $EVENT_TIMESTAMP"
         else
-            # Look for successful sync
-            SUCCESS_EVENTS=$(echo "$INGRESS_EVENTS" | grep -iE "successfully reconciled|ensured" || true)
+            # Look for error/warning events in recent history
+            ERROR_EVENTS=$(echo "$INGRESS_EVENTS_JSON" | jq -r '
+                .[]
+                | select(.type == "Warning" or .type == "Error")
+                | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"
+            ' | head -n 5)
 
-            if [[ -n "$SUCCESS_EVENTS" ]]; then
-                LAST_SUCCESS=$(echo "$SUCCESS_EVENTS" | tail -n 1 | awk '{print $1, $2}')
-                print_success "  Last successful reconciliation: $LAST_SUCCESS"
+            if [[ -n "$ERROR_EVENTS" ]]; then
+                HAS_ISSUES=1
+                print_error "  Found error/warning events:"
+                echo "$ERROR_EVENTS" | sed 's/^/    /'
+
+                # Check for specific ALB errors in all error events
+                ALL_ERROR_MESSAGES=$(echo "$INGRESS_EVENTS_JSON" | jq -r '.[] | select(.type == "Warning" or .type == "Error") | .message' 2>/dev/null)
+
+                if echo "$ALL_ERROR_MESSAGES" | grep -qi "failed to reconcile"; then
+                    print_error "  Issue: Failed to reconcile ingress"
+                fi
+
+                if echo "$ALL_ERROR_MESSAGES" | grep -qi "no available ip\|insufficient.*address"; then
+                    print_error "  Issue: No available IPs in subnet (see alb_capacity_check)"
+                fi
+
+                if echo "$ALL_ERROR_MESSAGES" | grep -qi "certificate\|tls.*secret"; then
+                    print_error "  Issue: Certificate problem detected (see ingress_tls_configuration)"
+                fi
             else
-                print_warning "  No explicit success or error events found"
+                print_info "  Last event: $EVENT_REASON at $EVENT_TIMESTAMP"
             fi
         fi
     else
@@ -66,21 +85,36 @@ for INGRESS_NAME in $INGRESSES; do
     if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
         for POD in $ALB_CONTROLLER_PODS; do
             # Get recent logs related to this ingress from pre-collected logs
-            if [[ -f "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" ]]; then
-                CONTROLLER_LOGS=$(cat "$ALB_CONTROLLER_LOGS_DIR/${POD}.log" | grep -i "$INGRESS_NAME" || true)
+            LOG_FILE="$ALB_CONTROLLER_LOGS_DIR/${POD}.log"
+            if [[ -f "$LOG_FILE" ]] && [[ -r "$LOG_FILE" ]]; then
+                # Use tail to limit log size and grep with line-buffered to avoid memory issues
+                # Skip lines longer than 10000 chars to avoid processing massive JSON lines
+                CONTROLLER_LOGS=$(tail -n 500 "$LOG_FILE" 2>/dev/null | \
+                    awk 'length <= 10000' 2>/dev/null | \
+                    grep -iF "$INGRESS_NAME" 2>/dev/null || true)
 
                 if [[ -n "$CONTROLLER_LOGS" ]]; then
-                    # Look for errors in controller logs
-                    ERROR_LOGS=$(echo "$CONTROLLER_LOGS" | grep -iE "error|failed|warning" || true)
+                    # Look for errors in controller logs (excluding "successfully built model" info logs)
+                    ERROR_LOGS=$(echo "$CONTROLLER_LOGS" | \
+                        grep -ivE "successfully built model|successfully reconciled" 2>/dev/null | \
+                        grep -iE "level.*error|level.*warn|failed|warning" 2>/dev/null | \
+                        head -n 5 || true)
 
                     if [[ -n "$ERROR_LOGS" ]]; then
                         HAS_ISSUES=1
                         print_error "  Found errors in ALB controller logs:"
-                        echo "$ERROR_LOGS" | tail -n 3 | sed 's/^/    /'
+                        # Safely print error logs with proper error handling and truncation
+                        if ! echo "$ERROR_LOGS" | head -n 3 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
+                            print_warning "    [Error logs could not be displayed due to formatting issues]"
+                        fi
                     else
                         print_success "  No errors in ALB controller logs for this ingress"
                     fi
+                else
+                    print_info "  No relevant logs found for this ingress in controller"
                 fi
+            elif [[ -e "$LOG_FILE" ]] && [[ ! -r "$LOG_FILE" ]]; then
+                print_warning "  Cannot read ALB controller log file (permission denied): ${POD}.log"
             fi
         done
     fi
@@ -91,12 +125,15 @@ for INGRESS_NAME in $INGRESSES; do
     if [[ -z "$INGRESS_ADDRESS" ]]; then
         HAS_ISSUES=1
         print_error "  ALB address not assigned yet (sync may be in progress or failing)"
+        print_action "Check ingress controller logs and verify backend services are healthy"
     else
         print_success "  ALB address assigned: $INGRESS_ADDRESS"
     fi
 done
 
 if [[ $HAS_ISSUES -eq 0 ]]; then
+    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+    print_success "All $INGRESS_COUNT ingress(es) synchronized successfully with controller"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

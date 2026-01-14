@@ -1,10 +1,43 @@
 #!/bin/bash
 
-DEPLOYMENT_TO_CLEAN="$DEPLOYMENT_ID"
+OBJECTS_TO_DELETE="deployment,service,hpa,ingress,pdb,secret,configmap"
+
+# Function to delete all resources for a given deployment_id
+delete_deployment_resources() {
+    local DEPLOYMENT_ID_TO_DELETE="$1"
+    kubectl delete "$OBJECTS_TO_DELETE" \
+      -l deployment_id="$DEPLOYMENT_ID_TO_DELETE" -n "$K8S_NAMESPACE" --cascade=foreground --wait=true
+}
+
+CURRENT_ACTIVE=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
 
 if [ "$DEPLOYMENT" = "blue" ]; then
-    DEPLOYMENT_TO_CLEAN=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+    # Deleting blue (old) deployment, keeping green (new)
+    DEPLOYMENT_TO_CLEAN="$CURRENT_ACTIVE"
+    DEPLOYMENT_TO_KEEP="$DEPLOYMENT_ID"
+elif [ "$DEPLOYMENT" = "green" ]; then
+    # Deleting green (new) deployment, keeping blue (old)
+    DEPLOYMENT_TO_CLEAN="$DEPLOYMENT_ID"
+    DEPLOYMENT_TO_KEEP="$CURRENT_ACTIVE"
 fi
 
-kubectl delete deployment,service,hpa,ingress,pdb,secret,configmap \
-  -l deployment_id="$DEPLOYMENT_TO_CLEAN" -n "$K8S_NAMESPACE" --cascade=foreground --wait=true
+delete_deployment_resources "$DEPLOYMENT_TO_CLEAN"
+
+echo "Verifying cleanup for scope_id: $SCOPE_ID in namespace: $K8S_NAMESPACE"
+
+# Get all unique deployment_ids for this scope_id
+ALL_DEPLOYMENT_IDS=$(kubectl get "$OBJECTS_TO_DELETE" -n "$K8S_NAMESPACE" \
+  -l "scope_id=$SCOPE_ID" \
+  -o jsonpath='{range .items[*]}{.metadata.labels.deployment_id}{"\n"}{end}' 2>/dev/null | sort -u | grep -v '^$')
+
+# Delete all deployment_ids except DEPLOYMENT_TO_KEEP
+if [ -n "$ALL_DEPLOYMENT_IDS" ]; then
+    while IFS= read -r EXTRA_DEPLOYMENT_ID; do
+        if [ "$EXTRA_DEPLOYMENT_ID" != "$DEPLOYMENT_TO_KEEP" ]; then
+            delete_deployment_resources "$EXTRA_DEPLOYMENT_ID"
+        fi
+    done <<< "$ALL_DEPLOYMENT_IDS"
+fi
+
+
+echo "Cleanup verification successful: Only deployment_id=$DEPLOYMENT_TO_KEEP remains for scope_id=$SCOPE_ID"

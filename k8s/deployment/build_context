@@ -22,6 +22,59 @@ MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : i
 
 DEPLOYMENT_STATUS=$(echo $CONTEXT | jq -r ".deployment.status")
 
+validate_status() {
+  local action="$1"
+  local status="$2"
+  local expected_status=""
+
+  case "$action" in
+    start-initial|start-blue-green)
+      expected_status="creating, waiting_for_instances or running"
+      ;;
+    switch-traffic)
+      expected_status="running or waiting_for_instances"
+      ;;
+    rollback-deployment)
+      expected_status="rolling_back or cancelling"
+      ;;
+    finalize-blue-green)
+      expected_status="finalizing"
+      ;;
+    delete-deployment)
+      expected_status="deleting, rolling_back or cancelling"
+      ;;
+    *)
+      echo "🔄 Running action '$action', any deployment status is accepted"
+      return 0
+      ;;
+  esac
+
+  echo "🔄 Running action '$action' (current status: '$status', expected: $expected_status)"
+
+  case "$action" in
+    start-initial|start-blue-green)
+      [[ "$status" == "creating" || "$status" == "waiting_for_instances" || "$status" == "running" ]]
+      ;;
+    switch-traffic)
+      [[ "$status" == "running" || "$status" == "waiting_for_instances" ]]
+      ;;
+    rollback-deployment)
+      [[ "$status" == "rolling_back" || "$status" == "cancelling" ]]
+      ;;
+    finalize-blue-green)
+      [[ "$status" == "finalizing" || "$status" == "cancelling" ]]
+      ;;
+    delete-deployment)
+      [[ "$status" == "deleting" || "$status" == "cancelling" || "$status" == "rolling_back" ]]
+      ;;
+  esac
+}
+
+if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
+  echo "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'" >&2
+  exit 1
+fi
+
 if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; then
   GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
   GREEN_REPLICAS=$(echo "$GREEN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
@@ -64,6 +117,36 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
+TRAFFIC_MANAGER_CONFIG_MAP=${TRAFFIC_MANAGER_CONFIG_MAP:-""}
+
+if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
+    echo "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
+
+    # Check if the ConfigMap exists
+    if ! kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" &>/dev/null; then
+        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        exit 1
+    fi
+    echo "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
+
+    # Check for required keys (subPaths)
+    REQUIRED_KEYS=("nginx.conf" "default.conf")
+
+    # Get all keys from the ConfigMap data
+    CONFIGMAP_KEYS=$(kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}')
+
+    for key in "${REQUIRED_KEYS[@]}"; do
+        if ! echo "$CONFIGMAP_KEYS" | grep -qx "$key"; then
+            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
+            echo "💡 The ConfigMap must contain data entries for: ${REQUIRED_KEYS[*]}"
+            exit 1
+        fi
+        echo "✅ Found required key '$key' in ConfigMap"
+    done
+
+    echo "🎉 ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+fi
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
           --arg blue_replicas "$BLUE_REPLICAS" \
@@ -74,6 +157,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg pdb_enabled "$PDB_ENABLED" \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
           --arg service_account_name "$SERVICE_ACCOUNT_NAME" \
+          --arg traffic_manager_config_map "$TRAFFIC_MANAGER_CONFIG_MAP" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -82,7 +166,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 traffic_image: $traffic_image,
                 pdb_enabled: $pdb_enabled,
                 pdb_max_unavailable: $pdb_max_unavailable,
-                service_account_name: $service_account_name
+                service_account_name: $service_account_name,
+                traffic_manager_config_map: $traffic_manager_config_map
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')

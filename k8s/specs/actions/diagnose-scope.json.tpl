@@ -12,7 +12,9 @@
         ],
         "properties": {
           "scope_id": {
-            "type": "string"
+            "type": "number",
+            "readOnly": true,
+            "visibleOn": ["read"]
           }
         }
       },
@@ -28,7 +30,7 @@
   },
   "annotations": {
     "show_on": [
-      "scope", "performance"
+      "manage", "performance"
     ],
     "runs_over": "scope"
   }

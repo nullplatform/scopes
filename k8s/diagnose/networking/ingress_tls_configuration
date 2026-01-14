@@ -26,7 +26,8 @@ for INGRESS_NAME in $INGRESSES; do
     # Get TLS secrets
     TLS_SECRETS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[] | "\(.secretName):\(.hosts | join(","))"' 2>/dev/null)
 
-    echo "$TLS_SECRETS" | while IFS=':' read -r SECRET_NAME HOSTS; do
+    # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
+    while IFS=':' read -r SECRET_NAME HOSTS; do
         # Check if secret exists in pre-collected data
         SECRET_INFO=$(jq --arg name "$SECRET_NAME" '.items[] | select(.metadata.name == $name)' "$SECRETS_FILE" 2>/dev/null)
 
@@ -78,12 +79,14 @@ for INGRESS_NAME in $INGRESSES; do
         else
             HAS_ISSUES=1
             print_error "  TLS Secret: '$SECRET_NAME' not found in namespace"
-            print_info "    Action: Create TLS secret or update ingress configuration"
+            print_action "Create TLS secret or update ingress configuration"
         fi
-    done
+    done < <(echo "$TLS_SECRETS")
 done
 
 if [[ $HAS_ISSUES -eq 0 ]]; then
+    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+    print_success "TLS configuration valid for all $INGRESS_COUNT ingress(es)"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

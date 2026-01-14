@@ -1,0 +1,401 @@
+#!/bin/bash
+# Check: Health Probe Endpoints
+# Validates that liveness and readiness probe endpoints are configured and responding correctly
+
+# Validate pods exist
+require_pods || return 0
+
+# Read pods from pre-collected data
+PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
+
+HAS_PROBE_ISSUES=0
+HAS_PROBE_WARNINGS=0
+CONTAINERS_TESTED=0
+CONTAINERS_SKIPPED=0
+
+for POD_NAME in $PODS; do
+    # Get pod info from pre-collected data
+    POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
+
+    # Check if pod is running
+    POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
+    if [[ "$POD_PHASE" != "Running" ]]; then
+        print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping probe checks"
+        continue
+    fi
+
+    # Get pod IP
+    POD_IP=$(echo "$POD_INFO" | jq -r '.status.podIP')
+    if [[ -z "$POD_IP" || "$POD_IP" == "null" ]]; then
+        print_warning "Pod $POD_NAME: No IP assigned, skipping probe checks"
+        continue
+    fi
+
+    print_info "Checking pod $POD_NAME:"
+
+    # Get all containers
+    CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
+
+    for CONTAINER_B64 in $CONTAINERS; do
+        CONTAINER_DATA=$(echo "$CONTAINER_B64" | base64 -d)
+        CONTAINER_NAME=$(echo "$CONTAINER_DATA" | jq -r '.name')
+
+        print_info "  Container '$CONTAINER_NAME':"
+
+        # Check container status before testing probes
+        CONTAINER_STATUS=$(echo "$POD_INFO" | jq -r --arg name "$CONTAINER_NAME" '.status.containerStatuses[]? | select(.name == $name)')
+
+        if [[ -z "$CONTAINER_STATUS" ]]; then
+            print_warning "    Container status not found, skipping probe checks"
+            continue
+        fi
+
+        # Check if container is ready
+        CONTAINER_READY=$(echo "$CONTAINER_STATUS" | jq -r '.ready')
+        CONTAINER_STATE=$(echo "$CONTAINER_STATUS" | jq -r '
+            if .state.running then "running"
+            elif .state.waiting then "waiting"
+            elif .state.terminated then "terminated"
+            else "unknown"
+            end
+        ')
+
+        # If container is not running, explain why we can't test probes
+        if [[ "$CONTAINER_STATE" != "running" ]]; then
+            if [[ "$CONTAINER_STATE" == "waiting" ]]; then
+                WAITING_REASON=$(echo "$CONTAINER_STATUS" | jq -r '.state.waiting.reason // "Unknown"')
+                WAITING_MESSAGE=$(echo "$CONTAINER_STATUS" | jq -r '.state.waiting.message // ""')
+
+                # Check if it's a normal startup state or a problem
+                case "$WAITING_REASON" in
+                    ContainerCreating|PodInitializing|Pulling)
+                        CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                        print_info "    Container is starting ($WAITING_REASON) - skipping probe checks"
+                        continue
+                        ;;
+                    CrashLoopBackOff|ImagePullBackOff|ErrImagePull)
+                        CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                        print_warning "    Cannot test probes - container is in error state: $WAITING_REASON"
+                        if [[ -n "$WAITING_MESSAGE" ]]; then
+                            print_warning "    Message: $WAITING_MESSAGE"
+                        fi
+                        print_action "Fix container startup issues (check container_crash_detection results)"
+                        continue
+                        ;;
+                    *)
+                        CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                        print_warning "    Container waiting: $WAITING_REASON - skipping probe checks"
+                        continue
+                        ;;
+                esac
+            elif [[ "$CONTAINER_STATE" == "terminated" ]]; then
+                EXIT_CODE=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.exitCode // "N/A"')
+                TERMINATION_REASON=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.reason // "Unknown"')
+                CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
+                print_warning "    Cannot test probes - container terminated (Exit: $EXIT_CODE, Reason: $TERMINATION_REASON)"
+                print_action "Fix container termination (check container_crash_detection results)"
+                continue
+            else
+                print_warning "    Container in unknown state - skipping probe checks"
+                continue
+            fi
+        fi
+
+        # Container is running - check if it's ready
+        if [[ "$CONTAINER_READY" != "true" ]]; then
+            print_info "    Container is running but not ready - probe checks may show why"
+        fi
+
+        # Check if container has any probes configured
+        HAS_READINESS=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe // empty')
+        HAS_LIVENESS=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe // empty')
+        HAS_STARTUP=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe // empty')
+
+        if [[ -z "$HAS_READINESS" && -z "$HAS_LIVENESS" && -z "$HAS_STARTUP" ]]; then
+            print_warning "    No health probes configured (recommend adding readiness/liveness probes)"
+            continue
+        fi
+
+        # Container has probes and is testable
+        CONTAINERS_TESTED=$((CONTAINERS_TESTED + 1))
+
+        # Track issues for this container to avoid repetitive action messages
+        CONTAINER_HAS_CONNECTION_ISSUES=0
+        CONTAINER_HAS_4XX_ISSUES=0
+        CONTAINER_HAS_5XX_ISSUES=0
+        FAILED_PROBES_LIST=""
+
+        # Check Readiness Probe
+        if [[ -n "$HAS_READINESS" ]]; then
+            PROBE_TYPE=$(echo "$CONTAINER_DATA" | jq -r 'if .readinessProbe.httpGet then "httpGet" elif .readinessProbe.tcpSocket then "tcpSocket" elif .readinessProbe.exec then "exec" else "unknown" end')
+
+            if [[ "$PROBE_TYPE" == "httpGet" ]]; then
+                PROBE_PATH=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.httpGet.path')
+                PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.httpGet.port')
+                PROBE_SCHEME=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.httpGet.scheme // "HTTP"')
+                PROBE_URL="${PROBE_SCHEME,,}://$POD_IP:$PROBE_PORT$PROBE_PATH"
+
+                # Try curl first from agent, then wget
+                if command -v curl >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
+                    else
+                        PROBE_RESPONSE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
+                    fi
+                    PROBE_EXIT_CODE=$?
+                elif command -v wget >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(wget --no-check-certificate -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
+                    else
+                        PROBE_RESPONSE=$(wget -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
+                    fi
+                    PROBE_EXIT_CODE=$?
+                    # Parse wget output to extract HTTP status or error
+                    if [[ $PROBE_EXIT_CODE -eq 0 ]]; then
+                        PROBE_RESPONSE="200"
+                    else
+                        # Extract error from wget output - try multiple patterns
+                        ERROR_MSG=$(echo "$PROBE_RESPONSE" | grep -iE "failed:|connection refused|timed? ?out|cannot connect|unable to|network|unreachable" | head -1)
+                        if [[ -n "$ERROR_MSG" ]]; then
+                            # Shorten the message if too long
+                            PROBE_RESPONSE=$(echo "$ERROR_MSG" | cut -c1-80)
+                        else
+                            # If no specific error found, show exit code
+                            PROBE_RESPONSE="wget failed with exit code $PROBE_EXIT_CODE"
+                        fi
+                    fi
+                else
+                    print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available in agent)"
+                    continue
+                fi
+
+                if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
+                    print_success "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
+                else
+                    # Probe failed - check if it's config issue or app issue
+                    if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
+                        # 4xx error: endpoint not found or bad config
+                        HAS_PROBE_ISSUES=1
+                        CONTAINER_HAS_4XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Readiness"
+                        print_error "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found"
+                    elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
+                        # 5xx error: app has internal issues
+                        HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_5XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Readiness"
+                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Application error"
+                    else
+                        # Connection failed or other error (port not listening, network issue, etc)
+                        HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_CONNECTION_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Readiness"
+                        print_warning "    Readiness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
+                    fi
+                fi
+            elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
+                PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.tcpSocket.port')
+                print_info "    Readiness Probe: TCP Socket on port $PROBE_PORT (tested in port health check)"
+            elif [[ "$PROBE_TYPE" == "exec" ]]; then
+                PROBE_COMMAND=$(echo "$CONTAINER_DATA" | jq -r '.readinessProbe.exec.command | join(" ")')
+                print_info "    Readiness Probe: Exec [$PROBE_COMMAND] (cannot test directly)"
+            fi
+        fi
+
+        # Check Liveness Probe
+        if [[ -n "$HAS_LIVENESS" ]]; then
+            PROBE_TYPE=$(echo "$CONTAINER_DATA" | jq -r 'if .livenessProbe.httpGet then "httpGet" elif .livenessProbe.tcpSocket then "tcpSocket" elif .livenessProbe.exec then "exec" else "unknown" end')
+
+            if [[ "$PROBE_TYPE" == "httpGet" ]]; then
+                PROBE_PATH=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.httpGet.path')
+                PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.httpGet.port')
+                PROBE_SCHEME=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.httpGet.scheme // "HTTP"')
+                PROBE_URL="${PROBE_SCHEME,,}://$POD_IP:$PROBE_PORT$PROBE_PATH"
+
+                # Try curl first from agent, then wget
+                if command -v curl >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
+                    else
+                        PROBE_RESPONSE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
+                    fi
+                    PROBE_EXIT_CODE=$?
+                elif command -v wget >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(wget --no-check-certificate -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
+                    else
+                        PROBE_RESPONSE=$(wget -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
+                    fi
+                    PROBE_EXIT_CODE=$?
+                    # Parse wget output to extract HTTP status or error
+                    if [[ $PROBE_EXIT_CODE -eq 0 ]]; then
+                        PROBE_RESPONSE="200"
+                    else
+                        # Extract error from wget output - try multiple patterns
+                        ERROR_MSG=$(echo "$PROBE_RESPONSE" | grep -iE "failed:|connection refused|timed? ?out|cannot connect|unable to|network|unreachable" | head -1)
+                        if [[ -n "$ERROR_MSG" ]]; then
+                            # Shorten the message if too long
+                            PROBE_RESPONSE=$(echo "$ERROR_MSG" | cut -c1-80)
+                        else
+                            # If no specific error found, show exit code
+                            PROBE_RESPONSE="wget failed with exit code $PROBE_EXIT_CODE"
+                        fi
+                    fi
+                else
+                    print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available in agent)"
+                    continue
+                fi
+
+                if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
+                    print_success "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
+                else
+                    # Probe failed - check if it's config issue or app issue
+                    if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
+                        # 4xx error: endpoint not found or bad config
+                        HAS_PROBE_ISSUES=1
+                        CONTAINER_HAS_4XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Liveness"
+                        print_error "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found"
+                    elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
+                        # 5xx error: app has internal issues
+                        HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_5XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Liveness"
+                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Application error"
+                    else
+                        # Connection failed or other error (port not listening, network issue, etc)
+                        HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_CONNECTION_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Liveness"
+                        print_warning "    Liveness Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
+                    fi
+                fi
+            elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
+                PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.tcpSocket.port')
+                print_info "    Liveness Probe: TCP Socket on port $PROBE_PORT (tested in port health check)"
+            elif [[ "$PROBE_TYPE" == "exec" ]]; then
+                PROBE_COMMAND=$(echo "$CONTAINER_DATA" | jq -r '.livenessProbe.exec.command | join(" ")')
+                print_info "    Liveness Probe: Exec [$PROBE_COMMAND] (cannot test directly)"
+            fi
+        fi
+
+        # Check Startup Probe
+        if [[ -n "$HAS_STARTUP" ]]; then
+            PROBE_TYPE=$(echo "$CONTAINER_DATA" | jq -r 'if .startupProbe.httpGet then "httpGet" elif .startupProbe.tcpSocket then "tcpSocket" elif .startupProbe.exec then "exec" else "unknown" end')
+
+            if [[ "$PROBE_TYPE" == "httpGet" ]]; then
+                PROBE_PATH=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.httpGet.path')
+                PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.httpGet.port')
+                PROBE_SCHEME=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.httpGet.scheme // "HTTP"')
+                PROBE_URL="${PROBE_SCHEME,,}://$POD_IP:$PROBE_PORT$PROBE_PATH"
+
+                # Try curl first from agent, then wget
+                if command -v curl >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
+                    else
+                        PROBE_RESPONSE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$PROBE_URL" 2>&1)
+                    fi
+                    PROBE_EXIT_CODE=$?
+                elif command -v wget >/dev/null 2>&1; then
+                    if [[ "${PROBE_SCHEME^^}" == "HTTPS" ]]; then
+                        PROBE_RESPONSE=$(wget --no-check-certificate -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
+                    else
+                        PROBE_RESPONSE=$(wget -O /dev/null --timeout=2 "$PROBE_URL" 2>&1)
+                    fi
+                    PROBE_EXIT_CODE=$?
+                    # Parse wget output to extract HTTP status or error
+                    if [[ $PROBE_EXIT_CODE -eq 0 ]]; then
+                        PROBE_RESPONSE="200"
+                    else
+                        # Extract error from wget output - try multiple patterns
+                        ERROR_MSG=$(echo "$PROBE_RESPONSE" | grep -iE "failed:|connection refused|timed? ?out|cannot connect|unable to|network|unreachable" | head -1)
+                        if [[ -n "$ERROR_MSG" ]]; then
+                            # Shorten the message if too long
+                            PROBE_RESPONSE=$(echo "$ERROR_MSG" | cut -c1-80)
+                        else
+                            # If no specific error found, show exit code
+                            PROBE_RESPONSE="wget failed with exit code $PROBE_EXIT_CODE"
+                        fi
+                    fi
+                else
+                    print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: Cannot test (curl/wget not available in agent)"
+                    continue
+                fi
+
+                if [[ $PROBE_EXIT_CODE -eq 0 && "$PROBE_RESPONSE" =~ ^[2-3][0-9][0-9]$ ]]; then
+                    print_success "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✓ HTTP $PROBE_RESPONSE"
+                else
+                    # Probe failed - check if it's config issue or app issue
+                    if [[ "$PROBE_RESPONSE" =~ ^4[0-9][0-9]$ ]]; then
+                        # 4xx error: endpoint not found or bad config
+                        HAS_PROBE_ISSUES=1
+                        CONTAINER_HAS_4XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Startup"
+                        print_error "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ✗ HTTP $PROBE_RESPONSE - Health check endpoint not found"
+                    elif [[ "$PROBE_RESPONSE" =~ ^5[0-9][0-9]$ ]]; then
+                        # 5xx error: app has internal issues
+                        HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_5XX_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Startup"
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ HTTP $PROBE_RESPONSE - Application error"
+                    else
+                        # Connection failed or other error (port not listening, network issue, etc)
+                        HAS_PROBE_WARNINGS=1
+                        CONTAINER_HAS_CONNECTION_ISSUES=1
+                        FAILED_PROBES_LIST="$FAILED_PROBES_LIST Startup"
+                        print_warning "    Startup Probe on $PROBE_SCHEME://$PROBE_PORT$PROBE_PATH: ⚠ Connection failed (response: $PROBE_RESPONSE, exit code: $PROBE_EXIT_CODE)"
+                    fi
+                fi
+            elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
+                PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.tcpSocket.port')
+                print_info "    Startup Probe: TCP Socket on port $PROBE_PORT"
+            elif [[ "$PROBE_TYPE" == "exec" ]]; then
+                PROBE_COMMAND=$(echo "$CONTAINER_DATA" | jq -r '.startupProbe.exec.command | join(" ")')
+                print_info "    Startup Probe: Exec [$PROBE_COMMAND] (cannot test directly)"
+            fi
+        fi
+
+        # Print consolidated action message for this container (avoid repetition)
+        if [[ -n "$FAILED_PROBES_LIST" ]]; then
+            echo ""
+            # Trim leading space from the list
+            FAILED_PROBES_LIST=$(echo "$FAILED_PROBES_LIST" | xargs)
+
+            if [[ $CONTAINER_HAS_CONNECTION_ISSUES -eq 1 ]]; then
+                print_action "For $FAILED_PROBES_LIST probe(s): Verify port is listening and accessible from within cluster"
+            fi
+
+            if [[ $CONTAINER_HAS_4XX_ISSUES -eq 1 ]]; then
+                print_action "For $FAILED_PROBES_LIST probe(s): Update probe path or implement the endpoint in application"
+            fi
+
+            if [[ $CONTAINER_HAS_5XX_ISSUES -eq 1 ]]; then
+                print_action "For $FAILED_PROBES_LIST probe(s): Check application logs and fix internal errors or dependencies"
+            fi
+        fi
+    done
+done
+
+echo ""
+if [[ $CONTAINERS_TESTED -eq 0 ]]; then
+    # No containers were tested - all were skipped
+    print_info "All containers skipped - no probe checks could be performed"
+    update_check_result --status "skipped" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+elif [[ $HAS_PROBE_ISSUES -gt 0 ]]; then
+    # Some containers were tested and had issues
+    if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
+        print_warning "Probe issues found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
+    fi
+    update_check_result --status "failed" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+elif [[ $HAS_PROBE_WARNINGS -gt 0 ]]; then
+    # Some containers were tested and had warnings
+    if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
+        print_info "Probe warnings found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
+    fi
+    update_check_result --status "warning" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+else
+    # All tested containers passed
+    print_success "Health probes verified on $CONTAINERS_TESTED container(s)"
+    update_check_result --status "success" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+fi

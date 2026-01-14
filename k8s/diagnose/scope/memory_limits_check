@@ -27,12 +27,14 @@ for POD_NAME in $PODS; do
             print_warning "  Container: $CONTAINER"
             print_warning "  Memory Limit: $MEMORY_LIMIT"
             print_warning "  Memory Request: $MEMORY_REQUEST"
-            print_info "  Action: Increase memory limits or optimize application memory usage"
+            print_action "Increase memory limits or optimize application memory usage"
         done
     fi
 done
 
 if [[ $HAS_OOM -eq 0 ]]; then
+    POD_COUNT=$(echo "$PODS" | wc -w)
+    print_success "No OOMKilled containers detected in $POD_COUNT pod(s)"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

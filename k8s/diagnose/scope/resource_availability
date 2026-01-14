@@ -30,11 +30,15 @@ for POD_NAME in $PODS; do
             if echo "$UNSCHEDULABLE" | grep -qi "insufficient memory"; then
                 print_warning "  Issue: Insufficient memory in cluster"
             fi
+
+            print_action "Reduce resource requests or add more nodes to cluster"
         fi
     fi
 done
 
 if [[ $HAS_ISSUES -eq 0 ]]; then
+    POD_COUNT=$(echo "$PODS" | wc -w)
+    print_success "All $POD_COUNT pod(s) successfully scheduled with sufficient resources"
     update_check_result --status "success" --evidence "{}"
 else
     update_check_result --status "failed" --evidence "{}"

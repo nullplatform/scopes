@@ -13,10 +13,14 @@
       ],
       "properties": {
         "scope_id": {
-          "type": "string"
+          "type": "number",
+          "readOnly": true,
+          "visibleOn": ["read"]
         },
         "deployment_id": {
-          "type": "string"
+          "type": "number",
+          "readOnly": true,
+          "visibleOn": ["read"]
         }
       }
     },
