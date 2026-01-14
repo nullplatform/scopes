@@ -85,9 +85,13 @@ fi
 echo "   ✅ bucket_name=$distribution_bucket_name"
 
 # S3 prefix for multi-scope bucket support
-# Extract path from asset_url (format: s3://bucket-name/path/to/assets)
-# Removes "s3://bucket-name" prefix, keeps the path with leading slash
-distribution_s3_prefix="/${asset_url#s3://*/}"
+# Extract path from asset_url (supports both s3:// and https:// formats)
+# Removes protocol and bucket/domain prefix, keeps the path with leading slash
+if [[ "$asset_url" == s3://* ]]; then
+  distribution_s3_prefix="/${asset_url#s3://*/}"
+else
+  distribution_s3_prefix="/${asset_url#https://*/}"
+fi
 
 echo "   ✅ s3_prefix=${distribution_s3_prefix:-"(root)"}"
 
