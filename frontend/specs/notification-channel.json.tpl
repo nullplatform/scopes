@@ -1,6 +1,7 @@
 {
   "nrn": "{{ env.Getenv "NRN" }}",
   "status": "active",
+  "description": "Channel to handle frontend scopes",
   "type": "agent",
   "source": [
     "telemetry",
