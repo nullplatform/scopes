@@ -25,7 +25,7 @@ TOFU_VARIABLES={}
 
 tf_state_key="frontend/$namespace_slug/$application_slug/$scope_slug-$scope_id"
 
-TOFU_INIT_VARIABLES="-backend-config=key=$tf_state_key"
+TOFU_INIT_VARIABLES="${TOFU_INIT_VARIABLES:-} -backend-config=key=$tf_state_key"
 
 TOFU_MODULE_DIR="$SERVICE_PATH/output/$scope_id"
 if [ -n "${NP_OUTPUT_DIR:-}" ]; then

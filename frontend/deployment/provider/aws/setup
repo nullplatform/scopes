@@ -1,19 +1,27 @@
 #!/bin/bash
 
+echo "🔍 Validating AWS provider configuration..."
+
 if [ -z "${AWS_REGION:-}" ]; then
-  echo "✗ AWS_REGION is not set"
+  echo "   ❌ AWS_REGION is not set"
   exit 1
 fi
+echo "   ✅ AWS_REGION=$AWS_REGION"
 
 if [ -z "${TOFU_PROVIDER_BUCKET:-}" ]; then
-  echo "✗ TOFU_PROVIDER_BUCKET is not set"
+  echo "   ❌ TOFU_PROVIDER_BUCKET is not set"
   exit 1
 fi
+echo "   ✅ TOFU_PROVIDER_BUCKET=$TOFU_PROVIDER_BUCKET"
 
 if [ -z "${TOFU_LOCK_TABLE:-}" ]; then
-  echo "✗ TOFU_LOCK_TABLE is not set"
+  echo "   ❌ TOFU_LOCK_TABLE is not set"
   exit 1
 fi
+echo "   ✅ TOFU_LOCK_TABLE=$TOFU_LOCK_TABLE"
+
+echo "✨ AWS provider configured successfully"
+echo ""
 
 RESOURCE_TAGS_JSON=${RESOURCE_TAGS_JSON:-"{}"}
 
@@ -27,15 +35,6 @@ TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=bucket=$TOFU_PROVIDER_BUCKET"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=region=$AWS_REGION"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=dynamodb_table=$TOFU_LOCK_TABLE"
-
-# TODO(federico.maleh) this is necessary for the integration tests, tests should not make us change the production code
-if [ -n "${AWS_ENDPOINT_URL:-}" ]; then
-  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=force_path_style=true"
-  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_credentials_validation=true"
-  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_metadata_api_check=true"
-  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_region_validation=true"
-  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=endpoints={s3=\"$AWS_ENDPOINT_URL\",dynamodb=\"$AWS_ENDPOINT_URL\"}"
-fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 module_name="${script_dir}/modules"
