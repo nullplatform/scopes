@@ -77,13 +77,14 @@ setup() {
 @test "create infrastructure deploys S3, CloudFront, and Route53 resources" {
   # Setup API mocks for np CLI calls
   # Note: /token is automatically mocked by clear_mocks()
-  local mocks_dir="frontend/deployment/tests/integration/mocks/asset_repository"
+  local mocks_dir="frontend/deployment/tests/integration/mocks/"
 
   # Mock the np CLI internal API calls
-  mock_request "GET" "/category" "$mocks_dir/category.json"
-  mock_request "GET" "/provider_specification" "$mocks_dir/list_provider_spec.json"
-  mock_request "GET" "/provider" "$mocks_dir/list_provider.json"
-  mock_request "GET" "/provider/s3-asset-repository-id" "$mocks_dir/get_provider.json"
+  mock_request "GET" "/category" "$mocks_dir/asset_repository/category.json"
+  mock_request "GET" "/provider_specification" "$mocks_dir/asset_repository/list_provider_spec.json"
+  mock_request "GET" "/provider" "$mocks_dir/asset_repository/list_provider.json"
+  mock_request "GET" "/provider/s3-asset-repository-id" "$mocks_dir/asset_repository/get_provider.json"
+  mock_request "PATCH" "/scope/7" "$mocks_dir/scope/patch.json"
 
   # Run the initial workflow
   run_workflow "frontend/deployment/workflows/initial.yaml"
