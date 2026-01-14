@@ -12,13 +12,29 @@ mock_provider "aws" {
       bucket_regional_domain_name = "my-static-bucket.s3.us-east-1.amazonaws.com"
     }
   }
+
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+      user_id    = "123456789012"
+    }
+  }
+
+  mock_data "aws_acm_certificate" {
+    defaults = {
+      arn = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+      id  = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+    }
+  }
 }
 
 variables {
   distribution_bucket_name       = "my-static-bucket"
   distribution_s3_prefix         = "app/scope-1"
   distribution_app_name          = "my-app-prod"
-  distribution_custom_domain     = null
+  network_full_domain            = ""
+  network_domain                 = ""
   distribution_resource_tags_json = {
     Environment = "production"
     Application = "my-app"
@@ -75,30 +91,30 @@ run "distribution_basic_configuration" {
 }
 
 # =============================================================================
-# Test: Distribution has no aliases when custom domain is null
+# Test: Distribution has no aliases when network_full_domain is empty
 # =============================================================================
-run "no_aliases_without_custom_domain" {
+run "no_aliases_without_network_domain" {
   command = plan
 
   assert {
     condition     = length(local.distribution_aliases) == 0
-    error_message = "Should have no aliases when custom_domain is null"
+    error_message = "Should have no aliases when network_full_domain is empty"
   }
 }
 
 # =============================================================================
-# Test: Distribution has alias when custom domain is set
+# Test: Distribution has alias when network_full_domain is set
 # =============================================================================
-run "has_alias_with_custom_domain" {
+run "has_alias_with_network_domain" {
   command = plan
 
   variables {
-    distribution_custom_domain = "cdn.example.com"
+    network_full_domain = "cdn.example.com"
   }
 
   assert {
     condition     = length(local.distribution_aliases) == 1
-    error_message = "Should have one alias when custom_domain is set"
+    error_message = "Should have one alias when network_full_domain is set"
   }
 
   assert {
@@ -116,6 +132,70 @@ run "origin_id_format" {
   assert {
     condition     = local.distribution_origin_id == "S3-my-static-bucket"
     error_message = "Origin ID should be 'S3-my-static-bucket'"
+  }
+}
+
+# =============================================================================
+# Test: Origin path normalization - removes double slashes
+# =============================================================================
+run "origin_path_normalizes_leading_slash" {
+  command = plan
+
+  variables {
+    distribution_s3_prefix = "/app"
+  }
+
+  assert {
+    condition     = local.distribution_origin_path == "/app"
+    error_message = "Origin path should be '/app' not '//app'"
+  }
+}
+
+# =============================================================================
+# Test: Origin path normalization - adds leading slash if missing
+# =============================================================================
+run "origin_path_adds_leading_slash" {
+  command = plan
+
+  variables {
+    distribution_s3_prefix = "app"
+  }
+
+  assert {
+    condition     = local.distribution_origin_path == "/app"
+    error_message = "Origin path should add leading slash"
+  }
+}
+
+# =============================================================================
+# Test: Origin path normalization - handles empty prefix
+# =============================================================================
+run "origin_path_handles_empty" {
+  command = plan
+
+  variables {
+    distribution_s3_prefix = ""
+  }
+
+  assert {
+    condition     = local.distribution_origin_path == ""
+    error_message = "Origin path should be empty when prefix is empty"
+  }
+}
+
+# =============================================================================
+# Test: Origin path normalization - trims trailing slashes
+# =============================================================================
+run "origin_path_trims_trailing_slash" {
+  command = plan
+
+  variables {
+    distribution_s3_prefix = "/app/subfolder/"
+  }
+
+  assert {
+    condition     = local.distribution_origin_path == "/app/subfolder"
+    error_message = "Origin path should trim trailing slashes"
   }
 }
 
@@ -226,12 +306,12 @@ run "dns_related_outputs" {
 }
 
 # =============================================================================
-# Test: Website URL without custom domain
+# Test: Website URL without network domain
 # =============================================================================
-run "website_url_without_custom_domain" {
+run "website_url_without_network_domain" {
   command = plan
 
-  # Without custom domain, URL should use CloudFront domain (known after apply)
+  # Without network domain, URL should use CloudFront domain (known after apply)
   # We can only check it starts with https://
   assert {
     condition     = startswith(output.distribution_website_url, "https://")
@@ -240,17 +320,147 @@ run "website_url_without_custom_domain" {
 }
 
 # =============================================================================
-# Test: Website URL with custom domain
+# Test: Website URL with network domain
 # =============================================================================
-run "website_url_with_custom_domain" {
+run "website_url_with_network_domain" {
   command = plan
 
   variables {
-    distribution_custom_domain = "cdn.example.com"
+    network_full_domain = "cdn.example.com"
   }
 
   assert {
     condition     = output.distribution_website_url == "https://cdn.example.com"
     error_message = "distribution_website_url should be 'https://cdn.example.com'"
+  }
+}
+
+# =============================================================================
+# Test: S3 bucket policy is created for CloudFront OAC
+# =============================================================================
+run "creates_s3_bucket_policy" {
+  command = plan
+
+  assert {
+    condition     = aws_s3_bucket_policy.static.bucket == "my-static-bucket"
+    error_message = "Bucket policy should be attached to 'my-static-bucket'"
+  }
+}
+
+# =============================================================================
+# Test: S3 bucket policy allows CloudFront service principal
+# =============================================================================
+run "bucket_policy_allows_cloudfront" {
+  command = plan
+
+  assert {
+    condition     = can(jsondecode(aws_s3_bucket_policy.static.policy))
+    error_message = "Bucket policy should be valid JSON"
+  }
+
+  assert {
+    condition     = jsondecode(aws_s3_bucket_policy.static.policy).Statement[0].Principal.Service == "cloudfront.amazonaws.com"
+    error_message = "Bucket policy should allow cloudfront.amazonaws.com service principal"
+  }
+
+  assert {
+    condition     = jsondecode(aws_s3_bucket_policy.static.policy).Statement[0].Action == "s3:GetObject"
+    error_message = "Bucket policy should allow s3:GetObject action"
+  }
+
+  assert {
+    condition     = jsondecode(aws_s3_bucket_policy.static.policy).Statement[0].Effect == "Allow"
+    error_message = "Bucket policy should have Allow effect"
+  }
+}
+
+# =============================================================================
+# Test: S3 bucket policy resource scope
+# =============================================================================
+run "bucket_policy_resource_scope" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_s3_bucket_policy.static.policy).Statement[0].Resource == "arn:aws:s3:::my-static-bucket/*"
+    error_message = "Bucket policy resource should be 'arn:aws:s3:::my-static-bucket/*'"
+  }
+}
+
+# =============================================================================
+# Test: S3 bucket policy has distribution condition
+# =============================================================================
+run "bucket_policy_has_distribution_condition" {
+  command = plan
+
+  assert {
+    condition     = can(jsondecode(aws_s3_bucket_policy.static.policy).Statement[0].Condition.StringEquals["AWS:SourceArn"])
+    error_message = "Bucket policy should have AWS:SourceArn condition"
+  }
+
+  assert {
+    condition     = startswith(jsondecode(aws_s3_bucket_policy.static.policy).Statement[0].Condition.StringEquals["AWS:SourceArn"], "arn:aws:cloudfront::123456789012:distribution/")
+    error_message = "Bucket policy condition should reference the CloudFront distribution ARN with account 123456789012"
+  }
+}
+
+# =============================================================================
+# Test: ACM certificate domain derivation
+# =============================================================================
+run "acm_certificate_domain_derived_from_network_domain" {
+  command = plan
+
+  variables {
+    network_domain = "example.com"
+  }
+
+  assert {
+    condition     = local.distribution_acm_certificate_domain == "*.example.com"
+    error_message = "ACM certificate domain should be '*.example.com'"
+  }
+}
+
+# =============================================================================
+# Test: No ACM certificate lookup when network_domain is empty
+# =============================================================================
+run "no_acm_lookup_without_network_domain" {
+  command = plan
+
+  assert {
+    condition     = local.distribution_acm_certificate_domain == ""
+    error_message = "ACM certificate domain should be empty when network_domain is empty"
+  }
+
+  assert {
+    condition     = local.distribution_has_acm_certificate == false
+    error_message = "Should not have ACM certificate when network_domain is empty"
+  }
+}
+
+# =============================================================================
+# Test: Uses ACM certificate when network_domain is set
+# =============================================================================
+run "uses_acm_certificate_with_network_domain" {
+  command = plan
+
+  variables {
+    network_domain      = "example.com"
+    network_full_domain = "app.example.com"
+  }
+
+  assert {
+    condition     = local.distribution_has_acm_certificate == true
+    error_message = "Should have ACM certificate when network_domain is set"
+  }
+}
+
+# =============================================================================
+# Test: Uses default certificate without network_domain
+# =============================================================================
+run "uses_default_certificate_without_network_domain" {
+  command = plan
+
+  assert {
+    condition     = local.distribution_has_acm_certificate == false
+    error_message = "Should use default certificate when network_domain is empty"
   }
 }

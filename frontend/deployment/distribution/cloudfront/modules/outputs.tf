@@ -40,5 +40,5 @@ output "distribution_record_type" {
 
 output "distribution_website_url" {
   description = "Website URL"
-  value       = var.distribution_custom_domain != null ? "https://${var.distribution_custom_domain}" : "https://${aws_cloudfront_distribution.static.domain_name}"
+  value       = local.network_full_domain != "" ? "https://${local.network_full_domain}" : "https://${aws_cloudfront_distribution.static.domain_name}"
 }

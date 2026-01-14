@@ -27,6 +27,11 @@ setup_file() {
     --name frontend.publicdomain.com \
     --caller-reference "test-$(date +%s)" >/dev/null 2>&1 || true
 
+  # Create ACM certificate for the test domain (required for CloudFront custom domain SSL)
+  aws_local acm request-certificate \
+    --domain-name "*.frontend.publicdomain.com" \
+    --validation-method DNS >/dev/null 2>&1 || true
+
   # Get hosted zone ID for context override
   HOSTED_ZONE_ID=$(aws_local route53 list-hosted-zones --query 'HostedZones[0].Id' --output text | sed 's|/hostedzone/||')
 

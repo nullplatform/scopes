@@ -13,12 +13,6 @@ variable "distribution_app_name" {
   type        = string
 }
 
-variable "distribution_custom_domain" {
-  description = "Custom domain for CloudFront (optional)"
-  type        = string
-  default     = null
-}
-
 variable "distribution_resource_tags_json" {
   description = "Resource tags as JSON object"
   type        = map(string)

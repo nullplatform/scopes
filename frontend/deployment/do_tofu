@@ -2,29 +2,12 @@
 
 set -eou pipefail
 
+TOFU_VAR_FILE="$TOFU_MODULE_DIR/.tfvars.json"
+echo "$TOFU_VARIABLES" > "$TOFU_VAR_FILE"
+
 CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 cd "$CURRENT_DIR"
 
-#np scope patchtofu init \
-#  -backend-config="bucket=${TF_STATE_BUCKET}" \
-#  -backend-config="key=amplify/$APPLICATION_SLUG/$SCOPE_SLUG-$SCOPE_ID" \
-#  -backend-config="region=${AWS_REGION}" \
-#  -backend-config="dynamodb_table=${TF_LOCK_TABLE}" --id "$SCOPE_ID" --body "{\"domain\":\"$SUBDOMAIN.$DOMAIN\"}"
-# Write variables to a temp file for tofu
-TOFU_VAR_FILE="$TOFU_MODULE_DIR/.tfvars.json"
-echo "$TOFU_VARIABLES" > "$TOFU_VAR_FILE"
-
 tofu -chdir="$TOFU_MODULE_DIR" init -input=false $TOFU_INIT_VARIABLES
 tofu -chdir="$TOFU_MODULE_DIR" "$ACTION" -auto-approve -var-file="$TOFU_VAR_FILE"
-
-#tofu $ACTION -auto-approve \
-#  -var="aws_region=${AWS_REGION}" \
-#  -var="github_token=${GITHUB_TOKEN}" \
-#  -var="application_name=${APPLICATION_SLUG}" \
-#  -var="repository_url=${REPOSITORY_URL}" \
-#  -var="application_version=${APPLICATION_VERSION}" \
-#  -var="env_vars_json=${ENV_VARS_JSON}" \
-#  -var="resource_tags_json=${RESOURCE_TAGS_JSON}" \
-#  -var="domain=${DOMAIN}" \
-#  -var="subdomain=${SUBDOMAIN}"
