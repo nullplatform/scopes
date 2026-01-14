@@ -18,13 +18,13 @@
     "values": {}
   },
   "dimensions": {},
-  "name": "Frontend",
+  "name": "Static files",
   "scopes": {},
   "selectors": {
     "category": "Scope",
     "imported": false,
-    "provider": "AWS",
-    "sub_category": "Frontend"
+    "provider": "Agent",
+    "sub_category": "Static files"
   },
   "type": "scope",
   "use_default_actions": false,
