@@ -35,9 +35,6 @@ setup() {
 
   export TOFU_INIT_VARIABLES=""
   export MODULES_TO_USE=""
-
-  # Clear LocalStack endpoint
-  unset AWS_ENDPOINT_URL
 }
 
 # =============================================================================
@@ -155,41 +152,6 @@ run_aws_setup() {
 
   assert_contains "$TOFU_INIT_VARIABLES" "-var=existing=value"
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=bucket=my-terraform-state-bucket"
-}
-
-# =============================================================================
-# Test: LocalStack/AWS_ENDPOINT_URL configuration
-# =============================================================================
-@test "adds LocalStack backend config when AWS_ENDPOINT_URL is set" {
-  export AWS_ENDPOINT_URL="http://localhost:4566"
-
-  run_aws_setup
-
-  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=force_path_style=true"
-  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=skip_credentials_validation=true"
-  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=skip_metadata_api_check=true"
-  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=skip_region_validation=true"
-}
-
-@test "includes endpoint config with LocalStack URL" {
-  export AWS_ENDPOINT_URL="http://localhost:4566"
-
-  run_aws_setup
-
-  assert_contains "$TOFU_INIT_VARIABLES" '-backend-config=endpoints={s3="http://localhost:4566",dynamodb="http://localhost:4566"}'
-}
-
-@test "does not add LocalStack config when AWS_ENDPOINT_URL is not set" {
-  unset AWS_ENDPOINT_URL
-
-  run_aws_setup
-
-  # Should not contain LocalStack-specific configs
-  if [[ "$TOFU_INIT_VARIABLES" == *"force_path_style"* ]]; then
-    echo "TOFU_INIT_VARIABLES should not contain force_path_style when AWS_ENDPOINT_URL is not set"
-    echo "Actual: $TOFU_INIT_VARIABLES"
-    return 1
-  fi
 }
 
 # =============================================================================

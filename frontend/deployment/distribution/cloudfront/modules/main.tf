@@ -6,6 +6,30 @@ resource "aws_cloudfront_origin_access_control" "static" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_s3_bucket_policy" "static" {
+  bucket = data.aws_s3_bucket.static.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudFrontServicePrincipalReadOnly"
+        Effect    = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = "s3:GetObject"
+        Resource = "${data.aws_s3_bucket.static.arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/${aws_cloudfront_distribution.static.id}"
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_cloudfront_distribution" "static" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -19,7 +43,7 @@ resource "aws_cloudfront_distribution" "static" {
     origin_id                = local.distribution_origin_id
     origin_access_control_id = aws_cloudfront_origin_access_control.static.id
 
-    origin_path              = var.distribution_s3_prefix != "" ? "/${var.distribution_s3_prefix}" : ""
+    origin_path              = local.distribution_origin_path
   }
 
   default_cache_behavior {
@@ -79,9 +103,22 @@ resource "aws_cloudfront_distribution" "static" {
     }
   }
 
-  viewer_certificate {
-    cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1.2_2021"
+  # Use ACM certificate if available for custom domain, otherwise use default CloudFront certificate
+  dynamic "viewer_certificate" {
+    for_each = local.distribution_has_acm_certificate ? [1] : []
+    content {
+      acm_certificate_arn      = data.aws_acm_certificate.custom_domain[0].arn
+      ssl_support_method       = "sni-only"
+      minimum_protocol_version = "TLSv1.2_2021"
+    }
+  }
+
+  dynamic "viewer_certificate" {
+    for_each = local.distribution_has_acm_certificate ? [] : [1]
+    content {
+      cloudfront_default_certificate = true
+      minimum_protocol_version       = "TLSv1.2_2021"
+    }
   }
 
   tags = local.distribution_default_tags
