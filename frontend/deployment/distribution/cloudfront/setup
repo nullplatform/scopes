@@ -1,15 +1,16 @@
 #!/bin/bash
 
-# S3 + CloudFront Hosting Setup
+echo "🔍 Validating CloudFront distribution configuration..."
 
 application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
 scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
 scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
 
 distribution_app_name="$application_slug-$scope_slug-$scope_id"
+echo "   ✅ app_name=$distribution_app_name"
 
-# Fetch bucket name from assets-repository provider
-echo "🔍 Fetching assets-repository provider..."
+echo ""
+echo "   📡 Fetching assets-repository provider..."
 
 nrn=$(echo "$CONTEXT" | jq -r .scope.nrn)
 
@@ -18,7 +19,7 @@ np_exit_code=$?
 
 if [ $np_exit_code -ne 0 ]; then
   echo ""
-  echo "❌ Failed to fetch assets-repository provider"
+  echo "   ❌ Failed to fetch assets-repository provider"
   echo ""
 
   if echo "$asset_repository" | grep -q "not found\|no providers"; then
@@ -64,7 +65,7 @@ distribution_bucket_name=$(echo "$asset_repository" | jq -r '
 
 if [ -z "$distribution_bucket_name" ] || [ "$distribution_bucket_name" = "null" ]; then
   echo ""
-  echo "❌ No S3 bucket found in assets-repository providers"
+  echo "   ❌ No S3 bucket found in assets-repository providers"
   echo ""
   echo "  🤔 Found $(echo "$asset_repository" | jq '.results | length') provider(s), but none contain bucket information"
   echo ""
@@ -80,13 +81,13 @@ if [ -z "$distribution_bucket_name" ] || [ "$distribution_bucket_name" = "null" 
   exit 1
 fi
 
-echo "✅ Bucket name: $distribution_bucket_name"
+echo "   ✅ bucket_name=$distribution_bucket_name"
 
 # S3 prefix for multi-scope bucket support
 # TODO: Replace with your prefix variable
 distribution_s3_prefix="/app"
 
-echo "📁 S3 prefix: ${distribution_s3_prefix:-"(root)"}"
+echo "   ✅ s3_prefix=${distribution_s3_prefix:-"(root)"}"
 
 RESOURCE_TAGS_JSON=${RESOURCE_TAGS_JSON:-"{}"}
 
@@ -102,7 +103,9 @@ TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
     distribution_resource_tags_json: $resource_tags_json
   }')
 
-echo "✅ S3 + CloudFront distribution configured"
+echo ""
+echo "✨ CloudFront distribution configured successfully"
+echo ""
 
 # Add module to composition list
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

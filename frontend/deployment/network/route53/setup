@@ -1,24 +1,27 @@
 #!/bin/bash
 
+echo "🔍 Validating Route53 network configuration..."
+
 hosted_zone_id=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id // empty')
 
 if [ -z "$hosted_zone_id" ]; then
-  echo "❌ hosted_public_zone_id is not set in context"
+  echo "   ❌ hosted_public_zone_id is not set in context"
   exit 1
 fi
+echo "   ✅ hosted_zone_id=$hosted_zone_id"
 
 application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
 scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
 
-# Fetch the domain name from Route 53 hosted zone
-echo "🔍 Fetching domain from Route 53 hosted zone: $hosted_zone_id"
+echo ""
+echo "   📡 Fetching domain from Route 53 hosted zone..."
 
 aws_output=$(aws route53 get-hosted-zone --id "$hosted_zone_id" 2>&1)
 aws_exit_code=$?
 
 if [ $aws_exit_code -ne 0 ]; then
   echo ""
-  echo "❌ Failed to fetch Route 53 hosted zone information"
+  echo "   ❌ Failed to fetch Route 53 hosted zone information"
   echo ""
 
   if echo "$aws_output" | grep -q "NoSuchHostedZone"; then
@@ -84,7 +87,7 @@ network_domain=$(echo "$aws_output" | jq -r '.HostedZone.Name' | sed 's/\.$//')
 
 if [ -z "$network_domain" ] || [ "$network_domain" = "null" ]; then
   echo ""
-  echo "❌ Failed to extract domain name from hosted zone response"
+  echo "   ❌ Failed to extract domain name from hosted zone response"
   echo ""
   echo "  🤔 The AWS API returned successfully but the domain name could not be parsed."
   echo "  This is unexpected - please check the hosted zone configuration."
@@ -92,10 +95,14 @@ if [ -z "$network_domain" ] || [ "$network_domain" = "null" ]; then
   exit 1
 fi
 
-echo "✅ Domain resolved: $network_domain"
+echo "   ✅ domain=$network_domain"
 
 network_subdomain="$application_slug-$scope_slug"
-echo "✅ Subdomain: $network_subdomain"
+echo "   ✅ subdomain=$network_subdomain"
+
+echo ""
+echo "✨ Route53 network configured successfully"
+echo ""
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg hosted_zone_id "$hosted_zone_id" \

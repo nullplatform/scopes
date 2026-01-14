@@ -146,6 +146,16 @@ _setup_aws() {
   echo "  Moto: $MOTO_ENDPOINT"
   echo ""
 
+  # Configure OpenTofu/Terraform S3 backend for LocalStack
+  # These settings allow the S3 backend to work with LocalStack's S3 emulation
+  export TOFU_INIT_VARIABLES="${TOFU_INIT_VARIABLES:-}"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=force_path_style=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_credentials_validation=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_metadata_api_check=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_region_validation=true"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=endpoints={s3=\"$LOCALSTACK_ENDPOINT\",dynamodb=\"$LOCALSTACK_ENDPOINT\"}"
+  export TOFU_INIT_VARIABLES
+
   # Start containers if compose file exists
   if [[ -n "$INTEGRATION_COMPOSE_FILE" ]]; then
     _start_localstack
@@ -236,7 +246,9 @@ find_compose_file() {
     fi
   done
 
-  return 1
+  # Return success with empty output - compose file is optional
+  # (containers may already be managed by the test runner)
+  return 0
 }
 
 # =============================================================================
