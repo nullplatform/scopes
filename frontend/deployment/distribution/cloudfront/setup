@@ -5,6 +5,7 @@ echo "🔍 Validating CloudFront distribution configuration..."
 application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
 scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
 scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
+asset_url=$(echo "$CONTEXT" | jq -r .asset.url)
 
 distribution_app_name="$application_slug-$scope_slug-$scope_id"
 echo "   ✅ app_name=$distribution_app_name"
@@ -84,8 +85,9 @@ fi
 echo "   ✅ bucket_name=$distribution_bucket_name"
 
 # S3 prefix for multi-scope bucket support
-# TODO: Replace with your prefix variable
-distribution_s3_prefix="/app"
+# Extract path from asset_url (format: s3://bucket-name/path/to/assets)
+# Removes "s3://bucket-name" prefix, keeps the path with leading slash
+distribution_s3_prefix="/${asset_url#s3://*/}"
 
 echo "   ✅ s3_prefix=${distribution_s3_prefix:-"(root)"}"
 

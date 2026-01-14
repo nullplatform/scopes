@@ -68,7 +68,7 @@ set_np_mock() {
   "distribution_bucket_name": "assets-bucket",
   "distribution_app_name": "automation-development-tools-7",
   "distribution_resource_tags_json": {},
-  "distribution_s3_prefix": "/app"
+  "distribution_s3_prefix": "/tools/automation/v1.0.0"
 }'
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
@@ -170,8 +170,42 @@ set_np_mock() {
   "distribution_bucket_name": "assets-bucket",
   "distribution_app_name": "automation-development-tools-7",
   "distribution_resource_tags_json": {"Environment": "production", "Team": "platform"},
-  "distribution_s3_prefix": "/app"
+  "distribution_s3_prefix": "/tools/automation/v1.0.0"
 }'
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
+}
+
+# =============================================================================
+# Test: S3 prefix extraction from asset URL
+# =============================================================================
+@test "extracts s3_prefix from asset.url" {
+  set_np_mock "success.json"
+
+  run_cloudfront_setup
+
+  local s3_prefix=$(echo "$TOFU_VARIABLES" | jq -r '.distribution_s3_prefix')
+  assert_equal "$s3_prefix" "/tools/automation/v1.0.0"
+}
+
+@test "extracts s3_prefix correctly for different asset URL paths" {
+  set_np_mock "success.json"
+  # Override asset.url in context
+  export CONTEXT=$(echo "$CONTEXT" | jq '.asset.url = "s3://other-bucket/app/builds/latest"')
+
+  run_cloudfront_setup
+
+  local s3_prefix=$(echo "$TOFU_VARIABLES" | jq -r '.distribution_s3_prefix')
+  assert_equal "$s3_prefix" "/app/builds/latest"
+}
+
+@test "extracts s3_prefix with single path segment" {
+  set_np_mock "success.json"
+  # Override asset.url in context
+  export CONTEXT=$(echo "$CONTEXT" | jq '.asset.url = "s3://bucket/assets"')
+
+  run_cloudfront_setup
+
+  local s3_prefix=$(echo "$TOFU_VARIABLES" | jq -r '.distribution_s3_prefix')
+  assert_equal "$s3_prefix" "/assets"
 }
