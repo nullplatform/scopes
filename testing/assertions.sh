@@ -88,6 +88,39 @@ assert_json_equal() {
 }
 
 # =============================================================================
+# Mock helpers
+# =============================================================================
+
+# Set up a mock response for the np CLI
+# Usage: set_np_mock "<mock_file>" [exit_code]
+set_np_mock() {
+  local mock_file="$1"
+  local exit_code="${2:-0}"
+  export NP_MOCK_RESPONSE="$mock_file"
+  export NP_MOCK_EXIT_CODE="$exit_code"
+}
+
+# Set up a mock response for np scope patch command
+# Usage: set_np_scope_patch_mock "<mock_file>" [exit_code]
+# Requires: NP_MOCKS_DIR to be set in the test setup
+set_np_scope_patch_mock() {
+  local mock_file="$1"
+  local exit_code="${2:-0}"
+  export NP_MOCK_SCOPE_PATCH_RESPONSE="$NP_MOCKS_DIR/$mock_file"
+  export NP_MOCK_SCOPE_PATCH_EXIT_CODE="$exit_code"
+}
+
+# Set up a mock response for the aws CLI
+# Usage: set_aws_mock "<mock_file>" [exit_code]
+# Requires: AWS_MOCKS_DIR to be set in the test setup
+set_aws_mock() {
+  local mock_file="$1"
+  local exit_code="${2:-0}"
+  export AWS_MOCK_RESPONSE="$AWS_MOCKS_DIR/$mock_file"
+  export AWS_MOCK_EXIT_CODE="$exit_code"
+}
+
+# =============================================================================
 # Help / Documentation
 # =============================================================================
 
@@ -131,6 +164,21 @@ JSON ASSERTIONS
   assert_json_equal "<actual>" "<expected>" ["<name>"]
       Assert two JSON structures are equal (order-independent).
       Example: assert_json_equal "$response" '{"status": "ok"}'
+
+MOCK HELPERS
+------------
+  set_np_mock "<mock_file>" [exit_code]
+      Set up a mock response for the np CLI (fallback for any command).
+      Example: set_np_mock "mocks_dir/provider/success.json"
+
+  set_np_scope_patch_mock "<mock_file>" [exit_code]
+      Set up a mock response for "np scope patch" command.
+      Example: set_np_scope_patch_mock "scope/patch/success.json"
+
+  set_aws_mock "<mock_file>" [exit_code]
+      Set up a mock response for the aws CLI.
+      Requires: AWS_MOCKS_DIR to be set in setup().
+      Example: set_aws_mock "route53/success.json"
 
 BATS BUILT-IN HELPERS
 ---------------------

@@ -46,31 +46,37 @@ run_cloudfront_setup() {
 }
 
 # TODO(federico.maleh) move this to the assertions.sh and document
-set_np_mock() {
-  local mock_file="$1"
-  local exit_code="${2:-0}"
-  export NP_MOCK_RESPONSE="$MOCKS_DIR/asset_repository/$mock_file"
-  export NP_MOCK_EXIT_CODE="$exit_code"
-}
+#set_np_mock() {
+#  local mock_file="$1"
+#  local exit_code="${2:-0}"
+#  export NP_MOCK_RESPONSE="$mock_file"
+#  export NP_MOCK_EXIT_CODE="$exit_code"
+#}
 
 # =============================================================================
 # Test: Auth error case
 # =============================================================================
 @test "Should handle permission denied error fetching the asset-repository-provider" {
-  set_np_mock "auth_error.json" 1
+  set_np_mock "$MOCKS_DIR/asset_repository/auth_error.json" 1
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
   assert_contains "$output" "   ❌ Failed to fetch assets-repository provider"
   assert_contains "$output" "  🔒 Error: Permission denied"
+  assert_contains "$output" "  💡 Possible causes:"
+  assert_contains "$output" "    • The nullplatform API Key doesn't have 'Ops' permissions at nrn: organization=1:account=2:namespace=3:application=4:scope=7"
+
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    1. Ensure your API Key has 'Ops' permissions"
+  assert_contains "$output" "    2. Ensure your API Key is set at the correct NRN hierarchy level"
 }
 
 # =============================================================================
 # Test: Unknown error case
 # =============================================================================
 @test "Should handle unknown error fetching the asset-repository-provider" {
-  set_np_mock "unknown_error.json" 1
+  set_np_mock "$MOCKS_DIR/asset_repository/unknown_error.json" 1
 
   run source "$SCRIPT_PATH"
 
@@ -84,37 +90,44 @@ set_np_mock() {
 # Test: Empty results case
 # =============================================================================
 @test "Should fail if no asset-repository found" {
-  set_np_mock "no_data.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/no_data.json"
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "   ❌ No S3 bucket found in assets-repository providers"
-  assert_contains "$output" "  🤔 Found 0 provider(s), but none contain bucket information"
+  assert_contains "$output" "   ❌ No assets-repository provider of type AWS S3 at nrn: organization=1:account=2:namespace=3:application=4:scope=7"
+
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    1. Ensure you have an asset-repository provider of type S3 configured"
+  assert_contains "$output" "    2. Ensure your asset-repository provider is set at the correct NRN hierarchy level"
 }
 
 # =============================================================================
 # Test: No providers found case
 # =============================================================================
 @test "Should fail when no asset provider is of type s3" {
-  set_np_mock "no_bucket_data.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/no_bucket_data.json"
 
   run source "$SCRIPT_PATH"
 
-  # TODO(federico.maleh) improve the how to fix instructions for these.
-  # It should say: 1. you need an asset provider of type s3.
   assert_equal "$status" "1"
-  assert_contains "$output" "   ❌ No S3 bucket found in assets-repository providers"
-  assert_contains "$output" "  🤔 Found 1 provider(s), but none contain bucket information"
-  assert_contains "$output" "  📋 Providers found:"
+  assert_contains "$output" "   ❌ No assets-repository provider of type AWS S3 at nrn: organization=1:account=2:namespace=3:application=4:scope=7"
+  assert_contains "$output" "  🤔 Found 1 asset-repository provider(s), but none are configured for S3."
+
+  assert_contains "$output" "  📋 Verify the existing providers with the nullplatform CLI:"
   assert_contains "$output" "    • np provider read --id d397e46b-89b8-419d-ac14-2b483ace511c --format json"
+
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    1. Ensure you have an asset-repository provider of type S3 configured"
+  assert_contains "$output" "    2. Ensure your asset-repository provider is set at the correct NRN hierarchy level"
+  assert_equal "$status" "1"
 }
 
 # =============================================================================
 # Test: S3 prefix extraction from asset URL
 # =============================================================================
 @test "Should extracts s3_prefix from asset.url with s3 format" {
-  set_np_mock "success.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/success.json"
 
   run_cloudfront_setup
 
@@ -123,7 +136,7 @@ set_np_mock() {
 }
 
 @test "Should extracts s3_prefix from asset.url with http format" {
-  set_np_mock "success.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/success.json"
 
   # Override asset.url in context with https format
   export CONTEXT=$(echo "$CONTEXT" | jq '.asset.url = "https://my-asset-bucket/tools/automation/v1.0.0"')
@@ -138,7 +151,7 @@ set_np_mock() {
 # Test: TOFU_VARIABLES - verifies the entire JSON structure
 # =============================================================================
 @test "Should add distribution variables to TOFU_VARIABLES" {
-  set_np_mock "success.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/success.json"
 
   run_cloudfront_setup
 
@@ -156,7 +169,7 @@ set_np_mock() {
 }
 
 @test "Should add distribution_resource_tags_json to TOFU_VARIABLES" {
-  set_np_mock "success.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/success.json"
   export RESOURCE_TAGS_JSON='{"Environment": "production", "Team": "platform"}'
 
   run_cloudfront_setup
@@ -178,7 +191,7 @@ set_np_mock() {
 # Test: MODULES_TO_USE
 # =============================================================================
 @test "Should register the provider in the MODULES_TO_USE variable when it's empty" {
-  set_np_mock "success.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/success.json"
 
   run_cloudfront_setup
 
@@ -186,7 +199,7 @@ set_np_mock() {
 }
 
 @test "Should append the provider in the MODULES_TO_USE variable when it's not empty" {
-  set_np_mock "success.json"
+  set_np_mock "$MOCKS_DIR/asset_repository/success.json"
   export MODULES_TO_USE="existing/module"
 
   run_cloudfront_setup
