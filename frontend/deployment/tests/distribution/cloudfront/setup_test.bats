@@ -45,14 +45,6 @@ run_cloudfront_setup() {
   source "$SCRIPT_PATH"
 }
 
-# TODO(federico.maleh) move this to the assertions.sh and document
-#set_np_mock() {
-#  local mock_file="$1"
-#  local exit_code="${2:-0}"
-#  export NP_MOCK_RESPONSE="$mock_file"
-#  export NP_MOCK_EXIT_CODE="$exit_code"
-#}
-
 # =============================================================================
 # Test: Auth error case
 # =============================================================================
