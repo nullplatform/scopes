@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Function to get configuration value with priority hierarchy
+# Usage: get_config_value [--env ENV_VAR] [--provider "jq.path"] ... [--default "value"]
+# Returns the first non-empty value found in order of arguments
+get_config_value() {
+  local result=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --env)
+        local env_var="${2:-}"
+        if [ -n "${!env_var:-}" ]; then
+          result="${!env_var}"
+          echo "$result"
+          return 0
+        fi
+        shift 2
+        ;;
+      --provider)
+        local jq_path="${2:-}"
+        if [ -n "$jq_path" ]; then
+          local provider_value
+          provider_value=$(echo "$CONTEXT" | jq -r "$jq_path // empty")
+          if [ -n "$provider_value" ] && [ "$provider_value" != "null" ]; then
+            result="$provider_value"
+            echo "$result"
+            return 0
+          fi
+        fi
+        shift 2
+        ;;
+      --default)
+        local default_value="${2:-}"
+        if [ -n "$default_value" ]; then
+          echo "$default_value"
+          return 0
+        fi
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  echo "$result"
+}
