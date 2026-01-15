@@ -49,7 +49,10 @@ run_aws_setup() {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "   ❌ AWS_REGION is missing. You must set it as environment variables in you nullplatform agent installation."
+  assert_contains "$output" "   ❌ AWS_REGION is missing"
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    Set the missing variable(s) in your nullplatform agent Helm installation:"
+  assert_contains "$output" "      • AWS_REGION"
 }
 
 @test "Should fail when TOFU_PROVIDER_BUCKET is not set" {
@@ -58,7 +61,10 @@ run_aws_setup() {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "   ❌ TOFU_PROVIDER_BUCKET is missing. You must set it as environment variables in you nullplatform agent installation."
+  assert_contains "$output" "   ❌ TOFU_PROVIDER_BUCKET is missing"
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    Set the missing variable(s) in your nullplatform agent Helm installation:"
+  assert_contains "$output" "      • TOFU_PROVIDER_BUCKET"
 }
 
 @test "Should fail when TOFU_LOCK_TABLE is not set" {
@@ -67,7 +73,28 @@ run_aws_setup() {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "   ❌ TOFU_LOCK_TABLE is missing. You must set it as environment variables in you nullplatform agent installation."
+  assert_contains "$output" "   ❌ TOFU_LOCK_TABLE is missing"
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    Set the missing variable(s) in your nullplatform agent Helm installation:"
+  assert_contains "$output" "      • TOFU_LOCK_TABLE"
+}
+
+@test "Should report all the variables that are not set" {
+  unset AWS_REGION
+  unset TOFU_PROVIDER_BUCKET
+  unset TOFU_LOCK_TABLE
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "   ❌ AWS_REGION is missing"
+  assert_contains "$output" "   ❌ TOFU_PROVIDER_BUCKET is missing"
+  assert_contains "$output" "   ❌ TOFU_LOCK_TABLE is missing"
+  assert_contains "$output" "  🔧 How to fix:"
+  assert_contains "$output" "    Set the missing variable(s) in your nullplatform agent Helm installation:"
+  assert_contains "$output" "      • AWS_REGION"
+  assert_contains "$output" "      • TOFU_PROVIDER_BUCKET"
+  assert_contains "$output" "      • TOFU_LOCK_TABLE"
 }
 
 # =============================================================================
