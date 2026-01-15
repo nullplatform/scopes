@@ -28,13 +28,6 @@
           "title": "Create Namespace If Not Exist",
           "description": "Whether to create the namespace if it doesn't exist",
           "enum": ["true", "false"]
-        },
-        "region": {
-          "type": "string",
-          "order": 3,
-          "title": "Cloud Region",
-          "description": "Cloud provider region where resources will be deployed",
-          "examples": ["us-east-1", "us-west-2", "eu-west-1", "ap-south-1"]
         }
       }
     },

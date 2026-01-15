@@ -1,64 +1,68 @@
 # Kubernetes Scope Configuration
 
-Este documento describe todas las variables de configuración disponibles para scopes de Kubernetes, su jerarquía de prioridades y cómo configurarlas.
+This document describes all available configuration variables for Kubernetes scopes, their priority hierarchy, and how to configure them.
 
-## Jerarquía de Configuración
+## Configuration Hierarchy
 
-Las variables de configuración siguen una jerarquía de prioridades:
+Configuration variables follow a priority hierarchy:
 
 ```
-1. Variable de entorno (ENV VAR) - Máxima prioridad
+1. Existing Providers - Highest priority
+   - scope-configuration: Scope-specific configuration
+   - container-orchestration: Orchestrator configuration
+   - cloud-providers: Cloud provider configuration
+   (If there are multiple providers, the order in which they are specified determines priority)
    ↓
-2. Provider scope-configuration - Configuración específica del scope
+2. Environment Variable (ENV VAR) - Allows override when no provider exists
    ↓
-3. Providers existentes - container-orchestration / cloud-providers
-   ↓
-4. values.yaml - Valores por defecto del scope tipo
+3. values.yaml - Default values for the scope type
 ```
 
-## Variables de Configuración
+**Important Note**: The order of arguments in `get_config_value` does NOT affect priority. The function always respects the order: providers > env var > default, regardless of the order in which arguments are passed.
+
+## Configuration Variables
 
 ### Scope Context (`k8s/scope/build_context`)
 
-Variables que definen el contexto general del scope y recursos de Kubernetes.
+Variables that define the general context of the scope and Kubernetes resources.
 
-| Variable | Descripción | values.yaml | scope-configuration (JSON Schema) | Archivos que la usan | Default |
-|----------|-------------|-------------|-----------------------------------|---------------------|---------|
-| **K8S_NAMESPACE** | Namespace de Kubernetes donde se despliegan los recursos | `configuration.K8S_NAMESPACE` | `kubernetes.namespace` | `k8s/scope/build_context`<br>`k8s/deployment/build_context` | `"nullplatform"` |
-| **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Si se debe crear el namespace si no existe | `configuration.CREATE_K8S_NAMESPACE_IF_NOT_EXIST` | `kubernetes.create_namespace_if_not_exist` | `k8s/scope/build_context` | `"true"` |
-| **K8S_MODIFIERS** | Modificadores (annotations, labels, tolerations) para recursos K8s | `configuration.K8S_MODIFIERS` | `kubernetes.modifiers` | `k8s/scope/build_context` | `{}` |
-| **REGION** | Región de AWS/Cloud donde se despliegan los recursos | N/A (calculado) | `region` | `k8s/scope/build_context` | `"us-east-1"` |
-| **USE_ACCOUNT_SLUG** | Si se debe usar el slug de account como dominio de aplicación | `configuration.USE_ACCOUNT_SLUG` | `networking.application_domain` | `k8s/scope/build_context` | `"false"` |
-| **DOMAIN** | Dominio público para la aplicación | `configuration.DOMAIN` | `networking.domain_name` | `k8s/scope/build_context` | `"nullapps.io"` |
-| **PRIVATE_DOMAIN** | Dominio privado para servicios internos | `configuration.PRIVATE_DOMAIN` | `networking.private_domain_name` | `k8s/scope/build_context` | `"nullapps.io"` |
-| **PUBLIC_GATEWAY_NAME** | Nombre del gateway público para ingress | Env var o default | `gateway.public_name` | `k8s/scope/build_context` | `"gateway-public"` |
-| **PRIVATE_GATEWAY_NAME** | Nombre del gateway privado/interno para ingress | Env var o default | `gateway.private_name` | `k8s/scope/build_context` | `"gateway-internal"` |
-| **ALB_NAME** (public) | Nombre del Application Load Balancer público | Calculado | `balancer.public_name` | `k8s/scope/build_context` | `"k8s-nullplatform-internet-facing"` |
-| **ALB_NAME** (private) | Nombre del Application Load Balancer privado | Calculado | `balancer.private_name` | `k8s/scope/build_context` | `"k8s-nullplatform-internal"` |
-| **DNS_TYPE** | Tipo de DNS provider (route53, azure, external_dns) | `configuration.DNS_TYPE` | `dns.type` | `k8s/scope/build_context`<br>Workflows DNS | `"route53"` |
-| **ALB_RECONCILIATION_ENABLED** | Si está habilitada la reconciliación de ALB | `configuration.ALB_RECONCILIATION_ENABLED` | `networking.alb_reconciliation_enabled` | `k8s/scope/build_context`<br>Workflows balancer | `"false"` |
-| **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Tiempo máximo de espera para deployments (segundos) | `configuration.DEPLOYMENT_MAX_WAIT_IN_SECONDS` | `deployment.max_wait_seconds` | `k8s/scope/build_context`<br>Workflows deployment | `600` |
-| **MANIFEST_BACKUP** | Configuración de backup de manifiestos K8s | `configuration.MANIFEST_BACKUP` | `manifest_backup` | `k8s/scope/build_context`<br>Workflows backup | `{}` |
-| **VAULT_ADDR** | URL del servidor Vault para secrets | `configuration.VAULT_ADDR` | `vault.address` | `k8s/scope/build_context`<br>Workflows secrets | `""` (vacío) |
-| **VAULT_TOKEN** | Token de autenticación para Vault | `configuration.VAULT_TOKEN` | `vault.token` | `k8s/scope/build_context`<br>Workflows secrets | `""` (vacío) |
+| Variable | Description | values.yaml | scope-configuration (JSON Schema) | Files Using It | Default |
+|----------|-------------|-------------|-----------------------------------|----------------|---------|
+| **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `configuration.K8S_NAMESPACE` | `kubernetes.namespace` | `k8s/scope/build_context`<br>`k8s/deployment/build_context` | `"nullplatform"` |
+| **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `configuration.CREATE_K8S_NAMESPACE_IF_NOT_EXIST` | `kubernetes.create_namespace_if_not_exist` | `k8s/scope/build_context` | `"true"` |
+| **K8S_MODIFIERS** | Modifiers (annotations, labels, tolerations) for K8s resources | `configuration.K8S_MODIFIERS` | `kubernetes.modifiers` | `k8s/scope/build_context` | `{}` |
+| **REGION** | AWS/Cloud region where resources are deployed. **Note:** Only obtained from `cloud-providers` provider, not from `scope-configuration` | N/A (cloud-providers only) | N/A | `k8s/scope/build_context` | `"us-east-1"` |
+| **USE_ACCOUNT_SLUG** | Whether to use account slug as application domain | `configuration.USE_ACCOUNT_SLUG` | `networking.application_domain` | `k8s/scope/build_context` | `"false"` |
+| **DOMAIN** | Public domain for the application | `configuration.DOMAIN` | `networking.domain_name` | `k8s/scope/build_context` | `"nullapps.io"` |
+| **PRIVATE_DOMAIN** | Private domain for internal services | `configuration.PRIVATE_DOMAIN` | `networking.private_domain_name` | `k8s/scope/build_context` | `"nullapps.io"` |
+| **PUBLIC_GATEWAY_NAME** | Public gateway name for ingress | Env var or default | `gateway.public_name` | `k8s/scope/build_context` | `"gateway-public"` |
+| **PRIVATE_GATEWAY_NAME** | Private/internal gateway name for ingress | Env var or default | `gateway.private_name` | `k8s/scope/build_context` | `"gateway-internal"` |
+| **ALB_NAME** (public) | Public Application Load Balancer name | Calculated | `balancer.public_name` | `k8s/scope/build_context` | `"k8s-nullplatform-internet-facing"` |
+| **ALB_NAME** (private) | Private Application Load Balancer name | Calculated | `balancer.private_name` | `k8s/scope/build_context` | `"k8s-nullplatform-internal"` |
+| **DNS_TYPE** | DNS provider type (route53, azure, external_dns) | `configuration.DNS_TYPE` | `dns.type` | `k8s/scope/build_context`<br>DNS Workflows | `"route53"` |
+| **ALB_RECONCILIATION_ENABLED** | Whether ALB reconciliation is enabled | `configuration.ALB_RECONCILIATION_ENABLED` | `networking.alb_reconciliation_enabled` | `k8s/scope/build_context`<br>Balancer Workflows | `"false"` |
+| **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Maximum wait time for deployments (seconds) | `configuration.DEPLOYMENT_MAX_WAIT_IN_SECONDS` | `deployment.max_wait_seconds` | `k8s/scope/build_context`<br>Deployment Workflows | `600` |
+| **MANIFEST_BACKUP** | K8s manifests backup configuration | `configuration.MANIFEST_BACKUP` | `manifest_backup` | `k8s/scope/build_context`<br>Backup Workflows | `{}` |
+| **VAULT_ADDR** | Vault server URL for secrets | `configuration.VAULT_ADDR` | `vault.address` | `k8s/scope/build_context`<br>Secrets Workflows | `""` (empty) |
+| **VAULT_TOKEN** | Vault authentication token | `configuration.VAULT_TOKEN` | `vault.token` | `k8s/scope/build_context`<br>Secrets Workflows | `""` (empty) |
 
 ### Deployment Context (`k8s/deployment/build_context`)
 
-Variables específicas del deployment y configuración de pods.
+Deployment-specific variables and pod configuration.
 
-| Variable | Descripción | values.yaml | scope-configuration (JSON Schema) | Archivos que la usan | Default |
-|----------|-------------|-------------|-----------------------------------|---------------------|---------|
-| **IMAGE_PULL_SECRETS** | Secrets para descargar imágenes de registries privados | `configuration.IMAGE_PULL_SECRETS` | `deployment.image_pull_secrets` | `k8s/deployment/build_context` | `{}` |
-| **TRAFFIC_CONTAINER_IMAGE** | Imagen del contenedor sidecar traffic manager | `configuration.TRAFFIC_CONTAINER_IMAGE` | `deployment.traffic_container_image` | `k8s/deployment/build_context` | `"public.ecr.aws/nullplatform/k8s-traffic-manager:latest"` |
-| **POD_DISRUPTION_BUDGET_ENABLED** | Si está habilitado el Pod Disruption Budget | `configuration.POD_DISRUPTION_BUDGET.ENABLED` | `deployment.pod_disruption_budget.enabled` | `k8s/deployment/build_context` | `"false"` |
-| **POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE** | Máximo número o porcentaje de pods que pueden estar no disponibles | `configuration.POD_DISRUPTION_BUDGET.MAX_UNAVAILABLE` | `deployment.pod_disruption_budget.max_unavailable` | `k8s/deployment/build_context` | `"25%"` |
-| **TRAFFIC_MANAGER_CONFIG_MAP** | Nombre del ConfigMap con configuración custom de traffic manager | `configuration.TRAFFIC_MANAGER_CONFIG_MAP` | `deployment.traffic_manager_config_map` | `k8s/deployment/build_context` | `""` (vacío) |
-| **DEPLOY_STRATEGY** | Estrategia de deployment (rolling o blue-green) | `configuration.DEPLOY_STRATEGY` | `deployment.strategy` | `k8s/deployment/build_context`<br>`k8s/deployment/scale_deployments` | `"rolling"` |
-| **IAM** | Configuración de IAM roles y policies para service accounts | `configuration.IAM` | `deployment.iam` | `k8s/deployment/build_context`<br>`k8s/scope/iam/*` | `{}` |
+| Variable | Description | values.yaml | scope-configuration (JSON Schema) | Files Using It | Default |
+|----------|-------------|-------------|-----------------------------------|----------------|---------|
+| **IMAGE_PULL_SECRETS** | Secrets for pulling images from private registries | `configuration.IMAGE_PULL_SECRETS` | `deployment.image_pull_secrets` | `k8s/deployment/build_context` | `{}` |
+| **TRAFFIC_CONTAINER_IMAGE** | Traffic manager sidecar container image | `configuration.TRAFFIC_CONTAINER_IMAGE` | `deployment.traffic_container_image` | `k8s/deployment/build_context` | `"public.ecr.aws/nullplatform/k8s-traffic-manager:latest"` |
+| **POD_DISRUPTION_BUDGET_ENABLED** | Whether Pod Disruption Budget is enabled | `configuration.POD_DISRUPTION_BUDGET.ENABLED` | `deployment.pod_disruption_budget.enabled` | `k8s/deployment/build_context` | `"false"` |
+| **POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE** | Maximum number or percentage of pods that can be unavailable | `configuration.POD_DISRUPTION_BUDGET.MAX_UNAVAILABLE` | `deployment.pod_disruption_budget.max_unavailable` | `k8s/deployment/build_context` | `"25%"` |
+| **TRAFFIC_MANAGER_CONFIG_MAP** | ConfigMap name with custom traffic manager configuration | `configuration.TRAFFIC_MANAGER_CONFIG_MAP` | `deployment.traffic_manager_config_map` | `k8s/deployment/build_context` | `""` (empty) |
+| **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `configuration.DEPLOY_STRATEGY` | `deployment.strategy` | `k8s/deployment/build_context`<br>`k8s/deployment/scale_deployments` | `"rolling"` |
+| **IAM** | IAM roles and policies configuration for service accounts | `configuration.IAM` | `deployment.iam` | `k8s/deployment/build_context`<br>`k8s/scope/iam/*` | `{}` |
 
-## Configuración mediante scope-configuration Provider
+## Configuration via scope-configuration Provider
 
-### Estructura JSON Completa
+### Complete JSON Structure
 
 ```json
 {
@@ -87,7 +91,6 @@ Variables específicas del deployment y configuración de pods.
         }
       }
     },
-    "region": "us-west-2",
     "networking": {
       "domain_name": "example.com",
       "private_domain_name": "internal.example.com",
@@ -154,15 +157,16 @@ Variables específicas del deployment y configuración de pods.
   "scope-configuration": {
     "kubernetes": {
       "namespace": "staging"
-    },
-    "region": "eu-west-1"
+    }
   }
 }
 ```
 
-## Variables de Entorno
+**Note**: The region (`REGION`) is automatically obtained from the `cloud-providers` provider, it is not configured in `scope-configuration`.
 
-Puedes sobreescribir cualquier valor usando variables de entorno:
+## Environment Variables
+
+Environment variables allow configuring values when they are not defined in providers. Note that providers have higher priority than environment variables:
 
 ```bash
 # Kubernetes
@@ -196,22 +200,22 @@ export PUBLIC_GATEWAY_NAME="gateway-prod"
 export PRIVATE_GATEWAY_NAME="gateway-internal-prod"
 ```
 
-## Variables Adicionales (Solo values.yaml)
+## Additional Variables (values.yaml Only)
 
-Las siguientes variables están definidas en `k8s/values.yaml` pero **aún no están integradas** con el sistema de jerarquía scope-configuration. Solo se pueden configurar mediante `values.yaml`:
+The following variables are defined in `k8s/values.yaml` but are **not yet integrated** with the scope-configuration hierarchy system. They can only be configured via `values.yaml`:
 
-| Variable | Descripción | values.yaml | Default | Archivos que la usan |
-|----------|-------------|-------------|---------|---------------------|
-| **DEPLOYMENT_TEMPLATE** | Path al template de deployment | `configuration.DEPLOYMENT_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"` | Workflows de deployment |
-| **SECRET_TEMPLATE** | Path al template de secrets | `configuration.SECRET_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/secret.yaml.tpl"` | Workflows de deployment |
-| **SCALING_TEMPLATE** | Path al template de scaling/HPA | `configuration.SCALING_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"` | Workflows de scaling |
-| **SERVICE_TEMPLATE** | Path al template de service | `configuration.SERVICE_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/service.yaml.tpl"` | Workflows de deployment |
-| **PDB_TEMPLATE** | Path al template de Pod Disruption Budget | `configuration.PDB_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"` | Workflows de deployment |
-| **INITIAL_INGRESS_PATH** | Path al template de ingress inicial | `configuration.INITIAL_INGRESS_PATH` | `"$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"` | Workflows de ingress |
-| **BLUE_GREEN_INGRESS_PATH** | Path al template de ingress blue-green | `configuration.BLUE_GREEN_INGRESS_PATH` | `"$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"` | Workflows de ingress |
-| **SERVICE_ACCOUNT_TEMPLATE** | Path al template de service account | `configuration.SERVICE_ACCOUNT_TEMPLATE` | `"$SERVICE_PATH/scope/templates/service-account.yaml.tpl"` | Workflows de IAM |
+| Variable | Description | values.yaml | Default | Files Using It |
+|----------|-------------|-------------|---------|----------------|
+| **DEPLOYMENT_TEMPLATE** | Path to deployment template | `configuration.DEPLOYMENT_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"` | Deployment workflows |
+| **SECRET_TEMPLATE** | Path to secrets template | `configuration.SECRET_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/secret.yaml.tpl"` | Deployment workflows |
+| **SCALING_TEMPLATE** | Path to scaling/HPA template | `configuration.SCALING_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"` | Scaling workflows |
+| **SERVICE_TEMPLATE** | Path to service template | `configuration.SERVICE_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/service.yaml.tpl"` | Deployment workflows |
+| **PDB_TEMPLATE** | Path to Pod Disruption Budget template | `configuration.PDB_TEMPLATE` | `"$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"` | Deployment workflows |
+| **INITIAL_INGRESS_PATH** | Path to initial ingress template | `configuration.INITIAL_INGRESS_PATH` | `"$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"` | Ingress workflows |
+| **BLUE_GREEN_INGRESS_PATH** | Path to blue-green ingress template | `configuration.BLUE_GREEN_INGRESS_PATH` | `"$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"` | Ingress workflows |
+| **SERVICE_ACCOUNT_TEMPLATE** | Path to service account template | `configuration.SERVICE_ACCOUNT_TEMPLATE` | `"$SERVICE_PATH/scope/templates/service-account.yaml.tpl"` | IAM workflows |
 
-> **Nota**: Estas variables son paths a templates y están pendientes de migración al sistema de jerarquía scope-configuration. Actualmente solo pueden configurarse en `values.yaml` o mediante variables de entorno sin soporte para providers.
+> **Note**: These variables are template paths and are pending migration to the scope-configuration hierarchy system. Currently they can only be configured in `values.yaml` or via environment variables without provider support.
 
 ### IAM Configuration
 
@@ -242,11 +246,11 @@ MANIFEST_BACKUP:
   PREFIX: k8s-manifests
 ```
 
-## Detalles de Variables Importantes
+## Important Variables Details
 
 ### K8S_MODIFIERS
 
-Permite agregar annotations, labels y tolerations a recursos de Kubernetes. Estructura:
+Allows adding annotations, labels and tolerations to Kubernetes resources. Structure:
 
 ```json
 {
@@ -280,7 +284,7 @@ Permite agregar annotations, labels y tolerations a recursos de Kubernetes. Estr
 
 ### IMAGE_PULL_SECRETS
 
-Configuración para descargar imágenes de registries privados:
+Configuration for pulling images from private registries:
 
 ```json
 {
@@ -294,19 +298,19 @@ Configuración para descargar imágenes de registries privados:
 
 ### POD_DISRUPTION_BUDGET
 
-Asegura alta disponibilidad durante actualizaciones. `max_unavailable` puede ser:
-- **Porcentaje**: `"25%"` - máximo 25% de pods no disponibles
-- **Número absoluto**: `"1"` - máximo 1 pod no disponible
+Ensures high availability during updates. `max_unavailable` can be:
+- **Percentage**: `"25%"` - maximum 25% of pods unavailable
+- **Absolute number**: `"1"` - maximum 1 pod unavailable
 
 ### DEPLOY_STRATEGY
 
-Estrategia de deployment a utilizar:
-- **`rolling`** (default): Deployment progresivo, pods nuevos reemplazan gradualmente a los viejos
-- **`blue-green`**: Deployment side-by-side, cambio instantáneo de tráfico entre versiones
+Deployment strategy to use:
+- **`rolling`** (default): Progressive deployment, new pods gradually replace old ones
+- **`blue-green`**: Side-by-side deployment, instant traffic switch between versions
 
 ### IAM
 
-Configuración para integración con AWS IAM. Permite asignar roles de IAM a los service accounts de Kubernetes:
+Configuration for AWS IAM integration. Allows assigning IAM roles to Kubernetes service accounts:
 
 ```json
 {
@@ -328,15 +332,15 @@ Configuración para integración con AWS IAM. Permite asignar roles de IAM a los
 }
 ```
 
-Cuando está habilitado, crea un service account con nombre `{PREFIX}-{SCOPE_ID}` y lo asocia con el role de IAM configurado.
+When enabled, creates a service account with name `{PREFIX}-{SCOPE_ID}` and associates it with the configured IAM role.
 
 ### DNS_TYPE
 
-Especifica el tipo de DNS provider para gestionar registros DNS:
+Specifies the DNS provider type for managing DNS records:
 
 - **`route53`** (default): Amazon Route53
 - **`azure`**: Azure DNS
-- **`external_dns`**: External DNS para integración con otros providers
+- **`external_dns`**: External DNS for integration with other providers
 
 ```json
 {
@@ -348,7 +352,7 @@ Especifica el tipo de DNS provider para gestionar registros DNS:
 
 ### MANIFEST_BACKUP
 
-Configuración para realizar backups automáticos de los manifiestos de Kubernetes aplicados:
+Configuration for automatic backups of applied Kubernetes manifests:
 
 ```json
 {
@@ -361,15 +365,15 @@ Configuración para realizar backups automáticos de los manifiestos de Kubernet
 }
 ```
 
-Propiedades:
-- **`ENABLED`**: Habilita o deshabilita el backup (boolean)
-- **`TYPE`**: Tipo de storage para backups (actualmente solo `"s3"`)
-- **`BUCKET`**: Nombre del bucket S3 donde se guardan los backups
-- **`PREFIX`**: Prefijo/path dentro del bucket para organizar los manifiestos
+Properties:
+- **`ENABLED`**: Enables or disables backup (boolean)
+- **`TYPE`**: Storage type for backups (currently only `"s3"`)
+- **`BUCKET`**: S3 bucket name where backups are stored
+- **`PREFIX`**: Prefix/path within the bucket to organize manifests
 
 ### VAULT Integration
 
-Integración con HashiCorp Vault para gestión de secrets:
+Integration with HashiCorp Vault for secrets management:
 
 ```json
 {
@@ -380,23 +384,23 @@ Integración con HashiCorp Vault para gestión de secrets:
 }
 ```
 
-Propiedades:
-- **`address`**: URL completa del servidor Vault (debe incluir protocolo https://)
-- **`token`**: Token de autenticación para acceder a Vault
+Properties:
+- **`address`**: Complete Vault server URL (must include https:// protocol)
+- **`token`**: Authentication token to access Vault
 
-Cuando está configurado, el sistema puede obtener secrets desde Vault en lugar de usar Kubernetes Secrets nativos.
+When configured, the system can obtain secrets from Vault instead of using native Kubernetes Secrets.
 
-> **Nota de Seguridad**: Nunca commits el token de Vault en código. Usa variables de entorno o sistemas de gestión de secrets para inyectar el token en runtime.
+> **Security Note**: Never commit the Vault token in code. Use environment variables or secret management systems to inject the token at runtime.
 
 ### DEPLOYMENT_MAX_WAIT_IN_SECONDS
 
-Tiempo máximo (en segundos) que el sistema esperará a que un deployment se vuelva ready antes de considerarlo fallido:
+Maximum time (in seconds) the system will wait for a deployment to become ready before considering it failed:
 
-- **Default**: `600` (10 minutos)
-- **Valores recomendados**:
-  - Aplicaciones ligeras: `300` (5 minutos)
-  - Aplicaciones pesadas o con inicialización lenta: `900` (15 minutos)
-  - Aplicaciones con migrations complejas: `1200` (20 minutos)
+- **Default**: `600` (10 minutes)
+- **Recommended values**:
+  - Lightweight applications: `300` (5 minutes)
+  - Heavy applications or slow initialization: `900` (15 minutes)
+  - Applications with complex migrations: `1200` (20 minutes)
 
 ```json
 {
@@ -408,10 +412,10 @@ Tiempo máximo (en segundos) que el sistema esperará a que un deployment se vue
 
 ### ALB_RECONCILIATION_ENABLED
 
-Habilita la reconciliación automática de Application Load Balancers. Cuando está habilitado, el sistema verifica y actualiza la configuración del ALB para mantenerla sincronizada con la configuración deseada:
+Enables automatic reconciliation of Application Load Balancers. When enabled, the system verifies and updates the ALB configuration to keep it synchronized with the desired configuration:
 
-- **`"true"`**: Reconciliación habilitada
-- **`"false"`** (default): Reconciliación deshabilitada
+- **`"true"`**: Reconciliation enabled
+- **`"false"`** (default): Reconciliation disabled
 
 ```json
 {
@@ -423,27 +427,27 @@ Habilita la reconciliación automática de Application Load Balancers. Cuando es
 
 ### TRAFFIC_MANAGER_CONFIG_MAP
 
-Si se especifica, debe ser un ConfigMap existente con:
-- `nginx.conf` - Configuración principal de nginx
-- `default.conf` - Configuración del virtual host
+If specified, must be an existing ConfigMap with:
+- `nginx.conf` - Main nginx configuration
+- `default.conf` - Virtual host configuration
 
-## Validación de Configuración
+## Configuration Validation
 
-El JSON Schema está disponible en `/scope-configuration.schema.json` en la raíz del proyecto.
+The JSON Schema is available at `/scope-configuration.schema.json` in the project root.
 
-Para validar tu configuración:
+To validate your configuration:
 
 ```bash
-# Usando ajv-cli
+# Using ajv-cli
 ajv validate -s scope-configuration.schema.json -d your-config.json
 
-# Usando jq (validación básica)
+# Using jq (basic validation)
 jq empty your-config.json && echo "Valid JSON"
 ```
 
-## Ejemplos de Uso
+## Usage Examples
 
-### Desarrollo Local
+### Local Development
 
 ```json
 {
@@ -459,7 +463,7 @@ jq empty your-config.json && echo "Valid JSON"
 }
 ```
 
-### Producción con Alta Disponibilidad
+### Production with High Availability
 
 ```json
 {
@@ -479,7 +483,6 @@ jq empty your-config.json && echo "Valid JSON"
         }
       }
     },
-    "region": "us-east-1",
     "deployment": {
       "pod_disruption_budget": {
         "enabled": "true",
@@ -490,7 +493,7 @@ jq empty your-config.json && echo "Valid JSON"
 }
 ```
 
-### Múltiples Registries
+### Multiple Registries
 
 ```json
 {
@@ -509,7 +512,7 @@ jq empty your-config.json && echo "Valid JSON"
 }
 ```
 
-### Integración con Vault y Backups
+### Vault Integration and Backups
 
 ```json
 {
@@ -534,7 +537,7 @@ jq empty your-config.json && echo "Valid JSON"
 }
 ```
 
-### DNS Personalizado con Azure
+### Custom DNS with Azure
 
 ```json
 {
@@ -555,42 +558,42 @@ jq empty your-config.json && echo "Valid JSON"
 
 ## Tests
 
-Las configuraciones están completamente testeadas con BATS:
+Configurations are fully tested with BATS:
 
 ```bash
-# Ejecutar todos los tests
+# Run all tests
 make test-unit MODULE=k8s
 
-# Tests específicos
-./testing/run_bats_tests.sh k8s/utils/tests        # Tests de get_config_value
-./testing/run_bats_tests.sh k8s/scope/tests        # Tests de scope/build_context
-./testing/run_bats_tests.sh k8s/deployment/tests   # Tests de deployment/build_context
+# Specific tests
+./testing/run_bats_tests.sh k8s/utils/tests        # get_config_value tests
+./testing/run_bats_tests.sh k8s/scope/tests        # scope/build_context tests
+./testing/run_bats_tests.sh k8s/deployment/tests   # deployment/build_context tests
 ```
 
-**Total: 59 tests cubriendo todas las variables y jerarquías de configuración** ✅
-- 11 tests en `k8s/utils/tests/get_config_value.bats`
-- 26 tests en `k8s/scope/tests/build_context.bats`
-- 22 tests en `k8s/deployment/tests/build_context.bats`
+**Total: 75 tests covering all variables and configuration hierarchies** ✅
+- 19 tests in `k8s/utils/tests/get_config_value.bats`
+- 27 tests in `k8s/scope/tests/build_context.bats`
+- 29 tests in `k8s/deployment/tests/build_context.bats`
 
-## Archivos Relacionados
+## Related Files
 
-- **Función de utilidad**: `k8s/utils/get_config_value` - Implementa la jerarquía de configuración
+- **Utility function**: `k8s/utils/get_config_value` - Implements the configuration hierarchy
 - **Build contexts**:
-  - `k8s/scope/build_context` - Contexto de scope
-  - `k8s/deployment/build_context` - Contexto de deployment
-- **Schema**: `/scope-configuration.schema.json` - JSON Schema completo
-- **Defaults**: `k8s/values.yaml` - Valores por defecto del scope tipo
+  - `k8s/scope/build_context` - Scope context
+  - `k8s/deployment/build_context` - Deployment context
+- **Schema**: `/scope-configuration.schema.json` - Complete JSON Schema
+- **Defaults**: `k8s/values.yaml` - Default values for the scope type
 - **Tests**:
   - `k8s/utils/tests/get_config_value.bats`
   - `k8s/scope/tests/build_context.bats`
   - `k8s/deployment/tests/build_context.bats`
 
-## Contribuir
+## Contributing
 
-Al agregar nuevas variables de configuración:
+When adding new configuration variables:
 
-1. Actualizar `k8s/scope/build_context` o `k8s/deployment/build_context` usando `get_config_value`
-2. Agregar la propiedad en `scope-configuration.schema.json`
-3. Documentar el default en `k8s/values.yaml` si aplica
-4. Crear tests en el archivo `.bats` correspondiente
-5. Actualizar este README
+1. Update `k8s/scope/build_context` or `k8s/deployment/build_context` using `get_config_value`
+2. Add the property in `scope-configuration.schema.json`
+3. Document the default in `k8s/values.yaml` if applicable
+4. Create tests in the corresponding `.bats` file
+5. Update this README

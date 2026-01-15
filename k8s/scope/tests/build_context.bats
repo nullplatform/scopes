@@ -127,10 +127,36 @@ teardown() {
 }
 
 # =============================================================================
-# Test: K8S_NAMESPACE uses env var override
+# Test: K8S_NAMESPACE - provider wins over env var
 # =============================================================================
-@test "build_context: K8S_NAMESPACE uses NAMESPACE_OVERRIDE env var" {
+@test "build_context: K8S_NAMESPACE provider wins over NAMESPACE_OVERRIDE env var" {
   export NAMESPACE_OVERRIDE="env-override-ns"
+
+  # Set up context with namespace in container-orchestration provider
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {
+    "cluster": {
+      "namespace": "provider-namespace"
+    }
+  }')
+
+  result=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "$K8S_NAMESPACE"
+  )
+
+  assert_equal "$result" "provider-namespace"
+}
+
+# =============================================================================
+# Test: K8S_NAMESPACE uses env var when no provider
+# =============================================================================
+@test "build_context: K8S_NAMESPACE uses NAMESPACE_OVERRIDE when no provider" {
+  export NAMESPACE_OVERRIDE="env-override-ns"
+
+  # Remove namespace from providers so env var can win
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace)')
 
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
@@ -159,17 +185,17 @@ teardown() {
 }
 
 # =============================================================================
-# Test: REGION uses scope-configuration provider first
+# Test: REGION only uses cloud-providers (not scope-configuration)
 # =============================================================================
-@test "build_context: REGION uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
-    "cluster": {
+@test "build_context: REGION only uses cloud-providers" {
+  # Set up context with region in cloud-providers
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["cloud-providers"] = {
+    "account": {
       "region": "eu-west-1"
     }
   }')
 
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].cluster.region' \
     --provider '.providers["cloud-providers"].account.region' \
     --default "us-east-1"
   )
@@ -178,11 +204,10 @@ teardown() {
 }
 
 # =============================================================================
-# Test: REGION falls back to cloud-providers
+# Test: REGION falls back to default when cloud-providers not available
 # =============================================================================
-@test "build_context: REGION falls back to cloud-providers" {
+@test "build_context: REGION falls back to default" {
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].cluster.region' \
     --provider '.providers["cloud-providers"].account.region' \
     --default "us-east-1"
   )
