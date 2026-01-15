@@ -77,7 +77,7 @@ fi
 
 DEPLOY_STRATEGY=$(get_config_value \
   --env DEPLOY_STRATEGY \
-  --provider '.providers["scope-configuration"].deployment.deployment_strategy' \
+  --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
   --default "blue-green"
 )
 
@@ -100,11 +100,11 @@ else
     IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
   else
     PULL_SECRETS_ENABLED=$(get_config_value \
-      --provider '.providers["scope-configuration"].security.image_pull_secrets_enabled' \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
       --default "false"
     )
     PULL_SECRETS_LIST=$(get_config_value \
-      --provider '.providers["scope-configuration"].security.image_pull_secrets | @json' \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
       --default "[]"
     )
 
@@ -125,19 +125,19 @@ fi
 
 TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
   --env TRAFFIC_CONTAINER_IMAGE \
-  --provider '.providers["scope-configuration"].deployment.traffic_container_image' \
+  --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
   --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
 )
 
 # Pod Disruption Budget configuration
 PDB_ENABLED=$(get_config_value \
   --env POD_DISRUPTION_BUDGET_ENABLED \
-  --provider '.providers["scope-configuration"].deployment.pod_disruption_budget_enabled' \
+  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
   --default "false"
 )
 PDB_MAX_UNAVAILABLE=$(get_config_value \
   --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-  --provider '.providers["scope-configuration"].deployment.pod_disruption_budget_max_unavailable' \
+  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
   --default "25%"
 )
 
@@ -146,19 +146,19 @@ if [ -n "${IAM:-}" ]; then
   IAM="$IAM"
 else
   IAM_ENABLED_RAW=$(get_config_value \
-    --provider '.providers["scope-configuration"].security.iam_enabled' \
+    --provider '.providers["scope-configurations"].security.iam_enabled' \
     --default "false"
   )
   IAM_PREFIX=$(get_config_value \
-    --provider '.providers["scope-configuration"].security.iam_prefix' \
+    --provider '.providers["scope-configurations"].security.iam_prefix' \
     --default ""
   )
   IAM_POLICIES=$(get_config_value \
-    --provider '.providers["scope-configuration"].security.iam_policies | @json' \
+    --provider '.providers["scope-configurations"].security.iam_policies | @json' \
     --default "[]"
   )
   IAM_BOUNDARY=$(get_config_value \
-    --provider '.providers["scope-configuration"].security.iam_boundary_arn' \
+    --provider '.providers["scope-configurations"].security.iam_boundary_arn' \
     --default ""
   )
 
@@ -182,7 +182,7 @@ fi
 
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
   --env TRAFFIC_MANAGER_CONFIG_MAP \
-  --provider '.providers["scope-configuration"].deployment.traffic_manager_config_map' \
+  --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
   --default ""
 )
 

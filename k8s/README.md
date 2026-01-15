@@ -8,7 +8,7 @@ Configuration variables follow a priority hierarchy:
 
 ```
 1. Existing Providers - Highest priority
-   - scope-configuration: Scope-specific configuration
+   - scope-configurations: Scope-specific configuration
    - container-orchestration: Orchestrator configuration
    - cloud-providers: Cloud provider configuration
    (If there are multiple providers, the order in which they are specified determines priority)
@@ -31,7 +31,7 @@ Variables that define the general context of the scope and Kubernetes resources.
 | **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `configuration.K8S_NAMESPACE` | `kubernetes.namespace` | `k8s/scope/build_context`<br>`k8s/deployment/build_context` | `"nullplatform"` |
 | **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `configuration.CREATE_K8S_NAMESPACE_IF_NOT_EXIST` | `kubernetes.create_namespace_if_not_exist` | `k8s/scope/build_context` | `"true"` |
 | **K8S_MODIFIERS** | Modifiers (annotations, labels, tolerations) for K8s resources | `configuration.K8S_MODIFIERS` | `kubernetes.modifiers` | `k8s/scope/build_context` | `{}` |
-| **REGION** | AWS/Cloud region where resources are deployed. **Note:** Only obtained from `cloud-providers` provider, not from `scope-configuration` | N/A (cloud-providers only) | N/A | `k8s/scope/build_context` | `"us-east-1"` |
+| **REGION** | AWS/Cloud region where resources are deployed. **Note:** Only obtained from `cloud-providers` provider, not from `scope-configurations` | N/A (cloud-providers only) | N/A | `k8s/scope/build_context` | `"us-east-1"` |
 | **USE_ACCOUNT_SLUG** | Whether to use account slug as application domain | `configuration.USE_ACCOUNT_SLUG` | `networking.application_domain` | `k8s/scope/build_context` | `"false"` |
 | **DOMAIN** | Public domain for the application | `configuration.DOMAIN` | `networking.domain_name` | `k8s/scope/build_context` | `"nullapps.io"` |
 | **PRIVATE_DOMAIN** | Private domain for internal services | `configuration.PRIVATE_DOMAIN` | `networking.private_domain_name` | `k8s/scope/build_context` | `"nullapps.io"` |
@@ -60,13 +60,13 @@ Deployment-specific variables and pod configuration.
 | **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `configuration.DEPLOY_STRATEGY` | `deployment.strategy` | `k8s/deployment/build_context`<br>`k8s/deployment/scale_deployments` | `"rolling"` |
 | **IAM** | IAM roles and policies configuration for service accounts | `configuration.IAM` | `deployment.iam` | `k8s/deployment/build_context`<br>`k8s/scope/iam/*` | `{}` |
 
-## Configuration via scope-configuration Provider
+## Configuration via scope-configurations Provider
 
 ### Complete JSON Structure
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "kubernetes": {
       "namespace": "production",
       "create_namespace_if_not_exist": "true",
@@ -154,7 +154,7 @@ Deployment-specific variables and pod configuration.
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "kubernetes": {
       "namespace": "staging"
     }
@@ -162,7 +162,7 @@ Deployment-specific variables and pod configuration.
 }
 ```
 
-**Note**: The region (`REGION`) is automatically obtained from the `cloud-providers` provider, it is not configured in `scope-configuration`.
+**Note**: The region (`REGION`) is automatically obtained from the `cloud-providers` provider, it is not configured in `scope-configurations`.
 
 ## Environment Variables
 
@@ -202,7 +202,7 @@ export PRIVATE_GATEWAY_NAME="gateway-internal-prod"
 
 ## Additional Variables (values.yaml Only)
 
-The following variables are defined in `k8s/values.yaml` but are **not yet integrated** with the scope-configuration hierarchy system. They can only be configured via `values.yaml`:
+The following variables are defined in `k8s/values.yaml` but are **not yet integrated** with the scope-configurations hierarchy system. They can only be configured via `values.yaml`:
 
 | Variable | Description | values.yaml | Default | Files Using It |
 |----------|-------------|-------------|---------|----------------|
@@ -215,7 +215,7 @@ The following variables are defined in `k8s/values.yaml` but are **not yet integ
 | **BLUE_GREEN_INGRESS_PATH** | Path to blue-green ingress template | `configuration.BLUE_GREEN_INGRESS_PATH` | `"$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"` | Ingress workflows |
 | **SERVICE_ACCOUNT_TEMPLATE** | Path to service account template | `configuration.SERVICE_ACCOUNT_TEMPLATE` | `"$SERVICE_PATH/scope/templates/service-account.yaml.tpl"` | IAM workflows |
 
-> **Note**: These variables are template paths and are pending migration to the scope-configuration hierarchy system. Currently they can only be configured in `values.yaml` or via environment variables without provider support.
+> **Note**: These variables are template paths and are pending migration to the scope-configurations hierarchy system. Currently they can only be configured in `values.yaml` or via environment variables without provider support.
 
 ### IAM Configuration
 
@@ -451,7 +451,7 @@ jq empty your-config.json && echo "Valid JSON"
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "kubernetes": {
       "namespace": "dev-local",
       "create_namespace_if_not_exist": "true"
@@ -467,7 +467,7 @@ jq empty your-config.json && echo "Valid JSON"
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "kubernetes": {
       "namespace": "production",
       "modifiers": {
@@ -497,7 +497,7 @@ jq empty your-config.json && echo "Valid JSON"
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "deployment": {
       "image_pull_secrets": {
         "ENABLED": true,
@@ -516,7 +516,7 @@ jq empty your-config.json && echo "Valid JSON"
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "kubernetes": {
       "namespace": "production"
     },
@@ -541,7 +541,7 @@ jq empty your-config.json && echo "Valid JSON"
 
 ```json
 {
-  "scope-configuration": {
+  "scope-configurations": {
     "kubernetes": {
       "namespace": "staging"
     },
