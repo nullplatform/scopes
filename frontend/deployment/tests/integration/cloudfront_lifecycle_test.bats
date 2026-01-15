@@ -68,13 +68,7 @@ setup() {
 
   # Point to LocalStack-compatible modules
   export CUSTOM_TOFU_MODULES="$BATS_TEST_DIRNAME/localstack"
-}
 
-# =============================================================================
-# Test: Create Infrastructure
-# =============================================================================
-
-@test "create infrastructure deploys S3, CloudFront, and Route53 resources" {
   # Setup API mocks for np CLI calls
   # Note: /token is automatically mocked by clear_mocks()
   local mocks_dir="frontend/deployment/tests/integration/mocks/"
@@ -85,6 +79,14 @@ setup() {
   mock_request "GET" "/provider" "$mocks_dir/asset_repository/list_provider.json"
   mock_request "GET" "/provider/s3-asset-repository-id" "$mocks_dir/asset_repository/get_provider.json"
   mock_request "PATCH" "/scope/7" "$mocks_dir/scope/patch.json"
+
+}
+
+# =============================================================================
+# Test: Create Infrastructure
+# =============================================================================
+
+@test "create infrastructure deploys S3, CloudFront, and Route53 resources" {
 
   # Run the initial workflow
   run_workflow "frontend/deployment/workflows/initial.yaml"
@@ -99,26 +101,17 @@ setup() {
 # Test: Destroy Infrastructure
 # =============================================================================
 
-#@test "destroy infrastructure removes CloudFront and Route53 resources" {
-#  # Setup API mocks
-#  mock_request "GET" "/provider" "frontend/deployment/tests/integration/mocks/asset_repository/success.json"
-#
-#  mock_request "GET" "/scope/7" 200 '{
-#    "id": 7,
-#    "name": "development-tools",
-#    "slug": "development-tools"
-#  }'
-#
-#  # Disable CloudFront before deletion (required by AWS)
-#  if [[ -f "$BATS_TEST_DIRNAME/scripts/disable_cloudfront.sh" ]]; then
-#    "$BATS_TEST_DIRNAME/scripts/disable_cloudfront.sh" "Distribution for automation-development-tools-7"
-#  fi
-#
-#  # Run the delete workflow
-#  run_workflow "frontend/deployment/workflows/delete.yaml"
-#
-#  # Verify resources were removed (S3 bucket should remain)
-#  assert_s3_bucket_exists "assets-bucket"
-#  assert_cloudfront_not_exists "Distribution for automation-development-tools-7"
-#  assert_route53_record_not_exists "automation-development-tools.frontend.publicdomain.com" "A"
-#}
+@test "destroy infrastructure removes CloudFront and Route53 resources" {
+  # Disable CloudFront before deletion (required by AWS)
+  if [[ -f "$BATS_TEST_DIRNAME/scripts/disable_cloudfront.sh" ]]; then
+    "$BATS_TEST_DIRNAME/scripts/disable_cloudfront.sh" "Distribution for automation-development-tools-7"
+  fi
+
+  # Run the delete workflow
+  run_workflow "frontend/deployment/workflows/delete.yaml"
+
+  # Verify resources were removed (S3 bucket should remain)
+  assert_s3_bucket_exists "assets-bucket"
+  assert_cloudfront_not_exists "Distribution for automation-development-tools-7"
+  assert_route53_record_not_exists "automation-development-tools.frontend.publicdomain.com" "A"
+}
