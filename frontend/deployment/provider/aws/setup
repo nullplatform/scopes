@@ -2,25 +2,34 @@
 
 echo "🔍 Validating AWS provider configuration..."
 
-set_env_var_error_message="You must set it as environment variables in you nullplatform agent installation."
+missing_vars=()
 
-if [ -z "${AWS_REGION:-}" ]; then
-  echo "   ❌ AWS_REGION is missing. $set_env_var_error_message"
+function validate_env_var() {
+  local variable_name=$1
+  local variable_value="${!variable_name}"
+
+  if [ -z "$variable_value" ]; then
+    echo "   ❌ $variable_name is missing"
+    missing_vars+=("$variable_name")
+  else
+    echo "   ✅ $variable_name=$variable_value"
+  fi
+}
+
+validate_env_var AWS_REGION
+validate_env_var TOFU_PROVIDER_BUCKET
+validate_env_var TOFU_LOCK_TABLE
+
+if [ ${#missing_vars[@]} -gt 0 ]; then
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    Set the missing variable(s) in your nullplatform agent Helm installation:"
+  for var in "${missing_vars[@]}"; do
+    echo "      • $var"
+  done
+  echo ""
   exit 1
 fi
-echo "   ✅ AWS_REGION=$AWS_REGION"
-
-if [ -z "${TOFU_PROVIDER_BUCKET:-}" ]; then
-  echo "   ❌ TOFU_PROVIDER_BUCKET is missing. $set_env_var_error_message"
-  exit 1
-fi
-echo "   ✅ TOFU_PROVIDER_BUCKET=$TOFU_PROVIDER_BUCKET"
-
-if [ -z "${TOFU_LOCK_TABLE:-}" ]; then
-  echo "   ❌ TOFU_LOCK_TABLE is missing. $set_env_var_error_message"
-  exit 1
-fi
-echo "   ✅ TOFU_LOCK_TABLE=$TOFU_LOCK_TABLE"
 
 echo "✨ AWS provider configured successfully"
 echo ""
