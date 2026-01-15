@@ -12,108 +12,106 @@ JWT_JWKS_URI=${JWT_JWKS_URI:-"https://api.nullplatform.com/scope/.well-known/jwk
 
 echo "JWT authorization enabled: $JWT_AUTHORIZATION_ENABLED"
 
-# Only proceed if JWT authorization is enabled
-if [ "$JWT_AUTHORIZATION_ENABLED" != "true" ]; then
-  echo "JWT authorization is not enabled for this scope, skipping JWT authentication setup"
-  exit 0
-fi
+if [ "$JWT_AUTHORIZATION_ENABLED" = "true" ]; then
+  echo "Managing JWT authentication for scope: $SCOPE_ID"
+  echo "Action: $ACTION"
+  echo "Scope domain: $SCOPE_DOMAIN"
+  echo "Gateway name: $GATEWAY_NAME"
+  echo "Gateway namespace: $GATEWAY_NAMESPACE"
 
-echo "Managing JWT authentication for scope: $SCOPE_ID"
-echo "Action: $ACTION"
-echo "Scope domain: $SCOPE_DOMAIN"
-echo "Gateway name: $GATEWAY_NAME"
-echo "Gateway namespace: $GATEWAY_NAMESPACE"
-
-# Ensure templates directory exists
-TEMPLATE_DIR="$SERVICE_PATH/scope/security/templates"
-if [ ! -d "$TEMPLATE_DIR" ]; then
-  echo "ERROR: Template directory not found: $TEMPLATE_DIR"
-  exit 1
-fi
-
-# Create or verify RequestAuthentication (one per cluster)
-REQUEST_AUTH_NAME="nullplatform-scope-jwt-auth"
-echo "Checking RequestAuthentication: $REQUEST_AUTH_NAME"
-
-if kubectl get requestauthentication "$REQUEST_AUTH_NAME" -n "$GATEWAY_NAMESPACE" &> /dev/null; then
-  echo "RequestAuthentication '$REQUEST_AUTH_NAME' already exists, skipping creation"
-else
-  if [ "$ACTION" = "create" ] || [ "$ACTION" = "apply" ]; then
-    echo "Creating RequestAuthentication: $REQUEST_AUTH_NAME"
-
-    # Build RequestAuthentication template
-    CONTEXT_PATH="$OUTPUT_DIR/jwt-context-$SCOPE_ID.json"
-    REQUEST_AUTH_PATH="$OUTPUT_DIR/request-authentication-$SCOPE_ID.yaml"
-
-    echo "$CONTEXT" | jq \
-      --arg gateway_namespace "$GATEWAY_NAMESPACE" \
-      --arg request_auth_name "$REQUEST_AUTH_NAME" \
-      --arg jwt_issuer "$JWT_ISSUER" \
-      --arg jwt_jwks_uri "$JWT_JWKS_URI" \
-      '. + {
-        gateway_namespace: $gateway_namespace,
-        request_auth_name: $request_auth_name,
-        jwt_issuer: $jwt_issuer,
-        jwt_jwks_uri: $jwt_jwks_uri
-      }' > "$CONTEXT_PATH"
-
-    gomplate -c .="$CONTEXT_PATH" \
-      --file "$TEMPLATE_DIR/request-authentication.yaml.tmpl" \
-      --out "$REQUEST_AUTH_PATH"
-
-    if [ $? -ne 0 ]; then
-      echo "ERROR: Failed to build RequestAuthentication template"
-      exit 1
-    fi
-
-    kubectl apply -f "$REQUEST_AUTH_PATH"
-    echo "RequestAuthentication created successfully"
-  fi
-fi
-
-# Manage AuthorizationPolicy per scope domain
-AUTHZ_POLICY_NAME="require-jwt-$(echo "$SCOPE_ID" | sed 's/_/-/g')"
-echo "Managing AuthorizationPolicy: $AUTHZ_POLICY_NAME"
-
-if [ "$ACTION" = "delete" ]; then
-  echo "Deleting AuthorizationPolicy: $AUTHZ_POLICY_NAME"
-
-  if kubectl get authorizationpolicy "$AUTHZ_POLICY_NAME" -n "$GATEWAY_NAMESPACE" &> /dev/null; then
-    kubectl delete authorizationpolicy "$AUTHZ_POLICY_NAME" -n "$GATEWAY_NAMESPACE"
-    echo "AuthorizationPolicy deleted successfully"
-  else
-    echo "AuthorizationPolicy '$AUTHZ_POLICY_NAME' does not exist, skipping deletion"
-  fi
-else
-  # Create or update AuthorizationPolicy
-  echo "Creating/updating AuthorizationPolicy: $AUTHZ_POLICY_NAME"
-
-  CONTEXT_PATH="$OUTPUT_DIR/jwt-context-$SCOPE_ID.json"
-  AUTHZ_POLICY_PATH="$OUTPUT_DIR/authorization-policy-$SCOPE_ID.yaml"
-
-  echo "$CONTEXT" | jq \
-    --arg gateway_namespace "$GATEWAY_NAMESPACE" \
-    --arg authz_policy_name "$AUTHZ_POLICY_NAME" \
-    --arg scope_domain "$SCOPE_DOMAIN" \
-    --arg jwt_issuer "$JWT_ISSUER" \
-    '. + {
-      gateway_namespace: $gateway_namespace,
-      authz_policy_name: $authz_policy_name,
-      scope_domain: $scope_domain,
-      jwt_issuer: $jwt_issuer
-    }' > "$CONTEXT_PATH"
-
-  gomplate -c .="$CONTEXT_PATH" \
-    --file "$TEMPLATE_DIR/authorization-policy.yaml.tmpl" \
-    --out "$AUTHZ_POLICY_PATH"
-
-  if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to build AuthorizationPolicy template"
+  # Ensure templates directory exists
+  TEMPLATE_DIR="$SERVICE_PATH/scope/security/templates"
+  if [ ! -d "$TEMPLATE_DIR" ]; then
+    echo "ERROR: Template directory not found: $TEMPLATE_DIR"
     exit 1
   fi
 
-  kubectl apply -f "$AUTHZ_POLICY_PATH"
-  echo "AuthorizationPolicy created/updated successfully"
+  # Create or verify RequestAuthentication (one per cluster)
+  REQUEST_AUTH_NAME="nullplatform-scope-jwt-auth"
+  echo "Checking RequestAuthentication: $REQUEST_AUTH_NAME"
+
+  if kubectl get requestauthentication "$REQUEST_AUTH_NAME" -n "$GATEWAY_NAMESPACE" &> /dev/null; then
+    echo "RequestAuthentication '$REQUEST_AUTH_NAME' already exists, skipping creation"
+  else
+    if [ "$ACTION" = "create" ] || [ "$ACTION" = "apply" ]; then
+      echo "Creating RequestAuthentication: $REQUEST_AUTH_NAME"
+
+      # Build RequestAuthentication template
+      CONTEXT_PATH="$OUTPUT_DIR/jwt-context-$SCOPE_ID.json"
+      REQUEST_AUTH_PATH="$OUTPUT_DIR/request-authentication-$SCOPE_ID.yaml"
+
+      echo "$CONTEXT" | jq \
+        --arg gateway_namespace "$GATEWAY_NAMESPACE" \
+        --arg request_auth_name "$REQUEST_AUTH_NAME" \
+        --arg jwt_issuer "$JWT_ISSUER" \
+        --arg jwt_jwks_uri "$JWT_JWKS_URI" \
+        '. + {
+          gateway_namespace: $gateway_namespace,
+          request_auth_name: $request_auth_name,
+          jwt_issuer: $jwt_issuer,
+          jwt_jwks_uri: $jwt_jwks_uri
+        }' > "$CONTEXT_PATH"
+
+      gomplate -c .="$CONTEXT_PATH" \
+        --file "$TEMPLATE_DIR/request-authentication.yaml.tmpl" \
+        --out "$REQUEST_AUTH_PATH"
+
+      if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to build RequestAuthentication template"
+        exit 1
+      fi
+
+      kubectl apply -f "$REQUEST_AUTH_PATH"
+      echo "RequestAuthentication created successfully"
+    fi
+  fi
+
+  # Manage AuthorizationPolicy per scope domain
+  AUTHZ_POLICY_NAME="require-jwt-$(echo "$SCOPE_ID" | sed 's/_/-/g')"
+  echo "Managing AuthorizationPolicy: $AUTHZ_POLICY_NAME"
+
+  if [ "$ACTION" = "delete" ]; then
+    echo "Deleting AuthorizationPolicy: $AUTHZ_POLICY_NAME"
+
+    if kubectl get authorizationpolicy "$AUTHZ_POLICY_NAME" -n "$GATEWAY_NAMESPACE" &> /dev/null; then
+      kubectl delete authorizationpolicy "$AUTHZ_POLICY_NAME" -n "$GATEWAY_NAMESPACE"
+      echo "AuthorizationPolicy deleted successfully"
+    else
+      echo "AuthorizationPolicy '$AUTHZ_POLICY_NAME' does not exist, skipping deletion"
+    fi
+  else
+    # Create or update AuthorizationPolicy
+    echo "Creating/updating AuthorizationPolicy: $AUTHZ_POLICY_NAME"
+
+    CONTEXT_PATH="$OUTPUT_DIR/jwt-context-$SCOPE_ID.json"
+    AUTHZ_POLICY_PATH="$OUTPUT_DIR/authorization-policy-$SCOPE_ID.yaml"
+
+    echo "$CONTEXT" | jq \
+      --arg gateway_namespace "$GATEWAY_NAMESPACE" \
+      --arg authz_policy_name "$AUTHZ_POLICY_NAME" \
+      --arg scope_domain "$SCOPE_DOMAIN" \
+      --arg jwt_issuer "$JWT_ISSUER" \
+      '. + {
+        gateway_namespace: $gateway_namespace,
+        authz_policy_name: $authz_policy_name,
+        scope_domain: $scope_domain,
+        jwt_issuer: $jwt_issuer
+      }' > "$CONTEXT_PATH"
+
+    gomplate -c .="$CONTEXT_PATH" \
+      --file "$TEMPLATE_DIR/authorization-policy.yaml.tmpl" \
+      --out "$AUTHZ_POLICY_PATH"
+
+    if [ $? -ne 0 ]; then
+      echo "ERROR: Failed to build AuthorizationPolicy template"
+      exit 1
+    fi
+
+    kubectl apply -f "$AUTHZ_POLICY_PATH"
+    echo "AuthorizationPolicy created/updated successfully"
+  fi
+else
+  echo "JWT authorization is not enabled for this scope, skipping JWT authentication setup"
 fi
 
 echo "JWT authentication management completed"
