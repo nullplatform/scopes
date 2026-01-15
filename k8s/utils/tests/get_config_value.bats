@@ -43,9 +43,9 @@ teardown() {
 }
 
 # =============================================================================
-# Test: Environment variable takes highest priority
+# Test: Provider has highest priority over env variable
 # =============================================================================
-@test "get_config_value: env variable has highest priority" {
+@test "get_config_value: provider has highest priority over env variable" {
   export TEST_ENV_VAR="env-value"
 
   result=$(get_config_value \
@@ -53,7 +53,7 @@ teardown() {
     --provider '.providers["scope-configuration"].kubernetes.namespace' \
     --default "default-value")
 
-  assert_equal "$result" "env-value"
+  assert_equal "$result" "scope-config-namespace"
 }
 
 # =============================================================================
@@ -105,20 +105,11 @@ teardown() {
 }
 
 # =============================================================================
-# Test: Complete hierarchy - env > provider1 > provider2 > default
+# Test: Complete hierarchy - provider1 > provider2 > env > default
 # =============================================================================
-@test "get_config_value: complete hierarchy env > provider1 > provider2 > default" {
-  # Test 1: Env var wins
+@test "get_config_value: complete hierarchy provider1 > provider2 > env > default" {
+  # Test 1: First provider wins over everything
   export NAMESPACE_OVERRIDE="override-namespace"
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "default-namespace")
-  assert_equal "$result" "override-namespace"
-
-  # Test 2: First provider wins when no env
-  unset NAMESPACE_OVERRIDE
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
     --provider '.providers["scope-configuration"].kubernetes.namespace' \
@@ -126,7 +117,7 @@ teardown() {
     --default "default-namespace")
   assert_equal "$result" "scope-config-namespace"
 
-  # Test 3: Second provider wins when first doesn't exist
+  # Test 2: Second provider wins when first doesn't exist
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
     --provider '.providers["non-existent"].value' \
@@ -134,7 +125,16 @@ teardown() {
     --default "default-namespace")
   assert_equal "$result" "container-orch-namespace"
 
+  # Test 3: Env var wins when no providers exist
+  result=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --provider '.providers["non-existent1"].value' \
+    --provider '.providers["non-existent2"].value' \
+    --default "default-namespace")
+  assert_equal "$result" "override-namespace"
+
   # Test 4: Default wins when nothing else exists
+  unset NAMESPACE_OVERRIDE
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
     --provider '.providers["non-existent1"].value' \
@@ -183,22 +183,21 @@ teardown() {
 }
 
 # =============================================================================
-# Test: Real-world scenario - region selection
+# Test: Real-world scenario - region selection (only from cloud-providers)
 # =============================================================================
-@test "get_config_value: real-world region selection" {
-  # Scenario: region from scope-configuration should win
+@test "get_config_value: real-world region selection from cloud-providers only" {
+  # Scenario: region should only come from cloud-providers, not scope-configuration
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].region' \
     --provider '.providers["cloud-providers"].account.region' \
     --default "us-east-1")
 
-  assert_equal "$result" "us-west-2"
+  assert_equal "$result" "eu-west-1"
 }
 
 # =============================================================================
-# Test: Real-world scenario - namespace with override
+# Test: Real-world scenario - namespace with override (provider wins)
 # =============================================================================
-@test "get_config_value: real-world namespace with NAMESPACE_OVERRIDE" {
+@test "get_config_value: real-world namespace - provider wins over NAMESPACE_OVERRIDE" {
   export NAMESPACE_OVERRIDE="prod-override"
 
   result=$(get_config_value \
@@ -207,5 +206,105 @@ teardown() {
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "default-ns")
 
-  assert_equal "$result" "prod-override"
+  # Provider wins over env var
+  assert_equal "$result" "scope-config-namespace"
+}
+
+# =============================================================================
+# Test: Argument order does NOT affect priority - providers always win
+# =============================================================================
+@test "get_config_value: argument order does not affect priority - provider first" {
+  export TEST_ENV_VAR="env-value"
+
+  # Test with provider before env
+  result=$(get_config_value \
+    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --env TEST_ENV_VAR \
+    --default "default-value")
+
+  assert_equal "$result" "scope-config-namespace"
+}
+
+@test "get_config_value: argument order does not affect priority - env first" {
+  export TEST_ENV_VAR="env-value"
+
+  # Test with env before provider - provider should still win
+  result=$(get_config_value \
+    --env TEST_ENV_VAR \
+    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --default "default-value")
+
+  assert_equal "$result" "scope-config-namespace"
+}
+
+@test "get_config_value: argument order does not affect priority - default first" {
+  export TEST_ENV_VAR="env-value"
+
+  # Test with default first - provider should still win
+  result=$(get_config_value \
+    --default "default-value" \
+    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --env TEST_ENV_VAR)
+
+  assert_equal "$result" "scope-config-namespace"
+}
+
+@test "get_config_value: argument order does not affect priority - mixed order" {
+  export TEST_ENV_VAR="env-value"
+
+  # Test with mixed order
+  result=$(get_config_value \
+    --default "default-value" \
+    --env TEST_ENV_VAR \
+    --provider '.providers["scope-configuration"].kubernetes.namespace')
+
+  assert_equal "$result" "scope-config-namespace"
+}
+
+# =============================================================================
+# Test: Env var wins when no providers exist, regardless of argument order
+# =============================================================================
+@test "get_config_value: env var wins when no providers - default first" {
+  export TEST_ENV_VAR="env-value"
+
+  result=$(get_config_value \
+    --default "default-value" \
+    --env TEST_ENV_VAR \
+    --provider '.providers["non-existent"].value')
+
+  assert_equal "$result" "env-value"
+}
+
+@test "get_config_value: env var wins when no providers - env last" {
+  export TEST_ENV_VAR="env-value"
+
+  result=$(get_config_value \
+    --provider '.providers["non-existent"].value' \
+    --default "default-value" \
+    --env TEST_ENV_VAR)
+
+  assert_equal "$result" "env-value"
+}
+
+# =============================================================================
+# Test: Multiple providers priority order is preserved
+# =============================================================================
+@test "get_config_value: multiple providers - order matters among providers" {
+  # First provider in list should win
+  result=$(get_config_value \
+    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "default-value")
+
+  assert_equal "$result" "scope-config-namespace"
+}
+
+@test "get_config_value: multiple providers - reversed order" {
+  # First provider in list should still win (container-orchestration comes first)
+  result=$(get_config_value \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --default "default-value")
+
+  assert_equal "$result" "container-orch-namespace"
 }

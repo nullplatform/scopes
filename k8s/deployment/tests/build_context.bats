@@ -69,13 +69,33 @@ teardown() {
 }
 
 # =============================================================================
-# Test: IMAGE_PULL_SECRETS uses env var
+# Test: IMAGE_PULL_SECRETS - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: IMAGE_PULL_SECRETS uses env var" {
+@test "deployment/build_context: IMAGE_PULL_SECRETS provider wins over env var" {
   export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["env-secret"]}'
 
-  # When IMAGE_PULL_SECRETS env var is set, it's used directly
-  # This test verifies env var has priority over provider
+  # Set up provider with IMAGE_PULL_SECRETS
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "image_pull_secrets": {"ENABLED":true,"SECRETS":["provider-secret"]}
+  }')
+
+  # Provider should win over env var
+  result=$(get_config_value \
+    --env IMAGE_PULL_SECRETS \
+    --provider '.providers["scope-configuration"].image_pull_secrets | @json' \
+    --default "{}"
+  )
+
+  assert_contains "$result" "provider-secret"
+}
+
+# =============================================================================
+# Test: IMAGE_PULL_SECRETS uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: IMAGE_PULL_SECRETS uses env var when no provider" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["env-secret"]}'
+
+  # Env var is used when provider is not available
   result=$(get_config_value \
     --env IMAGE_PULL_SECRETS \
     --provider '.providers["scope-configuration"].image_pull_secrets | @json' \
@@ -122,9 +142,31 @@ teardown() {
 }
 
 # =============================================================================
-# Test: TRAFFIC_CONTAINER_IMAGE uses env var
+# Test: TRAFFIC_CONTAINER_IMAGE - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE uses env var" {
+@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE provider wins over env var" {
+  export TRAFFIC_CONTAINER_IMAGE="env.ecr.aws/traffic:custom"
+
+  # Set up provider with TRAFFIC_CONTAINER_IMAGE
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "deployment": {
+      "traffic_container_image": "provider.ecr.aws/traffic-manager:v3.0"
+    }
+  }')
+
+  result=$(get_config_value \
+    --env TRAFFIC_CONTAINER_IMAGE \
+    --provider '.providers["scope-configuration"].deployment.traffic_container_image' \
+    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+  )
+
+  assert_equal "$result" "provider.ecr.aws/traffic-manager:v3.0"
+}
+
+# =============================================================================
+# Test: TRAFFIC_CONTAINER_IMAGE uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE uses env var when no provider" {
   export TRAFFIC_CONTAINER_IMAGE="env.ecr.aws/traffic:custom"
 
   result=$(get_config_value \
@@ -171,9 +213,31 @@ teardown() {
 }
 
 # =============================================================================
-# Test: PDB_ENABLED uses env var
+# Test: PDB_ENABLED - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: PDB_ENABLED uses env var" {
+@test "deployment/build_context: PDB_ENABLED provider wins over env var" {
+  export POD_DISRUPTION_BUDGET_ENABLED="true"
+
+  # Set up provider with PDB_ENABLED
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "deployment": {
+      "pod_disruption_budget_enabled": "false"
+    }
+  }')
+
+  result=$(get_config_value \
+    --env POD_DISRUPTION_BUDGET_ENABLED \
+    --provider '.providers["scope-configuration"].deployment.pod_disruption_budget_enabled' \
+    --default "false"
+  )
+
+  assert_equal "$result" "false"
+}
+
+# =============================================================================
+# Test: PDB_ENABLED uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: PDB_ENABLED uses env var when no provider" {
   export POD_DISRUPTION_BUDGET_ENABLED="true"
 
   result=$(get_config_value \
@@ -222,9 +286,31 @@ teardown() {
 }
 
 # =============================================================================
-# Test: PDB_MAX_UNAVAILABLE uses env var
+# Test: PDB_MAX_UNAVAILABLE - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: PDB_MAX_UNAVAILABLE uses env var" {
+@test "deployment/build_context: PDB_MAX_UNAVAILABLE provider wins over env var" {
+  export POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE="2"
+
+  # Set up provider with PDB_MAX_UNAVAILABLE
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "deployment": {
+      "pod_disruption_budget_max_unavailable": "75%"
+    }
+  }')
+
+  result=$(get_config_value \
+    --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
+    --provider '.providers["scope-configuration"].deployment.pod_disruption_budget_max_unavailable' \
+    --default "25%"
+  )
+
+  assert_equal "$result" "75%"
+}
+
+# =============================================================================
+# Test: PDB_MAX_UNAVAILABLE uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: PDB_MAX_UNAVAILABLE uses env var when no provider" {
   export POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE="2"
 
   result=$(get_config_value \
@@ -271,9 +357,31 @@ teardown() {
 }
 
 # =============================================================================
-# Test: TRAFFIC_MANAGER_CONFIG_MAP uses env var
+# Test: TRAFFIC_MANAGER_CONFIG_MAP - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP uses env var" {
+@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP provider wins over env var" {
+  export TRAFFIC_MANAGER_CONFIG_MAP="env-traffic-config"
+
+  # Set up provider with TRAFFIC_MANAGER_CONFIG_MAP
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "deployment": {
+      "traffic_manager_config_map": "provider-traffic-config"
+    }
+  }')
+
+  result=$(get_config_value \
+    --env TRAFFIC_MANAGER_CONFIG_MAP \
+    --provider '.providers["scope-configuration"].deployment.traffic_manager_config_map' \
+    --default ""
+  )
+
+  assert_equal "$result" "provider-traffic-config"
+}
+
+# =============================================================================
+# Test: TRAFFIC_MANAGER_CONFIG_MAP uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP uses env var when no provider" {
   export TRAFFIC_MANAGER_CONFIG_MAP="env-traffic-config"
 
   result=$(get_config_value \
@@ -318,9 +426,31 @@ teardown() {
 }
 
 # =============================================================================
-# Test: DEPLOY_STRATEGY uses env var
+# Test: DEPLOY_STRATEGY - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: DEPLOY_STRATEGY uses env var" {
+@test "deployment/build_context: DEPLOY_STRATEGY provider wins over env var" {
+  export DEPLOY_STRATEGY="blue-green"
+
+  # Set up provider with DEPLOY_STRATEGY
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "deployment": {
+      "deployment_strategy": "rolling"
+    }
+  }')
+
+  result=$(get_config_value \
+    --env DEPLOY_STRATEGY \
+    --provider '.providers["scope-configuration"].deployment.deployment_strategy' \
+    --default "rolling"
+  )
+
+  assert_equal "$result" "rolling"
+}
+
+# =============================================================================
+# Test: DEPLOY_STRATEGY uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: DEPLOY_STRATEGY uses env var when no provider" {
   export DEPLOY_STRATEGY="blue-green"
 
   result=$(get_config_value \
@@ -370,9 +500,31 @@ teardown() {
 }
 
 # =============================================================================
-# Test: IAM uses env var
+# Test: IAM - provider wins over env var
 # =============================================================================
-@test "deployment/build_context: IAM uses env var" {
+@test "deployment/build_context: IAM provider wins over env var" {
+  export IAM='{"ENABLED":true,"PREFIX":"env-prefix"}'
+
+  # Set up provider with IAM
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+    "deployment": {
+      "iam": {"ENABLED":true,"PREFIX":"provider-prefix"}
+    }
+  }')
+
+  result=$(get_config_value \
+    --env IAM \
+    --provider '.providers["scope-configuration"].deployment.iam | @json' \
+    --default "{}"
+  )
+
+  assert_contains "$result" "provider-prefix"
+}
+
+# =============================================================================
+# Test: IAM uses env var when no provider
+# =============================================================================
+@test "deployment/build_context: IAM uses env var when no provider" {
   export IAM='{"ENABLED":true,"PREFIX":"env-prefix"}'
 
   result=$(get_config_value \
