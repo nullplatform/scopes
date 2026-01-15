@@ -112,7 +112,6 @@ USE_ACCOUNT_SLUG=$(get_config_value \
 )
 
 REGION=$(get_config_value \
-  --provider '.providers["scope-configuration"].cluster.region' \
   --provider '.providers["cloud-providers"].account.region' \
   --default "us-east-1"
 )
