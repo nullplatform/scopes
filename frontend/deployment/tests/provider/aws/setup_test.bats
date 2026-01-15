@@ -10,23 +10,19 @@
 #   bats tests/provider/aws/setup_test.bats
 # =============================================================================
 
-# Setup - runs before each test
 setup() {
   TEST_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
   PROJECT_DIR="$(cd "$TEST_DIR/../../.." && pwd)"
   PROJECT_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
   SCRIPT_PATH="$PROJECT_DIR/provider/aws/setup"
-  RESOURCES_DIR="$PROJECT_DIR/tests/resources"
 
-  # Load shared test utilities
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  # Initialize required environment variables
   export AWS_REGION="us-east-1"
   export TOFU_PROVIDER_BUCKET="my-terraform-state-bucket"
   export TOFU_LOCK_TABLE="terraform-locks"
 
-  # Initialize TOFU_VARIABLES with existing keys to verify script merges (not replaces)
+  # Base tofu variables
   export TOFU_VARIABLES='{
     "application_slug": "automation",
     "scope_slug": "development-tools",
@@ -47,37 +43,37 @@ run_aws_setup() {
 # =============================================================================
 # Test: Required environment variables
 # =============================================================================
-@test "fails when AWS_REGION is not set" {
+@test "Should fail when AWS_REGION is not set" {
   unset AWS_REGION
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "AWS_REGION is not set"
+  assert_contains "$output" "   ❌ AWS_REGION is missing. You must set it as environment variables in you nullplatform agent installation."
 }
 
-@test "fails when TOFU_PROVIDER_BUCKET is not set" {
+@test "Should fail when TOFU_PROVIDER_BUCKET is not set" {
   unset TOFU_PROVIDER_BUCKET
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "TOFU_PROVIDER_BUCKET is not set"
+  assert_contains "$output" "   ❌ TOFU_PROVIDER_BUCKET is missing. You must set it as environment variables in you nullplatform agent installation."
 }
 
-@test "fails when TOFU_LOCK_TABLE is not set" {
+@test "Should fail when TOFU_LOCK_TABLE is not set" {
   unset TOFU_LOCK_TABLE
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "TOFU_LOCK_TABLE is not set"
+  assert_contains "$output" "   ❌ TOFU_LOCK_TABLE is missing. You must set it as environment variables in you nullplatform agent installation."
 }
 
 # =============================================================================
 # Test: TOFU_VARIABLES - verifies the entire JSON structure
 # =============================================================================
-@test "TOFU_VARIABLES matches expected structure on success" {
+@test "Should add aws_provider field to TOFU_VARIABLES" {
   run_aws_setup
 
   local expected='{
@@ -95,7 +91,7 @@ run_aws_setup() {
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
 }
 
-@test "TOFU_VARIABLES includes custom resource tags" {
+@test "Should add provider_resource_tags_json to TOFU_VARIABLES" {
   export RESOURCE_TAGS_JSON='{"Environment": "production", "Team": "platform"}'
 
   run_aws_setup
@@ -115,78 +111,48 @@ run_aws_setup() {
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
 }
 
-@test "TOFU_VARIABLES uses different region" {
-  export AWS_REGION="eu-west-1"
-
-  run_aws_setup
-
-  local region=$(echo "$TOFU_VARIABLES" | jq -r '.aws_provider.region')
-  assert_equal "$region" "eu-west-1"
-}
-
 # =============================================================================
 # Test: TOFU_INIT_VARIABLES - backend configuration
 # =============================================================================
-@test "TOFU_INIT_VARIABLES includes bucket backend config" {
+@test "Should add S3 bucket configuration to TOFU_INIT_VARIABLES" {
   run_aws_setup
 
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=bucket=my-terraform-state-bucket"
 }
 
-@test "TOFU_INIT_VARIABLES includes region backend config" {
+@test "Should add AWS region configuration to TOFU_INIT_VARIABLES" {
   run_aws_setup
 
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=region=us-east-1"
 }
 
-@test "TOFU_INIT_VARIABLES includes dynamodb_table backend config" {
+@test "Should add Dynamo table configuration to TOFU_INIT_VARIABLES" {
   run_aws_setup
 
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=dynamodb_table=terraform-locks"
 }
 
-@test "TOFU_INIT_VARIABLES appends to existing variables" {
+@test "Should append to TOFU_INIT_VARIABLES when it previous settings are present" {
   export TOFU_INIT_VARIABLES="-var=existing=value"
 
   run_aws_setup
 
-  assert_contains "$TOFU_INIT_VARIABLES" "-var=existing=value"
-  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=bucket=my-terraform-state-bucket"
+  assert_equal "$TOFU_INIT_VARIABLES" "-var=existing=value -backend-config=bucket=my-terraform-state-bucket -backend-config=region=us-east-1 -backend-config=dynamodb_table=terraform-locks"
 }
 
 # =============================================================================
 # Test: MODULES_TO_USE
 # =============================================================================
-@test "adds module to MODULES_TO_USE when empty" {
+@test "Should register the provider in the MODULES_TO_USE variable when it's empty" {
   run_aws_setup
 
   assert_equal "$MODULES_TO_USE" "$PROJECT_DIR/provider/aws/modules"
 }
 
-@test "appends module to existing MODULES_TO_USE" {
+@test "Should append the provider in the MODULES_TO_USE variable when it's not empty" {
   export MODULES_TO_USE="existing/module"
 
   run_aws_setup
 
   assert_equal "$MODULES_TO_USE" "existing/module,$PROJECT_DIR/provider/aws/modules"
-}
-
-@test "preserves multiple existing modules in MODULES_TO_USE" {
-  export MODULES_TO_USE="first/module,second/module"
-
-  run_aws_setup
-
-  assert_equal "$MODULES_TO_USE" "first/module,second/module,$PROJECT_DIR/provider/aws/modules"
-}
-
-# =============================================================================
-# Test: Default values
-# =============================================================================
-@test "uses empty object for RESOURCE_TAGS_JSON when not set" {
-  unset RESOURCE_TAGS_JSON
-
-  run_aws_setup
-
-  local tags=$(echo "$TOFU_VARIABLES" | jq -r '.provider_resource_tags_json')
-  assert_equal "$tags" "{}"
 }

@@ -8,7 +8,6 @@
 # =============================================================================
 # Assertion functions
 # =============================================================================
-
 assert_equal() {
   local actual="$1"
   local expected="$2"
@@ -75,14 +74,15 @@ assert_json_equal() {
   if [ "$actual_sorted" != "$expected_sorted" ]; then
     echo "$name does not match expected structure"
     echo ""
+    echo "Diff:"
+    diff <(echo "$expected_sorted") <(echo "$actual_sorted") || true
+    echo ""
     echo "Expected:"
     echo "$expected_sorted"
     echo ""
     echo "Actual:"
     echo "$actual_sorted"
     echo ""
-    echo "Diff:"
-    diff <(echo "$expected_sorted") <(echo "$actual_sorted") || true
     return 1
   fi
 }

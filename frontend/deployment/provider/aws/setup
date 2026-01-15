@@ -2,20 +2,22 @@
 
 echo "🔍 Validating AWS provider configuration..."
 
+set_env_var_error_message="You must set it as environment variables in you nullplatform agent installation."
+
 if [ -z "${AWS_REGION:-}" ]; then
-  echo "   ❌ AWS_REGION is not set"
+  echo "   ❌ AWS_REGION is missing. $set_env_var_error_message"
   exit 1
 fi
 echo "   ✅ AWS_REGION=$AWS_REGION"
 
 if [ -z "${TOFU_PROVIDER_BUCKET:-}" ]; then
-  echo "   ❌ TOFU_PROVIDER_BUCKET is not set"
+  echo "   ❌ TOFU_PROVIDER_BUCKET is missing. $set_env_var_error_message"
   exit 1
 fi
 echo "   ✅ TOFU_PROVIDER_BUCKET=$TOFU_PROVIDER_BUCKET"
 
 if [ -z "${TOFU_LOCK_TABLE:-}" ]; then
-  echo "   ❌ TOFU_LOCK_TABLE is not set"
+  echo "   ❌ TOFU_LOCK_TABLE is missing. $set_env_var_error_message"
   exit 1
 fi
 echo "   ✅ TOFU_LOCK_TABLE=$TOFU_LOCK_TABLE"
