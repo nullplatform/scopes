@@ -16,7 +16,7 @@ setup() {
   # Setup test CONTEXT for provider tests
   export CONTEXT='{
     "providers": {
-      "scope-configuration": {
+      "scope-configurations": {
         "kubernetes": {
           "namespace": "scope-config-namespace"
         },
@@ -50,7 +50,7 @@ teardown() {
 
   result=$(get_config_value \
     --env TEST_ENV_VAR \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --default "default-value")
 
   assert_equal "$result" "scope-config-namespace"
@@ -62,7 +62,7 @@ teardown() {
 @test "get_config_value: uses provider when env var not set" {
   result=$(get_config_value \
     --env NON_EXISTENT_VAR \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --default "default-value")
 
   assert_equal "$result" "scope-config-namespace"
@@ -73,7 +73,7 @@ teardown() {
 # =============================================================================
 @test "get_config_value: first provider match wins" {
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "default-value")
 
@@ -112,7 +112,7 @@ teardown() {
   export NAMESPACE_OVERRIDE="override-namespace"
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "default-namespace")
   assert_equal "$result" "scope-config-namespace"
@@ -175,7 +175,7 @@ teardown() {
 
   result=$(get_config_value \
     --env TEST_ENV_VAR \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --default "default-value")
 
   # Empty string from env should NOT be used, falls through to provider
@@ -202,7 +202,7 @@ teardown() {
 
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "default-ns")
 
@@ -218,7 +218,7 @@ teardown() {
 
   # Test with provider before env
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --env TEST_ENV_VAR \
     --default "default-value")
 
@@ -231,7 +231,7 @@ teardown() {
   # Test with env before provider - provider should still win
   result=$(get_config_value \
     --env TEST_ENV_VAR \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --default "default-value")
 
   assert_equal "$result" "scope-config-namespace"
@@ -243,7 +243,7 @@ teardown() {
   # Test with default first - provider should still win
   result=$(get_config_value \
     --default "default-value" \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --env TEST_ENV_VAR)
 
   assert_equal "$result" "scope-config-namespace"
@@ -256,7 +256,7 @@ teardown() {
   result=$(get_config_value \
     --default "default-value" \
     --env TEST_ENV_VAR \
-    --provider '.providers["scope-configuration"].kubernetes.namespace')
+    --provider '.providers["scope-configurations"].kubernetes.namespace')
 
   assert_equal "$result" "scope-config-namespace"
 }
@@ -292,7 +292,7 @@ teardown() {
 @test "get_config_value: multiple providers - order matters among providers" {
   # First provider in list should win
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "default-value")
 
@@ -303,7 +303,7 @@ teardown() {
   # First provider in list should still win (container-orchestration comes first)
   result=$(get_config_value \
     --provider '.providers["container-orchestration"].cluster.namespace' \
-    --provider '.providers["scope-configuration"].kubernetes.namespace' \
+    --provider '.providers["scope-configurations"].kubernetes.namespace' \
     --default "default-value")
 
   assert_equal "$result" "container-orch-namespace"
