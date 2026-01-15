@@ -1,0 +1,316 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nullplatform.com/schemas/scope-configuration.json",
+  "type": "object",
+  "title": "Scope Configuration",
+  "description": "Configuration schema for nullplatform scope-configuration provider",
+  "additionalProperties": false,
+  "properties": {
+    "cluster": {
+      "type": "object",
+      "order": 1,
+      "title": "Cluster Configuration",
+      "description": "Kubernetes cluster settings",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "order": 1,
+          "title": "Kubernetes Namespace",
+          "description": "Kubernetes namespace where resources will be deployed",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "minLength": 1,
+          "maxLength": 63,
+          "examples": ["production", "staging", "my-app-namespace"]
+        },
+        "create_namespace_if_not_exist": {
+          "type": "string",
+          "order": 2,
+          "title": "Create Namespace If Not Exist",
+          "description": "Whether to create the namespace if it doesn't exist",
+          "enum": ["true", "false"]
+        },
+        "region": {
+          "type": "string",
+          "order": 3,
+          "title": "Cloud Region",
+          "description": "Cloud provider region where resources will be deployed",
+          "examples": ["us-east-1", "us-west-2", "eu-west-1", "ap-south-1"]
+        }
+      }
+    },
+    "networking": {
+      "type": "object",
+      "order": 2,
+      "title": "Networking Configuration",
+      "description": "Network, DNS, gateway and load balancer settings",
+      "properties": {
+        "domain_name": {
+          "type": "string",
+          "order": 1,
+          "title": "Public Domain Name",
+          "description": "Public domain name for the application",
+          "format": "hostname",
+          "examples": ["example.com", "app.nullapps.io"]
+        },
+        "private_domain_name": {
+          "type": "string",
+          "order": 2,
+          "title": "Private Domain Name",
+          "description": "Private domain name for internal services",
+          "format": "hostname",
+          "examples": ["internal.example.com", "private.nullapps.io"]
+        },
+        "application_domain": {
+          "type": "string",
+          "order": 3,
+          "title": "Use Account Slug as Domain",
+          "description": "Whether to use account slug as application domain",
+          "enum": ["true", "false"]
+        },
+        "dns_type": {
+          "type": "string",
+          "order": 4,
+          "title": "DNS Provider Type",
+          "description": "DNS provider type",
+          "enum": ["route53", "azure", "external_dns"],
+          "examples": ["route53", "azure"]
+        },
+        "gateway_public_name": {
+          "type": "string",
+          "order": 5,
+          "title": "Public Gateway Name",
+          "description": "Name of the public gateway",
+          "examples": ["gateway-public", "my-public-gateway"]
+        },
+        "gateway_private_name": {
+          "type": "string",
+          "order": 6,
+          "title": "Private Gateway Name",
+          "description": "Name of the private gateway",
+          "examples": ["gateway-internal", "my-private-gateway"]
+        },
+        "balancer_public_name": {
+          "type": "string",
+          "order": 7,
+          "title": "Public Load Balancer Name",
+          "description": "Name of the public load balancer",
+          "examples": ["k8s-public-alb", "my-public-balancer"]
+        },
+        "balancer_private_name": {
+          "type": "string",
+          "order": 8,
+          "title": "Private Load Balancer Name",
+          "description": "Name of the private load balancer",
+          "examples": ["k8s-internal-alb", "my-private-balancer"]
+        },
+        "alb_reconciliation_enabled": {
+          "type": "string",
+          "order": 9,
+          "title": "ALB Reconciliation Enabled",
+          "description": "Whether ALB reconciliation is enabled",
+          "enum": ["true", "false"]
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "order": 3,
+      "title": "Deployment Configuration",
+      "description": "Deployment strategy, traffic management, and backup settings",
+      "properties": {
+        "deployment_strategy": {
+          "type": "string",
+          "order": 1,
+          "title": "Deployment Strategy",
+          "description": "Deployment strategy to use",
+          "enum": ["rolling", "blue-green"],
+          "examples": ["rolling", "blue-green"]
+        },
+        "deployment_max_wait_seconds": {
+          "type": "integer",
+          "order": 2,
+          "title": "Max Wait Seconds",
+          "description": "Maximum time in seconds to wait for deployments to become ready",
+          "minimum": 1,
+          "examples": [300, 600, 900]
+        },
+        "traffic_container_image": {
+          "type": "string",
+          "order": 3,
+          "title": "Traffic Manager Image",
+          "description": "Container image for the traffic manager sidecar",
+          "examples": ["public.ecr.aws/nullplatform/k8s-traffic-manager:latest", "custom.ecr.aws/traffic-manager:v2.0"]
+        },
+        "traffic_manager_config_map": {
+          "type": "string",
+          "order": 4,
+          "title": "Traffic Manager ConfigMap",
+          "description": "Name of the ConfigMap containing custom traffic manager configuration",
+          "examples": ["traffic-manager-configuration", "custom-nginx-config"]
+        },
+        "pod_disruption_budget_enabled": {
+          "type": "string",
+          "order": 5,
+          "title": "Pod Disruption Budget Enabled",
+          "description": "Whether Pod Disruption Budget is enabled",
+          "enum": ["true", "false"]
+        },
+        "pod_disruption_budget_max_unavailable": {
+          "type": "string",
+          "order": 6,
+          "title": "PDB Max Unavailable",
+          "description": "Maximum number or percentage of pods that can be unavailable",
+          "pattern": "^([0-9]+|[0-9]+%)$",
+          "examples": ["25%", "1", "2", "50%"]
+        },
+        "manifest_backup_enabled": {
+          "type": "boolean",
+          "order": 7,
+          "title": "Manifest Backup Enabled",
+          "description": "Whether manifest backup is enabled"
+        },
+        "manifest_backup_type": {
+          "type": "string",
+          "order": 8,
+          "title": "Backup Storage Type",
+          "description": "Backup storage type",
+          "enum": ["s3"],
+          "examples": ["s3"]
+        },
+        "manifest_backup_bucket": {
+          "type": "string",
+          "order": 9,
+          "title": "Backup S3 Bucket",
+          "description": "S3 bucket name for storing backups",
+          "examples": ["my-backup-bucket"]
+        },
+        "manifest_backup_prefix": {
+          "type": "string",
+          "order": 10,
+          "title": "Backup S3 Prefix",
+          "description": "Prefix path within the bucket",
+          "examples": ["k8s-manifests", "backups/prod"]
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "order": 4,
+      "title": "Security Configuration",
+      "description": "Security settings including image pull secrets, IAM, and Vault",
+      "properties": {
+        "image_pull_secrets_enabled": {
+          "type": "boolean",
+          "order": 1,
+          "title": "Image Pull Secrets Enabled",
+          "description": "Whether image pull secrets are enabled"
+        },
+        "image_pull_secrets": {
+          "type": "array",
+          "order": 2,
+          "title": "Image Pull Secrets",
+          "description": "List of secret names to use for pulling images",
+          "items": {"type": "string", "minLength": 1},
+          "examples": [["ecr-secret", "dockerhub-secret"]]
+        },
+        "iam_enabled": {
+          "type": "boolean",
+          "order": 3,
+          "title": "IAM Integration Enabled",
+          "description": "Whether IAM integration is enabled"
+        },
+        "iam_prefix": {
+          "type": "string",
+          "order": 4,
+          "title": "IAM Role Prefix",
+          "description": "Prefix for IAM role names",
+          "examples": ["nullplatform-scopes", "my-app"]
+        },
+        "iam_policies": {
+          "type": "array",
+          "order": 5,
+          "title": "IAM Policies",
+          "description": "List of IAM policies to attach to the role",
+          "items": {
+            "type": "object",
+            "required": ["TYPE"],
+            "properties": {
+              "TYPE": {"type": "string", "description": "Policy type (arn or inline)", "enum": ["arn", "inline"]},
+              "VALUE": {"type": "string", "description": "Policy ARN or inline policy JSON"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "iam_boundary_arn": {
+          "type": "string",
+          "order": 6,
+          "title": "IAM Boundary ARN",
+          "description": "ARN of the permissions boundary policy",
+          "examples": ["arn:aws:iam::aws:policy/AmazonS3FullAccess"]
+        },
+        "vault_address": {
+          "type": "string",
+          "order": 7,
+          "title": "Vault Server Address",
+          "description": "Vault server address",
+          "format": "uri",
+          "examples": ["http://localhost:8200", "https://vault.example.com"]
+        },
+        "vault_token": {
+          "type": "string",
+          "order": 8,
+          "title": "Vault Token",
+          "description": "Vault authentication token",
+          "examples": ["s.xxxxxxxxxxxxx"]
+        }
+      }
+    },
+    "object_modifiers": {
+      "type": "object",
+      "order": 5,
+      "title": "Kubernetes Object Modifiers",
+      "visible": false,
+      "description": "Dynamic modifications to Kubernetes objects using JSONPath selectors",
+      "required": ["modifiers"],
+      "properties": {
+        "modifiers": {
+          "type": "array",
+          "title": "Object Modifications",
+          "description": "List of modifications to apply to Kubernetes objects",
+          "items": {
+            "type": "object",
+            "required": ["selector", "action", "type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "title": "Object Type",
+                "description": "Type of Kubernetes object to modify",
+                "enum": ["deployment", "service", "ingress", "secret", "hpa"]
+              },
+              "selector": {
+                "type": "string",
+                "title": "JSONPath Selector",
+                "description": "JSONPath selector to match the object to be modified (e.g., '$.metadata.labels')"
+              },
+              "action": {
+                "type": "string",
+                "title": "Action",
+                "description": "Action to perform on the selected object",
+                "enum": ["add", "remove", "update"]
+              },
+              "value": {
+                "type": "string",
+                "title": "Value",
+                "description": "Value to set when action is 'add' or 'update'"
+              }
+            },
+            "if": {"properties": {"action": {"enum": ["add", "update"]}}},
+            "then": {"required": ["value"]},
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
