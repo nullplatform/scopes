@@ -23,18 +23,7 @@ if [ $np_exit_code -ne 0 ]; then
   echo "   ❌ Failed to fetch assets-repository provider"
   echo ""
 
-  if echo "$asset_repository" | grep -q "not found\|no providers"; then
-    echo "  🔎 Error: No assets-repository provider found"
-    echo ""
-    echo "  💡 Possible causes:"
-    echo "    • No assets-repository provider is configured for this scope"
-    echo "    • The provider category 'assets-repository' fes not exist"
-    echo ""
-    echo "  🔧 How to fix:"
-    echo "    1. Create an assets-repository provider in nullplatform"
-    echo "    2. Ensure it's linked to the scope with NRN: $nrn"
-
-  elif echo "$asset_repository" | grep -q "unauthorized\|forbidden\|401\|403"; then
+  if echo "$asset_repository" | grep -q "unauthorized\|forbidden\|401\|403"; then
     echo "  🔒 Error: Permission denied"
     echo ""
     echo "  💡 Possible causes:"
@@ -44,12 +33,6 @@ if [ $np_exit_code -ne 0 ]; then
     echo "  🔧 How to fix:"
     echo "    1. Check your NP_API_KEY is set and valid"
     echo "    2. Ensure you have permissions to access providers"
-
-  elif echo "$asset_repository" | grep -q "command not found"; then
-    echo "  ⚠️  Error: 'np' CLI not found"
-    echo ""
-    echo "  🔧 How to fix:"
-    echo "    Install the nullplatform CLI: npm install -g @nullplatform/cli"
 
   else
     echo "  📋 Error details:"
@@ -71,7 +54,7 @@ if [ -z "$distribution_bucket_name" ] || [ "$distribution_bucket_name" = "null" 
   echo "  🤔 Found $(echo "$asset_repository" | jq '.results | length') provider(s), but none contain bucket information"
   echo ""
   echo "  📋 Providers found:"
-  echo "$asset_repository" | jq -r '.results[] | "    • \(.name // .id // "unnamed") (type: \(.type // "unknown"))"' 2>/dev/null || echo "    (could not parse providers)"
+  echo "$asset_repository" | jq -r '.results[] | "    • np provider read --id \(.id) --format json"' 2>/dev/null
   echo ""
   echo "  💡 Expected one provider with: attributes.bucket.name"
   echo ""
