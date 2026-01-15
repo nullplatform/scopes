@@ -37,6 +37,7 @@ get_config_value() {
       local provider_value
       provider_value=$(echo "$CONTEXT" | jq -r "$jq_path // empty")
       if [ -n "$provider_value" ] && [ "$provider_value" != "null" ]; then
+        echo "[get_config_value] providers=[${providers[*]}] env=${env_var:-none} default=${default_value:-none} → SELECTED: provider='$jq_path' value='$provider_value'" >&2
         echo "$provider_value"
         return 0
       fi
@@ -45,16 +46,19 @@ get_config_value() {
 
   # Priority 2: Check environment variable
   if [ -n "$env_var" ] && [ -n "${!env_var:-}" ]; then
+    echo "[get_config_value] providers=[${providers[*]}] env=${env_var} default=${default_value:-none} → SELECTED: env='${env_var}' value='${!env_var}'" >&2
     echo "${!env_var}"
     return 0
   fi
 
   # Priority 3: Use default value
   if [ -n "$default_value" ]; then
+    echo "[get_config_value] providers=[${providers[*]}] env=${env_var:-none} default=${default_value} → SELECTED: default value='$default_value'" >&2
     echo "$default_value"
     return 0
   fi
 
   # No value found
+  echo "[get_config_value] providers=[${providers[*]}] env=${env_var:-none} default=${default_value:-none} → SELECTED: none (empty)" >&2
   echo ""
 }
