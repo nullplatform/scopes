@@ -100,15 +100,6 @@ set_np_mock() {
   export NP_MOCK_EXIT_CODE="$exit_code"
 }
 
-# Set up a mock response for np scope patch command
-# Usage: set_np_scope_patch_mock "<mock_file>" [exit_code]
-# Requires: NP_MOCKS_DIR to be set in the test setup
-set_np_scope_patch_mock() {
-  local mock_file="$1"
-  local exit_code="${2:-0}"
-  export NP_MOCK_SCOPE_PATCH_RESPONSE="$NP_MOCKS_DIR/$mock_file"
-  export NP_MOCK_SCOPE_PATCH_EXIT_CODE="$exit_code"
-}
 
 # Set up a mock response for the aws CLI
 # Usage: set_aws_mock "<mock_file>" [exit_code]
@@ -116,7 +107,7 @@ set_np_scope_patch_mock() {
 set_aws_mock() {
   local mock_file="$1"
   local exit_code="${2:-0}"
-  export AWS_MOCK_RESPONSE="$AWS_MOCKS_DIR/$mock_file"
+  export AWS_MOCK_RESPONSE="$mock_file"
   export AWS_MOCK_EXIT_CODE="$exit_code"
 }
 
@@ -168,17 +159,12 @@ JSON ASSERTIONS
 MOCK HELPERS
 ------------
   set_np_mock "<mock_file>" [exit_code]
-      Set up a mock response for the np CLI (fallback for any command).
-      Example: set_np_mock "mocks_dir/provider/success.json"
-
-  set_np_scope_patch_mock "<mock_file>" [exit_code]
-      Set up a mock response for "np scope patch" command.
-      Example: set_np_scope_patch_mock "scope/patch/success.json"
+      Set up a mock response for the np CLI.
+      Example: set_np_mock "$MOCKS_DIR/provider/success.json"
 
   set_aws_mock "<mock_file>" [exit_code]
       Set up a mock response for the aws CLI.
-      Requires: AWS_MOCKS_DIR to be set in setup().
-      Example: set_aws_mock "route53/success.json"
+      Example: set_aws_mock "$MOCKS_DIR/route53/success.json"
 
 BATS BUILT-IN HELPERS
 ---------------------

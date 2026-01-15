@@ -5,7 +5,13 @@ echo "🔍 Validating Route53 network configuration..."
 hosted_zone_id=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id // empty')
 
 if [ -z "$hosted_zone_id" ]; then
-  echo "   ❌ hosted_public_zone_id is not set in context. You must create a 'Cloud provider' configuration and then try again."
+  echo ""
+  echo "   ❌ hosted_public_zone_id is not set in context"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    1. Ensure there is an AWS cloud-provider configured at the correct NRN hierarchy level"
+  echo "    2. Set the 'hosted_public_zone_id' field with the Route 53 hosted zone ID"
+  echo ""
   exit 1
 fi
 echo "   ✅ hosted_zone_id=$hosted_zone_id"
@@ -35,7 +41,7 @@ if [ $aws_exit_code -ne 0 ]; then
     echo ""
     echo "  🔧 How to fix:"
     echo "    1. Verify the hosted zone exists: aws route53 list-hosted-zones"
-    echo "    2. Update 'hosted_public_zone_id' in your 'Cloud provider' configuration"
+    echo "    2. Update 'hosted_public_zone_id' in the AWS cloud-provider configuration"
 
   elif echo "$aws_output" | grep -q "AccessDenied\|not authorized"; then
     echo "  🔒 Error: Permission denied when accessing Route 53"
@@ -45,8 +51,8 @@ if [ $aws_exit_code -ne 0 ]; then
     echo "    • The IAM role/user is missing the 'route53:GetHostedZone' permission"
     echo ""
     echo "  🔧 How to fix:"
-    echo "    1. Check your AWS credentials are configured correctly"
-    echo "    2. Ensure your IAM policy includes:"
+    echo "    1. Check the AWS credentials are configured correctly"
+    echo "    2. Ensure the IAM policy includes:"
     echo "       {"
     echo "         \"Effect\": \"Allow\","
     echo "         \"Action\": \"route53:GetHostedZone\","
@@ -66,14 +72,12 @@ if [ $aws_exit_code -ne 0 ]; then
     echo "  🔑 Error: AWS credentials issue"
     echo ""
     echo "  💡 Possible causes:"
-    echo "    • AWS credentials are not configured"
-    echo "    • AWS credentials have expired"
-    echo "    • AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY environment variables are missing"
+    echo "    • The nullplatform agent is not configured with AWS credentials"
+    echo "    • The IAM role associated with the service account does not exist"
     echo ""
     echo "  🔧 How to fix:"
-    echo "    1. Run 'aws configure' to set up credentials"
-    echo "    2. Or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables"
-    echo "    3. If using temporary credentials, refresh your session token"
+    echo "    1. Configure a service account in the nullplatform agent Helm installation"
+    echo "    2. Verify the IAM role associated with the service account exists and has the required permissions"
 
   else
     echo "  📋 Error details:"
@@ -90,8 +94,11 @@ if [ -z "$network_domain" ] || [ "$network_domain" = "null" ]; then
   echo ""
   echo "   ❌ Failed to extract domain name from hosted zone response"
   echo ""
-  echo "  🤔 The AWS API returned successfully but the domain name could not be parsed."
-  echo "  This is unexpected - please check the hosted zone configuration."
+  echo "  💡 Possible causes:"
+  echo "    • The hosted zone does not have a valid domain name configured"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    1. Verify the hosted zone has a valid domain: aws route53 get-hosted-zone --id $hosted_zone_id"
   echo ""
   exit 1
 fi
@@ -100,10 +107,6 @@ echo "   ✅ domain=$network_domain"
 
 network_subdomain="$application_slug-$scope_slug"
 echo "   ✅ subdomain=$network_subdomain"
-
-echo ""
-echo "✨ Route53 network configured successfully"
-echo ""
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg hosted_zone_id "$hosted_zone_id" \
@@ -117,6 +120,7 @@ TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
 
 scope_domain="$network_subdomain.$network_domain"
 
+echo ""
 echo "   📝 Setting scope domain to '$scope_domain'..."
 
 np_output=$(np scope patch --id "$scope_id" --body "{\"domain\":\"$scope_domain\"}" --format json 2>&1)
@@ -131,12 +135,10 @@ if [ $np_exit_code -ne 0 ]; then
     echo "  🔒 Error: Permission denied"
     echo ""
     echo "  💡 Possible causes:"
-    echo "    • The API token doesn't have permission to update scopes"
-    echo "    • The token has expired"
+    echo "    • The nullplatform API Key doesn't have 'Developer' permissions"
     echo ""
     echo "  🔧 How to fix:"
-    echo "    1. Check your NP_API_KEY is set and valid"
-    echo "    2. Ensure you have permissions to update scopes"
+    echo "    1. Ensure the API Key has 'Developer' permissions at the correct NRN hierarchy level"
 
   else
     echo "  📋 Error details:"
@@ -148,6 +150,10 @@ if [ $np_exit_code -ne 0 ]; then
 fi
 
 echo "   ✅ Scope domain set successfully"
+
+echo ""
+echo "✨ Route53 network configured successfully"
+echo ""
 
 # Add module to composition list
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

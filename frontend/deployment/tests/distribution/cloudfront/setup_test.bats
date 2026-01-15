@@ -68,8 +68,7 @@ run_cloudfront_setup() {
   assert_contains "$output" "    • The nullplatform API Key doesn't have 'Ops' permissions at nrn: organization=1:account=2:namespace=3:application=4:scope=7"
 
   assert_contains "$output" "  🔧 How to fix:"
-  assert_contains "$output" "    1. Ensure your API Key has 'Ops' permissions"
-  assert_contains "$output" "    2. Ensure your API Key is set at the correct NRN hierarchy level"
+  assert_contains "$output" "    1. Ensure the API Key has 'Ops' permissions at the correct NRN hierarchy level"
 }
 
 # =============================================================================
@@ -98,8 +97,7 @@ run_cloudfront_setup() {
   assert_contains "$output" "   ❌ No assets-repository provider of type AWS S3 at nrn: organization=1:account=2:namespace=3:application=4:scope=7"
 
   assert_contains "$output" "  🔧 How to fix:"
-  assert_contains "$output" "    1. Ensure you have an asset-repository provider of type S3 configured"
-  assert_contains "$output" "    2. Ensure your asset-repository provider is set at the correct NRN hierarchy level"
+  assert_contains "$output" "    1. Ensure there is an asset-repository provider of type S3 configured at the correct NRN hierarchy level"
 }
 
 # =============================================================================
@@ -118,8 +116,7 @@ run_cloudfront_setup() {
   assert_contains "$output" "    • np provider read --id d397e46b-89b8-419d-ac14-2b483ace511c --format json"
 
   assert_contains "$output" "  🔧 How to fix:"
-  assert_contains "$output" "    1. Ensure you have an asset-repository provider of type S3 configured"
-  assert_contains "$output" "    2. Ensure your asset-repository provider is set at the correct NRN hierarchy level"
+  assert_contains "$output" "    1. Ensure there is an asset-repository provider of type S3 configured at the correct NRN hierarchy level"
   assert_equal "$status" "1"
 }
 

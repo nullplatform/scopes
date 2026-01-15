@@ -23,7 +23,7 @@ validate_env_var TOFU_LOCK_TABLE
 if [ ${#missing_vars[@]} -gt 0 ]; then
   echo ""
   echo "  🔧 How to fix:"
-  echo "    Set the missing variable(s) in your nullplatform agent Helm installation:"
+  echo "    Set the missing variable(s) in the nullplatform agent Helm installation:"
   for var in "${missing_vars[@]}"; do
     echo "      • $var"
   done
