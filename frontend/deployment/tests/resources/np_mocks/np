@@ -1,22 +1,12 @@
 #!/bin/bash
 # Mock np CLI for testing
 #
-# Supports command-specific mocks:
-#   - NP_MOCK_SCOPE_PATCH_RESPONSE / NP_MOCK_SCOPE_PATCH_EXIT_CODE for "np scope patch"
-#   - NP_MOCK_PROVIDER_LIST_RESPONSE / NP_MOCK_PROVIDER_LIST_EXIT_CODE for "np provider list"
-#   - NP_MOCK_RESPONSE / NP_MOCK_EXIT_CODE as fallback for any command
+# Usage:
+#   Set NP_MOCK_RESPONSE to the path of the mock JSON file to return
+#   Set NP_MOCK_EXIT_CODE to the exit code (default: 0)
 
-# Detect which command is being called
-if [[ "$1" == "scope" && "$2" == "patch" ]]; then
-  MOCK_RESPONSE="${NP_MOCK_SCOPE_PATCH_RESPONSE:-$NP_MOCK_RESPONSE}"
-  MOCK_EXIT_CODE="${NP_MOCK_SCOPE_PATCH_EXIT_CODE:-${NP_MOCK_EXIT_CODE:-0}}"
-elif [[ "$1" == "provider" && "$2" == "list" ]]; then
-  MOCK_RESPONSE="${NP_MOCK_PROVIDER_LIST_RESPONSE:-$NP_MOCK_RESPONSE}"
-  MOCK_EXIT_CODE="${NP_MOCK_PROVIDER_LIST_EXIT_CODE:-${NP_MOCK_EXIT_CODE:-0}}"
-else
-  MOCK_RESPONSE="$NP_MOCK_RESPONSE"
-  MOCK_EXIT_CODE="${NP_MOCK_EXIT_CODE:-0}"
-fi
+MOCK_RESPONSE="$NP_MOCK_RESPONSE"
+MOCK_EXIT_CODE="${NP_MOCK_EXIT_CODE:-0}"
 
 if [ -z "$MOCK_RESPONSE" ]; then
   echo "No mock response configured for: np $*" >&2
