@@ -1,0 +1,3 @@
+{
+  "error": "Unknown error updating scope: {\"statusCode\":500,\"code\":\"FST_INTERNAL_SERVER_ERROR\",\"error\":\"Internal Server Error\",\"message\":\"Error processing the request\"}"
+}
