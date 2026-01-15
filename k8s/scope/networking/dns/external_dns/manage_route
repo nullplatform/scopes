@@ -4,7 +4,7 @@ set -euo pipefail
 
 if [ "$ACTION" = "CREATE" ]; then
     echo "Building DNSEndpoint manifest for ExternalDNS..."
-    
+
     echo "Getting IP for gateway: $GATEWAY_NAME"
 
     GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
@@ -16,36 +16,38 @@ if [ "$ACTION" = "CREATE" ]; then
       GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
     fi
-    
+
     if [ -z "$GATEWAY_IP" ]; then
       echo "Warning: Could not determine gateway IP address yet, DNSEndpoint will be created later"
-      exit 0
-    fi
-    
-    echo "Gateway IP: $GATEWAY_IP"
-    
-    DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
-    
-    if [ -f "$DNS_ENDPOINT_TEMPLATE" ]; then
-      DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
-      CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
-      
-      echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
-      
-      echo "Building DNSEndpoint Template: $DNS_ENDPOINT_TEMPLATE to $DNS_ENDPOINT_FILE"
-      
-      gomplate -c .="$CONTEXT_PATH" \
-        --file "$DNS_ENDPOINT_TEMPLATE" \
-        --out "$DNS_ENDPOINT_FILE"
-      
-      echo "DNSEndpoint manifest created at: $DNS_ENDPOINT_FILE"
-      
-      rm "$CONTEXT_PATH"
-      
+      echo "Skipping DNSEndpoint creation"
     else
-      echo "Error: DNSEndpoint template not found at $DNS_ENDPOINT_TEMPLATE"
-      exit 1
+      echo "Gateway IP: $GATEWAY_IP"
+
+      DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
+
+      if [ -f "$DNS_ENDPOINT_TEMPLATE" ]; then
+        DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
+        CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
+
+        echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
+
+        echo "Building DNSEndpoint Template: $DNS_ENDPOINT_TEMPLATE to $DNS_ENDPOINT_FILE"
+
+        gomplate -c .="$CONTEXT_PATH" \
+          --file "$DNS_ENDPOINT_TEMPLATE" \
+          --out "$DNS_ENDPOINT_FILE"
+
+        echo "DNSEndpoint manifest created at: $DNS_ENDPOINT_FILE"
+
+        rm "$CONTEXT_PATH"
+
+      else
+        echo "Error: DNSEndpoint template not found at $DNS_ENDPOINT_TEMPLATE"
+        exit 1
+      fi
     fi
+
+    echo "DNSEndpoint management completed"
 
 elif [ "$ACTION" = "DELETE" ]; then
     echo "Deleting DNSEndpoint for external_dns..."
@@ -57,3 +59,5 @@ elif [ "$ACTION" = "DELETE" ]; then
 
     echo "DNSEndpoint deletion completed"
 fi
+
+echo "External DNS route management completed"
