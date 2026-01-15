@@ -96,7 +96,7 @@ teardown() {
 # Test: K8S_NAMESPACE uses scope-configuration provider first
 # =============================================================================
 @test "build_context: K8S_NAMESPACE uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "cluster": {
       "namespace": "scope-config-ns"
     }
@@ -104,7 +104,7 @@ teardown() {
 
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "$K8S_NAMESPACE"
   )
@@ -118,7 +118,7 @@ teardown() {
 @test "build_context: K8S_NAMESPACE falls back to container-orchestration" {
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "$K8S_NAMESPACE"
   )
@@ -141,7 +141,7 @@ teardown() {
 
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "$K8S_NAMESPACE"
   )
@@ -160,7 +160,7 @@ teardown() {
 
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "$K8S_NAMESPACE"
   )
@@ -176,7 +176,7 @@ teardown() {
 
   result=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "$K8S_NAMESPACE"
   )
@@ -219,14 +219,14 @@ teardown() {
 # Test: USE_ACCOUNT_SLUG uses scope-configuration provider
 # =============================================================================
 @test "build_context: USE_ACCOUNT_SLUG uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "application_domain": "true"
     }
   }')
 
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.application_domain' \
+    --provider '.providers["scope-configurations"].networking.application_domain' \
     --provider '.providers["cloud-providers"].networking.application_domain' \
     --default "$USE_ACCOUNT_SLUG"
   )
@@ -238,14 +238,14 @@ teardown() {
 # Test: DOMAIN (public) uses scope-configuration provider
 # =============================================================================
 @test "build_context: DOMAIN (public) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "domain_name": "scope-config-domain.io"
     }
   }')
 
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.domain_name' \
+    --provider '.providers["scope-configurations"].networking.domain_name' \
     --provider '.providers["cloud-providers"].networking.domain_name' \
     --default "$DOMAIN"
   )
@@ -258,7 +258,7 @@ teardown() {
 # =============================================================================
 @test "build_context: DOMAIN (public) falls back to cloud-providers" {
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.domain_name' \
+    --provider '.providers["scope-configurations"].networking.domain_name' \
     --provider '.providers["cloud-providers"].networking.domain_name' \
     --default "$DOMAIN"
   )
@@ -271,16 +271,16 @@ teardown() {
 # =============================================================================
 @test "build_context: DOMAIN (private) uses scope-configuration private domain" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.visibility = "private" |
-    .providers["scope-configuration"] = {
+    .providers["scope-configurations"] = {
     "networking": {
       "private_domain_name": "private-scope.io"
       }
     }')
 
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.private_domain_name' \
+    --provider '.providers["scope-configurations"].networking.private_domain_name' \
     --provider '.providers["cloud-providers"].networking.private_domain_name' \
-    --provider '.providers["scope-configuration"].networking.domain_name' \
+    --provider '.providers["scope-configurations"].networking.domain_name' \
     --provider '.providers["cloud-providers"].networking.domain_name' \
     --default "${PRIVATE_DOMAIN:-$DOMAIN}"
   )
@@ -292,7 +292,7 @@ teardown() {
 # Test: GATEWAY_NAME (public) uses scope-configuration provider
 # =============================================================================
 @test "build_context: GATEWAY_NAME (public) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "gateway_public_name": "scope-gateway-public"
     }
@@ -300,7 +300,7 @@ teardown() {
 
   GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.gateway_public_name' \
+    --provider '.providers["scope-configurations"].networking.gateway_public_name' \
     --provider '.providers["container-orchestration"].gateway.public_name' \
     --default "$GATEWAY_DEFAULT"
   )
@@ -314,7 +314,7 @@ teardown() {
 @test "build_context: GATEWAY_NAME (public) falls back to container-orchestration" {
   GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.gateway_public_name' \
+    --provider '.providers["scope-configurations"].networking.gateway_public_name' \
     --provider '.providers["container-orchestration"].gateway.public_name' \
     --default "$GATEWAY_DEFAULT"
   )
@@ -326,7 +326,7 @@ teardown() {
 # Test: GATEWAY_NAME (private) uses scope-configuration provider
 # =============================================================================
 @test "build_context: GATEWAY_NAME (private) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "gateway_private_name": "scope-gateway-private"
     }
@@ -334,7 +334,7 @@ teardown() {
 
   GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.gateway_private_name' \
+    --provider '.providers["scope-configurations"].networking.gateway_private_name' \
     --provider '.providers["container-orchestration"].gateway.private_name' \
     --default "$GATEWAY_DEFAULT"
   )
@@ -346,7 +346,7 @@ teardown() {
 # Test: ALB_NAME (public) uses scope-configuration provider
 # =============================================================================
 @test "build_context: ALB_NAME (public) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "balancer_public_name": "scope-balancer-public"
     }
@@ -354,7 +354,7 @@ teardown() {
 
   ALB_NAME="k8s-nullplatform-internet-facing"
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.balancer_public_name' \
+    --provider '.providers["scope-configurations"].networking.balancer_public_name' \
     --provider '.providers["container-orchestration"].balancer.public_name' \
     --default "$ALB_NAME"
   )
@@ -366,7 +366,7 @@ teardown() {
 # Test: ALB_NAME (private) uses scope-configuration provider
 # =============================================================================
 @test "build_context: ALB_NAME (private) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "balancer_private_name": "scope-balancer-private"
     }
@@ -374,7 +374,7 @@ teardown() {
 
   ALB_NAME="k8s-nullplatform-internal"
   result=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.balancer_private_name' \
+    --provider '.providers["scope-configurations"].networking.balancer_private_name' \
     --provider '.providers["container-orchestration"].balancer.private_name' \
     --default "$ALB_NAME"
   )
@@ -386,7 +386,7 @@ teardown() {
 # Test: CREATE_K8S_NAMESPACE_IF_NOT_EXIST uses scope-configuration provider
 # =============================================================================
 @test "build_context: CREATE_K8S_NAMESPACE_IF_NOT_EXIST uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "cluster": {
       "create_namespace_if_not_exist": "false"
     }
@@ -397,7 +397,7 @@ teardown() {
 
   result=$(get_config_value \
     --env CREATE_K8S_NAMESPACE_IF_NOT_EXIST \
-    --provider '.providers["scope-configuration"].cluster.create_namespace_if_not_exist' \
+    --provider '.providers["scope-configurations"].cluster.create_namespace_if_not_exist' \
     --default "true"
   )
 
@@ -408,7 +408,7 @@ teardown() {
 # Test: K8S_MODIFIERS uses scope-configuration provider
 # =============================================================================
 @test "build_context: K8S_MODIFIERS uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "object_modifiers": {
       "modifiers": {
         "global": {
@@ -425,7 +425,7 @@ teardown() {
 
   result=$(get_config_value \
     --env K8S_MODIFIERS \
-    --provider '.providers["scope-configuration"].object_modifiers.modifiers | @json' \
+    --provider '.providers["scope-configurations"].object_modifiers.modifiers | @json' \
     --default "{}"
   )
 
@@ -442,7 +442,7 @@ teardown() {
 
   result=$(get_config_value \
     --env K8S_MODIFIERS \
-    --provider '.providers["scope-configuration"].object_modifiers.modifiers | @json' \
+    --provider '.providers["scope-configurations"].object_modifiers.modifiers | @json' \
     --default "${K8S_MODIFIERS:-"{}"}"
   )
 
@@ -455,7 +455,7 @@ teardown() {
 # =============================================================================
 @test "build_context: complete configuration hierarchy works end-to-end" {
   # Set up a complete scope-configuration provider
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "cluster": {
       "namespace": "scope-ns",
       "create_namespace_if_not_exist": "false",
@@ -475,7 +475,7 @@ teardown() {
   # Test K8S_NAMESPACE
   k8s_namespace=$(get_config_value \
     --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configuration"].cluster.namespace' \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
     --provider '.providers["container-orchestration"].cluster.namespace' \
     --default "$K8S_NAMESPACE"
   )
@@ -483,7 +483,7 @@ teardown() {
 
   # Test REGION
   region=$(get_config_value \
-    --provider '.providers["scope-configuration"].cluster.region' \
+    --provider '.providers["scope-configurations"].cluster.region' \
     --provider '.providers["cloud-providers"].account.region' \
     --default "us-east-1"
   )
@@ -491,7 +491,7 @@ teardown() {
 
   # Test DOMAIN
   domain=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.domain_name' \
+    --provider '.providers["scope-configurations"].networking.domain_name' \
     --provider '.providers["cloud-providers"].networking.domain_name' \
     --default "$DOMAIN"
   )
@@ -499,7 +499,7 @@ teardown() {
 
   # Test USE_ACCOUNT_SLUG
   use_account_slug=$(get_config_value \
-    --provider '.providers["scope-configuration"].networking.application_domain' \
+    --provider '.providers["scope-configurations"].networking.application_domain' \
     --provider '.providers["cloud-providers"].networking.application_domain' \
     --default "$USE_ACCOUNT_SLUG"
   )
@@ -510,7 +510,7 @@ teardown() {
 # Test: DNS_TYPE uses scope-configuration provider
 # =============================================================================
 @test "build_context: DNS_TYPE uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "dns_type": "azure"
     }
@@ -518,7 +518,7 @@ teardown() {
 
   result=$(get_config_value \
     --env DNS_TYPE \
-    --provider '.providers["scope-configuration"].networking.dns_type' \
+    --provider '.providers["scope-configurations"].networking.dns_type' \
     --default "route53"
   )
 
@@ -531,7 +531,7 @@ teardown() {
 @test "build_context: DNS_TYPE uses default" {
   result=$(get_config_value \
     --env DNS_TYPE \
-    --provider '.providers["scope-configuration"].networking.dns_type' \
+    --provider '.providers["scope-configurations"].networking.dns_type' \
     --default "route53"
   )
 
@@ -542,7 +542,7 @@ teardown() {
 # Test: ALB_RECONCILIATION_ENABLED uses scope-configuration provider
 # =============================================================================
 @test "build_context: ALB_RECONCILIATION_ENABLED uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "networking": {
       "alb_reconciliation_enabled": "true"
     }
@@ -550,7 +550,7 @@ teardown() {
 
   result=$(get_config_value \
     --env ALB_RECONCILIATION_ENABLED \
-    --provider '.providers["scope-configuration"].networking.alb_reconciliation_enabled' \
+    --provider '.providers["scope-configurations"].networking.alb_reconciliation_enabled' \
     --default "false"
   )
 
@@ -561,13 +561,13 @@ teardown() {
 # Test: DEPLOYMENT_MAX_WAIT_IN_SECONDS uses scope-configuration provider
 # =============================================================================
 @test "build_context: DEPLOYMENT_MAX_WAIT_IN_SECONDS uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "deployment_max_wait_seconds": 900
   }')
 
   result=$(get_config_value \
     --env DEPLOYMENT_MAX_WAIT_IN_SECONDS \
-    --provider '.providers["scope-configuration"].deployment_max_wait_seconds' \
+    --provider '.providers["scope-configurations"].deployment_max_wait_seconds' \
     --default "600"
   )
 
@@ -578,22 +578,22 @@ teardown() {
 # Test: MANIFEST_BACKUP uses scope-configuration provider
 # =============================================================================
 @test "build_context: MANIFEST_BACKUP uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "manifest_backup_enabled": true,
     "manifest_backup_type": "s3",
     "manifest_backup_bucket": "my-bucket"
   }')
 
   enabled=$(get_config_value \
-    --provider '.providers["scope-configuration"].manifest_backup_enabled' \
+    --provider '.providers["scope-configurations"].manifest_backup_enabled' \
     --default "false"
   )
   type=$(get_config_value \
-    --provider '.providers["scope-configuration"].manifest_backup_type' \
+    --provider '.providers["scope-configurations"].manifest_backup_type' \
     --default ""
   )
   bucket=$(get_config_value \
-    --provider '.providers["scope-configuration"].manifest_backup_bucket' \
+    --provider '.providers["scope-configurations"].manifest_backup_bucket' \
     --default ""
   )
 
@@ -606,13 +606,13 @@ teardown() {
 # Test: VAULT_ADDR uses scope-configuration provider
 # =============================================================================
 @test "build_context: VAULT_ADDR uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "vault_address": "https://vault.example.com"
   }')
 
   result=$(get_config_value \
     --env VAULT_ADDR \
-    --provider '.providers["scope-configuration"].vault_address' \
+    --provider '.providers["scope-configurations"].vault_address' \
     --default ""
   )
 
@@ -623,13 +623,13 @@ teardown() {
 # Test: VAULT_TOKEN uses scope-configuration provider
 # =============================================================================
 @test "build_context: VAULT_TOKEN uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configuration"] = {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "vault_token": "s.xxxxxxxxxxxxxxx"
   }')
 
   result=$(get_config_value \
     --env VAULT_TOKEN \
-    --provider '.providers["scope-configuration"].vault_token' \
+    --provider '.providers["scope-configurations"].vault_token' \
     --default ""
   )
 
