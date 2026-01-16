@@ -1,0 +1,27 @@
+---
+apiVersion: security.istio.io/v1
+kind: RequestAuthentication
+metadata:
+  name: {{ .request_auth_name }}
+  namespace: {{ .gateway_namespace }}
+  labels:
+    nullplatform.com/managed-by: endpoint-exposer
+spec:
+  selector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .gateway_name }}
+  jwtRules:
+  - issuer: "{{ .jwt_issuer }}"
+    jwksUri: "{{ .jwt_jwks_uri }}"
+    fromHeaders:
+    - name: Authorization
+      prefix: "Bearer "
+    fromCookies:
+    - "np_scope_token"
+    outputClaimToHeaders:
+    - header: "X-User-ID"
+      claim: "sub"
+    - header: "X-User-Email"
+      claim: "email"
+    - header: "X-User-Scopes"
+      claim: "scope"

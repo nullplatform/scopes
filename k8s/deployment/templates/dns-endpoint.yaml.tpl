@@ -17,6 +17,6 @@ spec:
   endpoints:
   - dnsName: {{ .scope.domain }}
     recordTTL: 60
-    recordType: A
+    recordType: {{ .dns_record_type }}
     targets:
-    - "{{ .gateway_ip }}"
+    - "{{ .gateway_target }}"
