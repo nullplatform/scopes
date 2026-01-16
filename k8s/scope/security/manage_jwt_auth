@@ -67,7 +67,7 @@ if [ "$JWT_AUTHORIZATION_ENABLED" = "true" ]; then
   fi
 
   # Manage AuthorizationPolicy per scope domain
-  AUTHZ_POLICY_NAME="require-jwt-$(echo "$SCOPE_ID" | sed 's/_/-/g')"
+  AUTHZ_POLICY_NAME="require-nullplatform-jwt-${SCOPE_SLUG}-${SCOPE_ID}"
   echo "Managing AuthorizationPolicy: $AUTHZ_POLICY_NAME"
 
   if [ "$ACTION" = "delete" ]; then
