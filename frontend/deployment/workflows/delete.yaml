@@ -1,26 +1,4 @@
-provider_categories:
-  - cloud-providers
-steps:
-  - name: build_context
-    type: script
-    file: "$SERVICE_PATH/deployment/build_context"
-    output:
-      - name: TOFU_VARIABLES
-        type: environment
-  - name: setup_provider_layer
-    type: script
-    file: "$SERVICE_PATH/deployment/provider/$TOFU_PROVIDER/setup"
-  - name: setup_network_layer
-    type: script
-    file: "$SERVICE_PATH/deployment/network/$NETWORK_LAYER/setup"
-  - name: setup_distribution_layer
-    type: script
-    file: "$SERVICE_PATH/deployment/distribution/$DISTRIBUTION_LAYER/setup"
-  - name: build_modules
-    type: script
-    file: "$SERVICE_PATH/deployment/compose_modules"
-  - name: tofu
-    type: script
-    file: "$SERVICE_PATH/deployment/do_tofu"
-    configuration:
-      ACTION: "destroy"
+include:
+  - "$SERVICE_PATH/deployment/workflows/initial.yaml"
+configuration:
+  TOFU_ACTION: "destroy"

@@ -35,7 +35,7 @@ EOF
   export TOFU_MODULE_DIR="$TEST_OUTPUT_DIR"
   export TOFU_VARIABLES='{"key": "value", "number": 42}'
   export TOFU_INIT_VARIABLES="-backend-config=bucket=test-bucket -backend-config=region=us-east-1"
-  export ACTION="apply"
+  export TOFU_ACTION="apply"
   export TOFU_MOCK_LOG="$TEST_OUTPUT_DIR/tofu_calls.log"
 
   # Add mock bin to PATH
@@ -119,8 +119,8 @@ teardown() {
 # =============================================================================
 # Test: tofu action command
 # =============================================================================
-@test "Should call tofu with ACTION=apply" {
-  export ACTION="apply"
+@test "Should call tofu with TOFU_ACTION=apply" {
+  export TOFU_ACTION="apply"
 
   run bash "$SCRIPT_PATH"
 
@@ -130,8 +130,8 @@ teardown() {
   assert_contains "$action_call" "apply"
 }
 
-@test "Should call tofu with ACTION=destroy" {
-  export ACTION="destroy"
+@test "Should call tofu with TOFU_ACTION=destroy" {
+  export TOFU_ACTION="destroy"
 
   run bash "$SCRIPT_PATH"
 
@@ -141,8 +141,8 @@ teardown() {
   assert_contains "$action_call" "destroy"
 }
 
-@test "Should call tofu with ACTION=plan" {
-  export ACTION="plan"
+@test "Should call tofu with TOFU_ACTION=plan" {
+  export TOFU_ACTION="plan"
 
   run bash "$SCRIPT_PATH"
 
