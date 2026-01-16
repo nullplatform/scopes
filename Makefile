@@ -35,9 +35,9 @@ endif
 # Run integration tests
 test-integration:
 ifdef MODULE
-	@./testing/run_integration_tests.sh $(MODULE)
+	@./testing/run_integration_tests.sh $(MODULE) $(if $(VERBOSE),-v)
 else
-	@./testing/run_integration_tests.sh
+	@./testing/run_integration_tests.sh $(if $(VERBOSE),-v)
 endif
 
 # Help
@@ -51,3 +51,4 @@ help:
 	@echo ""
 	@echo "Options:"
 	@echo "  MODULE=<name>     Run tests for specific module (e.g., MODULE=frontend)"
+	@echo "  VERBOSE=1         Show output of passing tests (integration tests only)"

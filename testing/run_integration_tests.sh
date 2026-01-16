@@ -11,6 +11,7 @@
 #   ./testing/run_integration_tests.sh                    # Run all tests
 #   ./testing/run_integration_tests.sh frontend           # Run tests for frontend module only
 #   ./testing/run_integration_tests.sh --build            # Rebuild containers before running
+#   ./testing/run_integration_tests.sh -v|--verbose       # Show output of passing tests
 # =============================================================================
 
 set -e
@@ -29,11 +30,15 @@ NC='\033[0m'
 # Parse arguments
 MODULE=""
 BUILD_FLAG=""
+VERBOSE=""
 
 for arg in "$@"; do
   case $arg in
     --build)
       BUILD_FLAG="--build"
+      ;;
+    -v|--verbose)
+      VERBOSE="--show-output-of-passing-tests"
       ;;
     *)
       MODULE="$arg"
@@ -170,8 +175,8 @@ TOTAL_FAILED=0
 for test_dir in $TEST_PATHS; do
   module_name=$(get_module_name "$test_dir")
 
-  # Find .bats files
-  bats_files=$(find "$test_dir" -maxdepth 1 -name "*.bats" 2>/dev/null | sort)
+  # Find .bats files recursively (supports test_cases/ subfolder structure)
+  bats_files=$(find "$test_dir" -name "*.bats" 2>/dev/null | sort)
   if [ -z "$bats_files" ]; then
     continue
   fi
@@ -179,10 +184,17 @@ for test_dir in $TEST_PATHS; do
   echo -e "${CYAN}[$module_name]${NC} Running integration tests in $test_dir"
   echo ""
 
-  # Run tests inside the container
   # Strip leading ./ from test_dir for cleaner paths
   container_test_dir="${test_dir#./}"
 
+  # Build list of test files for bats (space-separated, container paths)
+  container_bats_files=""
+  for bats_file in $bats_files; do
+    container_path="/workspace/${bats_file#./}"
+    container_bats_files="$container_bats_files $container_path"
+  done
+
+  # Run tests inside the container
   docker compose -f "$COMPOSE_FILE" run --rm \
     -e PROJECT_ROOT=/workspace \
     -e SMOCKER_HOST=http://smocker:8081 \
@@ -190,7 +202,7 @@ for test_dir in $TEST_PATHS; do
     -e MOTO_ENDPOINT=http://moto:5000 \
     -e AWS_ENDPOINT_URL=http://localstack:4566 \
     test-runner \
-    -c "update-ca-certificates 2>/dev/null; bats --formatter pretty --show-output-of-passing-tests /workspace/${container_test_dir}/*.bats" || TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    -c "update-ca-certificates 2>/dev/null; bats --formatter pretty $VERBOSE $container_bats_files" || TOTAL_FAILED=$((TOTAL_FAILED + 1))
 
   echo ""
 done

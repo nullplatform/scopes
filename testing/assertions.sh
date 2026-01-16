@@ -47,6 +47,26 @@ assert_empty() {
   fi
 }
 
+assert_true() {
+  local value="$1"
+  local name="${2:-value}"
+  if [[ "$value" != "true" ]]; then
+    echo "Expected $name to be true"
+    echo "Actual: '$value'"
+    return 1
+  fi
+}
+
+assert_false() {
+  local value="$1"
+  local name="${2:-value}"
+  if [[ "$value" != "false" ]]; then
+    echo "Expected $name to be false"
+    echo "Actual: '$value'"
+    return 1
+  fi
+}
+
 assert_directory_exists() {
   local dir="$1"
   if [ ! -d "$dir" ]; then
@@ -139,6 +159,14 @@ VALUE ASSERTIONS
   assert_empty "<value>" ["<name>"]
       Assert a value is empty.
       Example: assert_empty "$error" "error message"
+
+  assert_true "<value>" ["<name>"]
+      Assert a value equals the string "true".
+      Example: assert_true "$enabled" "distribution enabled"
+
+  assert_false "<value>" ["<name>"]
+      Assert a value equals the string "false".
+      Example: assert_false "$disabled" "feature disabled"
 
 FILE SYSTEM ASSERTIONS
 ----------------------
