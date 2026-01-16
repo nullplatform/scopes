@@ -63,6 +63,8 @@ Configuration specific to Azure DNS provider. Visible only when `dns_type` is `a
 | **AZURE_SUBSCRIPTION_ID** | Azure subscription ID for DNS management | `networking.azure_subscription_id` |
 | **RESOURCE_GROUP** | Azure resource group for cluster resources | `networking.resource_group` |
 
+**Note:** These variables are obtained from the `scope-configurations` provider and exported for use in Azure DNS workflows.
+
 #### Gateways
 
 Gateway configuration for ingress traffic routing.
