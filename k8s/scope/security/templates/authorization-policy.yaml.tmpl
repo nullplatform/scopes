@@ -20,9 +20,7 @@ spec:
         - "{{ .scope_domain }}"
         ports: ["443"]
         notPaths:
-        - /health
-        - /ready
-        - /metrics
+        - "{{ .health_check_path }}"
     when:
     - key: request.auth.claims[aud]
       notValues: ["{{ .scope_domain }}"]

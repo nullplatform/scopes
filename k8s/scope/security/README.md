@@ -1,6 +1,6 @@
 # JWT Authentication for Scopes
 
-This directory manages JWT-based authentication for scopes with "exposer" visibility using Istio security resources.
+This directory manages JWT-based authentication for scopes with "jwt_authorization_enabled" using Istio security resources.
 
 ## Overview
 
@@ -78,8 +78,6 @@ spec:
         ports: ["443"]
         notPaths:
         - /health
-        - /ready
-        - /metrics
     when:
     - key: request.auth.claims[aud]
       notValues: ["my-app.example.com"]
@@ -88,7 +86,7 @@ spec:
 **Key Features**:
 - DENY action: Blocks requests that don't meet the conditions
 - Requires JWT audience (`aud` claim) to match the scope domain
-- Exempts health check endpoints (`/health`, `/ready`, `/metrics`)
+- Exempts health check endpoints (`/health`)
 - Applies only to HTTPS traffic (port 443)
 
 ## Flow Diagram
@@ -146,120 +144,6 @@ The [manage_jwt_auth](manage_jwt_auth) script handles resource lifecycle:
 | `SCOPE_DOMAIN` | - | Domain for the scope (e.g., `app.example.com`) |
 | `GATEWAY_NAME` | - | Name of the Istio gateway |
 
-### Create Resources
-
-```bash
-export JWT_AUTHORIZATION_ENABLED=true
-export SCOPE_ID=my_scope_123
-export SCOPE_DOMAIN=my-app.example.com
-export GATEWAY_NAME=my-gateway
-export ACTION=create
-
-./manage_jwt_auth
-```
-
-### Delete Authorization Policy
-
-```bash
-export JWT_AUTHORIZATION_ENABLED=true
-export SCOPE_ID=my_scope_123
-export ACTION=delete
-
-./manage_jwt_auth
-```
-
-## JWT Token Requirements
-
-Valid JWT tokens must include:
-
-- **`iss` (issuer)**: Must match `JWT_ISSUER` (default: `https://api.nullplatform.com/scope`)
-- **`aud` (audience)**: Must match the scope domain (e.g., `my-app.example.com`)
-- **`sub` (subject)**: User identifier
-- **`email`**: User email
-- **`exp` (expiration)**: Token must not be expired
-
-## Token Sources
-
-The RequestAuthentication accepts tokens from:
-
-1. **Authorization Header**: `Authorization: Bearer <token>`
-2. **Cookie**: `np_scope_token=<token>`
-
-This allows both API clients (using headers) and browsers (using cookies) to authenticate.
-
-## Exempted Paths
-
-The following paths are exempted from JWT validation to support infrastructure monitoring:
-
-- `/health` - Health check endpoint
-- `/ready` - Readiness probe endpoint
-- `/metrics` - Metrics collection endpoint
-
-## Troubleshooting
-
-### Request Rejected with 403
-
-**Symptom**: Requests to your domain return 403 Forbidden.
-
-**Possible Causes**:
-1. Missing or invalid JWT token
-2. Token `aud` claim doesn't match the domain
-3. Token expired or signature invalid
-4. Token issuer doesn't match configuration
-
-**Debug Steps**:
-```bash
-# Check RequestAuthentication exists
-kubectl get requestauthentication -n gateways
-
-# Check AuthorizationPolicy exists for your scope
-kubectl get authorizationpolicy -n gateways | grep require-jwt
-
-# View AuthorizationPolicy details
-kubectl describe authorizationpolicy require-jwt-<scope-id> -n gateways
-
-# Check Istio proxy logs
-kubectl logs -n gateways <gateway-pod-name> -c istio-proxy
-```
-
-### Token Validation Fails
-
-**Symptom**: Logs show JWT validation errors.
-
-**Check**:
-```bash
-# Verify JWKS URI is accessible
-curl https://api.nullplatform.com/scope/.well-known/jwks.json
-
-# Decode your JWT to check claims (use jwt.io)
-# Verify:
-# - iss matches JWT_ISSUER
-# - aud matches SCOPE_DOMAIN
-# - exp is in the future
-```
-
-### RequestAuthentication Not Applied
-
-**Symptom**: JWT validation doesn't occur.
-
-**Check**:
-```bash
-# Verify gateway has the correct label
-kubectl get gateway -n gateways -o yaml | grep gateway-name
-
-# Verify RequestAuthentication selector matches
-kubectl get requestauthentication nullplatform-scope-jwt-auth -n gateways -o yaml
-```
-
-## Alternatives for Non-Istio Gateways
-
-If you cannot use Istio, consider these alternatives:
-
-- **Nginx Ingress Controller**: Use `auth-url` annotation with external auth service
-- **Kong Gateway**: Use Kong JWT plugin
-- **Traefik**: Use ForwardAuth middleware
-- **AWS ALB**: Use AWS Cognito User Pools or Lambda authorizers
-- **Application-level**: Implement JWT validation in your application code
 
 ## References
 

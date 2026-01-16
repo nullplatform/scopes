@@ -83,6 +83,10 @@ if [ "$JWT_AUTHORIZATION_ENABLED" = "true" ]; then
     # Create or update AuthorizationPolicy
     echo "Creating/updating AuthorizationPolicy: $AUTHZ_POLICY_NAME"
 
+    # Extract health check path from scope context
+    HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r '.scope.capabilities.health_check.path // "/health"')
+    echo "Health check path: $HEALTH_CHECK_PATH"
+
     CONTEXT_PATH="$OUTPUT_DIR/jwt-context-$SCOPE_ID.json"
     AUTHZ_POLICY_PATH="$OUTPUT_DIR/authorization-policy-$SCOPE_ID.yaml"
 
@@ -91,11 +95,13 @@ if [ "$JWT_AUTHORIZATION_ENABLED" = "true" ]; then
       --arg authz_policy_name "$AUTHZ_POLICY_NAME" \
       --arg scope_domain "$SCOPE_DOMAIN" \
       --arg jwt_issuer "$JWT_ISSUER" \
+      --arg health_check_path "$HEALTH_CHECK_PATH" \
       '. + {
         gateway_namespace: $gateway_namespace,
         authz_policy_name: $authz_policy_name,
         scope_domain: $scope_domain,
-        jwt_issuer: $jwt_issuer
+        jwt_issuer: $jwt_issuer,
+        health_check_path: $health_check_path
       }' > "$CONTEXT_PATH"
 
     gomplate -c .="$CONTEXT_PATH" \
