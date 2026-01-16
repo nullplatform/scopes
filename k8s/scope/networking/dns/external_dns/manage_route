@@ -5,23 +5,49 @@ set -euo pipefail
 if [ "$ACTION" = "CREATE" ]; then
     echo "Building DNSEndpoint manifest for ExternalDNS..."
 
-    echo "Getting IP for gateway: $GATEWAY_NAME"
+    echo "Getting address for gateway: $GATEWAY_NAME"
 
+    # Try to get IP address first (for cloud providers that support it)
     GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
       -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
 
+    # If no IP from Gateway resource, try Service IP
     if [ -z "$GATEWAY_IP" ]; then
-      echo "Warning: Could not get gateway IP for $GATEWAY_NAME"
-
+      echo "No IP in Gateway resource, checking Service..."
       GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
     fi
 
+    # If still no IP, try to get hostname (for EKS/ELB scenarios)
+    GATEWAY_HOSTNAME=""
+    RECORD_TYPE="A"
+
     if [ -z "$GATEWAY_IP" ]; then
-      echo "Warning: Could not determine gateway IP address yet, DNSEndpoint will be created later"
-      echo "Skipping DNSEndpoint creation"
+      echo "No IP found, checking for hostname..."
+      GATEWAY_HOSTNAME=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null)
+
+      # If no hostname from Gateway resource, try Service hostname
+      if [ -z "$GATEWAY_HOSTNAME" ]; then
+        GATEWAY_HOSTNAME=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      fi
+
+      if [ -n "$GATEWAY_HOSTNAME" ]; then
+        RECORD_TYPE="CNAME"
+        echo "Gateway hostname: $GATEWAY_HOSTNAME"
+      fi
     else
       echo "Gateway IP: $GATEWAY_IP"
+    fi
+
+    # Check if we have either IP or hostname
+    if [ -z "$GATEWAY_IP" ] && [ -z "$GATEWAY_HOSTNAME" ]; then
+      echo "Warning: Could not determine gateway address yet, DNSEndpoint will be created later"
+      echo "Skipping DNSEndpoint creation"
+    else
+      # Determine the target value (IP or hostname)
+      GATEWAY_TARGET="${GATEWAY_IP:-$GATEWAY_HOSTNAME}"
 
       DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
 
@@ -29,7 +55,9 @@ if [ "$ACTION" = "CREATE" ]; then
         DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
         CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
 
-        echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
+        echo "$CONTEXT" | jq --arg gateway_target "$GATEWAY_TARGET" \
+          --arg record_type "$RECORD_TYPE" \
+          '. + {gateway_target: $gateway_target, dns_record_type: $record_type}' > "$CONTEXT_PATH"
 
         echo "Building DNSEndpoint Template: $DNS_ENDPOINT_TEMPLATE to $DNS_ENDPOINT_FILE"
 
