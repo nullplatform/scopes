@@ -19,13 +19,13 @@ scope_id=7
 setup() {
   # Get the directory of the test file
   TEST_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
-  PROJECT_DIR="$(cd "$TEST_DIR/.." && pwd)"
-  PROJECT_ROOT="$(cd "$TEST_DIR/../../.." && pwd)"
+  PROJECT_DIR="$(cd "$TEST_DIR/../.." && pwd)"
+  PROJECT_ROOT="$(cd "$TEST_DIR/../../../.." && pwd)"
 
   # Load shared test utilities
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  CONTEXT=$(cat "$TEST_DIR/resources/context.json")
+  CONTEXT=$(cat "$PROJECT_DIR/tests/resources/context.json")
   SERVICE_PATH="$PROJECT_DIR"
   TEST_OUTPUT_DIR=$(mktemp -d)
 
@@ -45,13 +45,13 @@ teardown() {
 # =============================================================================
 run_build_context() {
   # Source the build_context script
-  source "$PROJECT_DIR/build_context"
+  source "$PROJECT_DIR/scripts/build_context"
 }
 
 # =============================================================================
 # Test: TOFU_VARIABLES - verifies the entire JSON structure
 # =============================================================================
-@test "TOFU_VARIABLES matches expected structure" {
+@test "Should generate TOFU_VARIABLES with expected structure" {
   run_build_context
 
   # Expected JSON - update this when adding new fields
@@ -63,7 +63,7 @@ run_build_context() {
 # =============================================================================
 # Test: TOFU_INIT_VARIABLES
 # =============================================================================
-@test "generates correct tf_state_key format" {
+@test "Should generate correct tf_state_key format in TOFU_INIT_VARIABLES" {
   run_build_context
 
   # Should contain the expected backend-config key
@@ -74,14 +74,14 @@ run_build_context() {
 # =============================================================================
 # Test: TOFU_MODULE_DIR
 # =============================================================================
-@test "creates TOFU_MODULE_DIR with scope_id" {
+@test "Should create TOFU_MODULE_DIR path with scope_id" {
   run_build_context
 
   # Should end with the scope_id
   assert_contains "$TOFU_MODULE_DIR" "$SERVICE_PATH/output/$scope_id"
 }
 
-@test "TOFU_MODULE_DIR is created as directory" {
+@test "Should create TOFU_MODULE_DIR as a directory" {
   run_build_context
 
   assert_directory_exists "$TOFU_MODULE_DIR"
@@ -90,14 +90,14 @@ run_build_context() {
 # =============================================================================
 # Test: MODULES_TO_USE initialization
 # =============================================================================
-@test "MODULES_TO_USE is empty by default" {
+@test "Should initialize MODULES_TO_USE as empty by default" {
   unset CUSTOM_TOFU_MODULES
   run_build_context
 
   assert_empty "$MODULES_TO_USE" "MODULES_TO_USE"
 }
 
-@test "MODULES_TO_USE inherits from CUSTOM_TOFU_MODULES" {
+@test "Should inherit MODULES_TO_USE from CUSTOM_TOFU_MODULES" {
   export CUSTOM_TOFU_MODULES="custom/module1,custom/module2"
   run_build_context
 
@@ -107,19 +107,19 @@ run_build_context() {
 # =============================================================================
 # Test: exports are set
 # =============================================================================
-@test "exports TOFU_VARIABLES" {
+@test "Should export TOFU_VARIABLES" {
   run_build_context
 
   assert_not_empty "$TOFU_VARIABLES" "TOFU_VARIABLES"
 }
 
-@test "exports TOFU_INIT_VARIABLES" {
+@test "Should export TOFU_INIT_VARIABLES" {
   run_build_context
 
   assert_not_empty "$TOFU_INIT_VARIABLES" "TOFU_INIT_VARIABLES"
 }
 
-@test "exports TOFU_MODULE_DIR" {
+@test "Should export TOFU_MODULE_DIR" {
   run_build_context
 
   assert_not_empty "$TOFU_MODULE_DIR" "TOFU_MODULE_DIR"
@@ -128,7 +128,7 @@ run_build_context() {
 # =============================================================================
 # Test: RESOURCE_TAGS_JSON - verifies the entire JSON structure
 # =============================================================================
-@test "RESOURCE_TAGS_JSON matches expected structure" {
+@test "Should generate RESOURCE_TAGS_JSON with expected structure" {
   run_build_context
 
   # Expected JSON - update this when adding new fields
