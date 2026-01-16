@@ -21,6 +21,31 @@ DNS_TYPE=$(get_config_value \
   --default "route53"
 )
 
+# Azure DNS configuration
+HOSTED_ZONE_NAME=$(get_config_value \
+  --env HOSTED_ZONE_NAME \
+  --provider '.providers["scope-configurations"].networking.hosted_zone_name' \
+  --default ""
+)
+
+HOSTED_ZONE_RG=$(get_config_value \
+  --env HOSTED_ZONE_RG \
+  --provider '.providers["scope-configurations"].networking.hosted_zone_rg' \
+  --default ""
+)
+
+AZURE_SUBSCRIPTION_ID=$(get_config_value \
+  --env AZURE_SUBSCRIPTION_ID \
+  --provider '.providers["scope-configurations"].networking.azure_subscription_id' \
+  --default ""
+)
+
+RESOURCE_GROUP=$(get_config_value \
+  --env RESOURCE_GROUP \
+  --provider '.providers["scope-configurations"].networking.resource_group' \
+  --default ""
+)
+
 ALB_RECONCILIATION_ENABLED=$(get_config_value \
   --env ALB_RECONCILIATION_ENABLED \
   --provider '.providers["scope-configurations"].networking.alb_reconciliation_enabled' \
@@ -77,6 +102,10 @@ VAULT_TOKEN=$(get_config_value \
 )
 
 export DNS_TYPE
+export HOSTED_ZONE_NAME
+export HOSTED_ZONE_RG
+export AZURE_SUBSCRIPTION_ID
+export RESOURCE_GROUP
 export ALB_RECONCILIATION_ENABLED
 export DEPLOYMENT_MAX_WAIT_IN_SECONDS
 export MANIFEST_BACKUP
