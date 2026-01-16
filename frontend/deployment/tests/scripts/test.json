@@ -1,0 +1,2 @@
+tofu -chdir=/var/folders/lz/8bf63tz10kz930s8w1553s900000gq/T/tmp.iQhGScm139 init -input=false -backend-config=bucket=test-bucket -backend-config=region=us-east-1
+tofu -chdir=/var/folders/lz/8bf63tz10kz930s8w1553s900000gq/T/tmp.iQhGScm139 apply -auto-approve -var-file=/var/folders/lz/8bf63tz10kz930s8w1553s900000gq/T/tmp.iQhGScm139/.tfvars.json

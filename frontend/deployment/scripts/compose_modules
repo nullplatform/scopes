@@ -14,33 +14,50 @@
 script_dir="$(dirname "${BASH_SOURCE[0]}")"
 modules_dir="$script_dir"
 
+echo "🔍 Validating module composition configuration..."
+
 if [ -z "${MODULES_TO_USE:-}" ]; then
-  echo "✗ MODULES_TO_USE is not set"
+  echo ""
+  echo "   ❌ MODULES_TO_USE is not set"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    • Ensure MODULES_TO_USE is set before calling compose_modules"
+  echo "    • This is typically done by the setup scripts (provider, network, distribution)"
+  echo ""
   exit 1
 fi
 
 if [ -z "${TOFU_MODULE_DIR:-}" ]; then
-  echo "✗ TOFU_MODULE_DIR is not set"
+  echo ""
+  echo "   ❌ TOFU_MODULE_DIR is not set"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    • Ensure TOFU_MODULE_DIR is set before calling compose_modules"
+  echo "    • This is typically done by the build_context script"
+  echo ""
   exit 1
 fi
 
 mkdir -p "$TOFU_MODULE_DIR"
 
-echo "Composing modules: $MODULES_TO_USE"
-echo "Target directory: $TOFU_MODULE_DIR"
+echo "   ✅ modules=$MODULES_TO_USE"
+echo "   ✅ target=$TOFU_MODULE_DIR"
 echo ""
 
 IFS=',' read -ra modules <<< "$MODULES_TO_USE"
 for module in "${modules[@]}"; do
   module=$(echo "$module" | xargs) # trim whitespace
 
-  echo $module
-
-  ls $module
   if [ ! -d "$module" ]; then
-    echo "✗ Module not found: $module"
+    echo "   ❌ Module directory not found: $module"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Verify the module path is correct and the directory exists"
+    echo ""
     exit 1
   fi
+
+  echo "📦 $module"
 
   # Copy .tf files if they exist (with module prefix to avoid conflicts)
   if ls "$module"/*.tf 1> /dev/null 2>&1; then
@@ -48,6 +65,8 @@ for module in "${modules[@]}"; do
     parent=$(basename "$(dirname "$module")")
     leaf=$(basename "$module")
     prefix="${parent}_${leaf}_"
+
+    copied_files=()
     for tf_file in "$module"/*.tf; do
       filename=$(basename "$tf_file")
       # Skip test-only files (test_*.tf)
@@ -55,22 +74,29 @@ for module in "${modules[@]}"; do
         continue
       fi
       cp "$tf_file" "$TOFU_MODULE_DIR/${prefix}${filename}"
+      copied_files+=("$filename")
     done
-    echo "✓ Copied modules from: $module (prefix: $prefix)"
+
+    for file in "${copied_files[@]}"; do
+      echo "   $file"
+    done
+    echo "   ✅ Copied ${#copied_files[@]} file(s) with prefix: $prefix"
   fi
 
   # Source setup script if it exists
   if [ -f "$module/setup" ]; then
-    echo "  Running setup for: $module"
+    echo "   📡 Running setup script..."
     source "$module/setup"
     if [ $? -ne 0 ]; then
-      echo "✗ Setup failed for module: $module"
+      echo ""
+      echo "   ❌ Setup script failed for module: $module"
+      echo ""
       exit 1
     fi
-    echo "✓ Setup completed for: $module"
+    echo "   ✅ Setup completed"
   fi
 
   echo ""
 done
 
-echo "✓ All modules composed successfully"
+echo "✨ All modules composed successfully"
