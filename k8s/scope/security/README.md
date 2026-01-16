@@ -127,24 +127,6 @@ spec:
 └─────────────────────┘
 ```
 
-## Script Usage
-
-The [manage_jwt_auth](manage_jwt_auth) script handles resource lifecycle:
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JWT_AUTHORIZATION_ENABLED` | - | Set to "true" to enable JWT auth |
-| `ACTION` | "create" | Action to perform: "create", "apply", or "delete" |
-| `GATEWAY_NAMESPACE` | "gateways" | Namespace where gateway resources exist |
-| `JWT_ISSUER` | `https://api.nullplatform.com/scope` | JWT issuer URL |
-| `JWT_JWKS_URI` | `https://api.nullplatform.com/scope/.well-known/jwks.json` | JWKS endpoint for key verification |
-| `SCOPE_ID` | - | Unique scope identifier |
-| `SCOPE_DOMAIN` | - | Domain for the scope (e.g., `app.example.com`) |
-| `GATEWAY_NAME` | - | Name of the Istio gateway |
-
-
 ## References
 
 - [Istio RequestAuthentication Documentation](https://istio.io/latest/docs/reference/config/security/request_authentication/)
