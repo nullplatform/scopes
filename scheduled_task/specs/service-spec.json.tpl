@@ -285,10 +285,10 @@
   "dimensions": {},
   "name": "Scheduled task",
   "selectors": {
-    "category": "any",
+    "category": "Scope",
     "imported": false,
     "provider": "any",
-    "sub_category": "any"
+    "sub_category": "Scheduled task"
   },
   "type": "scope",
   "use_default_actions": false,
