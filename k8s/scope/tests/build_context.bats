@@ -409,15 +409,7 @@ teardown() {
 # =============================================================================
 @test "build_context: K8S_MODIFIERS uses scope-configuration provider" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "object_modifiers": {
-      "modifiers": {
-        "global": {
-          "labels": {
-            "environment": "production"
-          }
-        }
-      }
-    }
+    "object_modifiers": "{\"global\":{\"labels\":{\"environment\":\"production\"}}}"
   }')
 
   # Unset the env var to test provider precedence
@@ -425,7 +417,7 @@ teardown() {
 
   result=$(get_config_value \
     --env K8S_MODIFIERS \
-    --provider '.providers["scope-configurations"].object_modifiers | @json' \
+    --provider '.providers["scope-configurations"].object_modifiers' \
     --default "{}"
   )
 
@@ -442,7 +434,7 @@ teardown() {
 
   result=$(get_config_value \
     --env K8S_MODIFIERS \
-    --provider '.providers["scope-configurations"].object_modifiers.modifiers | @json' \
+    --provider '.providers["scope-configurations"].object_modifiers' \
     --default "${K8S_MODIFIERS:-"{}"}"
   )
 
@@ -467,9 +459,7 @@ teardown() {
       "gateway_public_name": "scope-gw-public",
       "balancer_public_name": "scope-alb-public"
     },
-    "object_modifiers": {
-      "modifiers": {"test": "value"}
-    }
+    "object_modifiers": "{\"test\":\"value\"}"
   }')
 
   # Test K8S_NAMESPACE
