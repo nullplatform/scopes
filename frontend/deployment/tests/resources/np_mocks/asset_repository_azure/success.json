@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "id": "d397e46b-89b8-419d-ac14-2b483ace511c",
+      "name": "Azure Blob Storage",
+      "type": "azure-blob-storage",
+      "attributes": {
+        "storage_account": {
+          "name": "mystaticstorage"
+        },
+        "container": {
+          "name": "$web"
+        }
+      }
+    }
+  ]
+}

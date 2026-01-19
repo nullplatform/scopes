@@ -8,6 +8,13 @@
         "categories": [
           {"slug": "assets-repository"}
         ]
+      },
+      {
+        "id": "azure-asset-repository-spec-id",
+        "slug": "azure-assets",
+        "categories": [
+          {"slug": "assets-repository"}
+        ]
       }
     ]
   }

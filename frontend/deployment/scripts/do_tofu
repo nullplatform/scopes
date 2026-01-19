@@ -9,5 +9,6 @@ CURRENT_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 cd "$CURRENT_DIR"
 
+echo $TOFU_INIT_VARIABLES
 tofu -chdir="$TOFU_MODULE_DIR" init -input=false $TOFU_INIT_VARIABLES
 tofu -chdir="$TOFU_MODULE_DIR" "$TOFU_ACTION" -auto-approve -var-file="$TOFU_VAR_FILE"

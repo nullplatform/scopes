@@ -1,40 +1,53 @@
 #!/bin/bash
 
-if [ -z "${AZURE_SUBSCRIPTION_ID:-}" ]; then
-  echo "✗ AZURE_SUBSCRIPTION_ID is not set"
+echo "🔍 Validating Azure provider configuration..."
+
+missing_vars=()
+
+function validate_env_var() {
+  local variable_name=$1
+  local variable_value="${!variable_name}"
+
+  if [ -z "$variable_value" ]; then
+    echo "   ❌ $variable_name is missing"
+    missing_vars+=("$variable_name")
+  else
+    echo "   ✅ $variable_name=$variable_value"
+  fi
+}
+
+validate_env_var AZURE_SUBSCRIPTION_ID
+validate_env_var AZURE_RESOURCE_GROUP
+validate_env_var TOFU_PROVIDER_STORAGE_ACCOUNT
+validate_env_var TOFU_PROVIDER_CONTAINER
+
+if [ ${#missing_vars[@]} -gt 0 ]; then
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    Set the missing variable(s) in the nullplatform agent Helm installation:"
+  for var in "${missing_vars[@]}"; do
+    echo "      • $var"
+  done
+  echo ""
   exit 1
 fi
 
-if [ -z "${TOFU_PROVIDER_RESOURCE_GROUP:-}" ]; then
-  echo "✗ TOFU_PROVIDER_RESOURCE_GROUP is not set"
-  exit 1
-fi
+echo "✨ Azure provider configured successfully"
+echo ""
 
-if [ -z "${TOFU_PROVIDER_STORAGE_ACCOUNT:-}" ]; then
-  echo "✗ TOFU_PROVIDER_STORAGE_ACCOUNT is not set"
-  exit 1
-fi
-
-if [ -z "${TOFU_PROVIDER_CONTAINER:-}" ]; then
-  echo "✗ TOFU_PROVIDER_CONTAINER is not set"
-  exit 1
-fi
+RESOURCE_TAGS_JSON=${RESOURCE_TAGS_JSON:-"{}"}
 
 TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
   --arg subscription_id "$AZURE_SUBSCRIPTION_ID" \
-  --arg resource_group "$TOFU_PROVIDER_RESOURCE_GROUP" \
+  --arg resource_group "$AZURE_RESOURCE_GROUP" \
   --arg storage_account "$TOFU_PROVIDER_STORAGE_ACCOUNT" \
   --arg container "$TOFU_PROVIDER_CONTAINER" \
-  '. + {azure_provider: {
-    subscription_id: $subscription_id,
-    resource_group_name: $resource_group,
-    storage_account_name: $storage_account,
-    container_name: $container
-  }}')
+  --argjson resource_tags_json "$RESOURCE_TAGS_JSON" \
+  '. + {azure_provider: {subscription_id: $subscription_id, resource_group: $resource_group, storage_account: $storage_account, container: $container}, provider_resource_tags_json: $resource_tags_json}')
 
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"resource_group_name=$TOFU_PROVIDER_RESOURCE_GROUP\""
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"storage_account_name=$TOFU_PROVIDER_STORAGE_ACCOUNT\""
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"container_name=$TOFU_PROVIDER_CONTAINER\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=storage_account_name=$TOFU_PROVIDER_STORAGE_ACCOUNT"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=container_name=$TOFU_PROVIDER_CONTAINER"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=resource_group_name=$AZURE_RESOURCE_GROUP"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 module_name="${script_dir}/modules"
