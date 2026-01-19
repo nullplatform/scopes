@@ -6,6 +6,7 @@ source "$SCRIPT_DIR/../utils/get_config_value"
 
 K8S_NAMESPACE=$(get_config_value \
   --env NAMESPACE_OVERRIDE \
+  --env K8S_NAMESPACE \
   --provider '.providers["scope-configurations"].cluster.namespace' \
   --provider '.providers["container-orchestration"].cluster.namespace' \
   --default "nullplatform"

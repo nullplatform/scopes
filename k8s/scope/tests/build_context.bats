@@ -185,6 +185,63 @@ teardown() {
 }
 
 # =============================================================================
+# Test: K8S_NAMESPACE - NAMESPACE_OVERRIDE has priority over K8S_NAMESPACE
+# =============================================================================
+@test "build_context: NAMESPACE_OVERRIDE has priority over K8S_NAMESPACE env var" {
+  export NAMESPACE_OVERRIDE="override-namespace"
+  export K8S_NAMESPACE="secondary-namespace"
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace) | del(.providers["scope-configurations"])')
+
+  result=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+  )
+
+  assert_equal "$result" "override-namespace"
+}
+
+# =============================================================================
+# Test: K8S_NAMESPACE uses K8S_NAMESPACE when NAMESPACE_OVERRIDE not set
+# =============================================================================
+@test "build_context: K8S_NAMESPACE env var used when NAMESPACE_OVERRIDE not set" {
+  unset NAMESPACE_OVERRIDE
+  export K8S_NAMESPACE="k8s-namespace"
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace) | del(.providers["scope-configurations"])')
+
+  result=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+  )
+
+  assert_equal "$result" "k8s-namespace"
+}
+
+# =============================================================================
+# Test: K8S_NAMESPACE uses default when no env vars and no providers
+# =============================================================================
+@test "build_context: K8S_NAMESPACE uses default when no env vars and no providers" {
+  unset NAMESPACE_OVERRIDE
+  unset K8S_NAMESPACE
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace) | del(.providers["scope-configurations"])')
+
+  result=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+  )
+
+  assert_equal "$result" "nullplatform"
+}
+
+# =============================================================================
 # Test: REGION only uses cloud-providers (not scope-configuration)
 # =============================================================================
 @test "build_context: REGION only uses cloud-providers" {
