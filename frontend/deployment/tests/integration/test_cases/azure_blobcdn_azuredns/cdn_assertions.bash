@@ -36,9 +36,10 @@ assert_azure_cdn_configured() {
   local resource_group="$4"
 
   # Derive CDN profile and endpoint names from app_name
-  # The terraform module uses: "${var.distribution_app_name}-cdn-profile"
-  local profile_name="${app_name}-cdn-profile"
-  local endpoint_name="${app_name}-cdn-endpoint"
+  # The terraform module uses: "${var.distribution_app_name}-cdn" for profile
+  # and "${var.distribution_app_name}" for endpoint
+  local profile_name="${app_name}-cdn"
+  local endpoint_name="${app_name}"
 
   # Get CDN Profile
   local profile_path="/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.Cdn/profiles/${profile_name}"
@@ -97,8 +98,8 @@ assert_azure_cdn_not_configured() {
   local subscription_id="$2"
   local resource_group="$3"
 
-  local profile_name="${app_name}-cdn-profile"
-  local endpoint_name="${app_name}-cdn-endpoint"
+  local profile_name="${app_name}-cdn"
+  local endpoint_name="${app_name}"
 
   # Check CDN Profile is deleted
   local profile_path="/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.Cdn/profiles/${profile_name}"

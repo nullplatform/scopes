@@ -44,8 +44,13 @@ setup_file() {
   # Pre-create Azure DNS zone in the mock server (required for data source lookup)
   echo "Creating test prerequisites in Azure Mock..."
 
-  # Create DNS zone via REST API
+  # Create DNS zone in dns-resource-group (for validation step in setup_network_layer)
   azure_mock_put "/subscriptions/${TEST_SUBSCRIPTION_ID}/resourceGroups/${TEST_DNS_ZONE_RESOURCE_GROUP}/providers/Microsoft.Network/dnszones/${TEST_NETWORK_DOMAIN}" \
+    '{"location": "global", "tags": {}}' >/dev/null 2>&1 || true
+
+  # Also create DNS zone in test-resource-group (for Terraform data source lookup)
+  # The azure_dns module uses var.azure_provider.resource_group which is test-resource-group
+  azure_mock_put "/subscriptions/${TEST_SUBSCRIPTION_ID}/resourceGroups/${TEST_RESOURCE_GROUP}/providers/Microsoft.Network/dnszones/${TEST_NETWORK_DOMAIN}" \
     '{"location": "global", "tags": {}}' >/dev/null 2>&1 || true
 
   # Create Storage Account via REST API (for data source lookup)
@@ -82,8 +87,8 @@ setup() {
   # Azure provider required environment variables
   export AZURE_SUBSCRIPTION_ID="$TEST_SUBSCRIPTION_ID"
   export AZURE_RESOURCE_GROUP="$TEST_RESOURCE_GROUP"
-  # Use Azurite's storage account for backend (like LocalStack for AWS)
-  export TOFU_PROVIDER_STORAGE_ACCOUNT="${AZURITE_ACCOUNT_NAME:-devstoreaccount1}"
+  # Use mock storage account for backend (handled by azure-mock)
+  export TOFU_PROVIDER_STORAGE_ACCOUNT="devstoreaccount1"
   export TOFU_PROVIDER_CONTAINER="tfstate"
 
   # Setup API mocks for np CLI calls
@@ -93,43 +98,58 @@ setup() {
   mock_request "GET" "/provider" "$mocks_dir/azure_asset_repository/list_provider.json"
   mock_request "GET" "/provider/azure-blob-asset-repository-id" "$mocks_dir/azure_asset_repository/get_provider.json"
   mock_request "PATCH" "/scope/7" "$mocks_dir/scope/patch.json"
+
+  # Ensure tfstate container exists in azure-mock for Terraform backend
+  curl -s -X PUT "${AZURE_MOCK_ENDPOINT}/tfstate?restype=container" \
+    -H "Host: devstoreaccount1.blob.core.windows.net" \
+    -H "x-ms-version: 2021-06-08" >/dev/null 2>&1 || true
+
+  # Ensure DNS zone exists in azure-mock (for validation and Terraform data source)
+  azure_mock_put "/subscriptions/${TEST_SUBSCRIPTION_ID}/resourceGroups/${TEST_DNS_ZONE_RESOURCE_GROUP}/providers/Microsoft.Network/dnszones/${TEST_NETWORK_DOMAIN}" \
+    '{"location": "global", "tags": {}}' >/dev/null 2>&1 || true
+  azure_mock_put "/subscriptions/${TEST_SUBSCRIPTION_ID}/resourceGroups/${TEST_RESOURCE_GROUP}/providers/Microsoft.Network/dnszones/${TEST_NETWORK_DOMAIN}" \
+    '{"location": "global", "tags": {}}' >/dev/null 2>&1 || true
+
+  # Ensure storage account exists in azure-mock (for Terraform data source)
+  azure_mock_put "/subscriptions/${TEST_SUBSCRIPTION_ID}/resourceGroups/${TEST_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${TEST_DISTRIBUTION_STORAGE_ACCOUNT}" \
+    '{"location": "eastus", "kind": "StorageV2", "sku": {"name": "Standard_LRS", "tier": "Standard"}}' >/dev/null 2>&1 || true
 }
 
 # =============================================================================
 # Test: Create Infrastructure
 # =============================================================================
 
-#@test "create infrastructure deploys Azure CDN and DNS resources" {
-#  run_workflow "frontend/deployment/workflows/initial.yaml"
-#
-#  assert_azure_cdn_configured \
-#    "$TEST_DISTRIBUTION_APP_NAME" \
-#    "$TEST_DISTRIBUTION_STORAGE_ACCOUNT" \
-#    "$TEST_SUBSCRIPTION_ID" \
-#    "$TEST_RESOURCE_GROUP"
-#
-#  assert_azure_dns_configured \
-#    "$TEST_NETWORK_SUBDOMAIN" \
-#    "$TEST_NETWORK_DOMAIN" \
-#    "$TEST_SUBSCRIPTION_ID" \
-#    "$TEST_DNS_ZONE_RESOURCE_GROUP"
-#}
+@test "create infrastructure deploys Azure CDN and DNS resources" {
+  run_workflow "frontend/deployment/workflows/initial.yaml"
+
+  assert_azure_cdn_configured \
+    "$TEST_DISTRIBUTION_APP_NAME" \
+    "$TEST_DISTRIBUTION_STORAGE_ACCOUNT" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP"
+
+  assert_azure_dns_configured \
+    "$TEST_NETWORK_SUBDOMAIN" \
+    "$TEST_NETWORK_DOMAIN" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP"
+}
 
 # =============================================================================
 # Test: Destroy Infrastructure
 # =============================================================================
 
-#@test "destroy infrastructure removes Azure CDN and DNS resources" {
-#  run_workflow "frontend/deployment/workflows/delete.yaml"
-#
-#  assert_azure_cdn_not_configured \
-#    "$TEST_DISTRIBUTION_APP_NAME" \
-#    "$TEST_SUBSCRIPTION_ID" \
-#    "$TEST_RESOURCE_GROUP"
-#
-#  assert_azure_dns_not_configured \
-#    "$TEST_NETWORK_SUBDOMAIN" \
-#    "$TEST_NETWORK_DOMAIN" \
-#    "$TEST_SUBSCRIPTION_ID" \
-#    "$TEST_DNS_ZONE_RESOURCE_GROUP"
-#}
+@test "destroy infrastructure removes Azure CDN and DNS resources" {
+  run_workflow "frontend/deployment/workflows/delete.yaml"
+
+  assert_azure_cdn_not_configured \
+    "$TEST_DISTRIBUTION_APP_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP"
+
+  assert_azure_dns_not_configured \
+    "$TEST_NETWORK_SUBDOMAIN" \
+    "$TEST_NETWORK_DOMAIN" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_DNS_ZONE_RESOURCE_GROUP"
+}
