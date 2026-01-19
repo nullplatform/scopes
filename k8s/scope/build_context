@@ -4,9 +4,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
 
-# Debug: Print all providers in a single line
-echo "[build_context] PROVIDERS: $(echo "$CONTEXT" | jq -c '.providers')" >&2
-
 K8S_NAMESPACE=$(get_config_value \
   --env NAMESPACE_OVERRIDE \
   --provider '.providers["scope-configurations"].cluster.namespace' \
