@@ -425,7 +425,7 @@ teardown() {
 
   result=$(get_config_value \
     --env K8S_MODIFIERS \
-    --provider '.providers["scope-configurations"].object_modifiers.modifiers | @json' \
+    --provider '.providers["scope-configurations"].object_modifiers | @json' \
     --default "{}"
   )
 
