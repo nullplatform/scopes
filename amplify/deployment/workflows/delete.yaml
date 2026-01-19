@@ -1,0 +1,8 @@
+provider_categories:
+  - cloud-providers
+steps:
+  - name: tofu
+    type: script
+    file: "$SERVICE_PATH/deployment/module/do_tofu"
+    configuration:
+      ACTION: "destroy"
