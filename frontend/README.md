@@ -591,53 +591,36 @@ export DISTRIBUTION_LAYER=cloudfront # or: blob-cdn, amplify, firebase, etc.
 
 ---
 
-## Claude Prompt for Implementing New Layers
+## AI Assistant Prompt for Implementing New Layers
 
-When asking Claude to help implement a new layer, use this prompt template:
+When asking an AI assistant to help implement a new layer, just paste this prompt:
 
 ````
-I need to implement a new {layer_type} layer for {provider_name} in the frontend deployment module.
+I need to implement a new layer in the frontend deployment module.
 
-**IMPORTANT:** Before starting, please read `frontend/README.md` to understand:
-- The layer system architecture and how layers interact
-- Variable naming conventions (layer prefixes)
-- Cross-layer communication via locals
-- Setup script patterns and logging conventions
-- Testing requirements (unit, tofu, integration)
+**IMPORTANT:** Before starting:
 
-**Context:**
-- Layer type: {network|distribution|provider}
-- Provider/Service: {e.g., Cloudflare, Netlify, DigitalOcean}
-- The boilerplate has been created at: frontend/deployment/{layer_type}/{name}/
+1. Read `frontend/README.md` to understand:
+   - The layer system architecture and how layers interact
+   - Variable naming conventions (layer prefixes)
+   - Cross-layer communication via locals
+   - Setup script patterns and logging conventions
+   - Testing requirements (unit, tofu, integration)
 
-**Requirements:**
+2. Ask me for the following information:
+   - Layer type (provider, network, or distribution)
+   - Provider/service name (e.g., Cloudflare, Netlify, DigitalOcean)
+   - Required environment variables or context values to validate
+   - External APIs to call (if any)
+   - Terraform resources to create
+   - Cross-layer dependencies and exports
 
-1. **Setup Script** (`setup`):
-   - Validate these inputs: {list required env vars or context values}
-   - Fetch data from: {APIs to call}
-   - Set these TOFU_VARIABLES: {list variables with layer prefix}
-   - Follow the logging pattern with icons (🔍 ✅ ❌ 📡 💡 🔧 ✨)
-   - Include comprehensive error handling with causes and fix instructions
-
-2. **Terraform Module** (`modules/`):
-   - Create these resources: {list resources}
-   - Use variable prefix: `{layer_type}_` (e.g., `network_`, `distribution_`)
-   - Reference cross-layer locals: {e.g., `local.network_full_domain`}
-   - Export these outputs: {list outputs}
-
-3. **Cross-Layer Integration:**
-   - This layer needs from other layers: {list dependencies}
-   - This layer provides to other layers: {list exports}
-
-4. **Tests** (create all three types):
-   - **Unit tests (BATS)**: Test the setup script validation and variable handling
-   - **Tofu tests**: Test the Terraform module with mock providers
-   - **Integration tests**: Test the full workflow with mocked cloud APIs
-
-**Naming Conventions:**
-- Variables: `{layer_type}_{descriptive_name}` (e.g., `distribution_bucket_name`)
-- Use same variable names as other {layer_type} implementations for shared concepts
-- Provider object: `{cloud}_provider` with standard fields
+3. After gathering requirements, generate:
+   - Setup script with validation and TOFU_VARIABLES
+   - Terraform module (main.tf, variables.tf, locals.tf, outputs.tf, test_locals.tf)
+   - Unit tests (BATS) for the setup script
+   - Tofu tests for the Terraform module
+   - Integration test additions (if applicable)
 
 **Reference Files by Layer Type:**
 
@@ -661,8 +644,6 @@ For DISTRIBUTION layers, reference:
 
 For INTEGRATION tests, reference:
 - `frontend/deployment/tests/integration/test_cases/azure_blobcdn_azuredns/lifecycle_test.bats`
-
-Please generate the setup script, terraform files, and all three types of tests following the patterns in the reference files.
 ````
 
 ---
