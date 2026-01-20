@@ -83,7 +83,7 @@ setup() {
   export TOFU_LOCK_TABLE="tofu-locks"
   export AWS_REGION="us-east-1"
   export SERVICE_PATH="$INTEGRATION_MODULE_ROOT/frontend"
-  export CUSTOM_TOFU_MODULES="$INTEGRATION_MODULE_ROOT/frontend/deployment/tests/integration/localstack"
+  export CUSTOM_TOFU_MODULES="$INTEGRATION_MODULE_ROOT/testing/localstack-provider"
 
   # Setup API mocks for np CLI calls
   local mocks_dir="frontend/deployment/tests/integration/mocks/"
