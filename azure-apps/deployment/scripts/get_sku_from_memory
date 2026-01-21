@@ -1,0 +1,68 @@
+#!/bin/bash
+# =============================================================================
+# Get SKU from Memory
+#
+# Maps a memory value (in GB) to the appropriate Azure App Service SKU.
+# This provides a developer-friendly interface - developers specify memory
+# requirements without needing to know Azure-specific SKU names.
+#
+# Usage:
+#   ./get_sku_from_memory <memory_gb>
+#
+# Arguments:
+#   memory_gb   Memory requirement in GB (valid values: 2, 4, 8, 16, 32)
+#
+# Output:
+#   Prints the Azure SKU name to stdout
+#
+# Memory to SKU mapping:
+#   2 GB  -> S1   (Standard, 1.75 GB RAM, 1 vCPU)
+#   4 GB  -> S2   (Standard, 3.5 GB RAM, 2 vCPU)
+#   8 GB  -> P1v3 (Premium, 8 GB RAM, 2 vCPU)
+#   16 GB -> P2v3 (Premium, 16 GB RAM, 4 vCPU)
+#   32 GB -> P3v3 (Premium, 32 GB RAM, 8 vCPU)
+# =============================================================================
+
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "❌ Missing required argument: memory" >&2
+  echo "" >&2
+  echo "Usage: $0 <memory_gb>" >&2
+  echo "Valid memory values: 2, 4, 8, 16, 32" >&2
+  exit 1
+fi
+
+memory="$1"
+
+case "$memory" in
+  2)
+    echo "S1"
+    ;;
+  4)
+    echo "S2"
+    ;;
+  8)
+    echo "P1v3"
+    ;;
+  16)
+    echo "P2v3"
+    ;;
+  32)
+    echo "P3v3"
+    ;;
+  *)
+    echo "❌ Invalid memory value: $memory" >&2
+    echo "" >&2
+    echo "💡 Valid memory values are: 2, 4, 8, 16, 32 (in GB)" >&2
+    echo "" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   Choose one of the supported memory configurations:" >&2
+    echo "   • 2 GB  - Standard tier (S1)" >&2
+    echo "   • 4 GB  - Standard tier (S2)" >&2
+    echo "   • 8 GB  - Premium tier (P1v3)" >&2
+    echo "   • 16 GB - Premium tier (P2v3)" >&2
+    echo "   • 32 GB - Premium tier (P3v3)" >&2
+    exit 1
+    ;;
+esac

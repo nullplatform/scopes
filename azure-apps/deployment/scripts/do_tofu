@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+
+TOFU_ACTION="${TOFU_ACTION:-apply}"
+
+echo "📝 Running tofu $TOFU_ACTION for deployment: $DEPLOYMENT_ID"
+echo "📋 App Service: $APP_NAME"
+
+TOFU_SOURCE="${TOFU_PATH:-$SERVICE_PATH/tofu-azure-app-service}"
+
+# Copy tofu files to working directory
+cp -r "$TOFU_SOURCE"/*.tf "$TF_WORKING_DIR/" 2>/dev/null || true
+cp -r "$TOFU_SOURCE"/scripts "$TF_WORKING_DIR/" 2>/dev/null || true
+
+# Generate tfvars from TOFU_VARIABLES
+TOFU_VAR_FILE="$OUTPUT_DIR/tofu.tfvars.json"
+echo "$TOFU_VARIABLES" > "$TOFU_VAR_FILE"
+
+echo "📋 Generated tfvars:"
+echo "$TOFU_VARIABLES" | jq .
+
+# Run tofu
+echo "📝 Initializing tofu..."
+tofu -chdir="$TF_WORKING_DIR" init -input=false $TOFU_INIT_VARIABLES
+
+echo "📝 Running tofu $TOFU_ACTION..."
+tofu -chdir="$TF_WORKING_DIR" "$TOFU_ACTION" -auto-approve -var-file="$TOFU_VAR_FILE"
+
+echo "✅ Tofu $TOFU_ACTION completed successfully"

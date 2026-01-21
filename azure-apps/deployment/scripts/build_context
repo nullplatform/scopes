@@ -1,0 +1,135 @@
+#!/bin/bash
+set -euo pipefail
+
+# Extract scope information from context
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
+
+# Extract NRN components
+eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
+export ORGANIZATION_ID=\(capture("organization=(?<id>\\d+)").id)
+export ACCOUNT_ID=\(capture("account=(?<id>\\d+)").id)
+export NAMESPACE_ID=\(capture("namespace=(?<id>\\d+)").id)
+export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
+"')"
+
+# Extract slugs for naming
+NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r '.namespace.slug')
+APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
+
+# Generate App Service name (must be globally unique)
+# Format: {namespace}-{application}-{scope}-{scope_id}
+# Intelligent trimming: always keep scope_id, remove full segments from left
+AZURE_APP_SERVICE_NAME_MAX_LENGTH=60
+APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" "$AZURE_APP_SERVICE_NAME_MAX_LENGTH" "$NAMESPACE_SLUG" "$APPLICATION_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
+
+DOCKER_IMAGE=$(echo "$CONTEXT" | jq -r '.asset.url')
+
+# Extract scope capabilities (required fields from service-spec have no defaults)
+MEMORY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.memory')
+SKU_NAME=$("$SERVICE_PATH/deployment/scripts/get_sku_from_memory" "$MEMORY")
+WEBSOCKETS_ENABLED=$(echo "$CONTEXT" | jq -r '.scope.capabilities.websockets_enabled')
+SCALING_TYPE=$(echo "$CONTEXT" | jq -r '.scope.capabilities.scaling_type')
+FIXED_INSTANCES=$(echo "$CONTEXT" | jq -r '.scope.capabilities.fixed_instances')
+
+# Configured via workflow
+ENABLE_STAGING_SLOT="${ENABLE_STAGING_SLOT:-false}"
+
+# Extract autoscaling settings (no defaults - if not set, autoscaling is disabled)
+AUTOSCALING_MIN=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.min_instances')
+AUTOSCALING_MAX=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.max_instances')
+AUTOSCALING_CPU_THRESHOLD=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.target_cpu_utilization')
+AUTOSCALING_MEMORY_THRESHOLD=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.target_memory_utilization')
+
+# Extract health check settings (no default for path - if not set, health check is disabled in Terraform)
+HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r '.scope.capabilities.health_check.path')
+HEALTH_CHECK_EVICTION_TIME=$(echo "$CONTEXT" | jq -r '.scope.capabilities.health_check.eviction_time_in_min // 1')
+
+# Determine if autoscaling should be enabled
+ENABLE_AUTOSCALING="false"
+if [ "$SCALING_TYPE" = "auto" ]; then
+    ENABLE_AUTOSCALING="true"
+fi
+
+# Extract parameters/environment variables
+PARAMETER_JSON=$(echo "$CONTEXT" | jq -c '.deployment.parameters // .scope.parameters // {}')
+
+# Set output directory
+OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
+if [ -n "${NP_OUTPUT_DIR:-}" ]; then
+    OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
+fi
+mkdir -p "$OUTPUT_DIR"
+
+# Set Terraform working directory
+TF_WORKING_DIR="$OUTPUT_DIR/terraform"
+mkdir -p "$TF_WORKING_DIR"
+
+# Configuration from workflow (e.g., SWAP_SLOTS, TOFU_ACTION)
+SWAP_SLOTS="${SWAP_SLOTS:-false}"
+
+# Build TOFU_VARIABLES JSON with all terraform configuration
+TOFU_VARIABLES=$(jq -n \
+    --arg app_name "$APP_NAME" \
+    --argjson swap_slots "$SWAP_SLOTS" \
+    --arg docker_image "$DOCKER_IMAGE" \
+    --arg docker_registry_url "${DOCKER_REGISTRY_URL:-https://index.docker.io}" \
+    --arg docker_registry_username "${DOCKER_REGISTRY_USERNAME:-}" \
+    --arg docker_registry_password "${DOCKER_REGISTRY_PASSWORD:-}" \
+    --arg sku_name "$SKU_NAME" \
+    --argjson websockets_enabled "$WEBSOCKETS_ENABLED" \
+    --arg health_check_path "$HEALTH_CHECK_PATH" \
+    --argjson health_check_eviction_time_in_min "$HEALTH_CHECK_EVICTION_TIME" \
+    --argjson enable_staging_slot "$ENABLE_STAGING_SLOT" \
+    --argjson enable_autoscaling "$ENABLE_AUTOSCALING" \
+    --argjson fixed_instances "$FIXED_INSTANCES" \
+    --argjson autoscale_min_instances "$AUTOSCALING_MIN" \
+    --argjson autoscale_max_instances "$AUTOSCALING_MAX" \
+    --argjson cpu_scale_out_threshold "$AUTOSCALING_CPU_THRESHOLD" \
+    --argjson memory_scale_out_threshold "$AUTOSCALING_MEMORY_THRESHOLD" \
+    --argjson parameter_json "$PARAMETER_JSON" \
+    --argjson https_only "${HTTPS_ONLY:-true}" \
+    --arg minimum_tls_version "${MINIMUM_TLS_VERSION:-1.2}" \
+    --arg ftps_state "${FTPS_STATE:-Disabled}" \
+    --argjson client_affinity_enabled "${CLIENT_AFFINITY_ENABLED:-false}" \
+    --argjson enable_logging "${ENABLE_LOGGING:-true}" \
+    --arg application_logs_level "${APPLICATION_LOGS_LEVEL:-Information}" \
+    --argjson http_logs_retention_days "${HTTP_LOGS_RETENTION_DAYS:-7}" \
+    '{
+        app_name: $app_name,
+        swap_slots: $swap_slots,
+        docker_image: $docker_image,
+        docker_registry_url: $docker_registry_url,
+        docker_registry_username: $docker_registry_username,
+        docker_registry_password: $docker_registry_password,
+        sku_name: $sku_name,
+        websockets_enabled: $websockets_enabled,
+        health_check_path: $health_check_path,
+        health_check_eviction_time_in_min: $health_check_eviction_time_in_min,
+        enable_staging_slot: $enable_staging_slot,
+        enable_autoscaling: $enable_autoscaling,
+        fixed_instances: $fixed_instances,
+        autoscale_min_instances: $autoscale_min_instances,
+        autoscale_max_instances: $autoscale_max_instances,
+        cpu_scale_out_threshold: $cpu_scale_out_threshold,
+        memory_scale_out_threshold: $memory_scale_out_threshold,
+        parameter_json: ($parameter_json | tojson),
+        https_only: $https_only,
+        minimum_tls_version: $minimum_tls_version,
+        ftps_state: $ftps_state,
+        client_affinity_enabled: $client_affinity_enabled,
+        enable_logging: $enable_logging,
+        application_logs_level: $application_logs_level,
+        http_logs_retention_days: $http_logs_retention_days
+    }')
+
+# Export all variables
+export SCOPE_ID
+export DEPLOYMENT_ID
+export APP_NAME
+export DOCKER_IMAGE
+export OUTPUT_DIR
+export TF_WORKING_DIR
+export TOFU_VARIABLES
+export CONTEXT

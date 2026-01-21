@@ -1,0 +1,57 @@
+# Azure App Service Scope Configuration
+#
+# Required environment variables (set in Helm values):
+#   AZURE_SUBSCRIPTION_ID    - Azure subscription ID
+#   AZURE_RESOURCE_GROUP     - Resource group for App Service resources
+#   AZURE_LOCATION           - Azure region (e.g., eastus, westus2)
+#   TOFU_PROVIDER_STORAGE_ACCOUNT - Storage account for Terraform state
+#   TOFU_PROVIDER_CONTAINER  - Container name for Terraform state (default: tfstate)
+#
+# Optional environment variables:
+#   DOCKER_REGISTRY_URL      - Docker registry URL (default: https://index.docker.io)
+#   DOCKER_REGISTRY_USERNAME - Registry username (for private registries)
+#   DOCKER_REGISTRY_PASSWORD - Registry password (for private registries)
+#   DNS_ZONE_NAME            - Azure DNS zone name for custom domains
+#   DNS_ZONE_RESOURCE_GROUP  - Resource group containing DNS zone
+#   RESOURCE_TAGS_JSON       - JSON object with resource tags
+
+configuration:
+  # Terraform Configuration
+  TERRAFORM_PATH: "$SERVICE_PATH/terraform-azure-app-service"
+
+  # Domain Configuration (optional - set via environment variables)
+  ENABLE_CUSTOM_DOMAIN: false
+  ENABLE_MANAGED_CERTIFICATE: true
+
+  # Docker Registry defaults
+  DOCKER_REGISTRY_URL: "https://index.docker.io"
+
+  # Network Configuration (optional)
+  ENABLE_VNET_INTEGRATION: false
+  # VNET_INTEGRATION_SUBNET_ID: ""
+  # VNET_ROUTE_ALL_ENABLED: false
+
+  # Logging Configuration
+  ENABLE_LOGGING: true
+  APPLICATION_LOGS_LEVEL: "Information"
+  HTTP_LOGS_RETENTION_DAYS: 7
+
+  # Application Insights (optional)
+  ENABLE_APPLICATION_INSIGHTS: false
+  LOG_ANALYTICS_RETENTION_DAYS: 30
+
+  # Alerting (optional)
+  ENABLE_ALERTS: false
+  # ALERT_EMAIL_RECIPIENTS: []
+
+  # Identity Configuration
+  ENABLE_SYSTEM_IDENTITY: false
+
+  # Default App Service Settings
+  HTTPS_ONLY: true
+  MINIMUM_TLS_VERSION: "1.2"
+  FTPS_STATE: "Disabled"
+  CLIENT_AFFINITY_ENABLED: false
+
+  # Deployment Settings
+  DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
