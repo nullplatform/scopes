@@ -143,16 +143,16 @@ EOF
   assert_directory_exists "$TF_WORKING_DIR/scripts"
 }
 
-@test "Should use SERVICE_PATH/tofu-azure-app-service as default source" {
+@test "Should use SERVICE_PATH/modules as default source" {
   unset TOFU_PATH
-  mkdir -p "$SERVICE_PATH/tofu-azure-app-service"
-  echo 'resource "test" {}' > "$SERVICE_PATH/tofu-azure-app-service/test.tf"
+  mkdir -p "$SERVICE_PATH/modules"
+  echo 'resource "test" {}' > "$SERVICE_PATH/modules/test.tf"
 
   run bash "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
 
-  rm -rf "$SERVICE_PATH/tofu-azure-app-service"
+  rm -rf "$SERVICE_PATH/modules"
 }
 
 # =============================================================================

@@ -51,8 +51,8 @@ resource "azurerm_linux_web_app" "main" {
       }
     }
 
-    # Auto-heal configuration
-    auto_heal_enabled = var.enable_auto_heal
+    # Auto-heal configuration (only set when enabled - provider requires both attributes together)
+    auto_heal_enabled = var.enable_auto_heal ? true : null
 
     dynamic "auto_heal_setting" {
       for_each = var.enable_auto_heal ? [1] : []

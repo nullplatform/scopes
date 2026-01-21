@@ -6,7 +6,7 @@ TOFU_ACTION="${TOFU_ACTION:-apply}"
 echo "📝 Running tofu $TOFU_ACTION for deployment: $DEPLOYMENT_ID"
 echo "📋 App Service: $APP_NAME"
 
-TOFU_SOURCE="${TOFU_PATH:-$SERVICE_PATH/tofu-azure-app-service}"
+TOFU_SOURCE="${TOFU_PATH:-$SERVICE_PATH/modules}"
 
 # Copy tofu files to working directory
 cp -r "$TOFU_SOURCE"/*.tf "$TF_WORKING_DIR/" 2>/dev/null || true
