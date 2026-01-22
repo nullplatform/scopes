@@ -166,46 +166,40 @@ run_azure_setup() {
 # =============================================================================
 # Test: TOFU_VARIABLES generation
 # =============================================================================
-@test "Should generate TOFU_VARIABLES with azure_provider object" {
+@test "Should generate TOFU_VARIABLES with resource_group_name" {
   run_azure_setup
 
-  local expected_azure_provider='{
-    "subscription_id": "test-subscription-id",
-    "resource_group": "test-resource-group",
-    "location": "eastus",
-    "state_storage_account": "tfstatestorage",
-    "state_container": "tfstate"
-  }'
-
-  local actual_azure_provider=$(echo "$TOFU_VARIABLES" | jq '.azure_provider')
-  assert_json_equal "$actual_azure_provider" "$expected_azure_provider" "azure_provider"
+  local actual_value=$(echo "$TOFU_VARIABLES" | jq -r '.resource_group_name')
+  assert_equal "$actual_value" "test-resource-group"
 }
 
-@test "Should include provider_resource_tags_json in TOFU_VARIABLES" {
+@test "Should generate TOFU_VARIABLES with location" {
+  run_azure_setup
+
+  local actual_value=$(echo "$TOFU_VARIABLES" | jq -r '.location')
+  assert_equal "$actual_value" "eastus"
+}
+
+@test "Should include resource_tags in TOFU_VARIABLES" {
   export RESOURCE_TAGS_JSON='{"environment": "test", "team": "platform"}'
 
   run_azure_setup
 
   local expected_tags='{"environment": "test", "team": "platform"}'
-  local actual_tags=$(echo "$TOFU_VARIABLES" | jq '.provider_resource_tags_json')
-  assert_json_equal "$actual_tags" "$expected_tags" "provider_resource_tags_json"
+  local actual_tags=$(echo "$TOFU_VARIABLES" | jq '.resource_tags')
+  assert_json_equal "$actual_tags" "$expected_tags" "resource_tags"
 }
 
-@test "Should preserve existing TOFU_VARIABLES when adding azure_provider" {
+@test "Should preserve existing TOFU_VARIABLES when adding azure variables" {
   export TOFU_VARIABLES='{"existing_key": "existing_value"}'
 
   run_azure_setup
 
   local expected='{
     "existing_key": "existing_value",
-    "azure_provider": {
-      "subscription_id": "test-subscription-id",
-      "resource_group": "test-resource-group",
-      "location": "eastus",
-      "state_storage_account": "tfstatestorage",
-      "state_container": "tfstate"
-    },
-    "provider_resource_tags_json": {}
+    "resource_group_name": "test-resource-group",
+    "location": "eastus",
+    "resource_tags": {}
   }'
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
@@ -215,12 +209,14 @@ run_azure_setup() {
 # Test: TOFU_INIT_VARIABLES generation
 # =============================================================================
 @test "Should generate TOFU_INIT_VARIABLES with backend config" {
+  export SCOPE_ID="42"
+
   run_azure_setup
 
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=storage_account_name=tfstatestorage"
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=container_name=tfstate"
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=resource_group_name=test-resource-group"
-  assert_contains "$TOFU_INIT_VARIABLES" '-backend-config=key=azure-apps/${SCOPE_ID}/terraform.tfstate'
+  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=key=azure-apps/42/terraform.tfstate"
 }
 
 @test "Should preserve existing TOFU_INIT_VARIABLES" {

@@ -33,8 +33,13 @@ WEBSOCKETS_ENABLED=$(echo "$CONTEXT" | jq -r '.scope.capabilities.websockets_ena
 SCALING_TYPE=$(echo "$CONTEXT" | jq -r '.scope.capabilities.scaling_type')
 FIXED_INSTANCES=$(echo "$CONTEXT" | jq -r '.scope.capabilities.fixed_instances')
 
-# Configured via workflow
+# Blue-green deployment settings from context
+# enable_staging_slot: enabled via ENABLE_STAGING_SLOT env var (set by workflow)
+# staging_traffic_percent: read from deployment strategy_data
+# promote_staging_to_production: enabled via PROMOTE_STAGING_TO_PRODUCTION env var (set by finalize workflow)
 ENABLE_STAGING_SLOT="${ENABLE_STAGING_SLOT:-false}"
+STAGING_TRAFFIC_PERCENT=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 0')
+PROMOTE_STAGING_TO_PRODUCTION="${PROMOTE_STAGING_TO_PRODUCTION:-false}"
 
 # Extract autoscaling settings (no defaults - if not set, autoscaling is disabled)
 AUTOSCALING_MIN=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.min_instances')
@@ -66,13 +71,10 @@ mkdir -p "$OUTPUT_DIR"
 TF_WORKING_DIR="$OUTPUT_DIR/terraform"
 mkdir -p "$TF_WORKING_DIR"
 
-# Configuration from workflow (e.g., SWAP_SLOTS, TOFU_ACTION)
-SWAP_SLOTS="${SWAP_SLOTS:-false}"
-
 # Build TOFU_VARIABLES JSON with all terraform configuration
+# Note: Only include variables that exist in the terraform module's variables.tf
 TOFU_VARIABLES=$(jq -n \
     --arg app_name "$APP_NAME" \
-    --argjson swap_slots "$SWAP_SLOTS" \
     --arg docker_image "$DOCKER_IMAGE" \
     --arg docker_registry_url "${DOCKER_REGISTRY_URL:-https://index.docker.io}" \
     --arg docker_registry_username "${DOCKER_REGISTRY_USERNAME:-}" \
@@ -82,10 +84,12 @@ TOFU_VARIABLES=$(jq -n \
     --arg health_check_path "$HEALTH_CHECK_PATH" \
     --argjson health_check_eviction_time_in_min "$HEALTH_CHECK_EVICTION_TIME" \
     --argjson enable_staging_slot "$ENABLE_STAGING_SLOT" \
+    --argjson staging_traffic_percent "$STAGING_TRAFFIC_PERCENT" \
+    --argjson promote_staging_to_production "$PROMOTE_STAGING_TO_PRODUCTION" \
     --argjson enable_autoscaling "$ENABLE_AUTOSCALING" \
-    --argjson fixed_instances "$FIXED_INSTANCES" \
     --argjson autoscale_min_instances "$AUTOSCALING_MIN" \
     --argjson autoscale_max_instances "$AUTOSCALING_MAX" \
+    --argjson autoscale_default_instances "$FIXED_INSTANCES" \
     --argjson cpu_scale_out_threshold "$AUTOSCALING_CPU_THRESHOLD" \
     --argjson memory_scale_out_threshold "$AUTOSCALING_MEMORY_THRESHOLD" \
     --argjson parameter_json "$PARAMETER_JSON" \
@@ -98,7 +102,6 @@ TOFU_VARIABLES=$(jq -n \
     --argjson http_logs_retention_days "${HTTP_LOGS_RETENTION_DAYS:-7}" \
     '{
         app_name: $app_name,
-        swap_slots: $swap_slots,
         docker_image: $docker_image,
         docker_registry_url: $docker_registry_url,
         docker_registry_username: $docker_registry_username,
@@ -108,10 +111,12 @@ TOFU_VARIABLES=$(jq -n \
         health_check_path: $health_check_path,
         health_check_eviction_time_in_min: $health_check_eviction_time_in_min,
         enable_staging_slot: $enable_staging_slot,
+        staging_traffic_percent: $staging_traffic_percent,
+        promote_staging_to_production: $promote_staging_to_production,
         enable_autoscaling: $enable_autoscaling,
-        fixed_instances: $fixed_instances,
         autoscale_min_instances: $autoscale_min_instances,
         autoscale_max_instances: $autoscale_max_instances,
+        autoscale_default_instances: $autoscale_default_instances,
         cpu_scale_out_threshold: $cpu_scale_out_threshold,
         memory_scale_out_threshold: $memory_scale_out_threshold,
         parameter_json: ($parameter_json | tojson),

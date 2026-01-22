@@ -1,5 +1,5 @@
 include:
   - "$SERVICE_PATH/deployment/workflows/initial.yaml"
 configuration:
-  SWAP_SLOTS: true
   ENABLE_STAGING_SLOT: false
+  PROMOTE_STAGING_TO_PRODUCTION: true

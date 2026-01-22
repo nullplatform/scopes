@@ -123,7 +123,6 @@ run_build_context() {
   expected_json=$(cat <<'EOF'
 {
   "app_name": "tools-automation-development-tools-7",
-  "swap_slots": false,
   "docker_image": "myregistry.azurecr.io/tools/automation:v1.0.0",
   "docker_registry_url": "https://index.docker.io",
   "docker_registry_username": "",
@@ -133,10 +132,12 @@ run_build_context() {
   "health_check_path": "/healthz",
   "health_check_eviction_time_in_min": 5,
   "enable_staging_slot": false,
+  "staging_traffic_percent": 0,
+  "promote_staging_to_production": false,
   "enable_autoscaling": true,
-  "fixed_instances": 2,
   "autoscale_min_instances": 2,
   "autoscale_max_instances": 5,
+  "autoscale_default_instances": 2,
   "cpu_scale_out_threshold": 75,
   "memory_scale_out_threshold": 80,
   "parameter_json": "{\"DATABASE_URL\":\"postgres://localhost:5432/db\",\"LOG_LEVEL\":\"info\"}",
@@ -203,14 +204,65 @@ EOF
   assert_equal "$registry_url" "myregistry.azurecr.io"
 }
 
-@test "Should use provided SWAP_SLOTS value" {
-  export SWAP_SLOTS="true"
+# =============================================================================
+# Test: Blue-green deployment variables
+# =============================================================================
+@test "Should read staging_traffic_percent from context.deployment.strategy_data.desired_switched_traffic" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.deployment.strategy_data.desired_switched_traffic = 25')
 
   run_build_context
 
-  local swap_slots
-  swap_slots=$(echo "$TOFU_VARIABLES" | jq -r '.swap_slots')
-  assert_equal "$swap_slots" "true"
+  local traffic_percent
+  traffic_percent=$(echo "$TOFU_VARIABLES" | jq -r '.staging_traffic_percent')
+  assert_equal "$traffic_percent" "25"
+}
+
+@test "Should default staging_traffic_percent to 0 when not in context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.deployment.strategy_data.desired_switched_traffic)')
+
+  run_build_context
+
+  local traffic_percent
+  traffic_percent=$(echo "$TOFU_VARIABLES" | jq -r '.staging_traffic_percent')
+  assert_equal "$traffic_percent" "0"
+}
+
+@test "Should handle staging_traffic_percent of 100" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.deployment.strategy_data.desired_switched_traffic = 100')
+
+  run_build_context
+
+  local traffic_percent
+  traffic_percent=$(echo "$TOFU_VARIABLES" | jq -r '.staging_traffic_percent')
+  assert_equal "$traffic_percent" "100"
+}
+
+@test "Should default promote_staging_to_production to false" {
+  run_build_context
+
+  local promote
+  promote=$(echo "$TOFU_VARIABLES" | jq -r '.promote_staging_to_production')
+  assert_equal "$promote" "false"
+}
+
+@test "Should use PROMOTE_STAGING_TO_PRODUCTION from environment when set" {
+  export PROMOTE_STAGING_TO_PRODUCTION="true"
+
+  run_build_context
+
+  local promote
+  promote=$(echo "$TOFU_VARIABLES" | jq -r '.promote_staging_to_production')
+  assert_equal "$promote" "true"
+}
+
+@test "Should map fixed_instances to autoscale_default_instances" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.fixed_instances = 3')
+
+  run_build_context
+
+  local autoscale_default_instances
+  autoscale_default_instances=$(echo "$TOFU_VARIABLES" | jq -r '.autoscale_default_instances')
+  assert_equal "$autoscale_default_instances" "3"
 }
 
 # =============================================================================

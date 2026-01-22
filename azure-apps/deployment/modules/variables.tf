@@ -178,6 +178,23 @@ variable "staging_slot_always_on" {
   default     = false
 }
 
+variable "staging_traffic_percent" {
+  description = "Percentage of traffic to route to staging slot (0-100). Used for gradual traffic shifting during blue-green deployments."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.staging_traffic_percent >= 0 && var.staging_traffic_percent <= 100
+    error_message = "staging_traffic_percent must be between 0 and 100"
+  }
+}
+
+variable "promote_staging_to_production" {
+  description = "When true, performs a slot swap promoting staging to production. After swap, the previous production becomes staging."
+  type        = bool
+  default     = false
+}
+
 # =============================================================================
 # DNS / CUSTOM DOMAIN
 # =============================================================================

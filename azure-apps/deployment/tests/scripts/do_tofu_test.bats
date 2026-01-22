@@ -143,16 +143,16 @@ EOF
   assert_directory_exists "$TF_WORKING_DIR/scripts"
 }
 
-@test "Should use SERVICE_PATH/modules as default source" {
+@test "Should use SERVICE_PATH/deployment/modules as default source" {
   unset TOFU_PATH
-  mkdir -p "$SERVICE_PATH/modules"
-  echo 'resource "test" {}' > "$SERVICE_PATH/modules/test.tf"
+  mkdir -p "$SERVICE_PATH/deployment/modules"
+  echo 'resource "test" {}' > "$SERVICE_PATH/deployment/modules/test.tf"
 
   run bash "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
 
-  rm -rf "$SERVICE_PATH/modules"
+  rm -rf "$SERVICE_PATH/deployment/modules"
 }
 
 # =============================================================================
@@ -328,4 +328,122 @@ EOF
   run bash "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
+}
+
+@test "Should fail if source directory does not exist" {
+  export TOFU_PATH="/nonexistent/path"
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Source directory does not exist"
+}
+
+@test "Should fail if no .tf files found in source" {
+  local empty_source=$(mktemp -d)
+
+  export TOFU_PATH="$empty_source"
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ No .tf files found"
+
+  rm -rf "$empty_source"
+}
+
+# =============================================================================
+# Test: Custom modules (CUSTOM_TOFU_MODULES)
+# =============================================================================
+@test "Should not copy custom modules when CUSTOM_TOFU_MODULES is not set" {
+  unset CUSTOM_TOFU_MODULES
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  # Should not contain "Adding custom module" message
+  if [[ "$output" == *"Adding custom module"* ]]; then
+    echo "Output should not contain 'Adding custom module' but it does"
+    return 1
+  fi
+}
+
+@test "Should copy files from single custom module" {
+  local custom_module=$(mktemp -d)
+  echo 'provider "azurerm" { features {} }' > "$custom_module/provider_override.tf"
+
+  export CUSTOM_TOFU_MODULES="$custom_module"
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Adding custom module: $custom_module"
+  assert_file_exists "$TF_WORKING_DIR/provider_override.tf"
+
+  rm -rf "$custom_module"
+}
+
+@test "Should copy files from multiple custom modules" {
+  local custom_module1=$(mktemp -d)
+  local custom_module2=$(mktemp -d)
+  echo 'provider "azurerm" {}' > "$custom_module1/provider_override.tf"
+  echo 'terraform { backend "azurerm" {} }' > "$custom_module2/backend_override.tf"
+
+  export CUSTOM_TOFU_MODULES="$custom_module1,$custom_module2"
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Adding custom module: $custom_module1"
+  assert_contains "$output" "📋 Adding custom module: $custom_module2"
+  assert_file_exists "$TF_WORKING_DIR/provider_override.tf"
+  assert_file_exists "$TF_WORKING_DIR/backend_override.tf"
+
+  rm -rf "$custom_module1" "$custom_module2"
+}
+
+@test "Should skip non-existent custom module directory" {
+  local existing_module=$(mktemp -d)
+  echo 'provider "azurerm" {}' > "$existing_module/provider_override.tf"
+
+  export CUSTOM_TOFU_MODULES="/nonexistent/module,$existing_module"
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  # Should only show message for existing module
+  assert_contains "$output" "📋 Adding custom module: $existing_module"
+  assert_file_exists "$TF_WORKING_DIR/provider_override.tf"
+
+  rm -rf "$existing_module"
+}
+
+@test "Should allow custom module to override existing files" {
+  # Original file in main source
+  echo 'provider "azurerm" { features { key_vault {} } }' > "$MOCK_TOFU_SOURCE/provider.tf"
+
+  # Override in custom module
+  local custom_module=$(mktemp -d)
+  echo 'provider "azurerm" { features {} skip_provider_registration = true }' > "$custom_module/provider.tf"
+
+  export CUSTOM_TOFU_MODULES="$custom_module"
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+
+  # The custom module version should have overwritten the original
+  local content
+  content=$(cat "$TF_WORKING_DIR/provider.tf")
+  assert_contains "$content" "skip_provider_registration = true"
+
+  rm -rf "$custom_module"
+}
+
+@test "Should handle empty CUSTOM_TOFU_MODULES gracefully" {
+  export CUSTOM_TOFU_MODULES=""
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
 }

@@ -90,6 +90,16 @@ output "staging_slot_url" {
   value       = var.enable_staging_slot ? "https://${azurerm_linux_web_app_slot.staging[0].default_hostname}" : null
 }
 
+output "staging_traffic_percent" {
+  description = "Percentage of traffic routed to staging slot"
+  value       = var.enable_staging_slot ? var.staging_traffic_percent : 0
+}
+
+output "slot_swap_performed" {
+  description = "Whether a slot swap was performed (staging promoted to production)"
+  value       = var.enable_staging_slot && var.promote_staging_to_production
+}
+
 # ---------------------------------------------------------------------------
 # CUSTOM DOMAIN
 # ---------------------------------------------------------------------------

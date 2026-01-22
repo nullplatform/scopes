@@ -128,7 +128,7 @@
   "providers": {
     "cloud-providers": {
       "azure": {
-        "subscription_id": "test-subscription-id",
+        "subscription_id": "mock-subscription-id",
         "resource_group": "test-resource-group",
         "location": "eastus"
       }
@@ -149,16 +149,10 @@
     "application_id": 4,
     "asset_name": "main",
     "capabilities": {
-      "memory": 8,
+      "memory": 4,
       "websockets_enabled": false,
-      "scaling_type": "auto",
-      "fixed_instances": 2,
-      "autoscaling": {
-        "min_instances": 2,
-        "max_instances": 5,
-        "target_cpu_utilization": 75,
-        "target_memory_utilization": 80
-      },
+      "scaling_type": "fixed",
+      "fixed_instances": 1,
       "health_check": {
         "path": "/healthz",
         "eviction_time_in_min": 5

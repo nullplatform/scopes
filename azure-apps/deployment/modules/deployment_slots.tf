@@ -40,3 +40,62 @@ resource "azurerm_linux_web_app_slot" "staging" {
     }
   }
 }
+
+# =============================================================================
+# TRAFFIC ROUTING
+# Routes a percentage of production traffic to the staging slot
+# =============================================================================
+
+resource "null_resource" "traffic_routing" {
+  count = var.enable_staging_slot && var.staging_traffic_percent > 0 ? 1 : 0
+
+  triggers = {
+    traffic_percent = var.staging_traffic_percent
+    app_name        = azurerm_linux_web_app.main.name
+    slot_name       = var.staging_slot_name
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      az webapp traffic-routing set \
+        --resource-group ${var.resource_group_name} \
+        --name ${azurerm_linux_web_app.main.name} \
+        --distribution ${var.staging_slot_name}=${var.staging_traffic_percent}
+    EOT
+  }
+
+  depends_on = [azurerm_linux_web_app_slot.staging]
+}
+
+# Clear traffic routing when percentage is set to 0
+resource "null_resource" "clear_traffic_routing" {
+  count = var.enable_staging_slot && var.staging_traffic_percent == 0 ? 1 : 0
+
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      az webapp traffic-routing clear \
+        --resource-group ${var.resource_group_name} \
+        --name ${azurerm_linux_web_app.main.name}
+    EOT
+  }
+
+  depends_on = [azurerm_linux_web_app_slot.staging]
+}
+
+# =============================================================================
+# SLOT SWAP (Promote staging to production)
+# When promote_staging_to_production is true, swaps staging with production
+# =============================================================================
+
+resource "azurerm_web_app_active_slot" "slot_swap" {
+  count = var.enable_staging_slot && var.promote_staging_to_production ? 1 : 0
+
+  slot_id = azurerm_linux_web_app_slot.staging[0].id
+
+  # Ensure traffic routing is cleared before swap
+  depends_on = [null_resource.clear_traffic_routing]
+}

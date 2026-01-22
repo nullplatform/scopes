@@ -17,7 +17,7 @@
 
 configuration:
   # Terraform Configuration
-  TERRAFORM_PATH: "$SERVICE_PATH/terraform-azure-app-service"
+  TOFU_PATH: "$SERVICE_PATH/deployment/modules"
 
   # Domain Configuration (optional - set via environment variables)
   ENABLE_CUSTOM_DOMAIN: false

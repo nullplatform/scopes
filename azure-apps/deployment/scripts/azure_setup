@@ -43,21 +43,13 @@ echo ""
 RESOURCE_TAGS_JSON=${RESOURCE_TAGS_JSON:-"{}"}
 
 TOFU_VARIABLES=$(echo "${TOFU_VARIABLES:-"{}"}" | jq \
-  --arg azure_subscription_id "$AZURE_SUBSCRIPTION_ID" \
-  --arg azure_resource_group "$AZURE_RESOURCE_GROUP" \
-  --arg azure_location "$AZURE_LOCATION" \
-  --arg tf_state_storage_account "$TOFU_PROVIDER_STORAGE_ACCOUNT" \
-  --arg tf_state_container "$TOFU_PROVIDER_CONTAINER" \
-  --argjson resource_tags_json "$RESOURCE_TAGS_JSON" \
+  --arg resource_group_name "$AZURE_RESOURCE_GROUP" \
+  --arg location "$AZURE_LOCATION" \
+  --argjson resource_tags "$RESOURCE_TAGS_JSON" \
   '. + {
-    azure_provider: {
-      subscription_id: $azure_subscription_id,
-      resource_group: $azure_resource_group,
-      location: $azure_location,
-      state_storage_account: $tf_state_storage_account,
-      state_container: $tf_state_container
-    },
-    provider_resource_tags_json: $resource_tags_json
+    resource_group_name: $resource_group_name,
+    location: $location,
+    resource_tags: $resource_tags
   }')
 
 # Build tofu init backend config
@@ -65,7 +57,7 @@ TOFU_INIT_VARIABLES="${TOFU_INIT_VARIABLES:-""}"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=storage_account_name=$TOFU_PROVIDER_STORAGE_ACCOUNT"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=container_name=$TOFU_PROVIDER_CONTAINER"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=resource_group_name=$AZURE_RESOURCE_GROUP"
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=key=azure-apps/\${SCOPE_ID}/terraform.tfstate"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=key=azure-apps/${SCOPE_ID}/terraform.tfstate"
 
 # Export for downstream scripts
 export TOFU_VARIABLES
