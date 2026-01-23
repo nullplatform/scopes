@@ -87,7 +87,7 @@
               "type": "number"
             }
           ],
-          "default": 500,
+          "default": 100,
           "description": "Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)",
           "title": "CPU Millicores",
           "type": "integer"
@@ -285,10 +285,10 @@
   "dimensions": {},
   "name": "Scheduled task",
   "selectors": {
-    "category": "any",
+    "category": "Scope",
     "imported": false,
     "provider": "any",
-    "sub_category": "any"
+    "sub_category": "Scheduled task"
   },
   "type": "scope",
   "use_default_actions": false,
