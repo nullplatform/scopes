@@ -476,7 +476,7 @@
          "cpu_millicores":{
             "type":"integer",
             "title":"CPU Millicores",
-            "default":500,
+            "default":100,
             "maximum":4000,
             "minimum":100,
             "description":"Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)"
@@ -630,10 +630,10 @@
   },
   "name": "Containers",
   "selectors": {
-    "category": "any",
+    "category": "Scope",
     "imported": false,
     "provider": "any",
-    "sub_category": "any"
+    "sub_category": "Containers"
   },
   "type": "scope",
   "use_default_actions": false,
