@@ -287,7 +287,7 @@
   "selectors": {
     "category": "Scope",
     "imported": false,
-    "provider": "any",
+    "provider": "Agent",
     "sub_category": "Scheduled task"
   },
   "type": "scope",

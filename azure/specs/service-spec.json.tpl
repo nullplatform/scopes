@@ -632,7 +632,7 @@
   "selectors": {
     "category": "Scope",
     "imported": false,
-    "provider": "any",
+    "provider": "Agent",
     "sub_category": "Containers"
   },
   "type": "scope",
