@@ -57,6 +57,7 @@
             "releases": {
               "type": "string",
               "title": "Releases (Semver)",
+              "default": ".*",
               "description": "Semver regex pattern to match releases for automatic deployment (e.g., v\\d+\\.\\d+\\.\\d+)"
             }
           },
