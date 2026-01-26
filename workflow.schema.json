@@ -3,8 +3,9 @@
   "title": "Workflow",
   "additionalProperties": false,
   "type": "object",
-  "required": [
-    "steps"
+  "anyOf": [
+    { "required": ["steps"] },
+    { "required": ["include"] }
   ],
   "properties": {
     "steps": {
