@@ -1,0 +1,26 @@
+provider_categories:
+  - cloud-providers
+configuration:
+  TOFU_ACTION: "apply"
+steps:
+  - name: build_context
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/build_context"
+    output:
+      - name: TOFU_VARIABLES
+        type: environment
+  - name: setup_provider_layer
+    type: script
+    file: "$SERVICE_PATH/deployment/provider/$TOFU_PROVIDER/setup"
+  - name: setup_network_layer
+    type: script
+    file: "$SERVICE_PATH/deployment/network/$NETWORK_LAYER/setup"
+  - name: setup_distribution_layer
+    type: script
+    file: "$SERVICE_PATH/deployment/distribution/$DISTRIBUTION_LAYER/setup"
+  - name: build_modules
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/compose_modules"
+  - name: tofu
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/do_tofu"

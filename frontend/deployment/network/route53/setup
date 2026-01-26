@@ -1,0 +1,166 @@
+#!/bin/bash
+
+echo "🔍 Validating Route53 network configuration..."
+
+hosted_zone_id=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id // empty')
+
+if [ -z "$hosted_zone_id" ]; then
+  echo ""
+  echo "   ❌ hosted_public_zone_id is not set in context"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    1. Ensure there is an AWS cloud-provider configured at the correct NRN hierarchy level"
+  echo "    2. Set the 'hosted_public_zone_id' field with the Route 53 hosted zone ID"
+  echo ""
+  exit 1
+fi
+echo "   ✅ hosted_zone_id=$hosted_zone_id"
+
+application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
+scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
+scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
+
+echo ""
+echo "   📡 Fetching domain from Route 53 hosted zone..."
+
+aws_output=$(aws route53 get-hosted-zone --id "$hosted_zone_id" 2>&1)
+aws_exit_code=$?
+
+if [ $aws_exit_code -ne 0 ]; then
+  echo ""
+  echo "   ❌ Failed to fetch Route 53 hosted zone information"
+  echo ""
+
+  if echo "$aws_output" | grep -q "NoSuchHostedZone"; then
+    echo "  🔎 Error: Hosted zone '$hosted_zone_id' does not exist"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The hosted zone ID is incorrect or has a typo"
+    echo "    • The hosted zone was deleted"
+    echo "    • The hosted zone ID format is wrong (should be like 'Z1234567890ABC' or '/hostedzone/Z1234567890ABC')"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    1. Verify the hosted zone exists: aws route53 list-hosted-zones"
+    echo "    2. Update 'hosted_public_zone_id' in the AWS cloud-provider configuration"
+
+  elif echo "$aws_output" | grep -q "AccessDenied\|not authorized"; then
+    echo "  🔒 Error: Permission denied when accessing Route 53"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The AWS credentials don't have Route 53 read permissions"
+    echo "    • The IAM role/user is missing the 'route53:GetHostedZone' permission"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    1. Check the AWS credentials are configured correctly"
+    echo "    2. Ensure the IAM policy includes:"
+    echo "       {"
+    echo "         \"Effect\": \"Allow\","
+    echo "         \"Action\": \"route53:GetHostedZone\","
+    echo "         \"Resource\": \"arn:aws:route53:::hostedzone/$hosted_zone_id\""
+    echo "       }"
+
+  elif echo "$aws_output" | grep -q "InvalidInput"; then
+    echo "  ⚠️  Error: Invalid hosted zone ID format"
+    echo ""
+    echo "  The hosted zone ID '$hosted_zone_id' is not valid."
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Use the format 'Z1234567890ABC' or '/hostedzone/Z1234567890ABC'"
+    echo "    • Find valid zone IDs with: aws route53 list-hosted-zones"
+
+  elif echo "$aws_output" | grep -q "Unable to locate credentials\|ExpiredToken\|InvalidClientTokenId"; then
+    echo "  🔑 Error: AWS credentials issue"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The nullplatform agent is not configured with AWS credentials"
+    echo "    • The IAM role associated with the service account does not exist"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    1. Configure a service account in the nullplatform agent Helm installation"
+    echo "    2. Verify the IAM role associated with the service account exists and has the required permissions"
+
+  else
+    echo "  📋 Error details:"
+    echo "$aws_output" | sed 's/^/    /'
+  fi
+
+  echo ""
+  exit 1
+fi
+
+network_domain=$(echo "$aws_output" | jq -r '.HostedZone.Name' | sed 's/\.$//')
+
+if [ -z "$network_domain" ] || [ "$network_domain" = "null" ]; then
+  echo ""
+  echo "   ❌ Failed to extract domain name from hosted zone response"
+  echo ""
+  echo "  💡 Possible causes:"
+  echo "    • The hosted zone does not have a valid domain name configured"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    1. Verify the hosted zone has a valid domain: aws route53 get-hosted-zone --id $hosted_zone_id"
+  echo ""
+  exit 1
+fi
+
+echo "   ✅ domain=$network_domain"
+
+network_subdomain="$application_slug-$scope_slug"
+echo "   ✅ subdomain=$network_subdomain"
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg hosted_zone_id "$hosted_zone_id" \
+  --arg domain "$network_domain" \
+  --arg subdomain "$network_subdomain" \
+  '. + {
+    network_hosted_zone_id: $hosted_zone_id,
+    network_domain: $domain,
+    network_subdomain: $subdomain
+  }')
+
+scope_domain="$network_subdomain.$network_domain"
+
+echo ""
+echo "   📝 Setting scope domain to '$scope_domain'..."
+
+np_output=$(np scope patch --id "$scope_id" --body "{\"domain\":\"$scope_domain\"}" --format json 2>&1)
+np_exit_code=$?
+
+if [ $np_exit_code -ne 0 ]; then
+  echo ""
+  echo "   ❌ Failed to update scope domain"
+  echo ""
+
+  if echo "$np_output" | grep -q "unauthorized\|forbidden\|401\|403"; then
+    echo "  🔒 Error: Permission denied"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The nullplatform API Key doesn't have 'Developer' permissions"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    1. Ensure the API Key has 'Developer' permissions at the correct NRN hierarchy level"
+
+  else
+    echo "  📋 Error details:"
+    echo "$np_output" | sed 's/^/    /'
+  fi
+
+  echo ""
+  exit 1
+fi
+
+echo "   ✅ Scope domain set successfully"
+
+echo ""
+echo "✨ Route53 network configured successfully"
+echo ""
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir}/modules"
+
+if [[ -n $MODULES_TO_USE ]]; then
+  MODULES_TO_USE="$MODULES_TO_USE,$module_name"
+else
+  MODULES_TO_USE="$module_name"
+fi

@@ -1,0 +1,2 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows/initial.yaml"

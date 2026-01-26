@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "id": "d397e46b-89b8-419d-ac14-2b483ace511c",
+      "name": "Other Storage Provider",
+      "type": "other",
+      "attributes": {
+        "endpoint": "https://example.com"
+      }
+    }
+  ]
+}

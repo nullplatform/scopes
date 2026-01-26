@@ -1,0 +1,1 @@
+AuthorizationFailed: The client does not have authorization to perform action 'Microsoft.Network/dnszones/read' over scope '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Network/dnszones/example.com'
