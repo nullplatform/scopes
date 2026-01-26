@@ -1,20 +1,126 @@
 #!/bin/bash
 
-if [ -n "${NAMESPACE_OVERRIDE:-}" ]; then
-  K8S_NAMESPACE="$NAMESPACE_OVERRIDE"
+# Source utility functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value"
+
+K8S_NAMESPACE=$(get_config_value \
+  --env NAMESPACE_OVERRIDE \
+  --env K8S_NAMESPACE \
+  --provider '.providers["scope-configurations"].cluster.namespace' \
+  --provider '.providers["container-orchestration"].cluster.namespace' \
+  --default "nullplatform"
+)
+
+# General configuration
+DNS_TYPE=$(get_config_value \
+  --env DNS_TYPE \
+  --provider '.providers["scope-configurations"].networking.dns_type' \
+  --default "route53"
+)
+
+# Azure DNS configuration
+HOSTED_ZONE_NAME=$(get_config_value \
+  --env HOSTED_ZONE_NAME \
+  --provider '.providers["scope-configurations"].networking.hosted_zone_name' \
+  --default ""
+)
+
+HOSTED_ZONE_RG=$(get_config_value \
+  --env HOSTED_ZONE_RG \
+  --provider '.providers["scope-configurations"].networking.hosted_zone_rg' \
+  --default ""
+)
+
+AZURE_SUBSCRIPTION_ID=$(get_config_value \
+  --env AZURE_SUBSCRIPTION_ID \
+  --provider '.providers["scope-configurations"].networking.azure_subscription_id' \
+  --default ""
+)
+
+RESOURCE_GROUP=$(get_config_value \
+  --env RESOURCE_GROUP \
+  --provider '.providers["scope-configurations"].networking.resource_group' \
+  --default ""
+)
+
+ALB_RECONCILIATION_ENABLED=$(get_config_value \
+  --env ALB_RECONCILIATION_ENABLED \
+  --provider '.providers["scope-configurations"].networking.alb_reconciliation_enabled' \
+  --default "false"
+)
+
+DEPLOYMENT_MAX_WAIT_IN_SECONDS=$(get_config_value \
+  --env DEPLOYMENT_MAX_WAIT_IN_SECONDS \
+  --provider '.providers["scope-configurations"].deployment.deployment_max_wait_seconds' \
+  --default "600"
+)
+
+# Build MANIFEST_BACKUP object from flat properties
+MANIFEST_BACKUP_ENABLED=$(get_config_value \
+  --provider '.providers["scope-configurations"].deployment.manifest_backup_enabled' \
+  --default "false"
+)
+MANIFEST_BACKUP_TYPE=$(get_config_value \
+  --provider '.providers["scope-configurations"].deployment.manifest_backup_type' \
+  --default ""
+)
+MANIFEST_BACKUP_BUCKET=$(get_config_value \
+  --provider '.providers["scope-configurations"].deployment.manifest_backup_bucket' \
+  --default ""
+)
+MANIFEST_BACKUP_PREFIX=$(get_config_value \
+  --provider '.providers["scope-configurations"].deployment.manifest_backup_prefix' \
+  --default ""
+)
+
+# Use env var if set, otherwise build from individual properties
+if [ -n "${MANIFEST_BACKUP:-}" ]; then
+  MANIFEST_BACKUP="$MANIFEST_BACKUP"
 else
-  K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
-    .providers["container-orchestration"].cluster.namespace // $default
-  ')
+  MANIFEST_BACKUP=$(jq -n \
+    --argjson enabled "$MANIFEST_BACKUP_ENABLED" \
+    --arg type "$MANIFEST_BACKUP_TYPE" \
+    --arg bucket "$MANIFEST_BACKUP_BUCKET" \
+    --arg prefix "$MANIFEST_BACKUP_PREFIX" \
+    '{ENABLED: $enabled, TYPE: $type, BUCKET: $bucket, PREFIX: $prefix} |
+     with_entries(select(.value != "" and .value != null))')
 fi
+
+VAULT_ADDR=$(get_config_value \
+  --env VAULT_ADDR \
+  --provider '.providers["scope-configurations"].security.vault_address' \
+  --default ""
+)
+
+VAULT_TOKEN=$(get_config_value \
+  --env VAULT_TOKEN \
+  --provider '.providers["scope-configurations"].security.vault_token' \
+  --default ""
+)
+
+export DNS_TYPE
+export HOSTED_ZONE_NAME
+export HOSTED_ZONE_RG
+export AZURE_SUBSCRIPTION_ID
+export RESOURCE_GROUP
+export ALB_RECONCILIATION_ENABLED
+export DEPLOYMENT_MAX_WAIT_IN_SECONDS
+export MANIFEST_BACKUP
+export VAULT_ADDR
+export VAULT_TOKEN
 
 echo "Validating namespace $K8S_NAMESPACE exists"
 
 if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   echo "Namespace '$K8S_NAMESPACE' does not exist in the cluster."
-  
-  CREATE_K8S_NAMESPACE_IF_NOT_EXIST="${CREATE_K8S_NAMESPACE_IF_NOT_EXIST:-true}"
-  
+
+  CREATE_K8S_NAMESPACE_IF_NOT_EXIST=$(get_config_value \
+    --env CREATE_K8S_NAMESPACE_IF_NOT_EXIST \
+    --provider '.providers["scope-configurations"].cluster.create_namespace_if_not_exist' \
+    --default "true"
+  )
+
   if [ "$CREATE_K8S_NAMESPACE_IF_NOT_EXIST" = "true" ]; then
     echo "Creating namespace '$K8S_NAMESPACE'..."
     
@@ -29,22 +135,33 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   fi
 fi
 
-USE_ACCOUNT_SLUG=$(echo "$CONTEXT" | jq -r --arg default "$USE_ACCOUNT_SLUG" '
-  .providers["cloud-providers"].networking.application_domain // $default
-')
+USE_ACCOUNT_SLUG=$(get_config_value \
+  --provider '.providers["scope-configurations"].networking.application_domain' \
+  --provider '.providers["cloud-providers"].networking.application_domain' \
+  --default "false"
+)
 
-REGION=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].account.region // "us-east-1"')
+REGION=$(get_config_value \
+  --provider '.providers["cloud-providers"].account.region' \
+  --default "us-east-1"
+)
 
 SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
-    DOMAIN=$(echo "$CONTEXT" | jq -r --arg default "$DOMAIN" '
-      .providers["cloud-providers"].networking.domain_name // $default
-    ')
+    DOMAIN=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.domain_name' \
+      --provider '.providers["cloud-providers"].networking.domain_name' \
+      --default "nullapps.io"
+    )
 else
-    DOMAIN=$(echo "$CONTEXT" | jq -r --arg private_default "$PRIVATE_DOMAIN" --arg default "$DOMAIN" '
-      (.providers["cloud-providers"].networking.private_domain_name // $private_default | if . == "" then empty else . end) // .providers["cloud-providers"].networking.domain_name // $default
-    ')
+    DOMAIN=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.private_domain_name' \
+      --provider '.providers["cloud-providers"].networking.private_domain_name' \
+      --provider '.providers["scope-configurations"].networking.domain_name' \
+      --provider '.providers["cloud-providers"].networking.domain_name' \
+      --default "nullapps.io"
+    )
 fi
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
 
@@ -63,22 +180,42 @@ export SCOPE_DOMAIN
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     export INGRESS_VISIBILITY="internet-facing"
     GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
-    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.public_name // $default')
+    export GATEWAY_NAME=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.gateway_public_name' \
+      --provider '.providers["container-orchestration"].gateway.public_name' \
+      --default "$GATEWAY_DEFAULT"
+    )
 else
     export INGRESS_VISIBILITY="internal"
     GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
-    export GATEWAY_NAME=$(echo "$CONTEXT" | jq -r --arg default "$GATEWAY_DEFAULT" '.providers["container-orchestration"].gateway.private_name // $default')
+    export GATEWAY_NAME=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.gateway_private_name' \
+      --provider '.providers["container-orchestration"].gateway.private_name' \
+      --default "$GATEWAY_DEFAULT"
+    )
 fi
 
-K8S_MODIFIERS="${K8S_MODIFIERS:-"{}"}"
+K8S_MODIFIERS=$(get_config_value \
+  --env K8S_MODIFIERS \
+  --provider '.providers["scope-configurations"].object_modifiers' \
+  --default "{}"
+)
 K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
 
 ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
 
 if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
-    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.public_name // $default')
+    ALB_NAME=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.balancer_public_name' \
+      --provider '.providers["container-orchestration"].balancer.public_name' \
+      --default "$ALB_NAME"
+    )
 else
-    ALB_NAME=$(echo "$CONTEXT" | jq -r --arg default "$ALB_NAME" '.providers["container-orchestration"].balancer.private_name // $default')
+    ALB_NAME=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.balancer_private_name' \
+      --provider '.providers["container-orchestration"].balancer.private_name' \
+      --default "$ALB_NAME"
+    )
 fi
 
 NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
