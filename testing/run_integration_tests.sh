@@ -67,6 +67,13 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
+# Generate certificates if they don't exist
+CERT_DIR="$SCRIPT_DIR/docker/certs"
+if [ ! -f "$CERT_DIR/cert.pem" ] || [ ! -f "$CERT_DIR/key.pem" ]; then
+  echo -e "${CYAN}Generating TLS certificates...${NC}"
+  "$SCRIPT_DIR/docker/generate-certs.sh"
+fi
+
 # Find all integration test directories
 find_test_dirs() {
   find . -type d -name "integration" -path "*/tests/*" -not -path "*/node_modules/*" 2>/dev/null | sort
