@@ -203,7 +203,47 @@
                               }
                            },
                            "type":"Control",
+                           "scope":"#/properties/continuous_delivery/properties/mode"
+                        },
+                        {
+                           "rule":{
+                              "effect":"SHOW",
+                              "condition":{
+                                 "type":"AND",
+                                 "conditions":[
+                                    {
+                                       "scope":"#/properties/continuous_delivery/properties/enabled",
+                                       "schema":{"const":true}
+                                    },
+                                    {
+                                       "scope":"#/properties/continuous_delivery/properties/mode",
+                                       "schema":{"const":"branch"}
+                                    }
+                                 ]
+                              }
+                           },
+                           "type":"Control",
                            "scope":"#/properties/continuous_delivery/properties/branches"
+                        },
+                        {
+                           "rule":{
+                              "effect":"SHOW",
+                              "condition":{
+                                 "type":"AND",
+                                 "conditions":[
+                                    {
+                                       "scope":"#/properties/continuous_delivery/properties/enabled",
+                                       "schema":{"const":true}
+                                    },
+                                    {
+                                       "scope":"#/properties/continuous_delivery/properties/mode",
+                                       "schema":{"const":"release"}
+                                    }
+                                 ]
+                              }
+                           },
+                           "type":"Control",
+                           "scope":"#/properties/continuous_delivery/properties/releases"
                         }
                      ]
                   },
@@ -571,15 +611,21 @@
             "type":"object",
             "title":"Continuous Delivery",
             "required":[
-               "enabled",
-               "branches"
+               "enabled"
             ],
             "properties":{
                "enabled":{
                   "type":"boolean",
                   "title":"Enable Continuous Delivery",
                   "default":false,
-                  "description":"Automatically deploy new versions from specified branches"
+                  "description":"Automatically deploy new versions from specified branches or releases"
+               },
+               "mode":{
+                  "type":"string",
+                  "title":"Mode",
+                  "enum":["branch", "release"],
+                  "default":"branch",
+                  "description":"Deploy based on branch builds or release creation"
                },
                "branches":{
                   "type":"array",
@@ -591,9 +637,15 @@
                      "main"
                   ],
                   "description":"Git branches to monitor for automatic deployment"
+               },
+               "releases":{
+                  "type":"string",
+                  "title":"Releases (Semver)",
+                  "default":".*",
+                  "description":"Semver regex pattern to match releases for automatic deployment (e.g., v\\d+\\.\\d+\\.\\d+)"
                }
             },
-            "description":"Configure automatic deployment from Git branches"
+            "description":"Configure automatic deployment from Git branches or releases"
          },
          "custom_domains": {
             "type": "object",
