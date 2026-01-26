@@ -144,5 +144,8 @@ frontend/deployment/tests/integration/volume/
 .terraform/
 .terraform.lock.hcl
 
+# Generated test certificates
+testing/docker/certs/
+
 # Claude Code
 .claude/
