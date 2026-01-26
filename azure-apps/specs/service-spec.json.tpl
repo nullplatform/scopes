@@ -316,7 +316,7 @@
   "selectors": {
     "category": "Scope",
     "imported": false,
-    "provider": "any",
+    "provider": "Agent",
     "sub_category": "App Service"
   },
   "type": "scope",
