@@ -9,10 +9,14 @@ if [ -z "$AZ_MOCK_RESPONSE" ]; then
 fi
 
 if [ -f "$AZ_MOCK_RESPONSE" ]; then
-  cat "$AZ_MOCK_RESPONSE"
+  exit_code="${AZ_MOCK_EXIT_CODE:-0}"
+  if [ "$exit_code" -eq 0 ]; then
+    cat "$AZ_MOCK_RESPONSE"
+  else
+    cat "$AZ_MOCK_RESPONSE" >&2
+  fi
+  exit "$exit_code"
 else
   echo "Mock file not found: $AZ_MOCK_RESPONSE" >&2
   exit 1
 fi
-
-exit "${AZ_MOCK_EXIT_CODE:-0}"
