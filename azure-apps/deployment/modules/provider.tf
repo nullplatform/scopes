@@ -12,7 +12,13 @@ terraform {
     }
   }
 
-  backend "azurerm" {}
+  # Uncomment and configure for remote state
+  # backend "azurerm" {
+  #   resource_group_name  = "tfstate-rg"
+  #   storage_account_name = "tfstate"
+  #   container_name       = "tfstate"
+  #   key                  = "app-service.tfstate"
+  # }
 }
 
 provider "azurerm" {
