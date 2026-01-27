@@ -28,10 +28,11 @@ setup() {
   SERVICE_PATH="$(cd "$PROJECT_DIR/.." && pwd)"
   TEST_OUTPUT_DIR=$(mktemp -d)
 
-  # Docker registry variables (normally set by docker_setup script)
+  # Variables normally set by docker_setup script
   export DOCKER_REGISTRY_URL="https://testregistry.azurecr.io"
   export DOCKER_REGISTRY_USERNAME="test-registry-user"
   export DOCKER_REGISTRY_PASSWORD="test-registry-password"
+  export DOCKER_IMAGE="tools/automation:v1.0.0"
 
   export CONTEXT SERVICE_PATH TEST_OUTPUT_DIR
 }
@@ -67,10 +68,10 @@ run_build_context() {
   assert_equal "$DEPLOYMENT_ID" "8"
 }
 
-@test "Should extract DOCKER_IMAGE from context" {
+@test "Should use DOCKER_IMAGE from environment" {
   run_build_context
 
-  assert_equal "$DOCKER_IMAGE" "myregistry.azurecr.io/tools/automation:v1.0.0"
+  assert_equal "$DOCKER_IMAGE" "tools/automation:v1.0.0"
 }
 
 # =============================================================================
@@ -128,7 +129,7 @@ run_build_context() {
   expected_json=$(cat <<'EOF'
 {
   "app_name": "tools-automation-development-tools-7",
-  "docker_image": "myregistry.azurecr.io/tools/automation:v1.0.0",
+  "docker_image": "tools/automation:v1.0.0",
   "docker_registry_url": "https://testregistry.azurecr.io",
   "docker_registry_username": "test-registry-user",
   "docker_registry_password": "test-registry-password",

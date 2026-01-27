@@ -68,6 +68,7 @@ run_docker_setup() {
   assert_contains "$output" "✅ DOCKER_REGISTRY_URL=https://testregistry.azurecr.io"
   assert_contains "$output" "✅ DOCKER_REGISTRY_USERNAME=test-registry-user"
   assert_contains "$output" "✅ DOCKER_REGISTRY_PASSWORD=****"
+  assert_contains "$output" "✅ DOCKER_IMAGE=tools/automation:v1.0.0"
 }
 
 # =============================================================================
@@ -170,4 +171,19 @@ run_docker_setup() {
   run_docker_setup
 
   assert_equal "$DOCKER_REGISTRY_PASSWORD" "test-registry-password"
+}
+
+# =============================================================================
+# Test: Docker image extraction
+# =============================================================================
+@test "Should extract DOCKER_IMAGE from asset URL with registry server stripped" {
+  run_docker_setup
+
+  assert_equal "$DOCKER_IMAGE" "tools/automation:v1.0.0"
+}
+
+@test "Should export DOCKER_IMAGE" {
+  run_docker_setup
+
+  assert_equal "$DOCKER_IMAGE" "tools/automation:v1.0.0"
 }
