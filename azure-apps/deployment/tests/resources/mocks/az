@@ -1,0 +1,10 @@
+#!/bin/bash
+# Mock az CLI for unit tests
+# Logs all invocations to AZ_CALL_LOG (one line per call)
+# Returns AZ_MOCK_EXIT_CODE (default: 0)
+
+if [ -n "${AZ_CALL_LOG:-}" ]; then
+  echo "$*" >> "$AZ_CALL_LOG"
+fi
+
+exit "${AZ_MOCK_EXIT_CODE:-0}"
