@@ -28,6 +28,13 @@ setup() {
 # =============================================================================
 # Test: Valid memory values - SKU mapping
 # =============================================================================
+@test "Should return F1 for 1 GB memory" {
+  run "$SCRIPT_PATH" 1
+
+  assert_equal "$status" "0"
+  assert_equal "$output" "F1"
+}
+
 @test "Should return S1 for 2 GB memory" {
   run "$SCRIPT_PATH" 2
 
@@ -66,11 +73,11 @@ setup() {
 # =============================================================================
 # Test: Error handling - Invalid memory values
 # =============================================================================
-@test "Should fail with error message for invalid memory value 1" {
-  run "$SCRIPT_PATH" 1
+@test "Should fail with error message for invalid memory value 5" {
+  run "$SCRIPT_PATH" 5
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Invalid memory value: 1"
+  assert_contains "$output" "❌ Invalid memory value: 5"
   assert_contains "$output" "💡 Valid memory values are: 2, 4, 8, 16, 32 (in GB)"
   assert_contains "$output" "🔧 How to fix:"
 }

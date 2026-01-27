@@ -36,6 +36,9 @@ fi
 memory="$1"
 
 case "$memory" in
+  1)
+    echo "F1"
+    ;;
   2)
     echo "S1"
     ;;

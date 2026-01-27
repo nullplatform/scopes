@@ -161,6 +161,10 @@
             "type":"integer",
             "oneOf":[
                {
+                  "const":1,
+                  "title":"1 GB"
+               },
+               {
                   "const":2,
                   "title":"2 GB"
                },
@@ -182,7 +186,7 @@
                }
             ],
             "title":"Memory",
-            "default":2,
+            "default":1,
             "description":"Memory allocation in GB for your application"
          },
          "websockets_enabled":{
@@ -263,9 +267,9 @@
                "eviction_time_in_min":{
                   "type":"integer",
                   "title":"Unhealthy Instance Eviction Time",
-                  "default":1,
-                  "maximum":60,
-                  "minimum":1,
+                  "default":2,
+                  "maximum":10,
+                  "minimum":2,
                   "description":"Minutes before an unhealthy instance is removed and replaced"
                }
             }
