@@ -36,7 +36,7 @@ ARM_SUBSCRIPTION_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].aut
 ARM_CLIENT_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].authentication.client_id // empty')
 ARM_TENANT_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].authentication.tenant_id // empty')
 AZURE_RESOURCE_GROUP=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_resource_group_name // empty')
-AZURE_LOCATION=eastus
+AZURE_LOCATION=australiaeast
 
 context_missing_vars=()
 

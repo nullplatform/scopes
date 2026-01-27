@@ -234,10 +234,10 @@ run_azure_setup() {
   assert_equal "$AZURE_RESOURCE_GROUP" "test-resource-group"
 }
 
-@test "Should set AZURE_LOCATION to eastus" {
+@test "Should set AZURE_LOCATION to australiaeast" {
   run_azure_setup
 
-  assert_equal "$AZURE_LOCATION" "eastus"
+  assert_equal "$AZURE_LOCATION" "australiaeast"
 }
 
 # =============================================================================
@@ -254,7 +254,7 @@ run_azure_setup() {
   run_azure_setup
 
   local actual_value=$(echo "$TOFU_VARIABLES" | jq -r '.location')
-  assert_equal "$actual_value" "eastus"
+  assert_equal "$actual_value" "australiaeast"
 }
 
 @test "Should include resource_tags in TOFU_VARIABLES" {
@@ -275,7 +275,7 @@ run_azure_setup() {
   local expected='{
     "existing_key": "existing_value",
     "resource_group_name": "test-resource-group",
-    "location": "eastus",
+    "location": "australiaeast",
     "resource_tags": {}
   }'
 
@@ -353,7 +353,7 @@ run_azure_setup() {
 @test "Should export AZURE_LOCATION" {
   run_azure_setup
 
-  assert_equal "$AZURE_LOCATION" "eastus"
+  assert_equal "$AZURE_LOCATION" "australiaeast"
 }
 
 # =============================================================================
