@@ -12,7 +12,11 @@ function validate_env_var() {
     echo "   ❌ $variable_name is missing"
     missing_vars+=("$variable_name")
   else
-    echo "   ✅ $variable_name=$variable_value"
+    if [[ "$(echo "$variable_name" | tr '[:upper:]' '[:lower:]')" == *secret* ]]; then
+      echo "   ✅ $variable_name=REDACTED"
+    else
+      echo "   ✅ $variable_name=$variable_value"
+    fi
   fi
 }
 

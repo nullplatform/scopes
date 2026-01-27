@@ -204,7 +204,14 @@ run_azure_setup() {
   assert_equal "$status" "0"
   assert_contains "$output" "✅ TOFU_PROVIDER_STORAGE_ACCOUNT=tfstatestorage"
   assert_contains "$output" "✅ TOFU_PROVIDER_CONTAINER=tfstate"
-  assert_contains "$output" "✅ ARM_CLIENT_SECRET=test-client-secret"
+}
+
+@test "Should redact variable value when name contains secret" {
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "✅ ARM_CLIENT_SECRET=REDACTED"
+  [[ "$output" != *"test-client-secret"* ]]
 }
 
 # =============================================================================
