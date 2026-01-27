@@ -1,0 +1,54 @@
+#!/bin/bash
+set -euo pipefail
+
+# Extract instance arguments from notification context
+# CONTEXT = $NP_ACTION_CONTEXT.notification (set by main entrypoint)
+
+ARGUMENTS=$(echo "$CONTEXT" | jq -r '.arguments // empty')
+
+export APPLICATION_ID=$(echo "$ARGUMENTS" | jq -r 'if (.application_id | type) == "array" then .application_id[0] else .application_id end')
+export SCOPE_ID=$(echo "$ARGUMENTS" | jq -r 'if (.scope_id | type) == "array" then .scope_id[0] else .scope_id end')
+export DEPLOYMENT_ID=$(echo "$ARGUMENTS" | jq -r 'if (.deployment_id | type) == "array" then .deployment_id[0] else .deployment_id end')
+
+export LIMIT=${LIMIT:-10}
+
+if [ -z "$SCOPE_ID" ] || [ "$SCOPE_ID" = "null" ]; then
+  echo "Error: Missing required parameter: scope_id" >&2
+  exit 1
+fi
+
+# Resolve App Service name via np CLI
+SCOPE_DATA=$(np scope read --id "$SCOPE_ID" --format json)
+SCOPE_SLUG=$(echo "$SCOPE_DATA" | jq -r '.slug')
+SCOPE_NRN=$(echo "$SCOPE_DATA" | jq -r '.nrn')
+RESOLVED_APP_ID=$(echo "$SCOPE_DATA" | jq -r '.application_id')
+
+APPLICATION_ID="${APPLICATION_ID:-$RESOLVED_APP_ID}"
+
+APP_DATA=$(np application read --id "$APPLICATION_ID" --format json)
+APP_SLUG=$(echo "$APP_DATA" | jq -r '.slug')
+NAMESPACE_ID=$(echo "$APP_DATA" | jq -r '.namespace_id')
+
+NS_DATA=$(np namespace read --id "$NAMESPACE_ID" --format json)
+NS_SLUG=$(echo "$NS_DATA" | jq -r '.slug')
+
+# Generate Azure App Service name
+APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" 60 "$NS_SLUG" "$APP_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
+export APP_NAME
+
+# Fetch Azure credentials from cloud provider
+PROVIDERS=$(np provider list --categories cloud-providers --nrn "$SCOPE_NRN" --format json)
+
+export ARM_SUBSCRIPTION_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.subscription_id // empty')
+export ARM_CLIENT_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.client_id // empty')
+export ARM_TENANT_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.tenant_id // empty')
+export AZURE_RESOURCE_GROUP=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.networking.public_dns_zone_resource_group_name // empty')
+
+if [ -z "$ARM_SUBSCRIPTION_ID" ] || [ -z "$ARM_CLIENT_ID" ] || [ -z "$ARM_TENANT_ID" ]; then
+  echo "Error: Could not resolve Azure credentials from cloud-providers provider" >&2
+  exit 1
+fi
+
+# Authenticate with Azure
+az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
+az account set --subscription "$ARM_SUBSCRIPTION_ID" --output none

@@ -1,0 +1,13 @@
+#!/bin/bash
+# Mock curl for unit tests
+# Returns CURL_MOCK_RESPONSE file content if configured
+
+if [ -n "${CURL_CALL_LOG:-}" ]; then
+  echo "$*" >> "$CURL_CALL_LOG"
+fi
+
+if [ -n "${CURL_MOCK_RESPONSE:-}" ] && [ -f "$CURL_MOCK_RESPONSE" ]; then
+  cat "$CURL_MOCK_RESPONSE"
+fi
+
+exit "${CURL_MOCK_EXIT_CODE:-0}"

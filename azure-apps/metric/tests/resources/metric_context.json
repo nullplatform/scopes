@@ -1,0 +1,9 @@
+{
+  "arguments": {
+    "scope_id": "7",
+    "metric": "system.cpu_usage_percentage",
+    "start_time": "2026-01-27T00:00:00Z",
+    "end_time": "2026-01-27T01:00:00Z",
+    "interval": "5"
+  }
+}

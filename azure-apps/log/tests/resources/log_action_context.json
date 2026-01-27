@@ -1,0 +1,14 @@
+{
+  "notification": {
+    "arguments": {
+      "scope_id": "7",
+      "application_id": "4",
+      "deployment_id": "8",
+      "filter_pattern": "ERROR",
+      "instance_id": "",
+      "limit": "100",
+      "start_time": "2026-01-27T00:00:00Z",
+      "next_page_token": ""
+    }
+  }
+}

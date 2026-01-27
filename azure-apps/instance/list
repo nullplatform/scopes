@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+
+# List Azure App Service instances
+
+INSTANCES=$(az webapp list-instances \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --name "$APP_NAME" \
+  --output json)
+
+echo "$INSTANCES" | jq --argjson limit "${LIMIT:-10}" --arg app_name "$APP_NAME" '{
+  results: .[:$limit] | map({
+    id: .name,
+    selector: {
+      scope_id: (env.SCOPE_ID // ""),
+      application_id: (env.APPLICATION_ID // ""),
+      deployment_id: (env.DEPLOYMENT_ID // "")
+    },
+    details: {
+      namespace: (env.AZURE_RESOURCE_GROUP // ""),
+      ip: "",
+      dns: ($app_name + ".azurewebsites.net"),
+      cpu: {
+        requested: 0,
+        limit: 0
+      },
+      memory: {
+        requested: "0Mi",
+        limit: "0Mi"
+      },
+      architecture: "x86"
+    },
+    state: (.state // "Running"),
+    launch_time: (.siteInstanceName // ""),
+    spot: false
+  })
+}'

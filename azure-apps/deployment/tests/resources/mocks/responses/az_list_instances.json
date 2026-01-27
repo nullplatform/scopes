@@ -1,0 +1,12 @@
+[
+  {
+    "name": "instance-001",
+    "siteInstanceName": "instance-001",
+    "state": "Running"
+  },
+  {
+    "name": "instance-002",
+    "siteInstanceName": "instance-002",
+    "state": "Running"
+  }
+]

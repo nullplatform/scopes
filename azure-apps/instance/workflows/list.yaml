@@ -1,0 +1,7 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/instance/build_context"
+  - name: list
+    type: script
+    file: "$SERVICE_PATH/instance/list"

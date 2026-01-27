@@ -1,0 +1,164 @@
+#!/bin/bash
+set -euo pipefail
+
+# Query Azure Monitor metrics for App Service
+
+if [ -z "${METRIC_NAME:-}" ]; then
+  echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}' >&2
+  exit 1
+fi
+
+# Map nullplatform metric names to Azure Monitor metrics
+get_azure_metric_config() {
+  local metric="$1"
+  # Returns: azure_metric aggregation unit type
+  case "$metric" in
+    "system.cpu_usage_percentage")
+      echo "CpuPercentage Average percent gauge"
+      ;;
+    "system.memory_usage_percentage")
+      echo "MemoryPercentage Average percent gauge"
+      ;;
+    "http.response_time")
+      echo "HttpResponseTime Average seconds gauge"
+      ;;
+    "http.rpm")
+      echo "Requests Total rpm gauge"
+      ;;
+    "http.error_rate")
+      echo "COMPUTED Total percent gauge"
+      ;;
+    "http.request_count")
+      echo "Requests Total count gauge"
+      ;;
+    "http.5xx_count")
+      echo "Http5xx Total count gauge"
+      ;;
+    "http.4xx_count")
+      echo "Http4xx Total count gauge"
+      ;;
+    "system.health_check_status")
+      echo "HealthCheckStatus Average percent gauge"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+CONFIG=$(get_azure_metric_config "$METRIC_NAME")
+
+if [ -z "$CONFIG" ]; then
+  echo "Error: Unknown metric: $METRIC_NAME" >&2
+  exit 1
+fi
+
+AZURE_METRIC=$(echo "$CONFIG" | cut -d' ' -f1)
+AGGREGATION=$(echo "$CONFIG" | cut -d' ' -f2)
+UNIT=$(echo "$CONFIG" | cut -d' ' -f3)
+METRIC_TYPE=$(echo "$CONFIG" | cut -d' ' -f4)
+
+# Calculate interval
+INTERVAL_MINUTES=${INTERVAL:-5}
+PERIOD_SECONDS=$((INTERVAL_MINUTES * 60))
+
+# Query Azure Monitor
+query_metric() {
+  local metric="$1"
+  local aggregation="$2"
+
+  az monitor metrics list \
+    --resource "$AZURE_RESOURCE_ID" \
+    --metric "$metric" \
+    --start-time "$START_TIME" \
+    --end-time "$END_TIME" \
+    --interval "PT${INTERVAL_MINUTES}M" \
+    --aggregation "$aggregation" \
+    --output json
+}
+
+# Transform Azure Monitor response to standard format
+transform_response() {
+  local response="$1"
+  local aggregation_key="$2"
+
+  echo "$response" | jq --arg agg "$aggregation_key" '[
+    .value[0].timeseries[] | {
+      selector: {},
+      data: [
+        .data[] |
+        select(.[$agg] != null) |
+        {
+          timestamp: .timeStamp,
+          value: .[$agg]
+        }
+      ]
+    }
+  ]'
+}
+
+AGG_KEY=$(echo "$AGGREGATION" | tr '[:upper:]' '[:lower:]')
+
+if [ "$METRIC_NAME" = "http.error_rate" ]; then
+  # Special case: compute Http5xx / Requests * 100
+  RESPONSE_5XX=$(query_metric "Http5xx" "Total")
+  RESPONSE_REQ=$(query_metric "Requests" "Total")
+
+  # Extract timeseries data and compute ratio
+  RESULTS=$(jq -n \
+    --argjson r5xx "$RESPONSE_5XX" \
+    --argjson rreq "$RESPONSE_REQ" \
+    '[{
+      selector: {},
+      data: [
+        range($r5xx.value[0].timeseries[0].data | length) |
+        . as $i |
+        {
+          timestamp: $r5xx.value[0].timeseries[0].data[$i].timeStamp,
+          value: (
+            if ($rreq.value[0].timeseries[0].data[$i].total // 0) > 0 then
+              ($r5xx.value[0].timeseries[0].data[$i].total // 0) / ($rreq.value[0].timeseries[0].data[$i].total) * 100
+            else
+              0
+            end
+          )
+        }
+      ]
+    }]')
+
+elif [ "$METRIC_NAME" = "http.rpm" ]; then
+  # Special case: Total requests / interval_minutes
+  RESPONSE=$(query_metric "Requests" "Total")
+  RESULTS=$(echo "$RESPONSE" | jq --argjson interval "$INTERVAL_MINUTES" '[
+    .value[0].timeseries[] | {
+      selector: {},
+      data: [
+        .data[] |
+        select(.total != null) |
+        {
+          timestamp: .timeStamp,
+          value: (.total / $interval)
+        }
+      ]
+    }
+  ]')
+
+else
+  RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION")
+  RESULTS=$(transform_response "$RESPONSE" "$AGG_KEY")
+fi
+
+# Output in standard format
+jq -n \
+  --arg metric "$METRIC_NAME" \
+  --arg type "$METRIC_TYPE" \
+  --argjson period "$PERIOD_SECONDS" \
+  --arg unit "$UNIT" \
+  --argjson results "$RESULTS" \
+  '{
+    metric: $metric,
+    type: $type,
+    period_in_seconds: $period,
+    unit: $unit,
+    results: $results
+  }'
