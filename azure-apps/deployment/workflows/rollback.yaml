@@ -3,3 +3,10 @@ include:
 configuration:
   SWAP_SLOTS: false
   ENABLE_STAGING_SLOT: false
+steps:
+  - name: switch_traffic
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/traffic_management"
+    configuration:
+      STAGING_TRAFFIC_PERCENT: 0
+    before: tofu
