@@ -205,6 +205,44 @@ EOF
 }
 
 # =============================================================================
+# Test: PARAMETER_JSON extraction
+# =============================================================================
+@test "Should generate parameter_json with correct key-value pairs from multiple parameters" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.parameters.results = [
+    {"variable": "TEST", "values": [{"id": "1", "value": "TRes"}]},
+    {"variable": "PARAM", "values": [{"id": "2", "value": "values"}]}
+  ]')
+
+  run_build_context
+
+  local parameter_json
+  parameter_json=$(echo "$TOFU_VARIABLES" | jq -r '.parameter_json')
+
+  local expected_json='{"TEST":"TRes","PARAM":"values"}'
+  assert_json_equal "$parameter_json" "$expected_json" "parameter_json"
+}
+
+@test "Should generate parameter_json as empty array when parameters.results is empty" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.parameters.results = []')
+
+  run_build_context
+
+  local parameter_json
+  parameter_json=$(echo "$TOFU_VARIABLES" | jq -r '.parameter_json')
+  assert_equal "$parameter_json" "[]"
+}
+
+@test "Should generate parameter_json as empty array when parameters is null" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.parameters = null')
+
+  run_build_context
+
+  local parameter_json
+  parameter_json=$(echo "$TOFU_VARIABLES" | jq -r '.parameter_json')
+  assert_equal "$parameter_json" "[]"
+}
+
+# =============================================================================
 # Test: Blue-green deployment variables
 # =============================================================================
 @test "Should read staging_traffic_percent from context.deployment.strategy_data.desired_switched_traffic" {

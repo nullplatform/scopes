@@ -99,6 +99,18 @@ setup() {
     "$TEST_SUBSCRIPTION_ID" \
     "$TEST_RESOURCE_GROUP" \
     "$TEST_EXPECTED_SKU"
+
+  # Verify app_settings merge all 3 sources:
+  #   - env_variables (from context parameters): DATABASE_URL, LOG_LEVEL
+  #   - base_app_settings (from locals.tf): WEBSITES_ENABLE_APP_SERVICE_STORAGE, DOCKER_ENABLE_CI
+  assert_web_app_app_settings_contain \
+    "$TEST_APP_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP" \
+    "DATABASE_URL" \
+    "LOG_LEVEL" \
+    "WEBSITES_ENABLE_APP_SERVICE_STORAGE" \
+    "DOCKER_ENABLE_CI"
 }
 
 # =============================================================================

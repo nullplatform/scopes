@@ -53,10 +53,6 @@
     "messages": [],
     "metadata": {},
     "nrn": "organization=1:account=2:namespace=3:application=4:scope=7:deployment=8",
-    "parameters": {
-      "DATABASE_URL": "postgres://localhost:5432/db",
-      "LOG_LEVEL": "info"
-    },
     "release_id": 9,
     "scope_id": 7,
     "status": "creating",

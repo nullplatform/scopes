@@ -58,7 +58,7 @@ if [ "$SCALING_TYPE" = "auto" ]; then
 fi
 
 # Extract parameters/environment variables
-PARAMETER_JSON=$(echo "$CONTEXT" | jq -c '.deployment.parameters // .scope.parameters // {}')
+PARAMETER_JSON=$(echo "$CONTEXT" | jq '[(.parameters.results // [])[] | {(.variable): .values[0].value}] | add // []')
 
 # Set output directory
 OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"

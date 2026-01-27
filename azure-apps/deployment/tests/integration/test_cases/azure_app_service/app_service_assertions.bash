@@ -403,3 +403,41 @@ assert_azure_app_service_with_slot_configured() {
   echo "PASS: Azure App Service '$app_name' with slot '$slot_name' is fully configured"
   return 0
 }
+
+# -----------------------------------------------------------------------------
+# assert_web_app_app_settings_contain
+# Verify that a Web App's app_settings contain expected key-value pairs
+#
+# Arguments:
+#   $1 - app_name: Name of the Web App
+#   $2 - subscription_id: Azure subscription ID
+#   $3 - resource_group: Azure resource group name
+#   $4 - expected_keys: Space-separated list of setting keys that must exist
+# -----------------------------------------------------------------------------
+assert_web_app_app_settings_contain() {
+  local app_name=$1
+  local subscription_id=$2
+  local resource_group=$3
+  shift 3
+  local expected_keys=("$@")
+
+  local path="/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/appSettings/list"
+  local response
+  response=$(curl -s -X POST "${AZURE_MOCK_ENDPOINT}${path}" 2>/dev/null)
+
+  local properties
+  properties=$(echo "$response" | jq '.properties // {}')
+
+  for key in "${expected_keys[@]}"; do
+    local value
+    value=$(echo "$properties" | jq -r --arg k "$key" '.[$k] // empty')
+    if [[ -z "$value" ]]; then
+      echo "FAIL: app_settings missing key '$key'"
+      echo "Available keys: $(echo "$properties" | jq -r 'keys | join(", ")')"
+      return 1
+    fi
+    echo "PASS: app_settings contains '$key'='$value'"
+  done
+
+  return 0
+}

@@ -52,6 +52,7 @@ type Store struct {
 	metricAlerts          map[string]MetricAlert
 	diagnosticSettings    map[string]DiagnosticSetting
 	trafficRouting        map[string][]TrafficRoutingRule
+	webAppSettings        map[string]map[string]string // key: lowercase resource ID → app settings key/value
 }
 
 // TrafficRoutingRule represents a traffic routing rule for a slot
@@ -82,6 +83,7 @@ func NewStore() *Store {
 		metricAlerts:           make(map[string]MetricAlert),
 		diagnosticSettings:     make(map[string]DiagnosticSetting),
 		trafficRouting:         make(map[string][]TrafficRoutingRule),
+		webAppSettings:         make(map[string]map[string]string),
 	}
 }
 
@@ -2052,12 +2054,30 @@ func (s *Server) handleWebAppAppSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Return empty app settings
+	// Build app resource ID from path to look up stored settings
+	path := r.URL.Path
+	parts := strings.Split(path, "/")
+	subscriptionID := parts[2]
+	resourceGroup := parts[4]
+	appName := parts[8]
+	appResourceID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Web/sites/%s",
+		subscriptionID, resourceGroup, appName)
+	storeKey := strings.ToLower(appResourceID)
+
+	s.store.mu.RLock()
+	settings := s.store.webAppSettings[storeKey]
+	s.store.mu.RUnlock()
+
+	properties := map[string]string{}
+	if settings != nil {
+		properties = settings
+	}
+
 	response := map[string]interface{}{
-		"id":         r.URL.Path,
+		"id":         path,
 		"name":       "appsettings",
 		"type":       "Microsoft.Web/sites/config",
-		"properties": map[string]string{},
+		"properties": properties,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -2270,13 +2290,32 @@ func (s *Server) handleWebAppConfigFallback(w http.ResponseWriter, r *http.Reque
 	// Return an empty properties response which should work for most cases
 	path := r.URL.Path
 
-	// Extract config name from path
+	// Extract config name and build app resource ID from path
 	parts := strings.Split(path, "/")
 	configName := "unknown"
 	for i, p := range parts {
-		if p == "config" && i+1 < len(parts) {
+		if strings.EqualFold(p, "config") && i+1 < len(parts) {
 			configName = parts[i+1]
 			break
+		}
+	}
+
+	// Persist app settings when the provider writes them via PUT
+	if strings.EqualFold(configName, "appsettings") && (r.Method == http.MethodPut || r.Method == http.MethodPatch) {
+		subscriptionID := parts[2]
+		resourceGroup := parts[4]
+		appName := parts[8]
+		appResourceID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Web/sites/%s",
+			subscriptionID, resourceGroup, appName)
+		storeKey := strings.ToLower(appResourceID)
+
+		var req struct {
+			Properties map[string]string `json:"properties"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Properties != nil {
+			s.store.mu.Lock()
+			s.store.webAppSettings[storeKey] = req.Properties
+			s.store.mu.Unlock()
 		}
 	}
 
