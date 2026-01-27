@@ -31,6 +31,7 @@ setup() {
   # Set required environment variables with defaults
   export TOFU_PROVIDER_STORAGE_ACCOUNT="tfstatestorage"
   export TOFU_PROVIDER_CONTAINER="tfstate"
+  export ARM_CLIENT_SECRET="test-client-secret"
 
   # Initialize TOFU_VARIABLES as empty JSON
   export TOFU_VARIABLES="{}"
@@ -42,7 +43,10 @@ setup() {
 teardown() {
   # Clean up exported variables
   unset CONTEXT
-  unset AZURE_SUBSCRIPTION_ID
+  unset ARM_SUBSCRIPTION_ID
+  unset ARM_CLIENT_ID
+  unset ARM_TENANT_ID
+  unset ARM_CLIENT_SECRET
   unset AZURE_RESOURCE_GROUP
   unset AZURE_LOCATION
   unset TOFU_PROVIDER_STORAGE_ACCOUNT
@@ -84,33 +88,71 @@ run_azure_setup() {
   assert_contains "$output" "• TOFU_PROVIDER_CONTAINER"
 }
 
+@test "Should fail when ARM_CLIENT_SECRET is not set" {
+  unset ARM_CLIENT_SECRET
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ARM_CLIENT_SECRET is missing"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• ARM_CLIENT_SECRET"
+}
+
 @test "Should fail when multiple env variables are missing and list all of them" {
   unset TOFU_PROVIDER_STORAGE_ACCOUNT
   unset TOFU_PROVIDER_CONTAINER
+  unset ARM_CLIENT_SECRET
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ TOFU_PROVIDER_STORAGE_ACCOUNT is missing"
   assert_contains "$output" "❌ TOFU_PROVIDER_CONTAINER is missing"
+  assert_contains "$output" "❌ ARM_CLIENT_SECRET is missing"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "• TOFU_PROVIDER_STORAGE_ACCOUNT"
   assert_contains "$output" "• TOFU_PROVIDER_CONTAINER"
+  assert_contains "$output" "• ARM_CLIENT_SECRET"
 }
 
 # =============================================================================
 # Test: Context-derived variables - Validation
 # =============================================================================
-@test "Should fail when AZURE_SUBSCRIPTION_ID cannot be resolved from context" {
+@test "Should fail when ARM_SUBSCRIPTION_ID cannot be resolved from context" {
   export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"].authentication.subscription_id)')
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ AZURE_SUBSCRIPTION_ID could not be resolved from providers"
+  assert_contains "$output" "❌ ARM_SUBSCRIPTION_ID could not be resolved from providers"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
   assert_contains "$output" "• subscription_id"
+}
+
+@test "Should fail when ARM_CLIENT_ID cannot be resolved from context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"].authentication.client_id)')
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ARM_CLIENT_ID could not be resolved from providers"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
+  assert_contains "$output" "• client_id"
+}
+
+@test "Should fail when ARM_TENANT_ID cannot be resolved from context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"].authentication.tenant_id)')
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ARM_TENANT_ID could not be resolved from providers"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
+  assert_contains "$output" "• tenant_id"
 }
 
 @test "Should fail when AZURE_RESOURCE_GROUP cannot be resolved from context" {
@@ -131,7 +173,9 @@ run_azure_setup() {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ AZURE_SUBSCRIPTION_ID could not be resolved from providers"
+  assert_contains "$output" "❌ ARM_SUBSCRIPTION_ID could not be resolved from providers"
+  assert_contains "$output" "❌ ARM_CLIENT_ID could not be resolved from providers"
+  assert_contains "$output" "❌ ARM_TENANT_ID could not be resolved from providers"
   assert_contains "$output" "❌ AZURE_RESOURCE_GROUP could not be resolved from providers"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
@@ -160,15 +204,28 @@ run_azure_setup() {
   assert_equal "$status" "0"
   assert_contains "$output" "✅ TOFU_PROVIDER_STORAGE_ACCOUNT=tfstatestorage"
   assert_contains "$output" "✅ TOFU_PROVIDER_CONTAINER=tfstate"
+  assert_contains "$output" "✅ ARM_CLIENT_SECRET=test-client-secret"
 }
 
 # =============================================================================
 # Test: Context value extraction
 # =============================================================================
-@test "Should extract AZURE_SUBSCRIPTION_ID from context" {
+@test "Should extract ARM_SUBSCRIPTION_ID from context" {
   run_azure_setup
 
-  assert_equal "$AZURE_SUBSCRIPTION_ID" "test-subscription-id"
+  assert_equal "$ARM_SUBSCRIPTION_ID" "test-subscription-id"
+}
+
+@test "Should extract ARM_CLIENT_ID from context" {
+  run_azure_setup
+
+  assert_equal "$ARM_CLIENT_ID" "test-client-id"
+}
+
+@test "Should extract ARM_TENANT_ID from context" {
+  run_azure_setup
+
+  assert_equal "$ARM_TENANT_ID" "test-tenant-id"
 }
 
 @test "Should extract AZURE_RESOURCE_GROUP from context" {
@@ -263,10 +320,28 @@ run_azure_setup() {
   assert_not_empty "$TOFU_INIT_VARIABLES" "TOFU_INIT_VARIABLES"
 }
 
-@test "Should export AZURE_SUBSCRIPTION_ID" {
+@test "Should export ARM_SUBSCRIPTION_ID" {
   run_azure_setup
 
-  assert_equal "$AZURE_SUBSCRIPTION_ID" "test-subscription-id"
+  assert_equal "$ARM_SUBSCRIPTION_ID" "test-subscription-id"
+}
+
+@test "Should export ARM_CLIENT_ID" {
+  run_azure_setup
+
+  assert_equal "$ARM_CLIENT_ID" "test-client-id"
+}
+
+@test "Should export ARM_TENANT_ID" {
+  run_azure_setup
+
+  assert_equal "$ARM_TENANT_ID" "test-tenant-id"
+}
+
+@test "Should export ARM_CLIENT_SECRET" {
+  run_azure_setup
+
+  assert_equal "$ARM_CLIENT_SECRET" "test-client-secret"
 }
 
 @test "Should export AZURE_RESOURCE_GROUP" {

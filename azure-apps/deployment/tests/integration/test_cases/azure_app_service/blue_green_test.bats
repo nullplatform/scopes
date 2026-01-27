@@ -66,6 +66,7 @@ setup() {
   # Use mock storage account for backend
   export TOFU_PROVIDER_STORAGE_ACCOUNT="devstoreaccount1"
   export TOFU_PROVIDER_CONTAINER="tfstate"
+  export ARM_CLIENT_SECRET="mock-client-secret"
 
   # Setup API mocks for np CLI calls
   local mocks_dir="azure-apps/deployment/tests/integration/mocks/"
