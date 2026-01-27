@@ -1,0 +1,51 @@
+#!/bin/bash
+
+echo "🔍 Validating Docker registry configuration..."
+
+echo "$CONTEXT" | jq -r '.providers["assets-repository"]'
+
+DOCKER_REGISTRY_SERVER=$(echo "$CONTEXT" | jq -r '.providers["assets-repository"].setup.server // empty')
+DOCKER_REGISTRY_USERNAME=$(echo "$CONTEXT" | jq -r '.providers["assets-repository"].setup.username // empty')
+DOCKER_REGISTRY_PASSWORD=$(echo "$CONTEXT" | jq -r '.providers["assets-repository"].setup.password // empty')
+
+context_missing_vars=()
+
+if [ -z "$DOCKER_REGISTRY_SERVER" ]; then
+  echo "   ❌ DOCKER_REGISTRY_SERVER could not be resolved from providers"
+  context_missing_vars+=("server")
+fi
+
+if [ -z "$DOCKER_REGISTRY_USERNAME" ]; then
+  echo "   ❌ DOCKER_REGISTRY_USERNAME could not be resolved from providers"
+  context_missing_vars+=("username")
+fi
+
+if [ -z "$DOCKER_REGISTRY_PASSWORD" ]; then
+  echo "   ❌ DOCKER_REGISTRY_PASSWORD could not be resolved from providers"
+  context_missing_vars+=("password")
+fi
+
+if [ ${#context_missing_vars[@]} -gt 0 ]; then
+  echo ""
+  echo "  💡 Possible causes:"
+  echo "    Verify that you have a Docker server asset provider provider linked to this scope."
+  echo "    The Docker server provider must include the following fields:"
+  for var in "${context_missing_vars[@]}"; do
+    echo "      • $var"
+  done
+  echo ""
+  exit 1
+fi
+
+DOCKER_REGISTRY_URL="https://${DOCKER_REGISTRY_SERVER}"
+
+echo "   ✅ DOCKER_REGISTRY_URL=$DOCKER_REGISTRY_URL"
+echo "   ✅ DOCKER_REGISTRY_USERNAME=$DOCKER_REGISTRY_USERNAME"
+echo "   ✅ DOCKER_REGISTRY_PASSWORD=****"
+echo ""
+echo "✨ Docker registry configured successfully"
+echo ""
+
+export DOCKER_REGISTRY_URL
+export DOCKER_REGISTRY_USERNAME
+export DOCKER_REGISTRY_PASSWORD

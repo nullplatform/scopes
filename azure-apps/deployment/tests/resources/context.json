@@ -135,6 +135,15 @@
       "networking": {
         "public_dns_zone_resource_group_name": "test-resource-group"
       }
+    },
+    "assets-repository": {
+      "setup": {
+        "password": "test-registry-password",
+        "path": "test-path",
+        "server": "testregistry.azurecr.io",
+        "use_namespace": false,
+        "username": "test-registry-user"
+      }
     }
   },
   "release": {

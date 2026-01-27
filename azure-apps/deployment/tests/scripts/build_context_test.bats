@@ -28,6 +28,11 @@ setup() {
   SERVICE_PATH="$(cd "$PROJECT_DIR/.." && pwd)"
   TEST_OUTPUT_DIR=$(mktemp -d)
 
+  # Docker registry variables (normally set by docker_setup script)
+  export DOCKER_REGISTRY_URL="https://testregistry.azurecr.io"
+  export DOCKER_REGISTRY_USERNAME="test-registry-user"
+  export DOCKER_REGISTRY_PASSWORD="test-registry-password"
+
   export CONTEXT SERVICE_PATH TEST_OUTPUT_DIR
 }
 
@@ -124,9 +129,9 @@ run_build_context() {
 {
   "app_name": "tools-automation-development-tools-7",
   "docker_image": "myregistry.azurecr.io/tools/automation:v1.0.0",
-  "docker_registry_url": "https://index.docker.io",
-  "docker_registry_username": "",
-  "docker_registry_password": "",
+  "docker_registry_url": "https://testregistry.azurecr.io",
+  "docker_registry_username": "test-registry-user",
+  "docker_registry_password": "test-registry-password",
   "sku_name": "P1v3",
   "websockets_enabled": false,
   "health_check_path": "/healthz",

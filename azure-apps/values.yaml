@@ -17,6 +17,7 @@
 
 provider_categories:
   - cloud-providers
+  - assets-repository
 
 configuration:
   # Terraform Configuration
@@ -25,9 +26,6 @@ configuration:
   # Domain Configuration (optional - set via environment variables)
   ENABLE_CUSTOM_DOMAIN: false
   ENABLE_MANAGED_CERTIFICATE: true
-
-  # Docker Registry defaults
-  DOCKER_REGISTRY_URL: "https://index.docker.io"
 
   # Network Configuration (optional)
   ENABLE_VNET_INTEGRATION: false

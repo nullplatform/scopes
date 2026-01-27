@@ -4,6 +4,9 @@ configuration:
   TOFU_ACTION: "apply"
   ENABLE_STAGING_SLOT: false
 steps:
+  - name: docker_setup
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/docker_setup"
   - name: build_context
     type: script
     file: "$SERVICE_PATH/deployment/scripts/build_context"
