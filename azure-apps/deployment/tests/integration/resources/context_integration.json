@@ -127,10 +127,11 @@
   },
   "providers": {
     "cloud-providers": {
-      "azure": {
-        "subscription_id": "mock-subscription-id",
-        "resource_group": "test-resource-group",
-        "location": "eastus"
+      "authentication": {
+        "subscription_id": "mock-subscription-id"
+      },
+      "networking": {
+        "public_dns_zone_resource_group_name": "test-resource-group"
       }
     }
   },

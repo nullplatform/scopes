@@ -25,10 +25,10 @@ setup() {
 
   SCRIPT_PATH="$PROJECT_DIR/scripts/azure_setup"
 
+  # Load CONTEXT from test resources
+  export CONTEXT=$(cat "$PROJECT_DIR/tests/resources/context.json")
+
   # Set required environment variables with defaults
-  export AZURE_SUBSCRIPTION_ID="test-subscription-id"
-  export AZURE_RESOURCE_GROUP="test-resource-group"
-  export AZURE_LOCATION="eastus"
   export TOFU_PROVIDER_STORAGE_ACCOUNT="tfstatestorage"
   export TOFU_PROVIDER_CONTAINER="tfstate"
 
@@ -41,6 +41,7 @@ setup() {
 # Teardown - runs after each test
 teardown() {
   # Clean up exported variables
+  unset CONTEXT
   unset AZURE_SUBSCRIPTION_ID
   unset AZURE_RESOURCE_GROUP
   unset AZURE_LOCATION
@@ -61,41 +62,6 @@ run_azure_setup() {
 # =============================================================================
 # Test: Required environment variables - Error messages
 # =============================================================================
-@test "Should fail when AZURE_SUBSCRIPTION_ID is not set" {
-  unset AZURE_SUBSCRIPTION_ID
-
-  run source "$SCRIPT_PATH"
-
-  assert_equal "$status" "1"
-  assert_contains "$output" "🔍 Validating Azure provider configuration..."
-  assert_contains "$output" "❌ AZURE_SUBSCRIPTION_ID is missing"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Set the missing variable(s) in the nullplatform agent Helm installation:"
-  assert_contains "$output" "• AZURE_SUBSCRIPTION_ID"
-}
-
-@test "Should fail when AZURE_RESOURCE_GROUP is not set" {
-  unset AZURE_RESOURCE_GROUP
-
-  run source "$SCRIPT_PATH"
-
-  assert_equal "$status" "1"
-  assert_contains "$output" "❌ AZURE_RESOURCE_GROUP is missing"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• AZURE_RESOURCE_GROUP"
-}
-
-@test "Should fail when AZURE_LOCATION is not set" {
-  unset AZURE_LOCATION
-
-  run source "$SCRIPT_PATH"
-
-  assert_equal "$status" "1"
-  assert_contains "$output" "❌ AZURE_LOCATION is missing"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• AZURE_LOCATION"
-}
-
 @test "Should fail when TOFU_PROVIDER_STORAGE_ACCOUNT is not set" {
   unset TOFU_PROVIDER_STORAGE_ACCOUNT
 
@@ -118,21 +84,57 @@ run_azure_setup() {
   assert_contains "$output" "• TOFU_PROVIDER_CONTAINER"
 }
 
-@test "Should fail when multiple variables are missing and list all of them" {
-  unset AZURE_SUBSCRIPTION_ID
-  unset AZURE_RESOURCE_GROUP
+@test "Should fail when multiple env variables are missing and list all of them" {
   unset TOFU_PROVIDER_STORAGE_ACCOUNT
+  unset TOFU_PROVIDER_CONTAINER
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ AZURE_SUBSCRIPTION_ID is missing"
-  assert_contains "$output" "❌ AZURE_RESOURCE_GROUP is missing"
   assert_contains "$output" "❌ TOFU_PROVIDER_STORAGE_ACCOUNT is missing"
+  assert_contains "$output" "❌ TOFU_PROVIDER_CONTAINER is missing"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• AZURE_SUBSCRIPTION_ID"
-  assert_contains "$output" "• AZURE_RESOURCE_GROUP"
   assert_contains "$output" "• TOFU_PROVIDER_STORAGE_ACCOUNT"
+  assert_contains "$output" "• TOFU_PROVIDER_CONTAINER"
+}
+
+# =============================================================================
+# Test: Context-derived variables - Validation
+# =============================================================================
+@test "Should fail when AZURE_SUBSCRIPTION_ID cannot be resolved from context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"].authentication.subscription_id)')
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ AZURE_SUBSCRIPTION_ID could not be resolved from providers"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
+  assert_contains "$output" "• subscription_id"
+}
+
+@test "Should fail when AZURE_RESOURCE_GROUP cannot be resolved from context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"].networking.public_dns_zone_resource_group_name)')
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ AZURE_RESOURCE_GROUP could not be resolved from providers"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
+  assert_contains "$output" "• public_dns_zone_resource_group_name"
+}
+
+@test "Should fail when cloud-providers section is missing from context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"])')
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ AZURE_SUBSCRIPTION_ID could not be resolved from providers"
+  assert_contains "$output" "❌ AZURE_RESOURCE_GROUP could not be resolved from providers"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Verify that you have an Azure cloud provider linked to this scope."
 }
 
 # =============================================================================
@@ -156,11 +158,29 @@ run_azure_setup() {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "✅ AZURE_SUBSCRIPTION_ID=test-subscription-id"
-  assert_contains "$output" "✅ AZURE_RESOURCE_GROUP=test-resource-group"
-  assert_contains "$output" "✅ AZURE_LOCATION=eastus"
   assert_contains "$output" "✅ TOFU_PROVIDER_STORAGE_ACCOUNT=tfstatestorage"
   assert_contains "$output" "✅ TOFU_PROVIDER_CONTAINER=tfstate"
+}
+
+# =============================================================================
+# Test: Context value extraction
+# =============================================================================
+@test "Should extract AZURE_SUBSCRIPTION_ID from context" {
+  run_azure_setup
+
+  assert_equal "$AZURE_SUBSCRIPTION_ID" "test-subscription-id"
+}
+
+@test "Should extract AZURE_RESOURCE_GROUP from context" {
+  run_azure_setup
+
+  assert_equal "$AZURE_RESOURCE_GROUP" "test-resource-group"
+}
+
+@test "Should set AZURE_LOCATION to eastus" {
+  run_azure_setup
+
+  assert_equal "$AZURE_LOCATION" "eastus"
 }
 
 # =============================================================================

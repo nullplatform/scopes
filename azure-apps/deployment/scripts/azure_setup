@@ -16,11 +16,6 @@ function validate_env_var() {
   fi
 }
 
-# Required Azure configuration
-validate_env_var AZURE_SUBSCRIPTION_ID
-validate_env_var AZURE_RESOURCE_GROUP
-validate_env_var AZURE_LOCATION
-
 # Terraform state backend configuration
 validate_env_var TOFU_PROVIDER_STORAGE_ACCOUNT
 validate_env_var TOFU_PROVIDER_CONTAINER
@@ -30,6 +25,34 @@ if [ ${#missing_vars[@]} -gt 0 ]; then
   echo "  🔧 How to fix:"
   echo "    Set the missing variable(s) in the nullplatform agent Helm installation:"
   for var in "${missing_vars[@]}"; do
+    echo "      • $var"
+  done
+  echo ""
+  exit 1
+fi
+
+AZURE_SUBSCRIPTION_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].authentication.subscription_id // empty')
+AZURE_RESOURCE_GROUP=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_resource_group_name // empty')
+AZURE_LOCATION=eastus
+
+context_missing_vars=()
+
+if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+  echo "   ❌ AZURE_SUBSCRIPTION_ID could not be resolved from providers"
+  context_missing_vars+=("subscription_id")
+fi
+
+if [ -z "$AZURE_RESOURCE_GROUP" ]; then
+  echo "   ❌ AZURE_RESOURCE_GROUP could not be resolved from providers"
+  context_missing_vars+=("public_dns_zone_resource_group_name")
+fi
+
+if [ ${#context_missing_vars[@]} -gt 0 ]; then
+  echo ""
+  echo "  💡 Possible causes:"
+  echo "    Verify that you have an Azure cloud provider linked to this scope."
+  echo "    The cloud provider must include the following fields:"
+  for var in "${context_missing_vars[@]}"; do
     echo "      • $var"
   done
   echo ""

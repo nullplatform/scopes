@@ -15,6 +15,9 @@
 #   DNS_ZONE_RESOURCE_GROUP  - Resource group containing DNS zone
 #   RESOURCE_TAGS_JSON       - JSON object with resource tags
 
+provider_categories:
+  - cloud-providers
+
 configuration:
   # Terraform Configuration
   TOFU_PATH: "$SERVICE_PATH/deployment/modules"

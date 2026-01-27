@@ -257,7 +257,8 @@
                "path":{
                   "type":"string",
                   "title":"Health Check Path",
-                  "description":"HTTP path for health check requests (e.g., /health). Leave empty to disable health checks."
+                  "description":"HTTP path for health check requests (e.g., /health). Leave empty to disable health checks.",
+                  "default": "/health"
                },
                "eviction_time_in_min":{
                   "type":"integer",
@@ -322,6 +323,6 @@
   "type": "scope",
   "use_default_actions": false,
   "visible_to": [
-    "{{ env.Getenv \"NRN\" }}"
+    "{{ env.Getenv "NRN" }}"
   ]
 }

@@ -67,11 +67,6 @@ setup() {
   export SERVICE_PATH="$INTEGRATION_MODULE_ROOT/azure-apps"
   export CUSTOM_TOFU_MODULES="$INTEGRATION_MODULE_ROOT/testing/azure-mock-provider"
 
-  # Azure provider required environment variables
-  export AZURE_SUBSCRIPTION_ID="$TEST_SUBSCRIPTION_ID"
-  export AZURE_RESOURCE_GROUP="$TEST_RESOURCE_GROUP"
-  export AZURE_LOCATION="$TEST_LOCATION"
-
   # Use mock storage account for backend (handled by azure-mock)
   export TOFU_PROVIDER_STORAGE_ACCOUNT="devstoreaccount1"
   export TOFU_PROVIDER_CONTAINER="tfstate"
@@ -79,6 +74,11 @@ setup() {
   # Setup API mocks for np CLI calls
   local mocks_dir="azure-apps/deployment/tests/integration/mocks/"
   mock_request "PATCH" "/scope/7" "$mocks_dir/scope/patch.json"
+
+  mock_request "GET" "/category" "$mocks_dir/azure-provider/category.json"
+  mock_request "GET" "/provider_specification" "$mocks_dir/azure-provider/list_provider_spec.json"
+  mock_request "GET" "/provider" "$mocks_dir/azure-provider/list_provider.json"
+  mock_request "GET" "/provider/azure-id" "$mocks_dir/azure-provider/get_provider.json"
 
   # Ensure tfstate container exists in azure-mock for Terraform backend
   curl -s -X PUT "${AZURE_MOCK_ENDPOINT}/tfstate?restype=container" \
