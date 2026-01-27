@@ -2,6 +2,9 @@ configuration:
   ENABLE_STAGING_SLOT: true
   PROMOTE_STAGING_TO_PRODUCTION: false
 steps:
+  - name: docker_setup
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/docker_setup"
   - name: build_context
     type: script
     file: "$SERVICE_PATH/deployment/scripts/build_context"
