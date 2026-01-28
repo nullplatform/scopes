@@ -126,6 +126,9 @@ setup() {
   # First run initial to create base infrastructure
   run_workflow "azure-apps/deployment/workflows/initial.yaml"
 
+  # Update context to deploy new version (v2.0.0) to staging slot
+  export CONTEXT=$(echo "$CONTEXT" | jq '.asset.url = "mockregistry.azurecr.io/tools/automation:v2.0.0"')
+
   # Then run blue_green to create staging slot
   run_workflow "azure-apps/deployment/workflows/blue_green.yaml"
 
@@ -158,8 +161,11 @@ setup() {
 # =============================================================================
 
 @test "Should maintain staging slot with traffic percentage from context on switch_traffic deployment" {
-  # Setup: Create infrastructure with staging slot
+  # Setup: Create infrastructure with initial deployment
   run_workflow "azure-apps/deployment/workflows/initial.yaml"
+
+  # Update context to deploy new version (v2.0.0) to staging slot
+  export CONTEXT=$(echo "$CONTEXT" | jq '.asset.url = "mockregistry.azurecr.io/tools/automation:v2.0.0"')
   run_workflow "azure-apps/deployment/workflows/blue_green.yaml"
 
   # Modify context to have desired_switched_traffic = 50
@@ -188,7 +194,7 @@ setup() {
     "$TEST_SLOT_NAME" \
     "$TEST_SUBSCRIPTION_ID" \
     "$TEST_RESOURCE_GROUP" \
-    "$TEST_DOCKER_IMAGE"
+    "$TEST_STAGING_DOCKER_IMAGE"
 }
 
 # =============================================================================

@@ -534,6 +534,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// List subscriptions endpoint
+	if matchListSubscriptions(path) {
+		s.handleListSubscriptions(w, r)
+		return
+	}
+
 	// Subscription endpoint
 	if matchSubscription(path) {
 		s.handleSubscription(w, r)
@@ -642,6 +648,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // =============================================================================
 
 var (
+	listSubscriptionsRegex    = regexp.MustCompile(`^/subscriptions$`)
 	subscriptionRegex         = regexp.MustCompile(`^/subscriptions/[^/]+$`)
 	listProvidersRegex        = regexp.MustCompile(`^/subscriptions/[^/]+/providers$`)
 	providerRegistrationRegex = regexp.MustCompile(`/subscriptions/[^/]+/providers/Microsoft\.[^/]+$`)
@@ -686,6 +693,7 @@ var (
 	diagnosticSettingRegex    = regexp.MustCompile(`(?i)/providers/Microsoft\.Insights/diagnosticSettings/[^/]+$`)
 )
 
+func matchListSubscriptions(path string) bool    { return listSubscriptionsRegex.MatchString(path) }
 func matchSubscription(path string) bool         { return subscriptionRegex.MatchString(path) }
 func matchListProviders(path string) bool        { return listProvidersRegex.MatchString(path) }
 func matchProviderRegistration(path string) bool { return providerRegistrationRegex.MatchString(path) }
@@ -3648,8 +3656,24 @@ func (s *Server) handleProviderRegistration(w http.ResponseWriter, r *http.Reque
 }
 
 // =============================================================================
-// Subscription Handler
+// Subscription Handlers
 // =============================================================================
+
+func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
+	// Return a mock list of subscriptions for az account set
+	response := map[string]interface{}{
+		"value": []map[string]interface{}{
+			{
+				"id":             "/subscriptions/mock-subscription-id",
+				"subscriptionId": "mock-subscription-id",
+				"displayName":    "Mock Subscription",
+				"state":          "Enabled",
+				"tenantId":       "mock-tenant-id",
+			},
+		},
+	}
+	json.NewEncoder(w).Encode(response)
+}
 
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
@@ -3676,7 +3700,7 @@ func main() {
 	log.Println("=====================")
 	log.Println("ARM Endpoints:")
 	log.Println("  OAuth Token:      /{tenant}/oauth2/token (POST)")
-	log.Println("  Subscriptions:    /subscriptions/{sub}")
+	log.Println("  Subscriptions:    /subscriptions (list), /subscriptions/{sub}")
 	log.Println("  CDN Profiles:     .../Microsoft.Cdn/profiles/{name}")
 	log.Println("  CDN Endpoints:    .../Microsoft.Cdn/profiles/{profile}/endpoints/{name}")
 	log.Println("  DNS Zones:        .../Microsoft.Network/dnszones/{name}")
