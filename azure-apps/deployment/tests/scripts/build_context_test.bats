@@ -140,6 +140,11 @@ run_build_context() {
   "enable_staging_slot": false,
   "staging_traffic_percent": 0,
   "promote_staging_to_production": false,
+  "preserve_production_image": false,
+  "backend_storage_account_name": "",
+  "backend_container_name": "",
+  "backend_resource_group_name": "",
+  "state_key": "azure-apps/7/terraform.tfstate",
   "enable_autoscaling": true,
   "autoscale_min_instances": 2,
   "autoscale_max_instances": 5,
@@ -310,6 +315,78 @@ EOF
 }
 
 # =============================================================================
+# Test: Blue-green image preservation variables
+# =============================================================================
+@test "Should default preserve_production_image to false" {
+  run_build_context
+
+  local preserve
+  preserve=$(echo "$TOFU_VARIABLES" | jq -r '.preserve_production_image')
+  assert_equal "$preserve" "false"
+}
+
+@test "Should use PRESERVE_PRODUCTION_IMAGE from environment when set" {
+  export PRESERVE_PRODUCTION_IMAGE="true"
+
+  run_build_context
+
+  local preserve
+  preserve=$(echo "$TOFU_VARIABLES" | jq -r '.preserve_production_image')
+  assert_equal "$preserve" "true"
+}
+
+@test "Should generate and export STATE_KEY with scope_id" {
+  run_build_context
+
+  assert_equal "$STATE_KEY" "azure-apps/7/terraform.tfstate"
+
+  local state_key
+  state_key=$(echo "$TOFU_VARIABLES" | jq -r '.state_key')
+  assert_equal "$state_key" "azure-apps/7/terraform.tfstate"
+}
+
+@test "Should use TOFU_PROVIDER_STORAGE_ACCOUNT for backend_storage_account_name" {
+  export TOFU_PROVIDER_STORAGE_ACCOUNT="mystorageaccount"
+
+  run_build_context
+
+  local storage_account
+  storage_account=$(echo "$TOFU_VARIABLES" | jq -r '.backend_storage_account_name')
+  assert_equal "$storage_account" "mystorageaccount"
+}
+
+@test "Should use TOFU_PROVIDER_CONTAINER for backend_container_name" {
+  export TOFU_PROVIDER_CONTAINER="tfstate"
+
+  run_build_context
+
+  local container
+  container=$(echo "$TOFU_VARIABLES" | jq -r '.backend_container_name')
+  assert_equal "$container" "tfstate"
+}
+
+@test "Should use AZURE_RESOURCE_GROUP for backend_resource_group_name" {
+  export AZURE_RESOURCE_GROUP="my-resource-group"
+
+  run_build_context
+
+  local resource_group
+  resource_group=$(echo "$TOFU_VARIABLES" | jq -r '.backend_resource_group_name')
+  assert_equal "$resource_group" "my-resource-group"
+}
+
+@test "Should allow STAGING_TRAFFIC_PERCENT env var to override context" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.deployment.strategy_data.desired_switched_traffic = 25')
+  export STAGING_TRAFFIC_PERCENT="50"
+
+  run_build_context
+
+  local traffic_percent
+  traffic_percent=$(echo "$TOFU_VARIABLES" | jq -r '.staging_traffic_percent')
+  assert_equal "$traffic_percent" "50"
+}
+
+# =============================================================================
 # Test: OUTPUT_DIR and TF_WORKING_DIR
 # =============================================================================
 @test "Should create OUTPUT_DIR with scope_id" {
@@ -393,4 +470,10 @@ EOF
   run_build_context
 
   assert_not_empty "$CONTEXT" "CONTEXT"
+}
+
+@test "Should export STATE_KEY" {
+  run_build_context
+
+  assert_not_empty "$STATE_KEY" "STATE_KEY"
 }

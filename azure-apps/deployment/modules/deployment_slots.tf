@@ -23,7 +23,7 @@ resource "azurerm_linux_web_app_slot" "staging" {
 
     application_stack {
       docker_registry_url      = var.docker_registry_url
-      docker_image_name        = var.docker_image
+      docker_image_name        = local.staging_docker_image
       docker_registry_username = local.docker_registry_username
       docker_registry_password = local.docker_registry_password
     }

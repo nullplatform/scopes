@@ -25,6 +25,9 @@ locals {
   docker_registry_username = var.docker_registry_username != "" ? var.docker_registry_username : null
   docker_registry_password = var.docker_registry_password != "" ? var.docker_registry_password : null
 
+  # Staging slot docker image (defaults to production image if not specified)
+  staging_docker_image = var.staging_docker_image != "" ? var.staging_docker_image : var.docker_image
+
   # App settings combining user env vars with required settings
   base_app_settings = {
     WEBSITES_ENABLE_APP_SERVICE_STORAGE = "false"

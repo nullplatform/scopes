@@ -30,9 +30,11 @@ resource "azurerm_linux_web_app" "main" {
     health_check_eviction_time_in_min = var.health_check_path != "" ? var.health_check_eviction_time_in_min : null
 
     # Docker configuration
+    # Uses local.effective_docker_image which preserves the current production image
+    # during blue-green deployments (when preserve_production_image is enabled)
     application_stack {
       docker_registry_url      = var.docker_registry_url
-      docker_image_name        = var.docker_image
+      docker_image_name        = local.effective_docker_image
       docker_registry_username = local.docker_registry_username
       docker_registry_password = local.docker_registry_password
     }

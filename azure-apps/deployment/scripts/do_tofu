@@ -50,6 +50,12 @@ echo "$TOFU_VARIABLES" | jq .
 echo "📝 Initializing tofu..."
 tofu -chdir="$TF_WORKING_DIR" init -input=false $TOFU_INIT_VARIABLES
 
+# Blue-green deployment image preservation is handled directly in Terraform
+# via the terraform_remote_state data source when preserve_production_image=true
+if [ "${PRESERVE_PRODUCTION_IMAGE:-false}" = "true" ]; then
+    echo "🔵 Blue-green mode: Terraform will preserve current production image and deploy new image to staging"
+fi
+
 echo "📝 Running tofu $TOFU_ACTION..."
 tofu -chdir="$TF_WORKING_DIR" "$TOFU_ACTION" -auto-approve -var-file="$TOFU_VAR_FILE"
 

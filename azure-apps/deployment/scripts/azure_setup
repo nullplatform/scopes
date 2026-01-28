@@ -93,11 +93,12 @@ TOFU_VARIABLES=$(echo "${TOFU_VARIABLES:-"{}"}" | jq \
   }')
 
 # Build tofu init backend config
+# STATE_KEY is exported by build_context
 TOFU_INIT_VARIABLES="${TOFU_INIT_VARIABLES:-""}"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=storage_account_name=$TOFU_PROVIDER_STORAGE_ACCOUNT"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=container_name=$TOFU_PROVIDER_CONTAINER"
 TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=resource_group_name=$AZURE_RESOURCE_GROUP"
-TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=key=azure-apps/${SCOPE_ID}/terraform.tfstate"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=key=$STATE_KEY"
 
 # Export for downstream scripts
 export TOFU_VARIABLES

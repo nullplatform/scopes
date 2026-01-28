@@ -597,6 +597,114 @@ run "slot_has_slot_name_env_var" {
   }
 }
 
+run "slot_docker_image_defaults_to_production" {
+  command = plan
+  variables {
+    enable_staging_slot = true
+    docker_image        = "myapp:v1.0.0"
+  }
+  assert {
+    condition     = local.staging_docker_image == "myapp:v1.0.0"
+    error_message = "Staging slot docker image should default to production image"
+  }
+  assert {
+    condition     = azurerm_linux_web_app_slot.staging[0].site_config[0].application_stack[0].docker_image_name == "myapp:v1.0.0"
+    error_message = "Staging slot should use the default docker image"
+  }
+}
+
+run "slot_docker_image_can_be_different" {
+  command = plan
+  variables {
+    enable_staging_slot   = true
+    docker_image          = "myapp:v1.0.0"
+    staging_docker_image  = "myapp:v2.0.0"
+  }
+  assert {
+    condition     = local.staging_docker_image == "myapp:v2.0.0"
+    error_message = "Staging slot docker image should be the specified value"
+  }
+  assert {
+    condition     = azurerm_linux_web_app.main.site_config[0].application_stack[0].docker_image_name == "myapp:v1.0.0"
+    error_message = "Production should use docker_image"
+  }
+  assert {
+    condition     = azurerm_linux_web_app_slot.staging[0].site_config[0].application_stack[0].docker_image_name == "myapp:v2.0.0"
+    error_message = "Staging slot should use staging_docker_image"
+  }
+}
+
+# =============================================================================
+# BLUE-GREEN IMAGE PRESERVATION TESTS
+# =============================================================================
+
+run "preserve_production_image_disabled_by_default" {
+  command = plan
+  assert {
+    condition     = var.preserve_production_image == false
+    error_message = "preserve_production_image should be false by default"
+  }
+}
+
+run "effective_docker_image_uses_var_when_preserve_disabled" {
+  command = plan
+  variables {
+    docker_image              = "myapp:v2.0.0"
+    preserve_production_image = false
+  }
+  assert {
+    condition     = local.effective_docker_image == "myapp:v2.0.0"
+    error_message = "effective_docker_image should use var.docker_image when preserve is disabled"
+  }
+}
+
+run "effective_docker_image_uses_var_when_no_backend_config" {
+  command = plan
+  variables {
+    docker_image              = "myapp:v2.0.0"
+    preserve_production_image = true
+  }
+  assert {
+    condition     = local.effective_docker_image == "myapp:v2.0.0"
+    error_message = "effective_docker_image should use var.docker_image when no backend config (no state to read)"
+  }
+}
+
+run "remote_state_not_created_when_preserve_disabled" {
+  command = plan
+  variables {
+    docker_image              = "myapp:v2.0.0"
+    preserve_production_image = false
+  }
+  assert {
+    condition     = length(data.terraform_remote_state.current) == 0
+    error_message = "terraform_remote_state should not be created when preserve_production_image is false"
+  }
+}
+
+run "remote_state_not_created_when_no_backend_config" {
+  command = plan
+  variables {
+    docker_image              = "myapp:v2.0.0"
+    preserve_production_image = true
+  }
+  assert {
+    condition     = length(data.terraform_remote_state.current) == 0
+    error_message = "terraform_remote_state should not be created when backend config is empty"
+  }
+}
+
+run "production_uses_effective_docker_image" {
+  command = plan
+  variables {
+    docker_image = "myapp:v2.0.0"
+  }
+  assert {
+    condition     = azurerm_linux_web_app.main.site_config[0].application_stack[0].docker_image_name == local.effective_docker_image
+    error_message = "Production slot should use local.effective_docker_image"
+  }
+}
+
 # =============================================================================
 # CUSTOM DOMAIN TESTS
 # =============================================================================

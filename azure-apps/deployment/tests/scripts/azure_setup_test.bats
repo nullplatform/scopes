@@ -37,6 +37,9 @@ setup() {
   export TOFU_VARIABLES="{}"
   export TOFU_INIT_VARIABLES=""
   export RESOURCE_TAGS_JSON="{}"
+
+  # STATE_KEY is normally set by build_context
+  export STATE_KEY="azure-apps/7/terraform.tfstate"
 }
 
 # Teardown - runs after each test
@@ -54,6 +57,7 @@ teardown() {
   unset TOFU_VARIABLES
   unset TOFU_INIT_VARIABLES
   unset RESOURCE_TAGS_JSON
+  unset STATE_KEY
 }
 
 # =============================================================================
@@ -293,7 +297,7 @@ run_azure_setup() {
 # Test: TOFU_INIT_VARIABLES generation
 # =============================================================================
 @test "Should generate TOFU_INIT_VARIABLES with backend config" {
-  export SCOPE_ID="42"
+  export STATE_KEY="azure-apps/42/terraform.tfstate"
 
   run_azure_setup
 
@@ -310,6 +314,14 @@ run_azure_setup() {
 
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=existing=value"
   assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=storage_account_name=tfstatestorage"
+}
+
+@test "Should use STATE_KEY from build_context in backend config" {
+  export STATE_KEY="azure-apps/99/terraform.tfstate"
+
+  run_azure_setup
+
+  assert_contains "$TOFU_INIT_VARIABLES" "-backend-config=key=azure-apps/99/terraform.tfstate"
 }
 
 # =============================================================================

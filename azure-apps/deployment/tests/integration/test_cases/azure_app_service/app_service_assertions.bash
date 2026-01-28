@@ -405,6 +405,94 @@ assert_azure_app_service_with_slot_configured() {
 }
 
 # -----------------------------------------------------------------------------
+# assert_web_app_docker_image
+# Verify that a Web App is configured with the expected docker image
+#
+# Arguments:
+#   $1 - app_name: Name of the Web App
+#   $2 - subscription_id: Azure subscription ID
+#   $3 - resource_group: Azure resource group name
+#   $4 - expected_image: Expected docker image (e.g., "myregistry.azurecr.io/app:v1.0.0")
+# -----------------------------------------------------------------------------
+assert_web_app_docker_image() {
+  local app_name=$1
+  local subscription_id=$2
+  local resource_group=$3
+  local expected_image=$4
+
+  local path="/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}"
+  local response
+  response=$(azure_mock "$path" 2>/dev/null)
+
+  # The docker image is in siteConfig.linuxFxVersion as "DOCKER|image:tag"
+  local linux_fx_version
+  linux_fx_version=$(echo "$response" | jq -r '.properties.siteConfig.linuxFxVersion // empty')
+
+  if [[ -z "$linux_fx_version" || "$linux_fx_version" == "null" ]]; then
+    echo "FAIL: Web App '$app_name' has no linuxFxVersion configured"
+    echo "Response: $response"
+    return 1
+  fi
+
+  # Extract the image from DOCKER|image format
+  local actual_image
+  actual_image="${linux_fx_version#DOCKER|}"
+
+  if [[ "$actual_image" != "$expected_image" ]]; then
+    echo "FAIL: Expected docker image '$expected_image', got '$actual_image'"
+    return 1
+  fi
+
+  echo "PASS: Web App '$app_name' has docker image '$expected_image'"
+  return 0
+}
+
+# -----------------------------------------------------------------------------
+# assert_deployment_slot_docker_image
+# Verify that a deployment slot is configured with the expected docker image
+#
+# Arguments:
+#   $1 - app_name: Name of the Web App
+#   $2 - slot_name: Name of the deployment slot
+#   $3 - subscription_id: Azure subscription ID
+#   $4 - resource_group: Azure resource group name
+#   $5 - expected_image: Expected docker image (e.g., "myregistry.azurecr.io/app:v1.0.0")
+# -----------------------------------------------------------------------------
+assert_deployment_slot_docker_image() {
+  local app_name=$1
+  local slot_name=$2
+  local subscription_id=$3
+  local resource_group=$4
+  local expected_image=$5
+
+  local path="/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/slots/${slot_name}"
+  local response
+  response=$(azure_mock "$path" 2>/dev/null)
+
+  # The docker image is in siteConfig.linuxFxVersion as "DOCKER|image:tag"
+  local linux_fx_version
+  linux_fx_version=$(echo "$response" | jq -r '.properties.siteConfig.linuxFxVersion // empty')
+
+  if [[ -z "$linux_fx_version" || "$linux_fx_version" == "null" ]]; then
+    echo "FAIL: Deployment slot '$slot_name' has no linuxFxVersion configured"
+    echo "Response: $response"
+    return 1
+  fi
+
+  # Extract the image from DOCKER|image format
+  local actual_image
+  actual_image="${linux_fx_version#DOCKER|}"
+
+  if [[ "$actual_image" != "$expected_image" ]]; then
+    echo "FAIL: Expected docker image '$expected_image' for slot '$slot_name', got '$actual_image'"
+    return 1
+  fi
+
+  echo "PASS: Deployment slot '$slot_name' has docker image '$expected_image'"
+  return 0
+}
+
+# -----------------------------------------------------------------------------
 # assert_web_app_app_settings_contain
 # Verify that a Web App's app_settings contain expected key-value pairs
 #

@@ -447,3 +447,56 @@ EOF
 
   assert_equal "$status" "0"
 }
+
+# =============================================================================
+# Test: Blue-green deployment (PRESERVE_PRODUCTION_IMAGE)
+# Note: Image preservation logic has moved to Terraform (terraform_remote_state).
+# The bash script now just passes through the configuration.
+# =============================================================================
+@test "Should display blue-green mode message when PRESERVE_PRODUCTION_IMAGE is true" {
+  export PRESERVE_PRODUCTION_IMAGE="true"
+  export TOFU_VARIABLES='{"docker_image": "new-app:v2.0.0", "app_name": "test-app", "preserve_production_image": true}'
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "Blue-green mode: Terraform will preserve current production image"
+}
+
+@test "Should not display blue-green message when PRESERVE_PRODUCTION_IMAGE is not set" {
+  export TOFU_VARIABLES='{"docker_image": "new-app:v2.0.0", "app_name": "test-app"}'
+  unset PRESERVE_PRODUCTION_IMAGE
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+
+  # Output should not contain blue-green messages
+  [[ "$output" != *"Blue-green mode"* ]]
+}
+
+@test "Should not display blue-green message when PRESERVE_PRODUCTION_IMAGE is false" {
+  export PRESERVE_PRODUCTION_IMAGE="false"
+  export TOFU_VARIABLES='{"docker_image": "new-app:v2.0.0", "app_name": "test-app"}'
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+
+  # Output should not contain blue-green messages
+  [[ "$output" != *"Blue-green mode"* ]]
+}
+
+@test "Should pass through TOFU_VARIABLES unchanged to tfvars file" {
+  export PRESERVE_PRODUCTION_IMAGE="true"
+  export TOFU_VARIABLES='{"docker_image": "new-app:v2.0.0", "app_name": "test-app", "preserve_production_image": true}'
+
+  run bash "$SCRIPT_PATH"
+
+  assert_equal "$status" "0"
+
+  # tfvars should contain the original values (Terraform handles the image preservation)
+  local docker_image
+  docker_image=$(cat "$OUTPUT_DIR/tofu.tfvars.json" | jq -r '.docker_image')
+  assert_equal "$docker_image" "new-app:v2.0.0"
+}

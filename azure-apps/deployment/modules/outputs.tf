@@ -25,6 +25,11 @@ output "app_service_default_url" {
   value       = "https://${azurerm_linux_web_app.main.default_hostname}"
 }
 
+output "docker_image" {
+  description = "The Docker image currently deployed to production"
+  value       = local.effective_docker_image
+}
+
 output "app_service_outbound_ip_addresses" {
   description = "Outbound IP addresses of the App Service (comma-separated)"
   value       = azurerm_linux_web_app.main.outbound_ip_addresses

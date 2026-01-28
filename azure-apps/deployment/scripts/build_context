@@ -24,8 +24,6 @@ SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
 AZURE_APP_SERVICE_NAME_MAX_LENGTH=60
 APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" "$AZURE_APP_SERVICE_NAME_MAX_LENGTH" "$NAMESPACE_SLUG" "$APPLICATION_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
 
-DOCKER_IMAGE="${DOCKER_IMAGE:?DOCKER_IMAGE must be set by docker_setup}"
-
 # Extract scope capabilities (required fields from service-spec have no defaults)
 MEMORY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.memory')
 SKU_NAME=$("$SERVICE_PATH/deployment/scripts/get_sku_from_memory" "$MEMORY")
@@ -35,11 +33,20 @@ FIXED_INSTANCES=$(echo "$CONTEXT" | jq -r '.scope.capabilities.fixed_instances')
 
 # Blue-green deployment settings from context
 # enable_staging_slot: enabled via ENABLE_STAGING_SLOT env var (set by workflow)
-# staging_traffic_percent: read from deployment strategy_data
+# staging_traffic_percent: read from deployment strategy_data (can be overridden by env var)
 # promote_staging_to_production: enabled via PROMOTE_STAGING_TO_PRODUCTION env var (set by finalize workflow)
+# preserve_production_image: enabled via PRESERVE_PRODUCTION_IMAGE env var (for blue-green to keep current prod image)
 ENABLE_STAGING_SLOT="${ENABLE_STAGING_SLOT:-false}"
-STAGING_TRAFFIC_PERCENT=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 0')
+STAGING_TRAFFIC_PERCENT="${STAGING_TRAFFIC_PERCENT:-$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 0')}"
 PROMOTE_STAGING_TO_PRODUCTION="${PROMOTE_STAGING_TO_PRODUCTION:-false}"
+PRESERVE_PRODUCTION_IMAGE="${PRESERVE_PRODUCTION_IMAGE:-false}"
+
+# Backend configuration for remote state lookup (used by preserve_production_image)
+# Storage account and container are set by azure_setup, resource group comes from context
+BACKEND_STORAGE_ACCOUNT="${TOFU_PROVIDER_STORAGE_ACCOUNT:-}"
+BACKEND_CONTAINER="${TOFU_PROVIDER_CONTAINER:-}"
+BACKEND_RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-}"
+STATE_KEY="azure-apps/${SCOPE_ID}/terraform.tfstate"
 
 # Extract autoscaling settings (no defaults - if not set, autoscaling is disabled)
 AUTOSCALING_MIN=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.min_instances')
@@ -86,6 +93,11 @@ TOFU_VARIABLES=$(jq -n \
     --argjson enable_staging_slot "$ENABLE_STAGING_SLOT" \
     --argjson staging_traffic_percent "$STAGING_TRAFFIC_PERCENT" \
     --argjson promote_staging_to_production "$PROMOTE_STAGING_TO_PRODUCTION" \
+    --argjson preserve_production_image "$PRESERVE_PRODUCTION_IMAGE" \
+    --arg backend_storage_account_name "$BACKEND_STORAGE_ACCOUNT" \
+    --arg backend_container_name "$BACKEND_CONTAINER" \
+    --arg backend_resource_group_name "$BACKEND_RESOURCE_GROUP" \
+    --arg state_key "$STATE_KEY" \
     --argjson enable_autoscaling "$ENABLE_AUTOSCALING" \
     --argjson autoscale_min_instances "$AUTOSCALING_MIN" \
     --argjson autoscale_max_instances "$AUTOSCALING_MAX" \
@@ -113,6 +125,11 @@ TOFU_VARIABLES=$(jq -n \
         enable_staging_slot: $enable_staging_slot,
         staging_traffic_percent: $staging_traffic_percent,
         promote_staging_to_production: $promote_staging_to_production,
+        preserve_production_image: $preserve_production_image,
+        backend_storage_account_name: $backend_storage_account_name,
+        backend_container_name: $backend_container_name,
+        backend_resource_group_name: $backend_resource_group_name,
+        state_key: $state_key,
         enable_autoscaling: $enable_autoscaling,
         autoscale_min_instances: $autoscale_min_instances,
         autoscale_max_instances: $autoscale_max_instances,
@@ -138,3 +155,4 @@ export OUTPUT_DIR
 export TF_WORKING_DIR
 export TOFU_VARIABLES
 export CONTEXT
+export STATE_KEY

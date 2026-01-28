@@ -68,8 +68,14 @@ variable "zone_balancing_enabled" {
 # =============================================================================
 
 variable "docker_image" {
-  description = "Docker image name with tag (e.g., myapp:latest)"
+  description = "Docker image name with tag (e.g., myapp:latest). This is used for the production slot."
   type        = string
+}
+
+variable "staging_docker_image" {
+  description = "Docker image for the staging slot. Defaults to docker_image if not specified. During blue-green deployments, this should be the new image while docker_image remains the current production image."
+  type        = string
+  default     = ""
 }
 
 variable "docker_registry_url" {
@@ -162,6 +168,12 @@ variable "app_command_line" {
 
 variable "enable_staging_slot" {
   description = "Create a staging deployment slot"
+  type        = bool
+  default     = false
+}
+
+variable "preserve_production_image" {
+  description = "When true, keeps the current production docker image and deploys the new image only to staging. Used for blue-green deployments."
   type        = bool
   default     = false
 }
@@ -519,4 +531,32 @@ variable "alert_memory_percentage_threshold" {
   description = "Threshold for memory percentage alert"
   type        = number
   default     = 85
+}
+
+# =============================================================================
+# BACKEND CONFIGURATION (for remote state lookup)
+# =============================================================================
+
+variable "backend_storage_account_name" {
+  description = "Storage account name for the Terraform backend (used to read current state for blue-green deployments)"
+  type        = string
+  default     = ""
+}
+
+variable "backend_container_name" {
+  description = "Container name for the Terraform backend"
+  type        = string
+  default     = ""
+}
+
+variable "backend_resource_group_name" {
+  description = "Resource group name for the Terraform backend storage account"
+  type        = string
+  default     = ""
+}
+
+variable "state_key" {
+  description = "State file key/path in the backend storage"
+  type        = string
+  default     = ""
 }

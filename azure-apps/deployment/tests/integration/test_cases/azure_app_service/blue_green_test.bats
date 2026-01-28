@@ -23,6 +23,10 @@ TEST_LOCATION="eastus"
 # Expected SKU based on memory=4 GB from context
 TEST_EXPECTED_SKU="S2"
 
+# Expected docker image from context asset.url
+TEST_DOCKER_IMAGE="myregistry.azurecr.io/tools/automation:v1.0.0"
+TEST_STAGING_DOCKER_IMAGE="myregistry.azurecr.io/tools/automation:v2.0.0"
+
 # =============================================================================
 # Test Setup
 # =============================================================================
@@ -43,6 +47,8 @@ setup_file() {
   export TEST_RESOURCE_GROUP
   export TEST_LOCATION
   export TEST_EXPECTED_SKU
+  export TEST_DOCKER_IMAGE
+  export TEST_STAGING_DOCKER_IMAGE
 }
 
 teardown_file() {
@@ -97,6 +103,13 @@ setup() {
     "$TEST_RESOURCE_GROUP" \
     "$TEST_EXPECTED_SKU"
 
+  # Verify production has the correct docker image
+  assert_web_app_docker_image \
+    "$TEST_APP_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP" \
+    "$TEST_DOCKER_IMAGE"
+
   # Verify staging slot does NOT exist
   assert_deployment_slot_not_exists \
     "$TEST_APP_NAME" \
@@ -123,6 +136,21 @@ setup() {
     "$TEST_RESOURCE_GROUP" \
     "$TEST_EXPECTED_SKU" \
     "$TEST_SLOT_NAME"
+
+  # Verify production slot keeps the original docker image
+  assert_web_app_docker_image \
+    "$TEST_APP_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP" \
+    "$TEST_DOCKER_IMAGE"
+
+  # Verify staging slot has the docker image (same as production on first blue-green)
+  assert_deployment_slot_docker_image \
+    "$TEST_APP_NAME" \
+    "$TEST_SLOT_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP" \
+    "$TEST_STAGING_DOCKER_IMAGE"
 }
 
 # =============================================================================
@@ -147,6 +175,20 @@ setup() {
     "$TEST_RESOURCE_GROUP" \
     "$TEST_EXPECTED_SKU" \
     "$TEST_SLOT_NAME"
+
+  # Verify docker images are preserved after traffic switch
+  assert_web_app_docker_image \
+    "$TEST_APP_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP" \
+    "$TEST_DOCKER_IMAGE"
+
+  assert_deployment_slot_docker_image \
+    "$TEST_APP_NAME" \
+    "$TEST_SLOT_NAME" \
+    "$TEST_SUBSCRIPTION_ID" \
+    "$TEST_RESOURCE_GROUP" \
+    "$TEST_DOCKER_IMAGE"
 }
 
 # =============================================================================
