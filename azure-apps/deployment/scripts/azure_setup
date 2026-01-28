@@ -86,10 +86,16 @@ TOFU_VARIABLES=$(echo "${TOFU_VARIABLES:-"{}"}" | jq \
   --arg resource_group_name "$AZURE_RESOURCE_GROUP" \
   --arg location "$AZURE_LOCATION" \
   --argjson resource_tags "$RESOURCE_TAGS_JSON" \
+  --arg backend_storage_account_name "$TOFU_PROVIDER_STORAGE_ACCOUNT" \
+  --arg backend_container_name "$TOFU_PROVIDER_CONTAINER" \
+  --arg backend_resource_group_name "$AZURE_RESOURCE_GROUP" \
   '. + {
     resource_group_name: $resource_group_name,
     location: $location,
-    resource_tags: $resource_tags
+    resource_tags: $resource_tags,
+    backend_storage_account_name: $backend_storage_account_name,
+    backend_container_name: $backend_container_name,
+    backend_resource_group_name: $backend_resource_group_name
   }')
 
 # Build tofu init backend config

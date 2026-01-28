@@ -287,10 +287,37 @@ run_azure_setup() {
     "existing_key": "existing_value",
     "resource_group_name": "test-resource-group",
     "location": "australiaeast",
-    "resource_tags": {}
+    "resource_tags": {},
+    "backend_storage_account_name": "tfstatestorage",
+    "backend_container_name": "tfstate",
+    "backend_resource_group_name": "test-resource-group"
   }'
 
   assert_json_equal "$TOFU_VARIABLES" "$expected" "TOFU_VARIABLES"
+}
+
+@test "Should add backend_storage_account_name to TOFU_VARIABLES" {
+  run_azure_setup
+
+  local storage_account
+  storage_account=$(echo "$TOFU_VARIABLES" | jq -r '.backend_storage_account_name')
+  assert_equal "$storage_account" "tfstatestorage"
+}
+
+@test "Should add backend_container_name to TOFU_VARIABLES" {
+  run_azure_setup
+
+  local container
+  container=$(echo "$TOFU_VARIABLES" | jq -r '.backend_container_name')
+  assert_equal "$container" "tfstate"
+}
+
+@test "Should add backend_resource_group_name to TOFU_VARIABLES" {
+  run_azure_setup
+
+  local resource_group
+  resource_group=$(echo "$TOFU_VARIABLES" | jq -r '.backend_resource_group_name')
+  assert_equal "$resource_group" "test-resource-group"
 }
 
 # =============================================================================

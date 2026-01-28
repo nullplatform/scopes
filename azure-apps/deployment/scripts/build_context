@@ -41,11 +41,7 @@ STAGING_TRAFFIC_PERCENT="${STAGING_TRAFFIC_PERCENT:-$(echo "$CONTEXT" | jq -r '.
 PROMOTE_STAGING_TO_PRODUCTION="${PROMOTE_STAGING_TO_PRODUCTION:-false}"
 PRESERVE_PRODUCTION_IMAGE="${PRESERVE_PRODUCTION_IMAGE:-false}"
 
-# Backend configuration for remote state lookup (used by preserve_production_image)
-# Storage account and container are set by azure_setup, resource group comes from context
-BACKEND_STORAGE_ACCOUNT="${TOFU_PROVIDER_STORAGE_ACCOUNT:-}"
-BACKEND_CONTAINER="${TOFU_PROVIDER_CONTAINER:-}"
-BACKEND_RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-}"
+# State key for remote state lookup (used by preserve_production_image in azure_setup)
 STATE_KEY="azure-apps/${SCOPE_ID}/terraform.tfstate"
 
 # Extract autoscaling settings (no defaults - if not set, autoscaling is disabled)
@@ -94,9 +90,6 @@ TOFU_VARIABLES=$(jq -n \
     --argjson staging_traffic_percent "$STAGING_TRAFFIC_PERCENT" \
     --argjson promote_staging_to_production "$PROMOTE_STAGING_TO_PRODUCTION" \
     --argjson preserve_production_image "$PRESERVE_PRODUCTION_IMAGE" \
-    --arg backend_storage_account_name "$BACKEND_STORAGE_ACCOUNT" \
-    --arg backend_container_name "$BACKEND_CONTAINER" \
-    --arg backend_resource_group_name "$BACKEND_RESOURCE_GROUP" \
     --arg state_key "$STATE_KEY" \
     --argjson enable_autoscaling "$ENABLE_AUTOSCALING" \
     --argjson autoscale_min_instances "$AUTOSCALING_MIN" \
@@ -126,9 +119,6 @@ TOFU_VARIABLES=$(jq -n \
         staging_traffic_percent: $staging_traffic_percent,
         promote_staging_to_production: $promote_staging_to_production,
         preserve_production_image: $preserve_production_image,
-        backend_storage_account_name: $backend_storage_account_name,
-        backend_container_name: $backend_container_name,
-        backend_resource_group_name: $backend_resource_group_name,
         state_key: $state_key,
         enable_autoscaling: $enable_autoscaling,
         autoscale_min_instances: $autoscale_min_instances,

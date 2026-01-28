@@ -141,9 +141,6 @@ run_build_context() {
   "staging_traffic_percent": 0,
   "promote_staging_to_production": false,
   "preserve_production_image": false,
-  "backend_storage_account_name": "",
-  "backend_container_name": "",
-  "backend_resource_group_name": "",
   "state_key": "azure-apps/7/terraform.tfstate",
   "enable_autoscaling": true,
   "autoscale_min_instances": 2,
@@ -343,36 +340,6 @@ EOF
   local state_key
   state_key=$(echo "$TOFU_VARIABLES" | jq -r '.state_key')
   assert_equal "$state_key" "azure-apps/7/terraform.tfstate"
-}
-
-@test "Should use TOFU_PROVIDER_STORAGE_ACCOUNT for backend_storage_account_name" {
-  export TOFU_PROVIDER_STORAGE_ACCOUNT="mystorageaccount"
-
-  run_build_context
-
-  local storage_account
-  storage_account=$(echo "$TOFU_VARIABLES" | jq -r '.backend_storage_account_name')
-  assert_equal "$storage_account" "mystorageaccount"
-}
-
-@test "Should use TOFU_PROVIDER_CONTAINER for backend_container_name" {
-  export TOFU_PROVIDER_CONTAINER="tfstate"
-
-  run_build_context
-
-  local container
-  container=$(echo "$TOFU_VARIABLES" | jq -r '.backend_container_name')
-  assert_equal "$container" "tfstate"
-}
-
-@test "Should use AZURE_RESOURCE_GROUP for backend_resource_group_name" {
-  export AZURE_RESOURCE_GROUP="my-resource-group"
-
-  run_build_context
-
-  local resource_group
-  resource_group=$(echo "$TOFU_VARIABLES" | jq -r '.backend_resource_group_name')
-  assert_equal "$resource_group" "my-resource-group"
 }
 
 @test "Should allow STAGING_TRAFFIC_PERCENT env var to override context" {
