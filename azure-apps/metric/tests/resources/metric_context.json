@@ -5,5 +5,15 @@
     "start_time": "2026-01-27T00:00:00Z",
     "end_time": "2026-01-27T01:00:00Z",
     "interval": "5"
+  },
+  "scope": {
+    "id": 7,
+    "slug": "development-tools",
+    "name": "Development tools",
+    "nrn": "organization=1:account=2:namespace=3:application=4:scope=7"
+  },
+  "tags": {
+    "namespace": "tools",
+    "application": "automation"
   }
 }

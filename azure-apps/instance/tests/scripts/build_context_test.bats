@@ -31,10 +31,7 @@ setup() {
   # Set SERVICE_PATH (azure-apps root)
   export SERVICE_PATH="$AZURE_APPS_DIR"
 
-  # Set np mock responses
-  export NP_SCOPE_RESPONSE="$RESPONSES_DIR/np_scope_read.json"
-  export NP_APP_RESPONSE="$RESPONSES_DIR/np_application_read.json"
-  export NP_NAMESPACE_RESPONSE="$RESPONSES_DIR/np_namespace_read.json"
+  # Set np mock responses (only provider list is called now)
   export NP_PROVIDER_RESPONSE="$RESPONSES_DIR/np_provider_list.json"
 
   # ARM_CLIENT_SECRET is an env var set on the agent (not from provider)
@@ -83,31 +80,34 @@ run_build_context() {
 }
 
 # =============================================================================
-# Test: APP_NAME resolution
+# Test: APP_NAME resolution from context slugs
 # =============================================================================
-@test "Should resolve APP_NAME via np CLI and generate_resource_name" {
+@test "Should resolve APP_NAME from context slugs" {
   run_build_context
 
   assert_equal "$APP_NAME" "tools-automation-development-tools-7"
 }
 
 # =============================================================================
-# Test: np CLI calls
+# Test: np CLI calls (only provider list now)
 # =============================================================================
-@test "Should call np scope read with correct SCOPE_ID" {
-  run_build_context
-
-  local calls
-  calls=$(cat "$NP_CALL_LOG")
-  assert_contains "$calls" "scope read --id 7 --format json"
-}
-
 @test "Should call np provider list with cloud-providers category" {
   run_build_context
 
   local calls
   calls=$(cat "$NP_CALL_LOG")
   assert_contains "$calls" "provider list --categories cloud-providers"
+}
+
+@test "Should not call np scope read" {
+  run_build_context
+
+  local calls
+  calls=$(cat "$NP_CALL_LOG")
+  if [[ "$calls" == *"scope read"* ]]; then
+    echo "Expected no 'scope read' call, but found one"
+    return 1
+  fi
 }
 
 # =============================================================================
@@ -146,10 +146,19 @@ run_build_context() {
 # Test: Validation
 # =============================================================================
 @test "Should fail when scope_id is missing from context" {
-  export CONTEXT='{"arguments":{}}'
+  export CONTEXT='{"arguments":{},"scope":{"slug":"test"},"tags":{"namespace":"ns","application":"app"}}'
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
   assert_contains "$output" "Missing required parameter: scope_id"
+}
+
+@test "Should fail when slugs are missing from context" {
+  export CONTEXT='{"arguments":{"scope_id":"7"},"scope":{},"tags":{}}'
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "Could not extract slugs from context"
 }

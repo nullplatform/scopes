@@ -2,41 +2,38 @@
 set -euo pipefail
 
 # Extract log arguments from notification context
-export SCOPE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.scope_id // empty')
-export APPLICATION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.application_id // empty')
-export DEPLOYMENT_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.deployment_id // empty')
-export FILTER_PATTERN=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.filter_pattern // empty')
-export INSTANCE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.instance_id // empty')
-export LIMIT=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.limit // empty')
-export START_TIME=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.start_time // empty')
-export NEXT_PAGE_TOKEN=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.next_page_token // empty')
+NOTIFICATION=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification')
+
+export SCOPE_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.scope_id // .scope.id // empty')
+export APPLICATION_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.application_id // .tags.application_id // empty')
+export DEPLOYMENT_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.deployment_id // empty')
+export FILTER_PATTERN=$(echo "$NOTIFICATION" | jq -r '.arguments.filter_pattern // empty')
+export INSTANCE_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.instance_id // empty')
+export LIMIT=$(echo "$NOTIFICATION" | jq -r '.arguments.limit // empty')
+export START_TIME=$(echo "$NOTIFICATION" | jq -r '.arguments.start_time // empty')
+export NEXT_PAGE_TOKEN=$(echo "$NOTIFICATION" | jq -r '.arguments.next_page_token // empty')
 
 if [ -z "$SCOPE_ID" ]; then
   echo "Error: Missing required parameter: SCOPE_ID" >&2
   exit 1
 fi
 
-# Resolve App Service name via np CLI
-SCOPE_DATA=$(np scope read --id "$SCOPE_ID" --format json)
-SCOPE_SLUG=$(echo "$SCOPE_DATA" | jq -r '.slug')
-SCOPE_NRN=$(echo "$SCOPE_DATA" | jq -r '.nrn')
-RESOLVED_APP_ID=$(echo "$SCOPE_DATA" | jq -r '.application_id')
+# Extract slugs directly from context (no np calls needed!)
+SCOPE_SLUG=$(echo "$NOTIFICATION" | jq -r '.scope.slug // empty')
+NS_SLUG=$(echo "$NOTIFICATION" | jq -r '.tags.namespace // empty')
+APP_SLUG=$(echo "$NOTIFICATION" | jq -r '.tags.application // empty')
+SCOPE_NRN=$(echo "$NOTIFICATION" | jq -r '.scope.nrn // .entity_nrn // empty')
 
-# Use APPLICATION_ID from context if provided, otherwise from scope
-APPLICATION_ID="${APPLICATION_ID:-$RESOLVED_APP_ID}"
-
-APP_DATA=$(np application read --id "$APPLICATION_ID" --format json)
-APP_SLUG=$(echo "$APP_DATA" | jq -r '.slug')
-NAMESPACE_ID=$(echo "$APP_DATA" | jq -r '.namespace_id')
-
-NS_DATA=$(np namespace read --id "$NAMESPACE_ID" --format json)
-NS_SLUG=$(echo "$NS_DATA" | jq -r '.slug')
+if [ -z "$SCOPE_SLUG" ] || [ -z "$NS_SLUG" ] || [ -z "$APP_SLUG" ]; then
+  echo "Error: Could not extract slugs from context" >&2
+  exit 1
+fi
 
 # Generate Azure App Service name
 APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" 60 "$NS_SLUG" "$APP_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
 export APP_NAME
 
-# Fetch Azure credentials from cloud provider
+# Fetch Azure credentials from cloud provider (still need this one np call)
 PROVIDERS=$(np provider list --categories cloud-providers --nrn "$SCOPE_NRN" --format json)
 
 export ARM_SUBSCRIPTION_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.subscription_id // empty')

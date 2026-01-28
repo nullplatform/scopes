@@ -4,7 +4,7 @@ set -euo pipefail
 # Extract metric arguments from notification context
 # CONTEXT = $NP_ACTION_CONTEXT.notification (set by main entrypoint)
 
-SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // .scope.id // empty')
 
 if [ -z "$SCOPE_ID" ]; then
   echo "Error: Missing required parameter: scope_id" >&2
@@ -26,26 +26,22 @@ if [ -n "${METRIC:-}" ]; then
   export METRIC_NAME="$METRIC"
 fi
 
-# Resolve App Service name via np CLI
-SCOPE_DATA=$(np scope read --id "$SCOPE_ID" --format json)
-SCOPE_SLUG=$(echo "$SCOPE_DATA" | jq -r '.slug')
-SCOPE_NRN=$(echo "$SCOPE_DATA" | jq -r '.nrn')
-RESOLVED_APP_ID=$(echo "$SCOPE_DATA" | jq -r '.application_id')
+# Extract slugs directly from context (no np calls needed!)
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug // empty')
+NS_SLUG=$(echo "$CONTEXT" | jq -r '.tags.namespace // empty')
+APP_SLUG=$(echo "$CONTEXT" | jq -r '.tags.application // empty')
+SCOPE_NRN=$(echo "$CONTEXT" | jq -r '.scope.nrn // .entity_nrn // empty')
 
-APPLICATION_ID="${APPLICATION_ID:-$RESOLVED_APP_ID}"
-
-APP_DATA=$(np application read --id "$APPLICATION_ID" --format json)
-APP_SLUG=$(echo "$APP_DATA" | jq -r '.slug')
-NAMESPACE_ID=$(echo "$APP_DATA" | jq -r '.namespace_id')
-
-NS_DATA=$(np namespace read --id "$NAMESPACE_ID" --format json)
-NS_SLUG=$(echo "$NS_DATA" | jq -r '.slug')
+if [ -z "$SCOPE_SLUG" ] || [ -z "$NS_SLUG" ] || [ -z "$APP_SLUG" ]; then
+  echo "Error: Could not extract slugs from context" >&2
+  exit 1
+fi
 
 # Generate Azure App Service name
 APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" 60 "$NS_SLUG" "$APP_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
 export APP_NAME
 
-# Fetch Azure credentials from cloud provider
+# Fetch Azure credentials from cloud provider (still need this one np call)
 PROVIDERS=$(np provider list --categories cloud-providers --nrn "$SCOPE_NRN" --format json)
 
 export ARM_SUBSCRIPTION_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.subscription_id // empty')

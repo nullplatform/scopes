@@ -19,10 +19,30 @@ LOG_LIST=$(curl -s -u "${SCM_USER}:${SCM_PASS}" "https://${SCM_HOST}/api/logs/do
 # Sort by lastUpdated descending and take top 3 log files
 LOG_URLS=$(echo "$LOG_LIST" | jq -r '[sort_by(.lastUpdated) | reverse | .[:3] | .[].href] | .[]')
 
-# Collect all log lines from the selected files
-ALL_LINES=""
+# Fetch log files in parallel
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
+PIDS=()
+INDEX=0
 for url in $LOG_URLS; do
-  CONTENT=$(curl -s -u "${SCM_USER}:${SCM_PASS}" "$url")
+  curl -s -u "${SCM_USER}:${SCM_PASS}" "$url" > "${TEMP_DIR}/log_${INDEX}" &
+  PIDS+=($!)
+  INDEX=$((INDEX + 1))
+done
+
+# Wait for all downloads to complete
+if [ ${#PIDS[@]} -gt 0 ]; then
+  for pid in "${PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+fi
+
+# Combine all log content
+ALL_LINES=""
+for file in "${TEMP_DIR}"/log_*; do
+  [ -f "$file" ] || continue
+  CONTENT=$(cat "$file")
   if [ -n "$CONTENT" ]; then
     if [ -n "$ALL_LINES" ]; then
       ALL_LINES="${ALL_LINES}

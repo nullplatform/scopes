@@ -31,10 +31,7 @@ setup() {
   # Set SERVICE_PATH (azure-apps root)
   export SERVICE_PATH="$AZURE_APPS_DIR"
 
-  # Set np mock responses
-  export NP_SCOPE_RESPONSE="$RESPONSES_DIR/np_scope_read.json"
-  export NP_APP_RESPONSE="$RESPONSES_DIR/np_application_read.json"
-  export NP_NAMESPACE_RESPONSE="$RESPONSES_DIR/np_namespace_read.json"
+  # Set np mock responses (only provider list is called now)
   export NP_PROVIDER_RESPONSE="$RESPONSES_DIR/np_provider_list.json"
 
   # ARM_CLIENT_SECRET is an env var set on the agent (not from provider)
@@ -94,45 +91,19 @@ run_build_context() {
   assert_equal "$START_TIME" "2026-01-27T00:00:00Z"
 }
 
-@test "Should default optional fields to empty when not provided" {
-  export NP_ACTION_CONTEXT='{"notification":{"arguments":{"scope_id":"7"}}}'
-
+# =============================================================================
+# Test: Slug extraction from context (no np calls)
+# =============================================================================
+@test "Should extract scope slug from context" {
   run_build_context
 
-  assert_empty "$FILTER_PATTERN" "FILTER_PATTERN"
-  assert_empty "$INSTANCE_ID" "INSTANCE_ID"
-  assert_empty "$LIMIT" "LIMIT"
-  assert_empty "$START_TIME" "START_TIME"
-  assert_empty "$NEXT_PAGE_TOKEN" "NEXT_PAGE_TOKEN"
+  # APP_NAME is built from slugs, verify it's correct
+  assert_equal "$APP_NAME" "tools-automation-development-tools-7"
 }
 
 # =============================================================================
-# Test: np CLI calls
+# Test: np CLI calls (only provider list now)
 # =============================================================================
-@test "Should call np scope read with correct SCOPE_ID" {
-  run_build_context
-
-  local calls
-  calls=$(cat "$NP_CALL_LOG")
-  assert_contains "$calls" "scope read --id 7 --format json"
-}
-
-@test "Should call np application read with correct APPLICATION_ID" {
-  run_build_context
-
-  local calls
-  calls=$(cat "$NP_CALL_LOG")
-  assert_contains "$calls" "application read --id 4 --format json"
-}
-
-@test "Should call np namespace read with correct NAMESPACE_ID" {
-  run_build_context
-
-  local calls
-  calls=$(cat "$NP_CALL_LOG")
-  assert_contains "$calls" "namespace read --id 3 --format json"
-}
-
 @test "Should call np provider list with cloud-providers category" {
   run_build_context
 
@@ -141,13 +112,16 @@ run_build_context() {
   assert_contains "$calls" "provider list --categories cloud-providers"
 }
 
-# =============================================================================
-# Test: APP_NAME resolution
-# =============================================================================
-@test "Should resolve APP_NAME via np CLI and generate_resource_name" {
+@test "Should not call np scope read" {
   run_build_context
 
-  assert_equal "$APP_NAME" "tools-automation-development-tools-7"
+  local calls
+  calls=$(cat "$NP_CALL_LOG")
+  # Should NOT contain scope read
+  if [[ "$calls" == *"scope read"* ]]; then
+    echo "Expected no 'scope read' call, but found one"
+    return 1
+  fi
 }
 
 # =============================================================================
@@ -200,12 +174,21 @@ run_build_context() {
 # Test: Validation
 # =============================================================================
 @test "Should fail when SCOPE_ID is missing from context" {
-  export NP_ACTION_CONTEXT='{"notification":{"arguments":{}}}'
+  export NP_ACTION_CONTEXT='{"notification":{"arguments":{},"scope":{"slug":"test"},"tags":{"namespace":"ns","application":"app"}}}'
 
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "1"
   assert_contains "$output" "Missing required parameter: SCOPE_ID"
+}
+
+@test "Should fail when slugs are missing from context" {
+  export NP_ACTION_CONTEXT='{"notification":{"arguments":{"scope_id":"7"},"scope":{},"tags":{}}}'
+
+  run source "$SCRIPT_PATH"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "Could not extract slugs from context"
 }
 
 # =============================================================================

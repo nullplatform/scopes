@@ -1,5 +1,7 @@
 {
   "notification": {
+    "action": "log:read",
+    "entity_nrn": "organization=1:account=2:namespace=3:application=4:scope=7",
     "arguments": {
       "scope_id": "7",
       "application_id": "4",
@@ -9,6 +11,16 @@
       "limit": "100",
       "start_time": "2026-01-27T00:00:00Z",
       "next_page_token": ""
+    },
+    "scope": {
+      "id": 7,
+      "slug": "development-tools",
+      "name": "Development tools",
+      "nrn": "organization=1:account=2:namespace=3:application=4:scope=7"
+    },
+    "tags": {
+      "namespace": "tools",
+      "application": "automation"
     }
   }
 }
