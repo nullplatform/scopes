@@ -22,6 +22,7 @@ eval "$(echo "$NOTIFICATION" | jq -r '
   "export INSTANCE_ID=" + (.arguments.instance_id // "" | @sh) + "\n" +
   "export LIMIT=" + (.arguments.limit // "" | @sh) + "\n" +
   "export START_TIME=" + (.arguments.start_time // "" | @sh) + "\n" +
+  "export END_TIME=" + (.arguments.end_time // "" | @sh) + "\n" +
   "export NEXT_PAGE_TOKEN=" + (.arguments.next_page_token // "" | @sh) + "\n" +
   "SCOPE_SLUG=" + (.scope.slug // "" | @sh) + "\n" +
   "NS_SLUG=" + (.tags.namespace // "" | @sh) + "\n" +
@@ -29,6 +30,16 @@ eval "$(echo "$NOTIFICATION" | jq -r '
   "SCOPE_NRN=" + (.scope.nrn // .entity_nrn // "" | @sh)
 ')"
 _log_timing "parse_context" "$START" "$(_timer)"
+
+# Convert START_TIME and END_TIME from Unix ms to ISO format if numeric
+if [ -n "$START_TIME" ] && [[ "$START_TIME" =~ ^[0-9]+$ ]]; then
+  START_TIME=$(python3 -c "from datetime import datetime, timezone; print(datetime.fromtimestamp($START_TIME/1000, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  export START_TIME
+fi
+if [ -n "$END_TIME" ] && [[ "$END_TIME" =~ ^[0-9]+$ ]]; then
+  END_TIME=$(python3 -c "from datetime import datetime, timezone; print(datetime.fromtimestamp($END_TIME/1000, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  export END_TIME
+fi
 
 if [ -z "$SCOPE_ID" ]; then
   echo "Error: Missing required parameter: SCOPE_ID" >&2

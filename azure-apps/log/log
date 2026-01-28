@@ -79,7 +79,7 @@ _log_timing "curl_log_files_parallel(${INDEX})" "$START" "$(_timer)"
 # Combine and parse logs using jq (much faster than bash loops)
 START=$(_timer)
 if ls "${TEMP_DIR}"/log_* >/dev/null 2>&1; then
-  PARSED_LINES=$(cat "${TEMP_DIR}"/log_* | jq -R --arg start_time "${START_TIME:-}" --arg filter "${FILTER_PATTERN:-}" '
+  PARSED_LINES=$(cat "${TEMP_DIR}"/log_* | jq -R --arg start_time "${START_TIME:-}" --arg end_time "${END_TIME:-}" --arg filter "${FILTER_PATTERN:-}" '
     # For each line, try to extract timestamp
     select(length > 0) |
     . as $line |
@@ -91,8 +91,10 @@ if ls "${TEMP_DIR}"/log_* >/dev/null 2>&1; then
     else
       empty
     end |
-    # Apply START_TIME filter
+    # Apply START_TIME filter (keep logs >= start_time)
     if ($start_time != "" and .datetime < $start_time) then empty else . end |
+    # Apply END_TIME filter (keep logs <= end_time)
+    if ($end_time != "" and .datetime > $end_time) then empty else . end |
     # Apply FILTER_PATTERN filter
     if ($filter != "" and (.message | test($filter) | not)) then empty else . end
   ' 2>/dev/null | jq -s 'sort_by(.datetime)' 2>/dev/null || echo "[]")
