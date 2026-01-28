@@ -1,26 +1,52 @@
 #!/bin/bash
 set -euo pipefail
 
-# List Azure App Service instances via REST API
+# List Azure App Service instances via REST API (both production and staging slots)
 
-INSTANCES_URL="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}/instances?api-version=2022-03-01"
+BASE_URL="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}"
+API_VERSION="api-version=2022-03-01"
 
-INSTANCES=$(curl -s "$INSTANCES_URL" \
+# Query production slot instances
+PROD_INSTANCES=$(curl -s "${BASE_URL}/instances?${API_VERSION}" \
   -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
   -H "Content-Type: application/json")
 
-echo "$INSTANCES" | jq --argjson limit "${LIMIT:-10}" --arg app_name "$APP_NAME" '{
-  results: (.value // [])[:$limit] | map({
+# Query staging slot instances (may not exist)
+STAGING_INSTANCES=$(curl -s "${BASE_URL}/slots/staging/instances?${API_VERSION}" \
+  -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" 2>/dev/null || echo '{"value":[]}')
+
+# Check if staging slot exists (error response won't have "value" array)
+if ! echo "$STAGING_INSTANCES" | jq -e '.value' >/dev/null 2>&1; then
+  STAGING_INSTANCES='{"value":[]}'
+fi
+
+# Merge and transform results
+jq -n \
+  --argjson prod "$PROD_INSTANCES" \
+  --argjson staging "$STAGING_INSTANCES" \
+  --argjson limit "${LIMIT:-10}" \
+  --arg app_name "$APP_NAME" \
+  --arg scope_id "${SCOPE_ID:-}" \
+  --arg application_id "${APPLICATION_ID:-}" \
+  --arg deployment_id "${DEPLOYMENT_ID:-}" \
+  --arg resource_group "${AZURE_RESOURCE_GROUP:-}" \
+'{
+  results: (
+    (($prod.value // []) | map(. + {_slot: "production"})) +
+    (($staging.value // []) | map(. + {_slot: "staging"}))
+  )[:$limit] | map({
     id: .name,
     selector: {
-      scope_id: (env.SCOPE_ID // ""),
-      application_id: (env.APPLICATION_ID // ""),
-      deployment_id: (env.DEPLOYMENT_ID // "")
+      scope_id: $scope_id,
+      application_id: $application_id,
+      deployment_id: $deployment_id,
+      slot: ._slot
     },
     details: {
-      namespace: (env.AZURE_RESOURCE_GROUP // ""),
+      namespace: $resource_group,
       ip: "",
-      dns: ($app_name + ".azurewebsites.net"),
+      dns: (if ._slot == "staging" then ($app_name + "-staging.azurewebsites.net") else ($app_name + ".azurewebsites.net") end),
       cpu: {
         requested: 0,
         limit: 0
@@ -31,8 +57,8 @@ echo "$INSTANCES" | jq --argjson limit "${LIMIT:-10}" --arg app_name "$APP_NAME"
       },
       architecture: "x86"
     },
-    state: (.properties.state // "Running"),
-    launch_time: (.properties.siteInstanceName // ""),
+    state: (if .properties.state == "READY" then "Running" else (.properties.state // "Running") end),
+    launch_time: (.properties.lastModifiedTimeUtc // ""),
     spot: false
   })
 }'

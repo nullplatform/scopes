@@ -15,14 +15,20 @@ if [[ "$ARGS" == *"login.microsoftonline.com"*"oauth2"* ]]; then
   exit 0
 fi
 
-# Azure publishing credentials endpoint
+# Azure publishing credentials endpoint (staging slot returns empty/error by default)
 if [[ "$ARGS" == *"publishingcredentials"* ]]; then
-  echo '{"properties":{"publishingUserName":"$mock-user","publishingPassword":"mock-password"}}'
+  if [[ "$ARGS" == *"/slots/staging/"* ]]; then
+    # Staging slot - return error (slot doesn't exist by default)
+    echo '{"error":{"code":"NotFound"}}'
+  else
+    # Production slot
+    echo '{"properties":{"publishingUserName":"$mock-user","publishingPassword":"mock-password"}}'
+  fi
   exit 0
 fi
 
 # Azure App Service site info endpoint (for getting serverFarmId)
-if [[ "$ARGS" == *"Microsoft.Web/sites/"* ]] && [[ "$ARGS" == *"api-version="* ]] && [[ "$ARGS" != *"/instances"* ]] && [[ "$ARGS" != *"/publishingcredentials"* ]] && [[ "$ARGS" != *"microsoft.insights"* ]]; then
+if [[ "$ARGS" == *"Microsoft.Web/sites/"* ]] && [[ "$ARGS" == *"api-version="* ]] && [[ "$ARGS" != *"/instances"* ]] && [[ "$ARGS" != *"/publishingcredentials"* ]] && [[ "$ARGS" != *"microsoft.insights"* ]] && [[ "$ARGS" != *"/slots/"* ]]; then
   echo '{"properties":{"serverFarmId":"/subscriptions/test-subscription-id/resourceGroups/test-resource-group/providers/Microsoft.Web/serverfarms/test-app-service-plan"}}'
   exit 0
 fi
@@ -30,7 +36,12 @@ fi
 # Azure Monitor metrics endpoint
 if [[ "$ARGS" == *"microsoft.insights/metrics"* ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  cat "$SCRIPT_DIR/responses/az_metrics_cpu.json"
+  if [[ "$ARGS" == *"/slots/staging/"* ]]; then
+    # Staging slot metrics - return empty by default
+    echo '{"value":[{"timeseries":[]}]}'
+  else
+    cat "$SCRIPT_DIR/responses/az_metrics_cpu.json"
+  fi
   exit 0
 fi
 
@@ -39,8 +50,24 @@ if [[ "$ARGS" == *"/instances"* ]]; then
   # Check for mock response override first
   if [ -n "${CURL_MOCK_RESPONSE:-}" ] && [ -f "$CURL_MOCK_RESPONSE" ]; then
     cat "$CURL_MOCK_RESPONSE"
+  elif [[ "$ARGS" == *"/slots/staging/"* ]]; then
+    # Staging slot instances - return empty by default
+    echo '{"value":[]}'
   else
-    echo '{"value":[{"name":"instance1","properties":{"state":"Running"}},{"name":"instance2","properties":{"state":"Running"}}]}'
+    # Production slot instances
+    echo '{"value":[{"name":"instance1","properties":{"state":"Running","lastModifiedTimeUtc":"2026-01-28T10:00:00Z"}},{"name":"instance2","properties":{"state":"Running","lastModifiedTimeUtc":"2026-01-28T10:00:00Z"}}]}'
+  fi
+  exit 0
+fi
+
+# Kudu Docker logs API
+if [[ "$ARGS" == *"scm.azurewebsites.net/api/logs/docker"* ]]; then
+  if [[ "$ARGS" == *"-staging.scm."* ]]; then
+    # Staging slot logs - return empty by default
+    echo '[]'
+  else
+    # Production slot logs
+    echo '[{"href":"https://mock.scm.azurewebsites.net/api/logs/docker/log1.txt","lastUpdated":"2026-01-28T10:00:00Z"}]'
   fi
   exit 0
 fi

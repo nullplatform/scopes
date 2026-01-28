@@ -1,67 +1,106 @@
 #!/bin/bash
 set -euo pipefail
 
-# Fetch logs from Azure App Service via Kudu Docker logs API
+# Fetch logs from Azure App Service via Kudu Docker logs API (both production and staging slots)
 
-# Get publishing credentials (with caching)
 CACHE_DIR="${SERVICE_PATH}/log/.cache"
-CACHE_FILE="${CACHE_DIR}/${APP_NAME}-creds.json"
 CACHE_TTL=3600  # 1 hour in seconds
-
-# Check if cached credentials exist and are fresh
-USE_CACHE=false
-if [ -f "$CACHE_FILE" ]; then
-  CACHE_AGE=$(($(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0)))
-  if [ "$CACHE_AGE" -lt "$CACHE_TTL" ]; then
-    USE_CACHE=true
-  fi
-fi
-
-if [ "$USE_CACHE" = true ]; then
-  CREDENTIALS=$(cat "$CACHE_FILE")
-else
-  CREDS_URL="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}/config/publishingcredentials/list?api-version=2022-03-01"
-  CREDENTIALS=$(curl -s -X POST "$CREDS_URL" \
-    -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d '{}')
-  # Cache the credentials
-  mkdir -p "$CACHE_DIR"
-  echo "$CREDENTIALS" > "$CACHE_FILE"
-fi
-
-SCM_USER=$(echo "$CREDENTIALS" | jq -r '.properties.publishingUserName')
-SCM_PASS=$(echo "$CREDENTIALS" | jq -r '.properties.publishingPassword')
-SCM_HOST="${APP_NAME}.scm.azurewebsites.net"
-
-# Fetch log file list from Kudu API
-LOG_LIST=$(curl -s -u "${SCM_USER}:${SCM_PASS}" "https://${SCM_HOST}/api/logs/docker")
-
-# Sort by lastUpdated descending and take top 3 log files
-LOG_URLS=$(echo "$LOG_LIST" | jq -r '[sort_by(.lastUpdated) | reverse | .[:3] | .[].href] | .[]')
-
-# Fetch log files in parallel
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-PIDS=()
-INDEX=0
-for url in $LOG_URLS; do
-  curl -s -u "${SCM_USER}:${SCM_PASS}" "$url" > "${TEMP_DIR}/log_${INDEX}" &
-  PIDS+=($!)
-  INDEX=$((INDEX + 1))
-done
+# Function to get publishing credentials (with caching)
+get_credentials() {
+  local slot="$1"  # "production" or "staging"
+  local cache_file="${CACHE_DIR}/${APP_NAME}-${slot}-creds.json"
+  local creds_url
 
-# Wait for all downloads to complete
-if [ ${#PIDS[@]} -gt 0 ]; then
-  for pid in "${PIDS[@]}"; do
-    wait "$pid" 2>/dev/null || true
+  if [ "$slot" = "staging" ]; then
+    creds_url="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}/slots/staging/config/publishingcredentials/list?api-version=2022-03-01"
+  else
+    creds_url="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}/config/publishingcredentials/list?api-version=2022-03-01"
+  fi
+
+  # Check if cached credentials exist and are fresh
+  if [ -f "$cache_file" ]; then
+    local cache_age=$(($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)))
+    if [ "$cache_age" -lt "$CACHE_TTL" ]; then
+      cat "$cache_file"
+      return 0
+    fi
+  fi
+
+  # Fetch fresh credentials
+  local credentials
+  credentials=$(curl -s -X POST "$creds_url" \
+    -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{}' 2>/dev/null)
+
+  # Check if valid response (has publishingUserName)
+  if echo "$credentials" | jq -e '.properties.publishingUserName' >/dev/null 2>&1; then
+    mkdir -p "$CACHE_DIR"
+    echo "$credentials" > "$cache_file"
+    echo "$credentials"
+    return 0
+  fi
+
+  return 1
+}
+
+# Function to fetch logs from a slot
+fetch_slot_logs() {
+  local slot="$1"
+  local scm_user="$2"
+  local scm_pass="$3"
+  local scm_host="$4"
+  local output_prefix="$5"
+
+  # Fetch log file list from Kudu API
+  local log_list
+  log_list=$(curl -s -u "${scm_user}:${scm_pass}" "https://${scm_host}/api/logs/docker" 2>/dev/null || echo "[]")
+
+  # Sort by lastUpdated descending and take top 3 log files
+  local log_urls
+  log_urls=$(echo "$log_list" | jq -r '[sort_by(.lastUpdated) | reverse | .[:3] | .[].href] | .[]' 2>/dev/null || echo "")
+
+  # Fetch log files in parallel
+  local pids=()
+  local index=0
+  for url in $log_urls; do
+    curl -s -u "${scm_user}:${scm_pass}" "$url" > "${TEMP_DIR}/${output_prefix}_${index}" 2>/dev/null &
+    pids+=($!)
+    index=$((index + 1))
   done
+
+  # Wait for all downloads
+  if [ ${#pids[@]} -gt 0 ]; then
+    for pid in "${pids[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  fi
+}
+
+# Fetch production slot credentials and logs
+PROD_CREDS=$(get_credentials "production" || echo '{}')
+if echo "$PROD_CREDS" | jq -e '.properties.publishingUserName' >/dev/null 2>&1; then
+  PROD_USER=$(echo "$PROD_CREDS" | jq -r '.properties.publishingUserName')
+  PROD_PASS=$(echo "$PROD_CREDS" | jq -r '.properties.publishingPassword')
+  PROD_HOST="${APP_NAME}.scm.azurewebsites.net"
+  fetch_slot_logs "production" "$PROD_USER" "$PROD_PASS" "$PROD_HOST" "prod_log"
 fi
 
-# Combine and parse logs using jq (much faster than bash loops)
-if ls "${TEMP_DIR}"/log_* >/dev/null 2>&1; then
-  PARSED_LINES=$(cat "${TEMP_DIR}"/log_* | jq -R --arg start_time "${START_TIME:-}" --arg end_time "${END_TIME:-}" --arg filter "${FILTER_PATTERN:-}" '
+# Fetch staging slot credentials and logs (may not exist)
+STAGING_CREDS=$(get_credentials "staging" || echo '{}')
+if echo "$STAGING_CREDS" | jq -e '.properties.publishingUserName' >/dev/null 2>&1; then
+  STAGING_USER=$(echo "$STAGING_CREDS" | jq -r '.properties.publishingUserName')
+  STAGING_PASS=$(echo "$STAGING_CREDS" | jq -r '.properties.publishingPassword')
+  STAGING_HOST="${APP_NAME}-staging.scm.azurewebsites.net"
+  fetch_slot_logs "staging" "$STAGING_USER" "$STAGING_PASS" "$STAGING_HOST" "staging_log"
+fi
+
+# Combine and parse logs from all slots using jq
+if ls "${TEMP_DIR}"/*_log_* >/dev/null 2>&1; then
+  PARSED_LINES=$(cat "${TEMP_DIR}"/*_log_* | jq -R --arg start_time "${START_TIME:-}" --arg end_time "${END_TIME:-}" --arg filter "${FILTER_PATTERN:-}" '
     # For each line, try to extract timestamp
     select(length > 0) |
     . as $line |

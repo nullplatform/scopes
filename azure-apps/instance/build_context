@@ -4,9 +4,9 @@ set -euo pipefail
 # Extract all context fields in a single jq call
 # CONTEXT = $NP_ACTION_CONTEXT.notification (set by main entrypoint)
 eval "$(echo "$CONTEXT" | jq -r '
-  "export SCOPE_ID=" + (.arguments.scope_id // .scope.id // "" | @sh) + "\n" +
-  "export APPLICATION_ID=" + ((.arguments.application_id // .tags.application_id // "") | if type == "array" then .[0] else . end | @sh) + "\n" +
-  "export DEPLOYMENT_ID=" + ((.arguments.deployment_id // "") | if type == "array" then .[0] else . end | @sh) + "\n" +
+  "export SCOPE_ID=" + ((.arguments.scope_id // .scope.id // "") | if type == "array" then .[0] else . end | tostring | @sh) + "\n" +
+  "export APPLICATION_ID=" + ((.arguments.application_id // .scope.application_id // .tags.application_id // "") | if type == "array" then .[0] else . end | tostring | @sh) + "\n" +
+  "export DEPLOYMENT_ID=" + ((.arguments.deployment_id // .scope.active_deployment // "") | if type == "array" then .[0] else . end | tostring | @sh) + "\n" +
   "SCOPE_SLUG=" + (.scope.slug // "" | @sh) + "\n" +
   "NS_SLUG=" + (.tags.namespace // "" | @sh) + "\n" +
   "APP_SLUG=" + (.tags.application // "" | @sh) + "\n" +

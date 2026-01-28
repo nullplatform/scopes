@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Query Azure Monitor metrics for App Service
+# Query Azure Monitor metrics for App Service (both production and staging slots)
 
 if [ -z "${METRIC_NAME:-}" ]; then
   echo '{"metric":"","type":"","period_in_seconds":0,"unit":"","results":[]}' >&2
@@ -10,7 +10,7 @@ fi
 
 # Map nullplatform metric names to Azure Monitor metrics
 # Returns: azure_metric aggregation unit type resource_type
-# resource_type: "site" or "plan" (plan metrics require App Service Plan resource ID)
+# resource_type: "site" or "plan" (plan metrics are shared across slots)
 get_azure_metric_config() {
   local metric="$1"
   case "$metric" in
@@ -63,33 +63,20 @@ RESOURCE_TYPE=$(echo "$CONFIG" | cut -d' ' -f5)
 # Calculate interval
 INTERVAL_MINUTES=${INTERVAL:-5}
 PERIOD_SECONDS=$((INTERVAL_MINUTES * 60))
+TIMESPAN="${START_TIME}/${END_TIME}"
 
-# Get the appropriate resource ID for the metric
-get_resource_id() {
-  local resource_type="$1"
+# Resource IDs
+PROD_RESOURCE_ID="$AZURE_RESOURCE_ID"
+STAGING_RESOURCE_ID="${AZURE_RESOURCE_ID}/slots/staging"
 
-  if [ "$resource_type" = "plan" ]; then
-    # CPU and Memory percentage metrics are at App Service Plan level
-    # Get the serverFarmId from the site
-    local SITE_URL="https://management.azure.com${AZURE_RESOURCE_ID}?api-version=2022-03-01"
-    local SITE_INFO
-    SITE_INFO=$(curl -s "$SITE_URL" \
-      -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
-      -H "Content-Type: application/json")
-
-    # Extract the App Service Plan resource ID
-    local PLAN_ID
-    PLAN_ID=$(echo "$SITE_INFO" | jq -r '.properties.serverFarmId // empty')
-
-    if [ -z "$PLAN_ID" ]; then
-      echo "Error: Could not get App Service Plan ID from site" >&2
-      return 1
-    fi
-
-    echo "$PLAN_ID"
-  else
-    echo "$AZURE_RESOURCE_ID"
-  fi
+# Get App Service Plan ID (for plan-level metrics)
+get_plan_id() {
+  local SITE_URL="https://management.azure.com${AZURE_RESOURCE_ID}?api-version=2022-03-01"
+  local SITE_INFO
+  SITE_INFO=$(curl -s "$SITE_URL" \
+    -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
+    -H "Content-Type: application/json")
+  echo "$SITE_INFO" | jq -r '.properties.serverFarmId // empty'
 }
 
 # Query Azure Monitor via REST API
@@ -99,85 +86,153 @@ query_metric() {
   local resource_id="$3"
 
   local METRICS_URL="https://management.azure.com${resource_id}/providers/microsoft.insights/metrics"
-  local TIMESPAN="${START_TIME}/${END_TIME}"
 
   curl -s "${METRICS_URL}?api-version=2018-01-01&metricnames=${metric}&aggregation=${aggregation}&timespan=${TIMESPAN}&interval=PT${INTERVAL_MINUTES}M" \
     -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
-    -H "Content-Type: application/json"
+    -H "Content-Type: application/json" 2>/dev/null || echo '{"value":[]}'
 }
 
-# Transform Azure Monitor response to standard format
+# Transform Azure Monitor response to standard format with slot selector
 transform_response() {
   local response="$1"
   local aggregation_key="$2"
+  local slot="$3"
 
-  echo "$response" | jq --arg agg "$aggregation_key" '[
-    .value[0].timeseries[] | {
-      selector: {},
-      data: [
-        .data[] |
-        select(.[$agg] != null) |
-        {
-          timestamp: .timeStamp,
-          value: .[$agg]
-        }
-      ]
-    }
-  ]'
+  echo "$response" | jq --arg agg "$aggregation_key" --arg slot "$slot" '
+    if (.value[0].timeseries | length) > 0 then
+      [.value[0].timeseries[] | {
+        selector: {slot: $slot},
+        data: [
+          .data[] |
+          select(.[$agg] != null) |
+          {
+            timestamp: .timeStamp,
+            value: .[$agg]
+          }
+        ]
+      }]
+    else
+      []
+    end
+  ' 2>/dev/null || echo '[]'
 }
 
 AGG_KEY=$(echo "$AGGREGATION" | tr '[:upper:]' '[:lower:]')
 
-# Get the appropriate resource ID for this metric type
-METRIC_RESOURCE_ID=$(get_resource_id "$RESOURCE_TYPE")
+if [ "$RESOURCE_TYPE" = "plan" ]; then
+  # Plan-level metrics (CPU/Memory) - shared across all slots
+  PLAN_ID=$(get_plan_id)
+  if [ -z "$PLAN_ID" ]; then
+    echo "Error: Could not get App Service Plan ID from site" >&2
+    exit 1
+  fi
 
-if [ "$METRIC_NAME" = "http.error_rate" ]; then
-  # Special case: compute Http5xx / Requests * 100
-  RESPONSE_5XX=$(query_metric "Http5xx" "Total" "$METRIC_RESOURCE_ID")
-  RESPONSE_REQ=$(query_metric "Requests" "Total" "$METRIC_RESOURCE_ID")
+  RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION" "$PLAN_ID")
+  RESULTS=$(transform_response "$RESPONSE" "$AGG_KEY" "all")
 
-  # Extract timeseries data and compute ratio
-  RESULTS=$(jq -n \
-    --argjson r5xx "$RESPONSE_5XX" \
-    --argjson rreq "$RESPONSE_REQ" \
-    '[{
-      selector: {},
-      data: [
-        range($r5xx.value[0].timeseries[0].data | length) |
-        . as $i |
-        {
-          timestamp: $r5xx.value[0].timeseries[0].data[$i].timeStamp,
-          value: (
-            if ($rreq.value[0].timeseries[0].data[$i].total // 0) > 0 then
-              ($r5xx.value[0].timeseries[0].data[$i].total // 0) / ($rreq.value[0].timeseries[0].data[$i].total) * 100
-            else
-              0
-            end
-          )
-        }
-      ]
-    }]')
+elif [ "$METRIC_NAME" = "http.error_rate" ]; then
+  # Special case: compute Http5xx / Requests * 100 for each slot
+  # Production
+  PROD_5XX=$(query_metric "Http5xx" "Total" "$PROD_RESOURCE_ID")
+  PROD_REQ=$(query_metric "Requests" "Total" "$PROD_RESOURCE_ID")
+
+  PROD_RESULTS=$(jq -n \
+    --argjson r5xx "$PROD_5XX" \
+    --argjson rreq "$PROD_REQ" \
+    'if ($r5xx.value[0].timeseries | length) > 0 then
+      [{
+        selector: {slot: "production"},
+        data: [
+          range($r5xx.value[0].timeseries[0].data | length) |
+          . as $i |
+          {
+            timestamp: $r5xx.value[0].timeseries[0].data[$i].timeStamp,
+            value: (
+              if ($rreq.value[0].timeseries[0].data[$i].total // 0) > 0 then
+                ($r5xx.value[0].timeseries[0].data[$i].total // 0) / ($rreq.value[0].timeseries[0].data[$i].total) * 100
+              else
+                0
+              end
+            )
+          }
+        ]
+      }]
+    else [] end' 2>/dev/null || echo '[]')
+
+  # Staging (may not exist)
+  STAGING_5XX=$(query_metric "Http5xx" "Total" "$STAGING_RESOURCE_ID")
+  STAGING_REQ=$(query_metric "Requests" "Total" "$STAGING_RESOURCE_ID")
+
+  STAGING_RESULTS=$(jq -n \
+    --argjson r5xx "$STAGING_5XX" \
+    --argjson rreq "$STAGING_REQ" \
+    'if ($r5xx.value[0].timeseries | length) > 0 then
+      [{
+        selector: {slot: "staging"},
+        data: [
+          range($r5xx.value[0].timeseries[0].data | length) |
+          . as $i |
+          {
+            timestamp: $r5xx.value[0].timeseries[0].data[$i].timeStamp,
+            value: (
+              if ($rreq.value[0].timeseries[0].data[$i].total // 0) > 0 then
+                ($r5xx.value[0].timeseries[0].data[$i].total // 0) / ($rreq.value[0].timeseries[0].data[$i].total) * 100
+              else
+                0
+              end
+            )
+          }
+        ]
+      }]
+    else [] end' 2>/dev/null || echo '[]')
+
+  RESULTS=$(jq -n --argjson prod "$PROD_RESULTS" --argjson staging "$STAGING_RESULTS" '$prod + $staging')
 
 elif [ "$METRIC_NAME" = "http.rpm" ]; then
-  # Special case: Total requests / interval_minutes
-  RESPONSE=$(query_metric "Requests" "Total" "$METRIC_RESOURCE_ID")
-  RESULTS=$(echo "$RESPONSE" | jq --argjson interval "$INTERVAL_MINUTES" '[
-    .value[0].timeseries[] | {
-      selector: {},
-      data: [
-        .data[] |
-        select(.total != null) |
-        {
-          timestamp: .timeStamp,
-          value: (.total / $interval)
-        }
-      ]
-    }
-  ]')
+  # Special case: Total requests / interval_minutes for each slot
+  PROD_RESPONSE=$(query_metric "Requests" "Total" "$PROD_RESOURCE_ID")
+  PROD_RESULTS=$(echo "$PROD_RESPONSE" | jq --argjson interval "$INTERVAL_MINUTES" '
+    if (.value[0].timeseries | length) > 0 then
+      [.value[0].timeseries[] | {
+        selector: {slot: "production"},
+        data: [
+          .data[] |
+          select(.total != null) |
+          {
+            timestamp: .timeStamp,
+            value: (.total / $interval)
+          }
+        ]
+      }]
+    else [] end' 2>/dev/null || echo '[]')
+
+  STAGING_RESPONSE=$(query_metric "Requests" "Total" "$STAGING_RESOURCE_ID")
+  STAGING_RESULTS=$(echo "$STAGING_RESPONSE" | jq --argjson interval "$INTERVAL_MINUTES" '
+    if (.value[0].timeseries | length) > 0 then
+      [.value[0].timeseries[] | {
+        selector: {slot: "staging"},
+        data: [
+          .data[] |
+          select(.total != null) |
+          {
+            timestamp: .timeStamp,
+            value: (.total / $interval)
+          }
+        ]
+      }]
+    else [] end' 2>/dev/null || echo '[]')
+
+  RESULTS=$(jq -n --argjson prod "$PROD_RESULTS" --argjson staging "$STAGING_RESULTS" '$prod + $staging')
 
 else
-  RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION" "$METRIC_RESOURCE_ID")
-  RESULTS=$(transform_response "$RESPONSE" "$AGG_KEY")
+  # Standard site-level metrics - query both slots
+  PROD_RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION" "$PROD_RESOURCE_ID")
+  PROD_RESULTS=$(transform_response "$PROD_RESPONSE" "$AGG_KEY" "production")
+
+  STAGING_RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION" "$STAGING_RESOURCE_ID")
+  STAGING_RESULTS=$(transform_response "$STAGING_RESPONSE" "$AGG_KEY" "staging")
+
+  RESULTS=$(jq -n --argjson prod "$PROD_RESULTS" --argjson staging "$STAGING_RESULTS" '$prod + $staging')
 fi
 
 # Output in standard format
