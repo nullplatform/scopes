@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": 1,
+      "name": "Azure Cloud Provider",
+      "category": "cloud-providers",
+      "attributes": {
+        "authentication": {
+          "subscription_id": "test-subscription-id",
+          "client_id": "test-client-id",
+          "tenant_id": "test-tenant-id"
+        },
+        "networking": {
+          "public_dns_zone_resource_group_name": "test-resource-group"
+        }
+      }
+    }
+  ]
+}

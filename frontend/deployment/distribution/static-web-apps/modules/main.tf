@@ -1,3 +1,4 @@
+
 # Azure Static Web Apps Hosting
 # Resources for Azure Static Web Apps
 

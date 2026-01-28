@@ -1,0 +1,79 @@
+#!/bin/bash
+# =============================================================================
+# Generate Resource Name
+#
+# Generates a resource name from segments with intelligent truncation.
+# The ID (last segment) is always preserved; if the name exceeds max length,
+# full segments are removed from the left until it fits.
+#
+# Usage:
+#   ./generate_resource_name <max_length> <segment1> <segment2> ... <id>
+#
+# Example:
+#   ./generate_resource_name 60 "$NAMESPACE_SLUG" "$APPLICATION_SLUG" "$SCOPE_SLUG" "$SCOPE_ID"
+#   # Output: namespace-application-scope-123
+#   # Or if too long: application-scope-123 (removes leftmost segments first)
+#
+# Arguments:
+#   max_length  Maximum allowed length for the final name
+#   segments    One or more name segments (last one is the ID, always preserved)
+#
+# Output:
+#   Prints the generated name to stdout
+# =============================================================================
+
+set -euo pipefail
+
+if [ $# -lt 2 ]; then
+  echo "Usage: $0 <max_length> <segment1> [segment2] ... <id>" >&2
+  echo "Example: $0 60 namespace app scope 123" >&2
+  exit 1
+fi
+
+max_length="$1"
+shift
+
+# Collect all segments
+segments=("$@")
+segment_count=${#segments[@]}
+
+# Last segment is the ID - always preserved
+id="${segments[$((segment_count - 1))]}"
+suffix="-${id}"
+suffix_length=${#suffix}
+max_prefix_length=$((max_length - suffix_length))
+
+# Build prefix from all segments except the ID
+prefix=""
+for ((i = 0; i < segment_count - 1; i++)); do
+  if [ -n "$prefix" ]; then
+    prefix="${prefix}-${segments[$i]}"
+  else
+    prefix="${segments[$i]}"
+  fi
+done
+
+# If no prefix segments, just return the ID
+if [ -z "$prefix" ]; then
+  echo "$id"
+  exit 0
+fi
+
+# Trim from the left, removing full segments until it fits
+while [ ${#prefix} -gt $max_prefix_length ]; do
+  if [[ "$prefix" == *-* ]]; then
+    # Remove the first segment (up to and including the first hyphen)
+    prefix="${prefix#*-}"
+  else
+    # No more hyphens, truncate at max length (last resort)
+    prefix="${prefix:0:$max_prefix_length}"
+    break
+  fi
+done
+
+# Handle edge case: prefix might be empty after trimming
+if [ -z "$prefix" ]; then
+  echo "$id"
+else
+  echo "${prefix}${suffix}"
+fi

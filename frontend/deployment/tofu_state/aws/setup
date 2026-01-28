@@ -1,0 +1,35 @@
+#!/bin/bash
+
+if [ -z "${AWS_REGION:-}" ]; then
+  echo "✗ AWS_REGION is not set"
+  exit 1
+fi
+
+if [ -z "${TOFU_STATE_BUCKET:-}" ]; then
+  echo "✗ TOFU_STATE_BUCKET is not set"
+  exit 1
+fi
+
+if [ -z "${TOFU_LOCK_TABLE:-}" ]; then
+  echo "✗ TOFU_LOCK_TABLE is not set"
+  exit 1
+fi
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg aws_region "$AWS_REGION" \
+  --arg tf_state_bucket "$TOFU_STATE_BUCKET" \
+  --arg tf_lock_table "$TOFU_LOCK_TABLE" \
+  '. + {aws_provider: {region: $aws_region, state_bucket: $tf_state_bucket, lock_table: $tf_lock_table}}')
+
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"bucket=$TOFU_STATE_BUCKET\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"region=$AWS_REGION\""
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=\"dynamodb_table=$TOFU_LOCK_TABLE\""
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir}/modules"
+
+if [[ -n $MODULES_TO_USE ]]; then
+  MODULES_TO_USE="$MODULES_TO_USE,$module_name"
+else
+  MODULES_TO_USE="$module_name"
+fi

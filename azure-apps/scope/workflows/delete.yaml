@@ -1,0 +1,2 @@
+include:
+  - "$SERVICE_PATH/scope/workflows/create.yaml"
