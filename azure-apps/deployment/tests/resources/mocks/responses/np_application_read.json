@@ -1,0 +1,8 @@
+{
+  "id": 4,
+  "name": "Automation",
+  "slug": "automation",
+  "namespace_id": 3,
+  "nrn": "organization=1:account=2:namespace=3:application=4",
+  "status": "active"
+}

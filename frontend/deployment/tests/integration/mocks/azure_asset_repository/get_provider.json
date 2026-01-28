@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "body": {
+    "id": "azure-blob-asset-repository-id",
+    "specification_id": "azure-asset-repository-spec-id",
+    "category": "assets-repository-id",
+    "attributes": {
+      "storage_account": {
+        "name": "assetsaccount",
+        "resource_group": "test-resource-group"
+      },
+      "container": {
+        "name": "assets"
+      }
+    }
+  }
+}

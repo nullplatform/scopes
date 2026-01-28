@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# GCS + Cloud CDN Hosting Setup
+
+distribution_app_name=$(echo "$CONTEXT" | jq -r .application.slug)
+distribution_environment=$(echo "$CONTEXT" | jq -r .scope.slug)
+distribution_project_id="must fill this value"
+distribution_region="must fill this value"
+
+if [ -z "$distribution_project_id" ]; then
+  echo "✗ GCP project not configured. Run provider/gcp setup first."
+  exit 1
+fi
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg app_name "$distribution_app_name" \
+  --arg environment "$distribution_environment" \
+  --arg project_id "$distribution_project_id" \
+  --arg region "$distribution_region" \
+  '. + {
+    distribution_app_name: $app_name,
+    distribution_environment: $environment,
+    distribution_project_id: $project_id,
+    distribution_region: $region
+  }')
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir#*deployment/}"
+MODULES_TO_USE="${MODULES_TO_USE:+$MODULES_TO_USE,}$module_name"

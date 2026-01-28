@@ -34,15 +34,15 @@ VERBOSE=""
 
 for arg in "$@"; do
   case $arg in
-    --build)
-      BUILD_FLAG="--build"
-      ;;
-    -v|--verbose)
-      VERBOSE="--show-output-of-passing-tests"
-      ;;
-    *)
-      MODULE="$arg"
-      ;;
+  --build)
+    BUILD_FLAG="--build"
+    ;;
+  -v|--verbose)
+    VERBOSE="--show-output-of-passing-tests"
+    ;;
+  *)
+    MODULE="$arg"
+    ;;
   esac
 done
 

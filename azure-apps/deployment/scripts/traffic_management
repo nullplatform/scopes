@@ -1,0 +1,43 @@
+#!/bin/bash
+# =============================================================================
+# Traffic Management Script for Azure App Service Deployment Slots
+# =============================================================================
+# Sets traffic distribution between production and staging slots based on
+# STAGING_TRAFFIC_PERCENT from build_context.
+#
+# Prerequisites (sourced before this script):
+#   - azure_setup:   exports AZURE_RESOURCE_GROUP, ARM_CLIENT_ID,
+#                    ARM_CLIENT_SECRET, ARM_TENANT_ID, ARM_SUBSCRIPTION_ID
+#   - build_context: sets APP_NAME, STAGING_TRAFFIC_PERCENT
+# =============================================================================
+
+set -euo pipefail
+
+STAGING_TRAFFIC_PERCENT="${STAGING_TRAFFIC_PERCENT:-0}"
+
+echo "🔀 Configuring traffic routing..."
+
+# Login to Azure using service principal credentials from azure_setup
+az login --service-principal \
+  --username "$ARM_CLIENT_ID" \
+  --password "$ARM_CLIENT_SECRET" \
+  --tenant "$ARM_TENANT_ID" \
+  --output none
+
+az account set --subscription "$ARM_SUBSCRIPTION_ID"
+
+if [ "$STAGING_TRAFFIC_PERCENT" -eq 0 ]; then
+  echo "  Clearing traffic routing for $APP_NAME (100% to production)"
+  az webapp traffic-routing clear \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --name "$APP_NAME"
+else
+  PRODUCTION_PERCENT=$((100 - STAGING_TRAFFIC_PERCENT))
+  echo "  Setting traffic for $APP_NAME: production=${PRODUCTION_PERCENT}% staging=${STAGING_TRAFFIC_PERCENT}%"
+  az webapp traffic-routing set \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --name "$APP_NAME" \
+    --distribution staging="$STAGING_TRAFFIC_PERCENT"
+fi
+
+echo "✅ Traffic routing updated successfully"

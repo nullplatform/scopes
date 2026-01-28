@@ -1,0 +1,22 @@
+#!/bin/bash
+# Mock az CLI for testing
+# Set AZ_MOCK_RESPONSE to the path of the mock file to return
+# Set AZ_MOCK_EXIT_CODE to the exit code (default: 0)
+
+if [ -z "$AZ_MOCK_RESPONSE" ]; then
+  echo "AZ_MOCK_RESPONSE not set" >&2
+  exit 1
+fi
+
+if [ -f "$AZ_MOCK_RESPONSE" ]; then
+  exit_code="${AZ_MOCK_EXIT_CODE:-0}"
+  if [ "$exit_code" -eq 0 ]; then
+    cat "$AZ_MOCK_RESPONSE"
+  else
+    cat "$AZ_MOCK_RESPONSE" >&2
+  fi
+  exit "$exit_code"
+else
+  echo "Mock file not found: $AZ_MOCK_RESPONSE" >&2
+  exit 1
+fi

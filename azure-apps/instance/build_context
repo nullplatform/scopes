@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+
+# Extract all context fields in a single jq call
+# CONTEXT = $NP_ACTION_CONTEXT.notification (set by main entrypoint)
+eval "$(echo "$CONTEXT" | jq -r '
+  "export SCOPE_ID=" + ((.arguments.scope_id // .scope.id // "") | if type == "array" then .[0] else . end | tostring | @sh) + "\n" +
+  "export APPLICATION_ID=" + ((.arguments.application_id // .scope.application_id // .tags.application_id // "") | if type == "array" then .[0] else . end | tostring | @sh) + "\n" +
+  "export DEPLOYMENT_ID=" + ((.arguments.deployment_id // .scope.active_deployment // "") | if type == "array" then .[0] else . end | tostring | @sh) + "\n" +
+  "SCOPE_SLUG=" + (.scope.slug // "" | @sh) + "\n" +
+  "NS_SLUG=" + (.tags.namespace // "" | @sh) + "\n" +
+  "APP_SLUG=" + (.tags.application // "" | @sh) + "\n" +
+  "SCOPE_NRN=" + (.scope.nrn // .entity_nrn // "" | @sh)
+')"
+
+export LIMIT=${LIMIT:-10}
+
+# If DEPLOYMENT_ID is empty, query the scope to get active_deployment
+if [ -z "$DEPLOYMENT_ID" ] || [ "$DEPLOYMENT_ID" = "null" ]; then
+  if [ -n "$SCOPE_ID" ] && [ "$SCOPE_ID" != "null" ]; then
+    SCOPE_INFO=$(np scope read --id "$SCOPE_ID" --format json 2>/dev/null || echo '{}')
+    DEPLOYMENT_ID=$(echo "$SCOPE_INFO" | jq -r '.active_deployment // empty')
+    export DEPLOYMENT_ID
+  fi
+fi
+
+# Use shared helper to resolve Azure context
+# shellcheck source=../deployment/scripts/resolve_azure_context
+source "$SERVICE_PATH/deployment/scripts/resolve_azure_context"

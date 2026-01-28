@@ -1,0 +1,4 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows/initial.yaml"
+configuration:
+  TOFU_ACTION: "destroy"

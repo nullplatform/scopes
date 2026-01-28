@@ -1,0 +1,51 @@
+#!/bin/bash
+
+application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
+scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
+namespace_slug=$(echo "$CONTEXT" | jq -r .namespace.slug)
+scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
+application_version="$(echo "$CONTEXT" | jq -r .release.semver)"
+env_vars_json=$(echo "$CONTEXT" | jq '(.parameters.results // []) | map({(.variable): .values[0].value}) | add // {}')
+
+RESOURCE_TAGS_JSON=$(echo "$CONTEXT" | jq \
+  '{
+  nullplatform: "true",
+  account: .account.slug,
+  account_id: .account.id,
+  namespace: .namespace.slug,
+  namespace_id: .namespace.id,
+  application: .application.slug,
+  application_id: .application.id,
+  scope: .scope.slug,
+  scope_id: .scope.id,
+  deployment_id: .deployment.id
+  }')
+
+TOFU_VARIABLES={}
+
+tf_state_key="frontend/$namespace_slug/$application_slug/$scope_slug-$scope_id"
+
+TOFU_INIT_VARIABLES="${TOFU_INIT_VARIABLES:-} -backend-config=key=$tf_state_key"
+
+TOFU_MODULE_DIR="$SERVICE_PATH/output/$scope_id"
+if [ -n "${NP_OUTPUT_DIR:-}" ]; then
+  TOFU_MODULE_DIR="$NP_OUTPUT_DIR/output/$scope_id"
+fi
+
+mkdir -p "$TOFU_MODULE_DIR"
+
+# =============================================================================
+# Modules to compose (comma-separated list)
+# Initialized from CUSTOM_MODULES, extended by setup scripts
+# Available modules:
+#   - state/aws         : AWS S3 backend for terraform state
+#   - network/route_53  : AWS Route53 DNS configuration
+#   - hosting/amplify   : AWS Amplify hosting (coming soon)
+# =============================================================================
+MODULES_TO_USE="${CUSTOM_TOFU_MODULES:-}"
+
+export TOFU_VARIABLES
+export TOFU_INIT_VARIABLES
+export TOFU_MODULE_DIR
+export MODULES_TO_USE
+export RESOURCE_TAGS_JSON

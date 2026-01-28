@@ -1,4 +1,4 @@
-#!/bin/bash
+mm#!/bin/bash
 
 ARGUMENTS=$(echo "$CONTEXT" | jq -r '.arguments // empty')
 
