@@ -31,15 +31,15 @@ setup() {
   export END_TIME="2026-01-27T01:00:00Z"
   export INTERVAL="5"
   export AZURE_RESOURCE_ID="/subscriptions/test-subscription-id/resourceGroups/test-resource-group/providers/Microsoft.Web/sites/tools-automation-development-tools-7"
+  export AZURE_ACCESS_TOKEN="mock-azure-token"
 
-  # Configure az mock
-  export AZ_MOCK_RESPONSE="$RESPONSES_DIR/az_metrics_cpu.json"
-  export AZ_MOCK_EXIT_CODE=0
-  export AZ_CALL_LOG=$(mktemp)
+  # Configure curl mock for Azure Monitor metrics
+  export CURL_CALL_LOG=$(mktemp)
+  export CURL_MOCK_EXIT_CODE=0
 }
 
 teardown() {
-  rm -f "$AZ_CALL_LOG"
+  rm -f "$CURL_CALL_LOG"
 }
 
 # =============================================================================
@@ -83,8 +83,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric CpuPercentage"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=CpuPercentage"
 }
 
 @test "Should map system.memory_usage_percentage to MemoryPercentage" {
@@ -95,8 +95,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric MemoryPercentage"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=MemoryPercentage"
 }
 
 @test "Should map http.response_time to HttpResponseTime" {
@@ -107,8 +107,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric HttpResponseTime"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=HttpResponseTime"
 }
 
 @test "Should map http.request_count to Requests" {
@@ -119,8 +119,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric Requests"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=Requests"
 }
 
 @test "Should map http.5xx_count to Http5xx" {
@@ -131,8 +131,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric Http5xx"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=Http5xx"
 }
 
 @test "Should map http.4xx_count to Http4xx" {
@@ -143,8 +143,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric Http4xx"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=Http4xx"
 }
 
 @test "Should map system.health_check_status to HealthCheckStatus" {
@@ -155,42 +155,41 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric HealthCheckStatus"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=HealthCheckStatus"
 }
 
 # =============================================================================
-# Test: Azure Monitor call parameters
+# Test: Azure Monitor REST API call parameters
 # =============================================================================
-@test "Should call az monitor metrics list with correct resource" {
+@test "Should call Azure Monitor REST API with correct resource" {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--resource /subscriptions/test-subscription-id/resourceGroups/test-resource-group/providers/Microsoft.Web/sites/tools-automation-development-tools-7"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "microsoft.insights/metrics"
 }
 
-@test "Should call az monitor metrics list with correct time range" {
+@test "Should call Azure Monitor REST API with correct time range" {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--start-time 2026-01-27T00:00:00Z"
-  assert_contains "$calls" "--end-time 2026-01-27T01:00:00Z"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "timespan=2026-01-27T00:00:00Z/2026-01-27T01:00:00Z"
 }
 
-@test "Should call az monitor metrics list with correct interval" {
+@test "Should call Azure Monitor REST API with correct interval" {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--interval PT5M"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "interval=PT5M"
 }
 
 # =============================================================================
@@ -204,9 +203,9 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric Requests"
-  assert_contains "$calls" "--aggregation Total"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=Requests"
+  assert_contains "$calls" "aggregation=Total"
 }
 
 @test "Should compute http.error_rate from Http5xx and Requests" {
@@ -217,9 +216,8 @@ teardown() {
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "--metric Http5xx"
-  assert_contains "$calls" "--metric Requests"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "metricnames=Http5xx"
 }
 
 # =============================================================================

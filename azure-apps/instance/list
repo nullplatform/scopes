@@ -1,15 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# List Azure App Service instances
+# List Azure App Service instances via REST API
 
-INSTANCES=$(az webapp list-instances \
-  --resource-group "$AZURE_RESOURCE_GROUP" \
-  --name "$APP_NAME" \
-  --output json)
+INSTANCES_URL="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}/instances?api-version=2022-03-01"
+
+INSTANCES=$(curl -s "$INSTANCES_URL" \
+  -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json")
 
 echo "$INSTANCES" | jq --argjson limit "${LIMIT:-10}" --arg app_name "$APP_NAME" '{
-  results: .[:$limit] | map({
+  results: (.value // [])[:$limit] | map({
     id: .name,
     selector: {
       scope_id: (env.SCOPE_ID // ""),
@@ -30,8 +31,8 @@ echo "$INSTANCES" | jq --argjson limit "${LIMIT:-10}" --arg app_name "$APP_NAME"
       },
       architecture: "x86"
     },
-    state: (.state // "Running"),
-    launch_time: (.siteInstanceName // ""),
+    state: (.properties.state // "Running"),
+    launch_time: (.properties.siteInstanceName // ""),
     spot: false
   })
 }'

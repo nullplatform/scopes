@@ -21,6 +21,24 @@ if [[ "$ARGS" == *"publishingcredentials"* ]]; then
   exit 0
 fi
 
+# Azure Monitor metrics endpoint
+if [[ "$ARGS" == *"microsoft.insights/metrics"* ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  cat "$SCRIPT_DIR/responses/az_metrics_cpu.json"
+  exit 0
+fi
+
+# Azure App Service instances endpoint
+if [[ "$ARGS" == *"/instances"* ]]; then
+  # Check for mock response override first
+  if [ -n "${CURL_MOCK_RESPONSE:-}" ] && [ -f "$CURL_MOCK_RESPONSE" ]; then
+    cat "$CURL_MOCK_RESPONSE"
+  else
+    echo '{"value":[{"name":"instance1","properties":{"state":"Running"}},{"name":"instance2","properties":{"state":"Running"}}]}'
+  fi
+  exit 0
+fi
+
 # Default: return mock response file if configured
 if [ -n "${CURL_MOCK_RESPONSE:-}" ] && [ -f "$CURL_MOCK_RESPONSE" ]; then
   cat "$CURL_MOCK_RESPONSE"

@@ -1,20 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Timing helper (uses Python for reliable milliseconds on all platforms)
-_timer() { python3 -c 'import time; print(int(time.time() * 1000))'; }
-_log_timing() {
-  local stage="$1" start="$2" end="$3"
-  local duration=$((end - start))
-  DEBUG_LOGS="${DEBUG_LOGS:-}[log] ${stage}: ${duration}ms\n"
-}
-
-START_TOTAL=$(_timer)
-
 # Fetch logs from Azure App Service via Kudu Docker logs API
 
 # Get publishing credentials (with caching)
-START=$(_timer)
 CACHE_DIR="${SERVICE_PATH}/log/.cache"
 CACHE_FILE="${CACHE_DIR}/${APP_NAME}-creds.json"
 CACHE_TTL=3600  # 1 hour in seconds
@@ -30,7 +19,6 @@ fi
 
 if [ "$USE_CACHE" = true ]; then
   CREDENTIALS=$(cat "$CACHE_FILE")
-  _log_timing "cached_publishing_credentials" "$START" "$(_timer)"
 else
   CREDS_URL="https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Web/sites/${APP_NAME}/config/publishingcredentials/list?api-version=2022-03-01"
   CREDENTIALS=$(curl -s -X POST "$CREDS_URL" \
@@ -40,7 +28,6 @@ else
   # Cache the credentials
   mkdir -p "$CACHE_DIR"
   echo "$CREDENTIALS" > "$CACHE_FILE"
-  _log_timing "rest_publishing_credentials" "$START" "$(_timer)"
 fi
 
 SCM_USER=$(echo "$CREDENTIALS" | jq -r '.properties.publishingUserName')
@@ -48,9 +35,7 @@ SCM_PASS=$(echo "$CREDENTIALS" | jq -r '.properties.publishingPassword')
 SCM_HOST="${APP_NAME}.scm.azurewebsites.net"
 
 # Fetch log file list from Kudu API
-START=$(_timer)
 LOG_LIST=$(curl -s -u "${SCM_USER}:${SCM_PASS}" "https://${SCM_HOST}/api/logs/docker")
-_log_timing "curl_log_list" "$START" "$(_timer)"
 
 # Sort by lastUpdated descending and take top 3 log files
 LOG_URLS=$(echo "$LOG_LIST" | jq -r '[sort_by(.lastUpdated) | reverse | .[:3] | .[].href] | .[]')
@@ -59,7 +44,6 @@ LOG_URLS=$(echo "$LOG_LIST" | jq -r '[sort_by(.lastUpdated) | reverse | .[:3] | 
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-START=$(_timer)
 PIDS=()
 INDEX=0
 for url in $LOG_URLS; do
@@ -74,10 +58,8 @@ if [ ${#PIDS[@]} -gt 0 ]; then
     wait "$pid" 2>/dev/null || true
   done
 fi
-_log_timing "curl_log_files_parallel(${INDEX})" "$START" "$(_timer)"
 
 # Combine and parse logs using jq (much faster than bash loops)
-START=$(_timer)
 if ls "${TEMP_DIR}"/log_* >/dev/null 2>&1; then
   PARSED_LINES=$(cat "${TEMP_DIR}"/log_* | jq -R --arg start_time "${START_TIME:-}" --arg end_time "${END_TIME:-}" --arg filter "${FILTER_PATTERN:-}" '
     # For each line, try to extract timestamp
@@ -101,7 +83,6 @@ if ls "${TEMP_DIR}"/log_* >/dev/null 2>&1; then
 else
   PARSED_LINES="[]"
 fi
-_log_timing "parse_logs" "$START" "$(_timer)"
 
 # Apply pagination (NEXT_PAGE_TOKEN and LIMIT)
 OFFSET=0
@@ -122,21 +103,6 @@ NEXT_OFFSET=$((OFFSET + EFFECTIVE_LIMIT))
 NEXT_TOKEN=""
 if [ "$NEXT_OFFSET" -lt "$TOTAL" ]; then
   NEXT_TOKEN=$(echo "{\"offset\":${NEXT_OFFSET}}" | base64 | tr -d '\n')
-fi
-
-_log_timing "TOTAL_log" "$START_TOTAL" "$(_timer)"
-
-# Prepend debug timing logs if not disabled
-if [ "${DISABLE_DEBUG_LOGS:-}" != "true" ]; then
-  NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  DEBUG_ENTRIES=$(echo -e "$DEBUG_LOGS" | while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    escaped=$(echo "$line" | jq -Rs '.')
-    echo "{\"message\":${escaped},\"datetime\":\"${NOW}\"}"
-  done | jq -s '.')
-
-  # Prepend debug entries to results
-  RESULTS=$(jq -n --argjson debug "$DEBUG_ENTRIES" --argjson results "$RESULTS" '$debug + $results')
 fi
 
 # Output in the standard format

@@ -1,18 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Timing helper (uses Python for reliable milliseconds on all platforms)
-_timer() { python3 -c 'import time; print(int(time.time() * 1000))'; }
-_log_timing() {
-  local stage="$1" start="$2" end="$3"
-  local duration=$((end - start))
-  DEBUG_LOGS="${DEBUG_LOGS:-}[build_context] ${stage}: ${duration}ms\n"
-}
-
-START_TOTAL=$(_timer)
-
 # Extract all context fields in a single jq call
-START=$(_timer)
 NOTIFICATION=$(echo "$NP_ACTION_CONTEXT" | jq -c '.notification')
 eval "$(echo "$NOTIFICATION" | jq -r '
   "export SCOPE_ID=" + (.arguments.scope_id // .scope.id // "" | @sh) + "\n" +
@@ -29,7 +18,6 @@ eval "$(echo "$NOTIFICATION" | jq -r '
   "APP_SLUG=" + (.tags.application // "" | @sh) + "\n" +
   "SCOPE_NRN=" + (.scope.nrn // .entity_nrn // "" | @sh)
 ')"
-_log_timing "parse_context" "$START" "$(_timer)"
 
 # Convert START_TIME and END_TIME from Unix ms to ISO format if numeric
 if [ -n "$START_TIME" ] && [[ "$START_TIME" =~ ^[0-9]+$ ]]; then
@@ -41,53 +29,6 @@ if [ -n "$END_TIME" ] && [[ "$END_TIME" =~ ^[0-9]+$ ]]; then
   export END_TIME
 fi
 
-if [ -z "$SCOPE_ID" ]; then
-  echo "Error: Missing required parameter: SCOPE_ID" >&2
-  exit 1
-fi
-
-if [ -z "$SCOPE_SLUG" ] || [ -z "$NS_SLUG" ] || [ -z "$APP_SLUG" ]; then
-  echo "Error: Could not extract slugs from context" >&2
-  exit 1
-fi
-
-# Generate Azure App Service name
-START=$(_timer)
-APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" 60 "$NS_SLUG" "$APP_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
-export APP_NAME
-_log_timing "generate_resource_name" "$START" "$(_timer)"
-
-# Fetch Azure credentials from cloud provider
-START=$(_timer)
-PROVIDERS=$(np provider list --categories cloud-providers --nrn "$SCOPE_NRN" --format json)
-_log_timing "np_provider_list" "$START" "$(_timer)"
-
-START=$(_timer)
-eval "$(echo "$PROVIDERS" | jq -r '.results[0] |
-  "export ARM_SUBSCRIPTION_ID=" + (.attributes.authentication.subscription_id // "" | @sh) + "\n" +
-  "export ARM_CLIENT_ID=" + (.attributes.authentication.client_id // "" | @sh) + "\n" +
-  "export ARM_TENANT_ID=" + (.attributes.authentication.tenant_id // "" | @sh) + "\n" +
-  "export AZURE_RESOURCE_GROUP=" + (.attributes.networking.public_dns_zone_resource_group_name // "" | @sh)
-')"
-_log_timing "parse_providers" "$START" "$(_timer)"
-
-if [ -z "$ARM_SUBSCRIPTION_ID" ] || [ -z "$ARM_CLIENT_ID" ] || [ -z "$ARM_TENANT_ID" ]; then
-  echo "Error: Could not resolve Azure credentials from cloud-providers provider" >&2
-  exit 1
-fi
-
-# Get Azure access token via REST API (faster than az CLI)
-START=$(_timer)
-TOKEN_RESPONSE=$(curl -s -X POST \
-  "https://login.microsoftonline.com/${ARM_TENANT_ID}/oauth2/v2.0/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=${ARM_CLIENT_ID}&client_secret=${ARM_CLIENT_SECRET}&scope=https://management.azure.com/.default&grant_type=client_credentials")
-export AZURE_ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
-if [ -z "$AZURE_ACCESS_TOKEN" ]; then
-  echo "Error: Failed to get Azure access token" >&2
-  exit 1
-fi
-_log_timing "azure_get_token" "$START" "$(_timer)"
-
-_log_timing "TOTAL_build_context" "$START_TOTAL" "$(_timer)"
-export DEBUG_LOGS
+# Use shared helper to resolve Azure context
+# shellcheck source=../deployment/scripts/resolve_azure_context
+source "$SERVICE_PATH/deployment/scripts/resolve_azure_context"

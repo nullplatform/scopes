@@ -34,30 +34,30 @@ setup() {
 
   # Set Azure env vars (normally from build_context via np provider list)
   export AZURE_RESOURCE_GROUP="test-resource-group"
+  export ARM_SUBSCRIPTION_ID="test-subscription-id"
+  export AZURE_ACCESS_TOKEN="mock-azure-token"
 
-  # Configure az mock
-  export AZ_MOCK_RESPONSE="$RESPONSES_DIR/az_list_instances.json"
-  export AZ_MOCK_EXIT_CODE=0
-  export AZ_CALL_LOG=$(mktemp)
+  # Configure curl mock
+  export CURL_CALL_LOG=$(mktemp)
+  export CURL_MOCK_EXIT_CODE=0
 }
 
 teardown() {
-  rm -f "$AZ_CALL_LOG"
+  rm -f "$CURL_CALL_LOG"
 }
 
 # =============================================================================
-# Test: Azure CLI call
+# Test: Azure REST API call
 # =============================================================================
-@test "Should call az webapp list-instances with correct parameters" {
+@test "Should call Azure REST API for instances" {
   run source "$SCRIPT_PATH"
 
   assert_equal "$status" "0"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "webapp list-instances"
-  assert_contains "$calls" "--resource-group test-resource-group"
-  assert_contains "$calls" "--name tools-automation-development-tools-7"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "/instances"
+  assert_contains "$calls" "Authorization: Bearer"
 }
 
 # =============================================================================
@@ -90,7 +90,7 @@ teardown() {
 
   local first_id
   first_id=$(echo "$output" | jq -r '.results[0].id')
-  assert_equal "$first_id" "instance-001"
+  assert_equal "$first_id" "instance1"
 }
 
 @test "Should include selector with scope_id" {
@@ -127,10 +127,9 @@ teardown() {
 # Test: Empty instances
 # =============================================================================
 @test "Should return empty results when no instances running" {
-  local empty_file
-  empty_file=$(mktemp)
-  echo "[]" > "$empty_file"
-  export AZ_MOCK_RESPONSE="$empty_file"
+  # Override curl mock for empty response
+  export CURL_MOCK_RESPONSE=$(mktemp)
+  echo '{"value":[]}' > "$CURL_MOCK_RESPONSE"
 
   run source "$SCRIPT_PATH"
 
@@ -140,5 +139,5 @@ teardown() {
   count=$(echo "$output" | jq '.results | length')
   assert_equal "$count" "0"
 
-  rm -f "$empty_file"
+  rm -f "$CURL_MOCK_RESPONSE"
 }

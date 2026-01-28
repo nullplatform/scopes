@@ -42,11 +42,8 @@ setup() {
   export ARM_CLIENT_SECRET="test-client-secret"
   export ARM_TENANT_ID="test-tenant-id"
   export ARM_SUBSCRIPTION_ID="test-subscription-id"
-
-  # Configure az mock to return publishing credentials
-  export AZ_MOCK_RESPONSE="$RESPONSES_DIR/az_publishing_credentials.json"
-  export AZ_MOCK_EXIT_CODE=0
-  export AZ_CALL_LOG=$(mktemp)
+  export AZURE_ACCESS_TOKEN="mock-azure-token"
+  export SERVICE_PATH="$AZURE_APPS_DIR"
 
   # Configure curl mock
   export CURL_CALL_LOG=$(mktemp)
@@ -59,21 +56,21 @@ setup() {
 }
 
 teardown() {
-  rm -f "$AZ_CALL_LOG" "$CURL_CALL_LOG"
+  rm -f "$CURL_CALL_LOG"
   rm -rf "${CURL_RESPONSE_DIR:-}"
+  rm -rf "${SERVICE_PATH}/log/.cache" 2>/dev/null || true
 }
 
 # =============================================================================
-# Test: Publishing credentials
+# Test: Publishing credentials via REST API
 # =============================================================================
-@test "Should fetch publishing credentials via az CLI" {
+@test "Should fetch publishing credentials via REST API" {
   run source "$SCRIPT_PATH"
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "webapp deployment list-publishing-credentials"
-  assert_contains "$calls" "--resource-group test-resource-group"
-  assert_contains "$calls" "--name tools-automation-development-tools-7"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "publishingcredentials"
+  assert_contains "$calls" "Authorization: Bearer"
 }
 
 # =============================================================================

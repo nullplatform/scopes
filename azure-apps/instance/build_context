@@ -1,50 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-# Extract instance arguments from notification context
+# Extract all context fields in a single jq call
 # CONTEXT = $NP_ACTION_CONTEXT.notification (set by main entrypoint)
-
-ARGUMENTS=$(echo "$CONTEXT" | jq -r '.arguments // empty')
-
-export APPLICATION_ID=$(echo "$ARGUMENTS" | jq -r 'if (.application_id | type) == "array" then .application_id[0] else .application_id end')
-export SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // .scope.id // empty')
-export DEPLOYMENT_ID=$(echo "$ARGUMENTS" | jq -r 'if (.deployment_id | type) == "array" then .deployment_id[0] else .deployment_id end')
+eval "$(echo "$CONTEXT" | jq -r '
+  "export SCOPE_ID=" + (.arguments.scope_id // .scope.id // "" | @sh) + "\n" +
+  "export APPLICATION_ID=" + ((.arguments.application_id // .tags.application_id // "") | if type == "array" then .[0] else . end | @sh) + "\n" +
+  "export DEPLOYMENT_ID=" + ((.arguments.deployment_id // "") | if type == "array" then .[0] else . end | @sh) + "\n" +
+  "SCOPE_SLUG=" + (.scope.slug // "" | @sh) + "\n" +
+  "NS_SLUG=" + (.tags.namespace // "" | @sh) + "\n" +
+  "APP_SLUG=" + (.tags.application // "" | @sh) + "\n" +
+  "SCOPE_NRN=" + (.scope.nrn // .entity_nrn // "" | @sh)
+')"
 
 export LIMIT=${LIMIT:-10}
 
-if [ -z "$SCOPE_ID" ] || [ "$SCOPE_ID" = "null" ]; then
-  echo "Error: Missing required parameter: scope_id" >&2
-  exit 1
-fi
-
-# Extract slugs directly from context (no np calls needed!)
-SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug // empty')
-NS_SLUG=$(echo "$CONTEXT" | jq -r '.tags.namespace // empty')
-APP_SLUG=$(echo "$CONTEXT" | jq -r '.tags.application // empty')
-SCOPE_NRN=$(echo "$CONTEXT" | jq -r '.scope.nrn // .entity_nrn // empty')
-
-if [ -z "$SCOPE_SLUG" ] || [ -z "$NS_SLUG" ] || [ -z "$APP_SLUG" ]; then
-  echo "Error: Could not extract slugs from context" >&2
-  exit 1
-fi
-
-# Generate Azure App Service name
-APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" 60 "$NS_SLUG" "$APP_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
-export APP_NAME
-
-# Fetch Azure credentials from cloud provider (still need this one np call)
-PROVIDERS=$(np provider list --categories cloud-providers --nrn "$SCOPE_NRN" --format json)
-
-export ARM_SUBSCRIPTION_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.subscription_id // empty')
-export ARM_CLIENT_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.client_id // empty')
-export ARM_TENANT_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.tenant_id // empty')
-export AZURE_RESOURCE_GROUP=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.networking.public_dns_zone_resource_group_name // empty')
-
-if [ -z "$ARM_SUBSCRIPTION_ID" ] || [ -z "$ARM_CLIENT_ID" ] || [ -z "$ARM_TENANT_ID" ]; then
-  echo "Error: Could not resolve Azure credentials from cloud-providers provider" >&2
-  exit 1
-fi
-
-# Authenticate with Azure
-az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
-az account set --subscription "$ARM_SUBSCRIPTION_ID" --output none
+# Use shared helper to resolve Azure context
+# shellcheck source=../deployment/scripts/resolve_azure_context
+source "$SERVICE_PATH/deployment/scripts/resolve_azure_context"

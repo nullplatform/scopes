@@ -62,19 +62,17 @@ METRIC_TYPE=$(echo "$CONFIG" | cut -d' ' -f4)
 INTERVAL_MINUTES=${INTERVAL:-5}
 PERIOD_SECONDS=$((INTERVAL_MINUTES * 60))
 
-# Query Azure Monitor
+# Query Azure Monitor via REST API
 query_metric() {
   local metric="$1"
   local aggregation="$2"
 
-  az monitor metrics list \
-    --resource "$AZURE_RESOURCE_ID" \
-    --metric "$metric" \
-    --start-time "$START_TIME" \
-    --end-time "$END_TIME" \
-    --interval "PT${INTERVAL_MINUTES}M" \
-    --aggregation "$aggregation" \
-    --output json
+  local METRICS_URL="https://management.azure.com${AZURE_RESOURCE_ID}/providers/microsoft.insights/metrics"
+  local TIMESPAN="${START_TIME}/${END_TIME}"
+
+  curl -s "${METRICS_URL}?api-version=2018-01-01&metricnames=${metric}&aggregation=${aggregation}&timespan=${TIMESPAN}&interval=PT${INTERVAL_MINUTES}M" \
+    -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
+    -H "Content-Type: application/json"
 }
 
 # Transform Azure Monitor response to standard format

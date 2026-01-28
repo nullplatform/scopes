@@ -40,12 +40,14 @@ setup() {
   # Call logs
   export AZ_CALL_LOG=$(mktemp)
   export NP_CALL_LOG=$(mktemp)
+  export CURL_CALL_LOG=$(mktemp)
   export AZ_MOCK_EXIT_CODE=0
   export NP_MOCK_EXIT_CODE=0
+  export CURL_MOCK_EXIT_CODE=0
 }
 
 teardown() {
-  rm -f "$AZ_CALL_LOG" "$NP_CALL_LOG"
+  rm -f "$AZ_CALL_LOG" "$NP_CALL_LOG" "$CURL_CALL_LOG"
 }
 
 run_build_context() {
@@ -130,22 +132,21 @@ run_build_context() {
 }
 
 # =============================================================================
-# Test: Azure login
+# Test: Azure token via REST API
 # =============================================================================
-@test "Should login to Azure with service principal credentials" {
+@test "Should get Azure access token via OAuth endpoint" {
   run_build_context
 
   local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "login --service-principal -u test-client-id -p test-client-secret --tenant test-tenant-id --output none"
+  calls=$(cat "$CURL_CALL_LOG")
+  assert_contains "$calls" "login.microsoftonline.com"
+  assert_contains "$calls" "oauth2"
 }
 
-@test "Should set the Azure subscription" {
+@test "Should export AZURE_ACCESS_TOKEN" {
   run_build_context
 
-  local calls
-  calls=$(cat "$AZ_CALL_LOG")
-  assert_contains "$calls" "account set --subscription test-subscription-id --output none"
+  assert_not_empty "$AZURE_ACCESS_TOKEN" "AZURE_ACCESS_TOKEN"
 }
 
 # =============================================================================
