@@ -1,28 +1,39 @@
 #!/bin/bash
 set -euo pipefail
 
-# Extract log arguments from notification context
-NOTIFICATION=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification')
+# Timing helper (uses Python for reliable milliseconds on all platforms)
+_timer() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+_log_timing() {
+  local stage="$1" start="$2" end="$3"
+  local duration=$((end - start))
+  DEBUG_LOGS="${DEBUG_LOGS:-}[build_context] ${stage}: ${duration}ms\n"
+}
 
-export SCOPE_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.scope_id // .scope.id // empty')
-export APPLICATION_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.application_id // .tags.application_id // empty')
-export DEPLOYMENT_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.deployment_id // empty')
-export FILTER_PATTERN=$(echo "$NOTIFICATION" | jq -r '.arguments.filter_pattern // empty')
-export INSTANCE_ID=$(echo "$NOTIFICATION" | jq -r '.arguments.instance_id // empty')
-export LIMIT=$(echo "$NOTIFICATION" | jq -r '.arguments.limit // empty')
-export START_TIME=$(echo "$NOTIFICATION" | jq -r '.arguments.start_time // empty')
-export NEXT_PAGE_TOKEN=$(echo "$NOTIFICATION" | jq -r '.arguments.next_page_token // empty')
+START_TOTAL=$(_timer)
+
+# Extract all context fields in a single jq call
+START=$(_timer)
+NOTIFICATION=$(echo "$NP_ACTION_CONTEXT" | jq -c '.notification')
+eval "$(echo "$NOTIFICATION" | jq -r '
+  "export SCOPE_ID=" + (.arguments.scope_id // .scope.id // "" | @sh) + "\n" +
+  "export APPLICATION_ID=" + (.arguments.application_id // .tags.application_id // "" | @sh) + "\n" +
+  "export DEPLOYMENT_ID=" + (.arguments.deployment_id // "" | @sh) + "\n" +
+  "export FILTER_PATTERN=" + (.arguments.filter_pattern // "" | @sh) + "\n" +
+  "export INSTANCE_ID=" + (.arguments.instance_id // "" | @sh) + "\n" +
+  "export LIMIT=" + (.arguments.limit // "" | @sh) + "\n" +
+  "export START_TIME=" + (.arguments.start_time // "" | @sh) + "\n" +
+  "export NEXT_PAGE_TOKEN=" + (.arguments.next_page_token // "" | @sh) + "\n" +
+  "SCOPE_SLUG=" + (.scope.slug // "" | @sh) + "\n" +
+  "NS_SLUG=" + (.tags.namespace // "" | @sh) + "\n" +
+  "APP_SLUG=" + (.tags.application // "" | @sh) + "\n" +
+  "SCOPE_NRN=" + (.scope.nrn // .entity_nrn // "" | @sh)
+')"
+_log_timing "parse_context" "$START" "$(_timer)"
 
 if [ -z "$SCOPE_ID" ]; then
   echo "Error: Missing required parameter: SCOPE_ID" >&2
   exit 1
 fi
-
-# Extract slugs directly from context (no np calls needed!)
-SCOPE_SLUG=$(echo "$NOTIFICATION" | jq -r '.scope.slug // empty')
-NS_SLUG=$(echo "$NOTIFICATION" | jq -r '.tags.namespace // empty')
-APP_SLUG=$(echo "$NOTIFICATION" | jq -r '.tags.application // empty')
-SCOPE_NRN=$(echo "$NOTIFICATION" | jq -r '.scope.nrn // .entity_nrn // empty')
 
 if [ -z "$SCOPE_SLUG" ] || [ -z "$NS_SLUG" ] || [ -z "$APP_SLUG" ]; then
   echo "Error: Could not extract slugs from context" >&2
@@ -30,22 +41,42 @@ if [ -z "$SCOPE_SLUG" ] || [ -z "$NS_SLUG" ] || [ -z "$APP_SLUG" ]; then
 fi
 
 # Generate Azure App Service name
+START=$(_timer)
 APP_NAME=$("$SERVICE_PATH/deployment/scripts/generate_resource_name" 60 "$NS_SLUG" "$APP_SLUG" "$SCOPE_SLUG" "$SCOPE_ID")
 export APP_NAME
+_log_timing "generate_resource_name" "$START" "$(_timer)"
 
-# Fetch Azure credentials from cloud provider (still need this one np call)
+# Fetch Azure credentials from cloud provider
+START=$(_timer)
 PROVIDERS=$(np provider list --categories cloud-providers --nrn "$SCOPE_NRN" --format json)
+_log_timing "np_provider_list" "$START" "$(_timer)"
 
-export ARM_SUBSCRIPTION_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.subscription_id // empty')
-export ARM_CLIENT_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.client_id // empty')
-export ARM_TENANT_ID=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.authentication.tenant_id // empty')
-export AZURE_RESOURCE_GROUP=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.networking.public_dns_zone_resource_group_name // empty')
+START=$(_timer)
+eval "$(echo "$PROVIDERS" | jq -r '.results[0] |
+  "export ARM_SUBSCRIPTION_ID=" + (.attributes.authentication.subscription_id // "" | @sh) + "\n" +
+  "export ARM_CLIENT_ID=" + (.attributes.authentication.client_id // "" | @sh) + "\n" +
+  "export ARM_TENANT_ID=" + (.attributes.authentication.tenant_id // "" | @sh) + "\n" +
+  "export AZURE_RESOURCE_GROUP=" + (.attributes.networking.public_dns_zone_resource_group_name // "" | @sh)
+')"
+_log_timing "parse_providers" "$START" "$(_timer)"
 
 if [ -z "$ARM_SUBSCRIPTION_ID" ] || [ -z "$ARM_CLIENT_ID" ] || [ -z "$ARM_TENANT_ID" ]; then
   echo "Error: Could not resolve Azure credentials from cloud-providers provider" >&2
   exit 1
 fi
 
-# Authenticate with Azure
-az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
-az account set --subscription "$ARM_SUBSCRIPTION_ID" --output none
+# Get Azure access token via REST API (faster than az CLI)
+START=$(_timer)
+TOKEN_RESPONSE=$(curl -s -X POST \
+  "https://login.microsoftonline.com/${ARM_TENANT_ID}/oauth2/v2.0/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=${ARM_CLIENT_ID}&client_secret=${ARM_CLIENT_SECRET}&scope=https://management.azure.com/.default&grant_type=client_credentials")
+export AZURE_ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
+if [ -z "$AZURE_ACCESS_TOKEN" ]; then
+  echo "Error: Failed to get Azure access token" >&2
+  exit 1
+fi
+_log_timing "azure_get_token" "$START" "$(_timer)"
+
+_log_timing "TOTAL_build_context" "$START_TOTAL" "$(_timer)"
+export DEBUG_LOGS

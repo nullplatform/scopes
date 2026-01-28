@@ -1,11 +1,27 @@
 #!/bin/bash
 # Mock curl for unit tests
-# Returns CURL_MOCK_RESPONSE file content if configured
+# Returns different responses based on URL patterns
 
 if [ -n "${CURL_CALL_LOG:-}" ]; then
   echo "$*" >> "$CURL_CALL_LOG"
 fi
 
+# Check URL in arguments
+ARGS="$*"
+
+# Azure OAuth token endpoint
+if [[ "$ARGS" == *"login.microsoftonline.com"*"oauth2"* ]]; then
+  echo '{"access_token":"mock-azure-token","token_type":"Bearer","expires_in":3600}'
+  exit 0
+fi
+
+# Azure publishing credentials endpoint
+if [[ "$ARGS" == *"publishingcredentials"* ]]; then
+  echo '{"properties":{"publishingUserName":"$mock-user","publishingPassword":"mock-password"}}'
+  exit 0
+fi
+
+# Default: return mock response file if configured
 if [ -n "${CURL_MOCK_RESPONSE:-}" ] && [ -f "$CURL_MOCK_RESPONSE" ]; then
   cat "$CURL_MOCK_RESPONSE"
 fi
