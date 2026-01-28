@@ -8,7 +8,12 @@ fi
 
 case "$1 $2" in
   "scope read")
-    [ -f "${NP_SCOPE_RESPONSE:-}" ] && cat "$NP_SCOPE_RESPONSE"
+    if [ -f "${NP_SCOPE_RESPONSE:-}" ]; then
+      cat "$NP_SCOPE_RESPONSE"
+    else
+      # Default response with active_deployment
+      echo '{"id":7,"slug":"development-tools","name":"Development tools","active_deployment":8}'
+    fi
     ;;
   "application read")
     [ -f "${NP_APP_RESPONSE:-}" ] && cat "$NP_APP_RESPONSE"

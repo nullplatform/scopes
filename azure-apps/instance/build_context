@@ -15,6 +15,15 @@ eval "$(echo "$CONTEXT" | jq -r '
 
 export LIMIT=${LIMIT:-10}
 
+# If DEPLOYMENT_ID is empty, query the scope to get active_deployment
+if [ -z "$DEPLOYMENT_ID" ] || [ "$DEPLOYMENT_ID" = "null" ]; then
+  if [ -n "$SCOPE_ID" ] && [ "$SCOPE_ID" != "null" ]; then
+    SCOPE_INFO=$(np scope read --id "$SCOPE_ID" --format json 2>/dev/null || echo '{}')
+    DEPLOYMENT_ID=$(echo "$SCOPE_INFO" | jq -r '.active_deployment // empty')
+    export DEPLOYMENT_ID
+  fi
+fi
+
 # Use shared helper to resolve Azure context
 # shellcheck source=../deployment/scripts/resolve_azure_context
 source "$SERVICE_PATH/deployment/scripts/resolve_azure_context"
