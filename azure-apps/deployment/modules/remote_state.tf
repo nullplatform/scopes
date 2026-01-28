@@ -14,6 +14,7 @@ data "terraform_remote_state" "current" {
     container_name       = var.backend_container_name
     resource_group_name  = var.backend_resource_group_name
     key                  = var.state_key
+    use_azuread_auth     = true
   }
 }
 

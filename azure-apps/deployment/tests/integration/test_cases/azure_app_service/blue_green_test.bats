@@ -24,8 +24,8 @@ TEST_LOCATION="eastus"
 TEST_EXPECTED_SKU="S2"
 
 # Expected docker image from context asset.url
-TEST_DOCKER_IMAGE="myregistry.azurecr.io/tools/automation:v1.0.0"
-TEST_STAGING_DOCKER_IMAGE="myregistry.azurecr.io/tools/automation:v2.0.0"
+TEST_DOCKER_IMAGE="mockregistry.azurecr.io/tools/automation:v1.0.0"
+TEST_STAGING_DOCKER_IMAGE="mockregistry.azurecr.io/tools/automation:v2.0.0"
 
 # =============================================================================
 # Test Setup
