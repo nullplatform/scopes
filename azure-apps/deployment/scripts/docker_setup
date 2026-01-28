@@ -2,8 +2,6 @@
 
 echo "🔍 Validating Docker registry configuration..."
 
-echo "$CONTEXT" | jq -r '.providers["assets-repository"]'
-
 DOCKER_REGISTRY_SERVER=$(echo "$CONTEXT" | jq -r '.providers["assets-repository"].setup.server // empty')
 DOCKER_REGISTRY_USERNAME=$(echo "$CONTEXT" | jq -r '.providers["assets-repository"].setup.username // empty')
 DOCKER_REGISTRY_PASSWORD=$(echo "$CONTEXT" | jq -r '.providers["assets-repository"].setup.password // empty')

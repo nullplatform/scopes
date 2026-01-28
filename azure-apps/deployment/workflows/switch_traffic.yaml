@@ -1,3 +1,5 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
 configuration:
   ENABLE_STAGING_SLOT: true
   PROMOTE_STAGING_TO_PRODUCTION: false
