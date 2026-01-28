@@ -9,36 +9,37 @@ if [ -z "${METRIC_NAME:-}" ]; then
 fi
 
 # Map nullplatform metric names to Azure Monitor metrics
+# Returns: azure_metric aggregation unit type resource_type
+# resource_type: "site" or "plan" (plan metrics require App Service Plan resource ID)
 get_azure_metric_config() {
   local metric="$1"
-  # Returns: azure_metric aggregation unit type
   case "$metric" in
     "system.cpu_usage_percentage")
-      echo "CpuPercentage Average percent gauge"
+      echo "CpuPercentage Average percent gauge plan"
       ;;
     "system.memory_usage_percentage")
-      echo "MemoryPercentage Average percent gauge"
+      echo "MemoryPercentage Average percent gauge plan"
       ;;
     "http.response_time")
-      echo "HttpResponseTime Average seconds gauge"
+      echo "HttpResponseTime Average seconds gauge site"
       ;;
     "http.rpm")
-      echo "Requests Total rpm gauge"
+      echo "Requests Total rpm gauge site"
       ;;
     "http.error_rate")
-      echo "COMPUTED Total percent gauge"
+      echo "COMPUTED Total percent gauge site"
       ;;
     "http.request_count")
-      echo "Requests Total count gauge"
+      echo "Requests Total count gauge site"
       ;;
     "http.5xx_count")
-      echo "Http5xx Total count gauge"
+      echo "Http5xx Total count gauge site"
       ;;
     "http.4xx_count")
-      echo "Http4xx Total count gauge"
+      echo "Http4xx Total count gauge site"
       ;;
     "system.health_check_status")
-      echo "HealthCheckStatus Average percent gauge"
+      echo "HealthCheckStatus Average percent gauge site"
       ;;
     *)
       echo ""
@@ -57,17 +58,47 @@ AZURE_METRIC=$(echo "$CONFIG" | cut -d' ' -f1)
 AGGREGATION=$(echo "$CONFIG" | cut -d' ' -f2)
 UNIT=$(echo "$CONFIG" | cut -d' ' -f3)
 METRIC_TYPE=$(echo "$CONFIG" | cut -d' ' -f4)
+RESOURCE_TYPE=$(echo "$CONFIG" | cut -d' ' -f5)
 
 # Calculate interval
 INTERVAL_MINUTES=${INTERVAL:-5}
 PERIOD_SECONDS=$((INTERVAL_MINUTES * 60))
 
+# Get the appropriate resource ID for the metric
+get_resource_id() {
+  local resource_type="$1"
+
+  if [ "$resource_type" = "plan" ]; then
+    # CPU and Memory percentage metrics are at App Service Plan level
+    # Get the serverFarmId from the site
+    local SITE_URL="https://management.azure.com${AZURE_RESOURCE_ID}?api-version=2022-03-01"
+    local SITE_INFO
+    SITE_INFO=$(curl -s "$SITE_URL" \
+      -H "Authorization: Bearer ${AZURE_ACCESS_TOKEN}" \
+      -H "Content-Type: application/json")
+
+    # Extract the App Service Plan resource ID
+    local PLAN_ID
+    PLAN_ID=$(echo "$SITE_INFO" | jq -r '.properties.serverFarmId // empty')
+
+    if [ -z "$PLAN_ID" ]; then
+      echo "Error: Could not get App Service Plan ID from site" >&2
+      return 1
+    fi
+
+    echo "$PLAN_ID"
+  else
+    echo "$AZURE_RESOURCE_ID"
+  fi
+}
+
 # Query Azure Monitor via REST API
 query_metric() {
   local metric="$1"
   local aggregation="$2"
+  local resource_id="$3"
 
-  local METRICS_URL="https://management.azure.com${AZURE_RESOURCE_ID}/providers/microsoft.insights/metrics"
+  local METRICS_URL="https://management.azure.com${resource_id}/providers/microsoft.insights/metrics"
   local TIMESPAN="${START_TIME}/${END_TIME}"
 
   curl -s "${METRICS_URL}?api-version=2018-01-01&metricnames=${metric}&aggregation=${aggregation}&timespan=${TIMESPAN}&interval=PT${INTERVAL_MINUTES}M" \
@@ -97,10 +128,13 @@ transform_response() {
 
 AGG_KEY=$(echo "$AGGREGATION" | tr '[:upper:]' '[:lower:]')
 
+# Get the appropriate resource ID for this metric type
+METRIC_RESOURCE_ID=$(get_resource_id "$RESOURCE_TYPE")
+
 if [ "$METRIC_NAME" = "http.error_rate" ]; then
   # Special case: compute Http5xx / Requests * 100
-  RESPONSE_5XX=$(query_metric "Http5xx" "Total")
-  RESPONSE_REQ=$(query_metric "Requests" "Total")
+  RESPONSE_5XX=$(query_metric "Http5xx" "Total" "$METRIC_RESOURCE_ID")
+  RESPONSE_REQ=$(query_metric "Requests" "Total" "$METRIC_RESOURCE_ID")
 
   # Extract timeseries data and compute ratio
   RESULTS=$(jq -n \
@@ -126,7 +160,7 @@ if [ "$METRIC_NAME" = "http.error_rate" ]; then
 
 elif [ "$METRIC_NAME" = "http.rpm" ]; then
   # Special case: Total requests / interval_minutes
-  RESPONSE=$(query_metric "Requests" "Total")
+  RESPONSE=$(query_metric "Requests" "Total" "$METRIC_RESOURCE_ID")
   RESULTS=$(echo "$RESPONSE" | jq --argjson interval "$INTERVAL_MINUTES" '[
     .value[0].timeseries[] | {
       selector: {},
@@ -142,7 +176,7 @@ elif [ "$METRIC_NAME" = "http.rpm" ]; then
   ]')
 
 else
-  RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION")
+  RESPONSE=$(query_metric "$AZURE_METRIC" "$AGGREGATION" "$METRIC_RESOURCE_ID")
   RESULTS=$(transform_response "$RESPONSE" "$AGG_KEY")
 fi
 

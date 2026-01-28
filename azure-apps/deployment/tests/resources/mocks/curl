@@ -21,6 +21,12 @@ if [[ "$ARGS" == *"publishingcredentials"* ]]; then
   exit 0
 fi
 
+# Azure App Service site info endpoint (for getting serverFarmId)
+if [[ "$ARGS" == *"Microsoft.Web/sites/"* ]] && [[ "$ARGS" == *"api-version="* ]] && [[ "$ARGS" != *"/instances"* ]] && [[ "$ARGS" != *"/publishingcredentials"* ]] && [[ "$ARGS" != *"microsoft.insights"* ]]; then
+  echo '{"properties":{"serverFarmId":"/subscriptions/test-subscription-id/resourceGroups/test-resource-group/providers/Microsoft.Web/serverfarms/test-app-service-plan"}}'
+  exit 0
+fi
+
 # Azure Monitor metrics endpoint
 if [[ "$ARGS" == *"microsoft.insights/metrics"* ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
