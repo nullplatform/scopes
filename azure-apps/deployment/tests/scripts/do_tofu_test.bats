@@ -91,13 +91,6 @@ EOF
   assert_contains "$output" "📝 Initializing tofu..."
 }
 
-@test "Should display generated tfvars" {
-  run bash "$SCRIPT_PATH"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "📋 Generated tfvars:"
-}
-
 @test "Should display action message" {
   export TOFU_ACTION="apply"
 

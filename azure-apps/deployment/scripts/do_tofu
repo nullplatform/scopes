@@ -43,9 +43,6 @@ fi
 TOFU_VAR_FILE="$OUTPUT_DIR/tofu.tfvars.json"
 echo "$TOFU_VARIABLES" > "$TOFU_VAR_FILE"
 
-echo "📋 Generated tfvars:"
-echo "$TOFU_VARIABLES" | jq .
-
 # Run tofu
 echo "📝 Initializing tofu..."
 tofu -chdir="$TF_WORKING_DIR" init -input=false $TOFU_INIT_VARIABLES
