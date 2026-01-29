@@ -484,7 +484,7 @@ variable "ip_restrictions" {
 variable "enable_system_identity" {
   description = "Enable system-assigned managed identity"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "user_assigned_identity_ids" {
