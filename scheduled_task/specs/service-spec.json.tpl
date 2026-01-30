@@ -28,8 +28,21 @@
           "type": "string"
         },
         "continuous_delivery": {
-          "description": "Configure automatic deployment from Git branches",
+          "description": "Configure automatic deployment from Git branches or releases",
           "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Automatically deploy new versions from specified branches or releases",
+              "title": "Enable Continuous Delivery",
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string",
+              "title": "Mode",
+              "enum": ["branch", "release"],
+              "default": "branch",
+              "description": "Deploy based on branch builds or release creation"
+            },
             "branches": {
               "default": [
                 "main"
@@ -41,16 +54,15 @@
               "title": "Branches",
               "type": "array"
             },
-            "enabled": {
-              "default": false,
-              "description": "Automatically deploy new versions from specified branches",
-              "title": "Enable Continuous Delivery",
-              "type": "boolean"
+            "releases": {
+              "type": "string",
+              "title": "Releases (Semver)",
+              "default": ".*",
+              "description": "Semver regex pattern to match releases for automatic deployment (e.g., v\\d+\\.\\d+\\.\\d+)"
             }
           },
           "required": [
-            "enabled",
-            "branches"
+            "enabled"
           ],
           "title": "Continuous Delivery",
           "type": "object"
@@ -260,7 +272,47 @@
                       },
                       "effect": "SHOW"
                     },
+                    "scope": "#/properties/continuous_delivery/properties/mode",
+                    "type": "Control"
+                  },
+                  {
+                    "rule": {
+                      "condition": {
+                        "type": "AND",
+                        "conditions": [
+                          {
+                            "scope": "#/properties/continuous_delivery/properties/enabled",
+                            "schema": {"const": true}
+                          },
+                          {
+                            "scope": "#/properties/continuous_delivery/properties/mode",
+                            "schema": {"const": "branch"}
+                          }
+                        ]
+                      },
+                      "effect": "SHOW"
+                    },
                     "scope": "#/properties/continuous_delivery/properties/branches",
+                    "type": "Control"
+                  },
+                  {
+                    "rule": {
+                      "condition": {
+                        "type": "AND",
+                        "conditions": [
+                          {
+                            "scope": "#/properties/continuous_delivery/properties/enabled",
+                            "schema": {"const": true}
+                          },
+                          {
+                            "scope": "#/properties/continuous_delivery/properties/mode",
+                            "schema": {"const": "release"}
+                          }
+                        ]
+                      },
+                      "effect": "SHOW"
+                    },
+                    "scope": "#/properties/continuous_delivery/properties/releases",
                     "type": "Control"
                   }
                 ],
