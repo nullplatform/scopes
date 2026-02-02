@@ -1,0 +1,183 @@
+# =============================================================================
+# EXAMPLE terraform.tfvars
+# =============================================================================
+# Copy this file to terraform.tfvars and customize as needed.
+# Most variables have sensible defaults - you only need to set required ones.
+# =============================================================================
+
+# =============================================================================
+# REQUIRED VARIABLES
+# =============================================================================
+
+resource_group_name = "my-app-rg"
+location            = "eastus"
+app_name            = "my-awesome-app"  # Must be globally unique
+docker_image        = "nginx:latest"    # Your Docker image
+
+# =============================================================================
+# OPTIONAL: Resource Tags
+# =============================================================================
+
+resource_tags = {
+  environment = "production"
+  project     = "my-project"
+  team        = "platform"
+  cost_center = "12345"
+}
+
+# =============================================================================
+# OPTIONAL: Environment Variables (as JSON)
+# =============================================================================
+
+# parameter_json = <<EOF
+# {
+#   "DATABASE_URL": "postgresql://user:pass@host:5432/db",
+#   "REDIS_URL": "redis://redis-host:6379",
+#   "API_KEY": "your-api-key",
+#   "LOG_LEVEL": "info",
+#   "NODE_ENV": "production"
+# }
+# EOF
+
+# =============================================================================
+# OPTIONAL: App Service Plan
+# =============================================================================
+
+# service_plan_name        = "my-custom-plan-name"
+# sku_name                 = "S1"        # B1, B2, B3, S1, S2, S3, P1v2, P2v2, P3v2, P1v3, P2v3, P3v3
+# os_type                  = "Linux"
+# per_site_scaling_enabled = false
+# zone_balancing_enabled   = false
+
+# =============================================================================
+# OPTIONAL: Docker Registry (for private registries)
+# =============================================================================
+
+# docker_registry_url      = "https://myregistry.azurecr.io"
+# docker_registry_username = ""  # Or set via TF_VAR_docker_registry_username
+# docker_registry_password = ""  # Or set via TF_VAR_docker_registry_password
+
+# =============================================================================
+# OPTIONAL: App Service Configuration
+# =============================================================================
+
+# always_on                         = true
+# https_only                        = true
+# http2_enabled                     = true
+# websockets_enabled                = false
+# health_check_path                 = "/health"
+# health_check_eviction_time_in_min = 10
+# ftps_state                        = "Disabled"
+# minimum_tls_version               = "1.2"
+# client_affinity_enabled           = false   # Sticky sessions
+# app_command_line                  = ""      # Custom startup command
+
+# =============================================================================
+# OPTIONAL: Deployment Slots
+# =============================================================================
+
+# enable_staging_slot    = true
+# staging_slot_name      = "staging"
+# staging_slot_always_on = false
+
+# =============================================================================
+# OPTIONAL: Custom Domain
+# =============================================================================
+
+# enable_custom_domain       = true
+# dns_zone_name              = "example.com"
+# dns_zone_resource_group    = "dns-rg"
+# custom_subdomain           = "api"      # Results in api.example.com (use "@" for apex)
+# enable_managed_certificate = true       # Free SSL certificate
+
+# =============================================================================
+# OPTIONAL: Logging
+# =============================================================================
+
+# enable_logging             = true
+# application_logs_level     = "Information"  # Off, Error, Warning, Information, Verbose
+# http_logs_retention_days   = 7
+# http_logs_retention_mb     = 35
+# detailed_error_messages    = true
+# failed_request_tracing     = true
+
+# =============================================================================
+# OPTIONAL: Application Insights / Monitoring
+# =============================================================================
+
+# enable_application_insights    = true
+# application_insights_name      = "my-app-insights"
+# log_analytics_workspace_name   = "my-app-logs"
+# log_analytics_retention_days   = 30
+# enable_diagnostic_settings     = true
+
+# =============================================================================
+# OPTIONAL: Autoscaling
+# =============================================================================
+
+# enable_autoscaling            = true
+# autoscale_min_instances       = 2
+# autoscale_max_instances       = 10
+# autoscale_default_instances   = 2
+# cpu_scale_out_threshold       = 70
+# cpu_scale_in_threshold        = 30
+# memory_scale_out_threshold    = 75
+# memory_scale_in_threshold     = 40
+# scale_out_cooldown            = "PT5M"
+# scale_in_cooldown             = "PT10M"
+# autoscale_notification_emails = ["platform-team@example.com"]
+
+# =============================================================================
+# OPTIONAL: Auto-Heal
+# =============================================================================
+
+# enable_auto_heal                  = true
+# auto_heal_slow_request_count      = 10
+# auto_heal_slow_request_interval   = "00:01:00"
+# auto_heal_slow_request_time_taken = "00:00:30"
+# auto_heal_status_code_count       = 50
+# auto_heal_status_code_interval    = "00:05:00"
+# auto_heal_status_code_range       = "500-599"
+# auto_heal_min_process_time        = "00:01:00"
+
+# =============================================================================
+# OPTIONAL: Networking
+# =============================================================================
+
+# enable_vnet_integration       = true
+# vnet_integration_subnet_id    = "/subscriptions/.../subnets/app-subnet"
+# vnet_route_all_enabled        = true
+# ip_restriction_default_action = "Allow"
+
+# ip_restrictions = [
+#   {
+#     name       = "allow-office"
+#     ip_address = "203.0.113.0/24"
+#     priority   = 100
+#     action     = "Allow"
+#   },
+#   {
+#     name        = "allow-azure-services"
+#     service_tag = "AzureCloud"
+#     priority    = 200
+#     action      = "Allow"
+#   }
+# ]
+
+# =============================================================================
+# OPTIONAL: Identity
+# =============================================================================
+
+# enable_system_identity     = true
+# user_assigned_identity_ids = ["/subscriptions/.../identities/my-identity"]
+
+# =============================================================================
+# OPTIONAL: Alerting
+# =============================================================================
+
+# enable_alerts                     = true
+# alert_email_recipients            = ["oncall@example.com", "platform-team@example.com"]
+# alert_http_5xx_threshold          = 10
+# alert_response_time_threshold_ms  = 5000
+# alert_cpu_percentage_threshold    = 85
+# alert_memory_percentage_threshold = 85

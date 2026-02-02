@@ -1,0 +1,13 @@
+include:
+  - "$SERVICE_PATH/deployment/workflows/initial.yaml"
+configuration:
+  ENABLE_STAGING_SLOT: false
+  PROMOTE_STAGING_TO_PRODUCTION: true
+  PRESERVE_PRODUCTION_IMAGE: false
+steps:
+  - name: clear_traffic
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/traffic_management"
+    configuration:
+      STAGING_TRAFFIC_PERCENT: 0
+    before: tofu

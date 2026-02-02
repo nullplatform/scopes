@@ -1,0 +1,39 @@
+{
+  "cost": 0,
+  "interval": "PT5M",
+  "namespace": "Microsoft.Web/sites",
+  "resourceregion": "australiaeast",
+  "timespan": "2026-01-27T00:00:00Z/2026-01-27T01:00:00Z",
+  "value": [
+    {
+      "displayDescription": "The percentage of CPU used by the app.",
+      "id": "/subscriptions/test-subscription-id/resourceGroups/test-resource-group/providers/Microsoft.Web/sites/tools-automation-development-tools-7/providers/Microsoft.Insights/metrics/CpuPercentage",
+      "name": {
+        "localizedValue": "CPU Percentage",
+        "value": "CpuPercentage"
+      },
+      "resourceGroup": "test-resource-group",
+      "timeseries": [
+        {
+          "data": [
+            {
+              "average": 25.5,
+              "timeStamp": "2026-01-27T00:00:00+00:00"
+            },
+            {
+              "average": 30.2,
+              "timeStamp": "2026-01-27T00:05:00+00:00"
+            },
+            {
+              "average": 22.1,
+              "timeStamp": "2026-01-27T00:10:00+00:00"
+            }
+          ],
+          "metadatavalues": []
+        }
+      ],
+      "type": "Microsoft.Insights/metrics",
+      "unit": "Percent"
+    }
+  ]
+}

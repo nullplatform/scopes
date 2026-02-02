@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "body": {
+    "id": "azure-id",
+    "specification_id": "azure-spec-id",
+    "category": "cloud-provider-id",
+    "attributes": {
+      "authentication": {
+        "subscription_id": "mock-subscription-id",
+        "client_id": "mock-client-id",
+        "tenant_id": "mock-tenant-id"
+      },
+      "networking": {
+        "public_dns_zone_resource_group_name": "test-resource-group"
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "id": 7,
+  "name": "Development tools",
+  "slug": "development-tools",
+  "application_id": 4,
+  "nrn": "organization=1:account=2:namespace=3:application=4:scope=7",
+  "status": "active"
+}

@@ -1,0 +1,33 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+configuration:
+  TOFU_ACTION: "apply"
+  ENABLE_STAGING_SLOT: false
+steps:
+  - name: docker_setup
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/docker_setup"
+  - name: build_context
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/build_context"
+    output:
+      - name: TOFU_VARIABLES
+        type: environment
+      - name: SCOPE_ID
+        type: environment
+      - name: DEPLOYMENT_ID
+        type: environment
+      - name: APP_NAME
+        type: environment
+      - name: OUTPUT_DIR
+        type: environment
+      - name: TF_WORKING_DIR
+        type: environment
+      - name: DOCKER_IMAGE
+        type: environment
+  - name: setup_provider
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/azure_setup"
+  - name: tofu
+    type: script
+    file: "$SERVICE_PATH/deployment/scripts/do_tofu"

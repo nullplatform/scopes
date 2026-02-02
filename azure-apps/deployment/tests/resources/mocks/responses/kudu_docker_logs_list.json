@@ -1,0 +1,16 @@
+[
+  {
+    "machineName": "lw1sdlwk00003F",
+    "lastUpdated": "2026-01-27T10:05:00Z",
+    "size": 1024,
+    "href": "https://tools-automation-development-tools-7.scm.azurewebsites.net/api/vfs/LogFiles/2026_01_27_lw1sdlwk00003F_docker.log",
+    "path": "/home/LogFiles/2026_01_27_lw1sdlwk00003F_docker.log"
+  },
+  {
+    "machineName": "lw1sdlwk00003F",
+    "lastUpdated": "2026-01-27T09:00:00Z",
+    "size": 512,
+    "href": "https://tools-automation-development-tools-7.scm.azurewebsites.net/api/vfs/LogFiles/2026_01_26_lw1sdlwk00003F_docker.log",
+    "path": "/home/LogFiles/2026_01_26_lw1sdlwk00003F_docker.log"
+  }
+]

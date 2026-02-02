@@ -1,0 +1,23 @@
+#!/bin/bash
+# Mock np CLI for testing
+#
+# Usage:
+#   Set NP_MOCK_RESPONSE to the path of the mock JSON file to return
+#   Set NP_MOCK_EXIT_CODE to the exit code (default: 0)
+
+MOCK_RESPONSE="$NP_MOCK_RESPONSE"
+MOCK_EXIT_CODE="${NP_MOCK_EXIT_CODE:-0}"
+
+if [ -z "$MOCK_RESPONSE" ]; then
+  echo "No mock response configured for: np $*" >&2
+  exit 1
+fi
+
+if [ -f "$MOCK_RESPONSE" ]; then
+  cat "$MOCK_RESPONSE"
+else
+  echo "Mock file not found: $MOCK_RESPONSE" >&2
+  exit 1
+fi
+
+exit "$MOCK_EXIT_CODE"

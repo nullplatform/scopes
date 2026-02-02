@@ -1,0 +1,29 @@
+#!/bin/bash
+# Mock np CLI for unit tests
+# Routes responses based on subcommand
+
+if [ -n "${NP_CALL_LOG:-}" ]; then
+  echo "$*" >> "$NP_CALL_LOG"
+fi
+
+case "$1 $2" in
+  "scope read")
+    if [ -f "${NP_SCOPE_RESPONSE:-}" ]; then
+      cat "$NP_SCOPE_RESPONSE"
+    else
+      # Default response with active_deployment
+      echo '{"id":7,"slug":"development-tools","name":"Development tools","active_deployment":8}'
+    fi
+    ;;
+  "application read")
+    [ -f "${NP_APP_RESPONSE:-}" ] && cat "$NP_APP_RESPONSE"
+    ;;
+  "namespace read")
+    [ -f "${NP_NAMESPACE_RESPONSE:-}" ] && cat "$NP_NAMESPACE_RESPONSE"
+    ;;
+  "provider list")
+    [ -f "${NP_PROVIDER_RESPONSE:-}" ] && cat "$NP_PROVIDER_RESPONSE"
+    ;;
+esac
+
+exit "${NP_MOCK_EXIT_CODE:-0}"

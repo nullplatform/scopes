@@ -1,0 +1,1 @@
+An error occurred (AccessDenied) when calling the GetHostedZone operation: User: arn:aws:iam::123456789012:user/testuser is not authorized to perform: route53:GetHostedZone on resource: arn:aws:route53:::hostedzone/Z1234567890ABC
