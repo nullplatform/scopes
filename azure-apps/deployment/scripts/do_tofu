@@ -1,0 +1,59 @@
+#!/bin/bash
+set -euo pipefail
+
+TOFU_ACTION="${TOFU_ACTION:-apply}"
+
+echo "📝 Running tofu $TOFU_ACTION for deployment: $DEPLOYMENT_ID"
+echo "📋 App Service: $APP_NAME"
+
+TOFU_SOURCE="${TOFU_PATH:-$SERVICE_PATH/deployment/modules}"
+
+echo "📋 Source modules: $TOFU_SOURCE"
+echo "📋 Working directory: $TF_WORKING_DIR"
+
+# Verify source directory exists
+if [ ! -d "$TOFU_SOURCE" ]; then
+    echo "❌ Source directory does not exist: $TOFU_SOURCE"
+    exit 1
+fi
+
+# Copy tofu files to working directory
+echo "📋 Copying terraform files..."
+if ls "$TOFU_SOURCE"/*.tf 1>/dev/null 2>&1; then
+    cp -r "$TOFU_SOURCE"/*.tf "$TF_WORKING_DIR/"
+    echo "   ✅ Copied $(ls "$TOFU_SOURCE"/*.tf | wc -l | tr -d ' ') .tf files"
+else
+    echo "   ❌ No .tf files found in $TOFU_SOURCE"
+    exit 1
+fi
+cp -r "$TOFU_SOURCE"/scripts "$TF_WORKING_DIR/" 2>/dev/null || true
+
+# Copy custom modules (provider overrides for testing)
+if [ -n "${CUSTOM_TOFU_MODULES:-}" ]; then
+    IFS=',' read -ra modules <<< "$CUSTOM_TOFU_MODULES"
+    for module in "${modules[@]}"; do
+        if [ -d "$module" ]; then
+            echo "📋 Adding custom module: $module"
+            cp -r "$module"/*.tf "$TF_WORKING_DIR/" 2>/dev/null || true
+        fi
+    done
+fi
+
+# Generate tfvars from TOFU_VARIABLES
+TOFU_VAR_FILE="$OUTPUT_DIR/tofu.tfvars.json"
+echo "$TOFU_VARIABLES" > "$TOFU_VAR_FILE"
+
+# Run tofu
+echo "📝 Initializing tofu..."
+tofu -chdir="$TF_WORKING_DIR" init -input=false $TOFU_INIT_VARIABLES
+
+# Blue-green deployment image preservation is handled directly in Terraform
+# via the terraform_remote_state data source when preserve_production_image=true
+if [ "${PRESERVE_PRODUCTION_IMAGE:-false}" = "true" ]; then
+    echo "🔵 Blue-green mode: Terraform will preserve current production image and deploy new image to staging"
+fi
+
+echo "📝 Running tofu $TOFU_ACTION..."
+tofu -chdir="$TF_WORKING_DIR" "$TOFU_ACTION" -auto-approve -var-file="$TOFU_VAR_FILE"
+
+echo "✅ Tofu $TOFU_ACTION completed successfully"

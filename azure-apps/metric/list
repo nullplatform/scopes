@@ -1,0 +1,69 @@
+#!/bin/bash
+
+echo '{
+	"results": [
+		{
+			"name": "http.rpm",
+			"title": "Throughput",
+			"unit": "rpm",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "http.response_time",
+			"title": "Response time",
+			"unit": "seconds",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "http.error_rate",
+			"title": "Error rate",
+			"unit": "%",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "http.request_count",
+			"title": "Request count",
+			"unit": "count",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "http.5xx_count",
+			"title": "5xx errors",
+			"unit": "count",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "http.4xx_count",
+			"title": "4xx errors",
+			"unit": "count",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "system.cpu_usage_percentage",
+			"title": "CPU usage",
+			"unit": "%",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "system.memory_usage_percentage",
+			"title": "Memory usage percentage",
+			"unit": "%",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		},
+		{
+			"name": "system.health_check_status",
+			"title": "Health check status",
+			"unit": "%",
+			"available_filters": ["scope_id"],
+			"available_group_by": []
+		}
+	]
+}'

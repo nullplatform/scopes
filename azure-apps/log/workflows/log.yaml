@@ -1,0 +1,7 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/log/build_context"
+  - name: logs
+    type: script
+    file: "$SERVICE_PATH/log/log"

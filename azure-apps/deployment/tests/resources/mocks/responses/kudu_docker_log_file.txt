@@ -1,0 +1,6 @@
+2026-01-27T10:00:00.000Z INFO  - Starting container
+2026-01-27T10:00:01.000Z INFO  - Container started successfully
+2026-01-27T10:00:05.000Z ERROR - Connection refused to database
+2026-01-27T10:00:10.000Z INFO  - Retrying database connection
+2026-01-27T10:00:15.000Z INFO  - Database connected
+2026-01-27T10:01:00.000Z INFO  - Health check passed

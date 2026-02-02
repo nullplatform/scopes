@@ -1,0 +1,197 @@
+{
+  "account": {
+    "created_at": "2023-01-31T21:53:32.597Z",
+    "id": 2,
+    "metadata": {},
+    "name": "Playground",
+    "nrn": "organization=1:account=2",
+    "organization_id": 1,
+    "repository_prefix": "playground-repos",
+    "repository_provider": "github",
+    "settings": {},
+    "slug": "playground",
+    "status": "active",
+    "updated_at": "2023-01-31T21:53:32.597Z"
+  },
+  "application": {
+    "auto_deploy_on_creation": false,
+    "created_at": "2025-10-07T03:22:21.385Z",
+    "id": 4,
+    "is_mono_repo": false,
+    "messages": [],
+    "metadata": {},
+    "name": "Automation",
+    "namespace_id": 3,
+    "nrn": "organization=1:account=2:namespace=3:application=4",
+    "repository_app_path": null,
+    "repository_url": "https://github.com/playground-repos/tools-automation",
+    "settings": {},
+    "slug": "automation",
+    "status": "active",
+    "tags": {},
+    "template_id": 1037172878,
+    "updated_at": "2025-10-07T03:22:30.695Z"
+  },
+  "asset": {
+    "id": 6,
+    "build_id": 612605537,
+    "name": "main",
+    "type": "docker",
+    "url": "myregistry.azurecr.io/tools/automation:v2.0.0",
+    "platform": "linux/amd64",
+    "metadata": {},
+    "nrn": "organization=1:account=2:namespace=3:application=4:build=5:asset=6"
+  },
+  "deployment": {
+    "created_at": "2025-12-22T18:27:54.701Z",
+    "created_by": 123456789,
+    "deployment_group_id": null,
+    "deployment_token": "dep-token",
+    "expires_at": null,
+    "external_strategy_id": 10,
+    "id": 8,
+    "messages": [],
+    "metadata": {},
+    "nrn": "organization=1:account=2:namespace=3:application=4:scope=7:deployment=8",
+    "release_id": 9,
+    "scope_id": 7,
+    "status": "creating",
+    "status_in_scope": "inactive",
+    "status_started_at": {
+      "creating": "2025-12-22T18:27:54.629Z"
+    },
+    "strategy": "initial",
+    "strategy_data": {
+      "desired_switched_traffic": 0,
+      "parameters": {
+        "metrics": {
+          "enabled": false,
+          "rules": []
+        },
+        "traffic": {
+          "enable_auto_switch": false,
+          "interval": 10,
+          "step": "0.1"
+        }
+      }
+    },
+    "updated_at": "2025-12-23T13:22:06.345Z",
+    "updated_by": null
+  },
+  "namespace": {
+    "account_id": 2,
+    "created_at": "2025-05-15T21:34:40.725Z",
+    "id": 3,
+    "metadata": {},
+    "name": "Tools",
+    "nrn": "organization=1:account=2:namespace=3",
+    "slug": "tools",
+    "status": "active",
+    "updated_at": "2025-05-15T21:34:40.725Z"
+  },
+  "parameters": {
+    "results": [
+      {
+        "destination_path": null,
+        "id": 10,
+        "name": "DATABASE_URL",
+        "type": "environment",
+        "values": [
+          {
+            "id": "11",
+            "value": "postgres://localhost:5432/db"
+          }
+        ],
+        "variable": "DATABASE_URL",
+        "version_id": 12
+      },
+      {
+        "destination_path": null,
+        "id": 13,
+        "name": "LOG_LEVEL",
+        "type": "environment",
+        "values": [
+          {
+            "id": "14",
+            "value": "info"
+          }
+        ],
+        "variable": "LOG_LEVEL",
+        "version_id": 15
+      }
+    ]
+  },
+  "providers": {
+    "cloud-providers": {
+      "authentication": {
+        "subscription_id": "mock-subscription-id",
+        "client_id": "mock-client-id",
+        "tenant_id": "mock-tenant-id"
+      },
+      "networking": {
+        "public_dns_zone_resource_group_name": "test-resource-group"
+      }
+    },
+    "assets-repository": {
+      "setup": {
+        "password": "mock-registry-password",
+        "path": "mock-path",
+        "server": "mockregistry.azurecr.io",
+        "use_namespace": false,
+        "username": "mock-registry-user"
+      }
+    }
+  },
+  "release": {
+    "application_id": 4,
+    "build_id": 5,
+    "created_at": "2025-12-12T13:07:27.435Z",
+    "id": 9,
+    "metadata": {},
+    "nrn": "organization=1:account=2:namespace=3:application=4:release=9",
+    "semver": "v1.0.0",
+    "status": "active",
+    "updated_at": "2025-12-12T13:07:27.702Z"
+  },
+  "scope": {
+    "application_id": 4,
+    "asset_name": "main",
+    "capabilities": {
+      "memory": 4,
+      "websockets_enabled": false,
+      "scaling_type": "fixed",
+      "fixed_instances": 1,
+      "health_check": {
+        "path": "/healthz",
+        "eviction_time_in_min": 5
+      }
+    },
+    "created_at": "2025-12-22T18:27:04.949Z",
+    "dimensions": {
+      "country": "argentina",
+      "environment": "development"
+    },
+    "domain": "",
+    "domains": [],
+    "external_created": false,
+    "id": 7,
+    "instance_id": "some-instance-id",
+    "messages": [],
+    "metadata": {},
+    "name": "Development tools",
+    "nrn": "organization=1:account=2:namespace=3:application=4:scope=7",
+    "profiles": [
+      "environment_development",
+      "environment_development_country_argentina"
+    ],
+    "provider": "scope-type-id",
+    "requested_spec": {},
+    "runtime_configurations": [],
+    "slug": "development-tools",
+    "status": "active",
+    "tags": [],
+    "tier": "important",
+    "type": "custom",
+    "updated_at": "2025-12-29T18:25:55.908Z"
+  }
+}

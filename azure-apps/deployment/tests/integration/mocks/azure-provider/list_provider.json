@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "category": "cloud-provider",
+        "created_at": "2026-01-07T16:28:17.036Z",
+        "dimensions": {},
+        "groups": [],
+        "id": "azure-id",
+        "nrn": "organization=1:account=2",
+        "specification_id": "azure-spec-id",
+        "tags": [],
+        "updated_at": "2026-01-07T16:28:17.036Z"
+      }
+    ]
+  }
+}

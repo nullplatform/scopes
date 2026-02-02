@@ -1,0 +1,130 @@
+#!/bin/bash
+
+echo "🔍 Validating Azure provider configuration..."
+
+missing_vars=()
+
+function validate_env_var() {
+  local variable_name=$1
+  local variable_value="${!variable_name}"
+
+  if [ -z "$variable_value" ]; then
+    echo "   ❌ $variable_name is missing"
+    missing_vars+=("$variable_name")
+  else
+    if [[ "$(echo "$variable_name" | tr '[:upper:]' '[:lower:]')" == *secret* ]]; then
+      echo "   ✅ $variable_name=REDACTED"
+    else
+      echo "   ✅ $variable_name=$variable_value"
+    fi
+  fi
+}
+
+# Terraform state backend configuration
+validate_env_var TOFU_PROVIDER_STORAGE_ACCOUNT
+validate_env_var TOFU_PROVIDER_CONTAINER
+validate_env_var ARM_CLIENT_SECRET
+
+if [ ${#missing_vars[@]} -gt 0 ]; then
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    Set the missing variable(s) in the nullplatform agent Helm installation:"
+  for var in "${missing_vars[@]}"; do
+    echo "      • $var"
+  done
+  echo ""
+  exit 1
+fi
+
+ARM_SUBSCRIPTION_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].authentication.subscription_id // empty')
+ARM_CLIENT_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].authentication.client_id // empty')
+ARM_TENANT_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].authentication.tenant_id // empty')
+AZURE_RESOURCE_GROUP=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_resource_group_name // empty')
+AZURE_LOCATION=australiaeast
+
+context_missing_vars=()
+
+if [ -z "$ARM_SUBSCRIPTION_ID" ]; then
+  echo "   ❌ ARM_SUBSCRIPTION_ID could not be resolved from providers"
+  context_missing_vars+=("subscription_id")
+fi
+
+if [ -z "$ARM_CLIENT_ID" ]; then
+  echo "   ❌ ARM_CLIENT_ID could not be resolved from providers"
+  context_missing_vars+=("client_id")
+fi
+
+if [ -z "$ARM_TENANT_ID" ]; then
+  echo "   ❌ ARM_TENANT_ID could not be resolved from providers"
+  context_missing_vars+=("tenant_id")
+fi
+
+if [ -z "$AZURE_RESOURCE_GROUP" ]; then
+  echo "   ❌ AZURE_RESOURCE_GROUP could not be resolved from providers"
+  context_missing_vars+=("public_dns_zone_resource_group_name")
+fi
+
+if [ ${#context_missing_vars[@]} -gt 0 ]; then
+  echo ""
+  echo "  💡 Possible causes:"
+  echo "    Verify that you have an Azure cloud provider linked to this scope."
+  echo "    The cloud provider must include the following fields:"
+  for var in "${context_missing_vars[@]}"; do
+    echo "      • $var"
+  done
+  echo ""
+  exit 1
+fi
+
+echo "✨ Azure provider configured successfully"
+echo ""
+
+# Build TOFU_VARIABLES for terraform
+RESOURCE_TAGS_JSON=${RESOURCE_TAGS_JSON:-"{}"}
+
+TOFU_VARIABLES=$(echo "${TOFU_VARIABLES:-"{}"}" | jq \
+  --arg resource_group_name "$AZURE_RESOURCE_GROUP" \
+  --arg location "$AZURE_LOCATION" \
+  --argjson resource_tags "$RESOURCE_TAGS_JSON" \
+  --arg backend_storage_account_name "$TOFU_PROVIDER_STORAGE_ACCOUNT" \
+  --arg backend_container_name "$TOFU_PROVIDER_CONTAINER" \
+  --arg backend_resource_group_name "$AZURE_RESOURCE_GROUP" \
+  '. + {
+    resource_group_name: $resource_group_name,
+    location: $location,
+    resource_tags: $resource_tags,
+    backend_storage_account_name: $backend_storage_account_name,
+    backend_container_name: $backend_container_name,
+    backend_resource_group_name: $backend_resource_group_name
+  }')
+
+# Build tofu init backend config
+# STATE_KEY is exported by build_context
+TOFU_INIT_VARIABLES="${TOFU_INIT_VARIABLES:-""}"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=storage_account_name=$TOFU_PROVIDER_STORAGE_ACCOUNT"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=container_name=$TOFU_PROVIDER_CONTAINER"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=resource_group_name=$AZURE_RESOURCE_GROUP"
+TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=key=$STATE_KEY"
+
+# Export for downstream scripts
+export TOFU_VARIABLES
+export TOFU_INIT_VARIABLES
+export ARM_SUBSCRIPTION_ID
+export ARM_CLIENT_ID
+export ARM_TENANT_ID
+export ARM_CLIENT_SECRET
+export AZURE_RESOURCE_GROUP
+export AZURE_LOCATION
+
+# Add modules path if available
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir}/modules"
+
+if [[ -d "$module_name" ]]; then
+  if [[ -n $MODULES_TO_USE ]]; then
+    MODULES_TO_USE="$MODULES_TO_USE,$module_name"
+  else
+    MODULES_TO_USE="$module_name"
+  fi
+  export MODULES_TO_USE
+fi
