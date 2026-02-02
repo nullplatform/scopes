@@ -1523,11 +1523,11 @@ run "ip_restrictions_service_tag" {
 # IDENTITY TESTS
 # =============================================================================
 
-run "identity_none_by_default" {
+run "identity_enabled_by_default" {
   command = plan
   assert {
-    condition     = local.identity_type == null
-    error_message = "Identity type should be null by default"
+    condition     = local.identity_type != null
+    error_message = "Identity type should not be null by default"
   }
 }
 
@@ -1542,14 +1542,14 @@ run "identity_system_assigned" {
   }
 }
 
-run "identity_user_assigned" {
+run "identity_system_assigned" {
   command = plan
   variables {
     user_assigned_identity_ids = ["/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/my-identity"]
   }
   assert {
-    condition     = local.identity_type == "UserAssigned"
-    error_message = "Identity type should be 'UserAssigned'"
+    condition     = local.identity_type == "SystemAssigned, UserAssigned"
+    error_message = "Identity type should be 'SystemAssigned, UserAssigned'"
   }
 }
 
@@ -1578,6 +1578,9 @@ run "identity_block_created_when_enabled" {
 
 run "identity_block_not_created_when_disabled" {
   command = plan
+  variables {
+    enable_system_identity = false
+  }
   assert {
     condition     = length(azurerm_linux_web_app.main.identity) == 0
     error_message = "Identity block should not be created when disabled"
@@ -1803,6 +1806,11 @@ run "output_application_insights_null_when_disabled" {
 
 run "output_identity_principal_null_when_disabled" {
   command = plan
+
+  variables {
+    enable_system_identity = false
+  }
+
   assert {
     condition     = output.app_service_identity_principal_id == null
     error_message = "app_service_identity_principal_id should be null when identity is disabled"

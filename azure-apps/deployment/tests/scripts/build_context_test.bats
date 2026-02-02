@@ -142,6 +142,7 @@ run_build_context() {
   "promote_staging_to_production": false,
   "preserve_production_image": false,
   "state_key": "azure-apps/7/terraform.tfstate",
+  "enable_system_identity": true,
   "enable_autoscaling": true,
   "autoscale_min_instances": 2,
   "autoscale_max_instances": 5,
@@ -340,6 +341,27 @@ EOF
   local state_key
   state_key=$(echo "$TOFU_VARIABLES" | jq -r '.state_key')
   assert_equal "$state_key" "azure-apps/7/terraform.tfstate"
+}
+
+# =============================================================================
+# Test: Managed identity settings
+# =============================================================================
+@test "Should default enable_system_identity to true" {
+  run_build_context
+
+  local enable_identity
+  enable_identity=$(echo "$TOFU_VARIABLES" | jq -r '.enable_system_identity')
+  assert_equal "$enable_identity" "true"
+}
+
+@test "Should allow ENABLE_SYSTEM_IDENTITY override from environment" {
+  export ENABLE_SYSTEM_IDENTITY="false"
+
+  run_build_context
+
+  local enable_identity
+  enable_identity=$(echo "$TOFU_VARIABLES" | jq -r '.enable_system_identity')
+  assert_equal "$enable_identity" "false"
 }
 
 @test "Should allow STAGING_TRAFFIC_PERCENT env var to override context" {

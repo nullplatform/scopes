@@ -44,6 +44,9 @@ PRESERVE_PRODUCTION_IMAGE="${PRESERVE_PRODUCTION_IMAGE:-false}"
 # State key for remote state lookup (used by preserve_production_image in azure_setup)
 STATE_KEY="azure-apps/${SCOPE_ID}/terraform.tfstate"
 
+# Managed identity settings (required for Azure RBAC integration, e.g., Cosmos DB)
+ENABLE_SYSTEM_IDENTITY="${ENABLE_SYSTEM_IDENTITY:-true}"
+
 # Extract autoscaling settings (no defaults - if not set, autoscaling is disabled)
 AUTOSCALING_MIN=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.min_instances')
 AUTOSCALING_MAX=$(echo "$CONTEXT" | jq -r '.scope.capabilities.autoscaling.max_instances')
@@ -91,6 +94,7 @@ TOFU_VARIABLES=$(jq -n \
     --argjson promote_staging_to_production "$PROMOTE_STAGING_TO_PRODUCTION" \
     --argjson preserve_production_image "$PRESERVE_PRODUCTION_IMAGE" \
     --arg state_key "$STATE_KEY" \
+    --argjson enable_system_identity "$ENABLE_SYSTEM_IDENTITY" \
     --argjson enable_autoscaling "$ENABLE_AUTOSCALING" \
     --argjson autoscale_min_instances "$AUTOSCALING_MIN" \
     --argjson autoscale_max_instances "$AUTOSCALING_MAX" \
@@ -120,6 +124,7 @@ TOFU_VARIABLES=$(jq -n \
         promote_staging_to_production: $promote_staging_to_production,
         preserve_production_image: $preserve_production_image,
         state_key: $state_key,
+        enable_system_identity: $enable_system_identity,
         enable_autoscaling: $enable_autoscaling,
         autoscale_min_instances: $autoscale_min_instances,
         autoscale_max_instances: $autoscale_max_instances,
