@@ -26,11 +26,16 @@ done
 BUCKET=$(echo "$MANIFEST_BACKUP" | jq -r .BUCKET)
 PREFIX=$(echo "$MANIFEST_BACKUP" | jq -r .PREFIX)
 
-echo "[INFO] Initializing S3 manifest backup operation - Action: $ACTION | Bucket: $BUCKET | Prefix: $PREFIX | Files: ${#FILES[@]}"
+echo "📝 Starting S3 manifest backup..."
+echo "📋 Action: $ACTION"
+echo "📋 Bucket: $BUCKET"
+echo "📋 Prefix: $PREFIX"
+echo "📋 Files: ${#FILES[@]}"
+echo ""
 
 # Now you can iterate over the files
 for file in "${FILES[@]}"; do
-  echo "[DEBUG] Processing manifest file: $file"
+  echo "📝 Processing: $(basename "$file")"
 
   # Extract the path after 'output/' and remove the action folder (apply/delete)
   # Example: /root/.np/services/k8s/output/1862688057-34121609/apply/secret-1862688057-34121609.yaml
@@ -54,34 +59,60 @@ for file in "${FILES[@]}"; do
 
 
   if [[ "$ACTION" == "apply" ]]; then
-    echo "[INFO] Uploading manifest to S3: s3://$BUCKET/$s3_key"
+    echo "   📡 Uploading to s3://$BUCKET/$s3_key"
 
     # Upload to S3
-    if aws s3 cp --region "$REGION" "$file" "s3://$BUCKET/$s3_key"; then
-      echo "[SUCCESS] Manifest upload completed successfully: $file"
+    if aws s3 cp --region "$REGION" "$file" "s3://$BUCKET/$s3_key" >/dev/null; then
+      echo "   ✅ Upload successful"
     else
-      echo "[ERROR] Manifest upload failed: $file" >&2
+      echo "   ❌ Upload failed"
+      echo ""
+      echo "💡 Possible causes:"
+      echo "   • S3 bucket does not exist or is not accessible"
+      echo "   • IAM permissions are missing for s3:PutObject"
+      echo ""
+      echo "🔧 How to fix:"
+      echo "   • Verify bucket '$BUCKET' exists and is accessible"
+      echo "   • Check IAM permissions for the agent"
+      echo ""
       exit 1
     fi
 
   elif [[ "$ACTION" == "delete" ]]; then
-    echo "[INFO] Removing manifest from S3: s3://$BUCKET/$s3_key"
+    echo "   📡 Deleting s3://$BUCKET/$s3_key"
 
     # Delete from S3 with error handling
     aws_output=$(aws s3 rm --region "$REGION" "s3://$BUCKET/$s3_key" 2>&1)
     aws_exit_code=$?
 
     if [[ $aws_exit_code -eq 0 ]]; then
-      echo "[SUCCESS] Manifest deletion completed successfully: s3://$BUCKET/$s3_key"
+      echo "   ✅ Deletion successful"
     elif [[ "$aws_output" == *"NoSuchKey"* ]] || [[ "$aws_output" == *"Not Found"* ]]; then
-      echo "[WARN] Manifest not found in S3, skipping deletion: s3://$BUCKET/$s3_key"
+      echo "   📋 File not found in S3, skipping"
     else
-      echo "[ERROR] Manifest deletion failed: s3://$BUCKET/$s3_key - $aws_output" >&2
+      echo "   ❌ Deletion failed"
+      echo "📋 AWS Error: $aws_output"
+      echo ""
+      echo "💡 Possible causes:"
+      echo "   • S3 bucket does not exist or is not accessible"
+      echo "   • IAM permissions are missing for s3:DeleteObject"
+      echo ""
+      echo "🔧 How to fix:"
+      echo "   • Verify bucket '$BUCKET' exists and is accessible"
+      echo "   • Check IAM permissions for the agent"
+      echo ""
       exit 1
     fi
 
   else
-    echo "[ERROR] Invalid action specified: $ACTION" >&2
+    echo "❌ Invalid action: '$ACTION'"
+    echo ""
+    echo "💡 Possible causes:"
+    echo "   The action parameter must be 'apply' or 'delete'"
+    echo ""
     exit 1
   fi
 done
+
+echo ""
+echo "✨ S3 backup operation completed successfully"
