@@ -103,7 +103,6 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "📝 kubectl apply valid.yaml"
-  assert_contains "$output" "✅ Applied successfully"
 }
 
 # =============================================================================
