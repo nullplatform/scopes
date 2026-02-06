@@ -13,7 +13,6 @@ echo ""
 
 echo "$CONTEXT" | jq --arg replicas "$REPLICAS" '. + {replicas: $replicas}' > "$CONTEXT_PATH"
 
-echo "📝 Building deployment template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$DEPLOYMENT_TEMPLATE" \
   --out "$DEPLOYMENT_PATH"
@@ -26,7 +25,6 @@ if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
 fi
 echo "   ✅ Deployment template: $DEPLOYMENT_PATH"
 
-echo "📝 Building secret template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SECRET_TEMPLATE" \
   --out "$SECRET_PATH"
@@ -39,7 +37,6 @@ if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
 fi
 echo "   ✅ Secret template: $SECRET_PATH"
 
-echo "📝 Building scaling template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SCALING_TEMPLATE" \
   --out "$SCALING_PATH"
@@ -52,7 +49,6 @@ if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
 fi
 echo "   ✅ Scaling template: $SCALING_PATH"
 
-echo "📝 Building service template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SERVICE_TEMPLATE" \
   --out "$SERVICE_TEMPLATE_PATH"

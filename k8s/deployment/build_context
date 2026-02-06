@@ -83,6 +83,12 @@ if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
   exit 1
 fi
 
+DEPLOY_STRATEGY=$(get_config_value \
+  --env DEPLOY_STRATEGY \
+  --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
+  --default "blue-green"
+)
+
 if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; then
   GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
   GREEN_REPLICAS=$(echo "$GREEN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
@@ -97,8 +103,23 @@ fi
 if [[ -n "$PULL_SECRETS" ]]; then
   IMAGE_PULL_SECRETS=$PULL_SECRETS
 else
-  IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-"{}"}"
-  IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
+  if [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
+    IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
+  else
+    PULL_SECRETS_ENABLED=$(get_config_value \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
+      --default "false"
+    )
+    PULL_SECRETS_LIST=$(get_config_value \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
+      --default "[]"
+    )
+
+    IMAGE_PULL_SECRETS=$(jq -n \
+      --argjson enabled "$PULL_SECRETS_ENABLED" \
+      --argjson secrets "$PULL_SECRETS_LIST" \
+      '{ENABLED: $enabled, SECRETS: $secrets}')
+  fi
 fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
@@ -109,13 +130,54 @@ if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
   TRAFFIC_CONTAINER_VERSION="websocket2"
 fi
 
-TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"}
+TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
+  --env TRAFFIC_CONTAINER_IMAGE \
+  --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
+  --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
+)
 
 # Pod Disruption Budget configuration
-PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
-PDB_MAX_UNAVAILABLE=${POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE:-"25%"}
+PDB_ENABLED=$(get_config_value \
+  --env POD_DISRUPTION_BUDGET_ENABLED \
+  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
+  --default "false"
+)
+PDB_MAX_UNAVAILABLE=$(get_config_value \
+  --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
+  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
+  --default "25%"
+)
 
-IAM=${IAM-"{}"}
+# IAM configuration - build from flat properties or use env var
+if [ -n "${IAM:-}" ]; then
+  IAM="$IAM"
+else
+  IAM_ENABLED_RAW=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_enabled' \
+    --default "false"
+  )
+  IAM_PREFIX=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_prefix' \
+    --default ""
+  )
+  IAM_POLICIES=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_policies | @json' \
+    --default "[]"
+  )
+  IAM_BOUNDARY=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_boundary_arn' \
+    --default ""
+  )
+
+  IAM=$(jq -n \
+    --argjson enabled "$IAM_ENABLED_RAW" \
+    --arg prefix "$IAM_PREFIX" \
+    --argjson policies "$IAM_POLICIES" \
+    --arg boundary "$IAM_BOUNDARY" \
+    '{ENABLED: $enabled, PREFIX: $prefix, ROLE: {POLICIES: $policies, BOUNDARY_ARN: $boundary}} |
+     if .ROLE.BOUNDARY_ARN == "" then .ROLE |= del(.BOUNDARY_ARN) else . end |
+     if .PREFIX == "" then del(.PREFIX) else . end')
+fi
 
 IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
 
@@ -125,7 +187,11 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
-TRAFFIC_MANAGER_CONFIG_MAP=${TRAFFIC_MANAGER_CONFIG_MAP:-""}
+TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
+  --env TRAFFIC_MANAGER_CONFIG_MAP \
+  --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
+  --default ""
+)
 
 if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     echo "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"

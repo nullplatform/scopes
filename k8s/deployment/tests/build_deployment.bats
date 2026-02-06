@@ -55,23 +55,18 @@ teardown() {
   assert_contains "$output" "📋 Output directory:"
 
   # Deployment template
-  assert_contains "$output" "📝 Building deployment template..."
   assert_contains "$output" "✅ Deployment template:"
 
   # Secret template
-  assert_contains "$output" "📝 Building secret template..."
   assert_contains "$output" "✅ Secret template:"
 
   # Scaling template
-  assert_contains "$output" "📝 Building scaling template..."
   assert_contains "$output" "✅ Scaling template:"
 
   # Service template
-  assert_contains "$output" "📝 Building service template..."
   assert_contains "$output" "✅ Service template:"
 
   # PDB template
-  assert_contains "$output" "📝 Building PDB template..."
   assert_contains "$output" "✅ PDB template:"
 
   # Summary
