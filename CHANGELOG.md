@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - Add unit testing support
 - Add scope configuration
+- Improve **k8s/backup** logging format with detailed error messages and fix suggestions
+- Add unit tests for **k8s/backup** module (backup_templates and s3 operations)
 
 ## [1.10.0] - 2026-01-14
 - Add support to configure the traffic manager nginx through a configmap.

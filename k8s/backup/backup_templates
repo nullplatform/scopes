@@ -6,7 +6,7 @@ BACKUP_ENABLED=$(echo "$MANIFEST_BACKUP" | jq -r .ENABLED)
 TYPE=$(echo "$MANIFEST_BACKUP" | jq -r .TYPE)
 
 if [[ "$BACKUP_ENABLED" == "false" || "$BACKUP_ENABLED" == "null" ]]; then
-  echo "No manifest backup enabled. Skipping manifest backup"
+  echo "📋 Manifest backup is disabled, skipping"
   return
 fi
 
@@ -40,7 +40,14 @@ case "$TYPE" in
     source "$SERVICE_PATH/backup/s3" --action="$ACTION" --files "${FILES[@]}"
     ;;
   *)
-    echo "Error: Unsupported manifest backup type type '$TYPE'"
+    echo "❌ Unsupported manifest backup type: '$TYPE'"
+    echo ""
+    echo "💡 Possible causes:"
+    echo "   The MANIFEST_BACKUP.TYPE configuration is invalid"
+    echo ""
+    echo "🔧 How to fix:"
+    echo "   • Set MANIFEST_BACKUP.TYPE to 's3' in values.yaml"
+    echo ""
     exit 1
     ;;
 esac
