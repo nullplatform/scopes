@@ -6,48 +6,56 @@ iteration=0
 LATEST_TIMESTAMP=""
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 
+echo "🔍 Waiting for deployment '$K8S_DEPLOYMENT_NAME' to become active..."
+echo "📋 Namespace: $K8S_NAMESPACE"
+echo "📋 Timeout: ${TIMEOUT}s (max $MAX_ITERATIONS iterations)"
+echo ""
+
 while true; do
     ((++iteration))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
-        echo "ERROR: Timeout waiting for deployment. Maximum iterations (${MAX_ITERATIONS}) reached."
+        echo ""
+        echo "❌ Timeout waiting for deployment"
+        echo "📋 Maximum iterations ($MAX_ITERATIONS) reached"
 
         source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 
         exit 1
     fi
-    
-    echo "Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
+
+    echo "📡 Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
     D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status 2>&1) || {
-        echo "ERROR: Failed to read deployment status"
-        echo "NP CLI error: $D_STATUS"
+        echo "   ❌ Failed to read deployment status"
+        echo "📋 NP CLI error: $D_STATUS"
         exit 1
     }
-    
+
     if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
-        echo "ERROR: Deployment status not found for ID $DEPLOYMENT_ID"
+        echo "   ❌ Deployment status not found for ID $DEPLOYMENT_ID"
         exit 1
     fi
 
     if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
         if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
-            echo "Deployment it's not running anymore [$D_STATUS]"
+            echo "   ❌ Deployment is no longer running (status: $D_STATUS)"
             exit 1
         fi
     fi
 
     deployment_status=$(kubectl get deployment "$K8S_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
     if [ $? -ne 0 ]; then
-        echo "Error: Deployment '$K8S_DEPLOYMENT_NAME' not found in namespace '$K8S_NAMESPACE'"
+        echo "   ❌ Deployment '$K8S_DEPLOYMENT_NAME' not found in namespace '$K8S_NAMESPACE'"
         exit 1
     fi
     desired=$(echo "$deployment_status" | jq '.spec.replicas')
     current=$(echo "$deployment_status" | jq '.status.availableReplicas // 0')
     updated=$(echo "$deployment_status" | jq '.status.updatedReplicas // 0')
     ready=$(echo "$deployment_status" | jq '.status.readyReplicas // 0')
-    echo "$(date): Iteration $iteration - Deployment status - Available: $current/$desired, Updated: $updated/$desired, Ready: $ready/$desired"
+    echo "🔍 $(date): Iteration $iteration - Deployment status - Available: $current/$desired, Updated: $updated/$desired, Ready: $ready/$desired"
 
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
-        echo "Success: All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
+        echo ""
+        echo "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
         break
     fi
 

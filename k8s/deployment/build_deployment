@@ -7,10 +7,13 @@ SERVICE_TEMPLATE_PATH="$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 PDB_PATH="$OUTPUT_DIR/pdb-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
+echo "📝 Building deployment templates..."
+echo "📋 Output directory: $OUTPUT_DIR"
+echo ""
+
 echo "$CONTEXT" | jq --arg replicas "$REPLICAS" '. + {replicas: $replicas}' > "$CONTEXT_PATH"
 
-echo "Building Template: $DEPLOYMENT_TEMPLATE to $DEPLOYMENT_PATH"
-
+echo "📝 Building deployment template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$DEPLOYMENT_TEMPLATE" \
   --out "$DEPLOYMENT_PATH"
@@ -18,12 +21,12 @@ gomplate -c .="$CONTEXT_PATH" \
 TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building deployment template"
+    echo "   ❌ Failed to build deployment template"
     exit 1
 fi
+echo "   ✅ Deployment template: $DEPLOYMENT_PATH"
 
-echo "Building Template: $SECRET_TEMPLATE to $SECRET_PATH"
-
+echo "📝 Building secret template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SECRET_TEMPLATE" \
   --out "$SECRET_PATH"
@@ -31,12 +34,12 @@ gomplate -c .="$CONTEXT_PATH" \
 TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building secret template"
+    echo "   ❌ Failed to build secret template"
     exit 1
 fi
+echo "   ✅ Secret template: $SECRET_PATH"
 
-echo "Building Template: $SCALING_TEMPLATE to $SCALING_PATH"
-
+echo "📝 Building scaling template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SCALING_TEMPLATE" \
   --out "$SCALING_PATH"
@@ -44,12 +47,12 @@ gomplate -c .="$CONTEXT_PATH" \
 TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building scaling template"
+    echo "   ❌ Failed to build scaling template"
     exit 1
 fi
+echo "   ✅ Scaling template: $SCALING_PATH"
 
-echo "Building Template: $SERVICE_TEMPLATE to $SERVICE_TEMPLATE_PATH"
-
+echo "📝 Building service template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SERVICE_TEMPLATE" \
   --out "$SERVICE_TEMPLATE_PATH"
@@ -57,12 +60,12 @@ gomplate -c .="$CONTEXT_PATH" \
 TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building service template"
+    echo "   ❌ Failed to build service template"
     exit 1
 fi
+echo "   ✅ Service template: $SERVICE_TEMPLATE_PATH"
 
-echo "Building Template: $PDB_TEMPLATE to $PDB_PATH"
-
+echo "📝 Building PDB template..."
 gomplate -c .="$CONTEXT_PATH" \
   --file "$PDB_TEMPLATE" \
   --out "$PDB_PATH"
@@ -70,8 +73,12 @@ gomplate -c .="$CONTEXT_PATH" \
 TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
-    echo "Error building PDB template"
+    echo "   ❌ Failed to build PDB template"
     exit 1
 fi
+echo "   ✅ PDB template: $PDB_PATH"
 
 rm "$CONTEXT_PATH"
+
+echo ""
+echo "✨ All templates built successfully"
