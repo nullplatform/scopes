@@ -1,11 +1,13 @@
 #!/bin/bash
 
+echo "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
+
 case "$DNS_TYPE" in
   route53)
     source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
     ;;
   *)
-    echo "Ingress reconciliation is not available yet for $DNS_TYPE"
+    echo "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
 #    source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
     ;;
 esac

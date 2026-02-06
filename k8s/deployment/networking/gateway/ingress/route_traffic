@@ -8,15 +8,42 @@ for arg in "$@"; do
   esac
 done
 
-echo "Creating $INGRESS_VISIBILITY ingress..."
+if [ -z "$TEMPLATE" ]; then
+    echo "❌ Template argument is required" >&2
+    echo "💡 Possible causes:" >&2
+    echo "   - Missing --template= argument" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   - Provide template: --template=/path/to/template.yaml" >&2
+    exit 1
+fi
+
+echo "🔍 Creating $INGRESS_VISIBILITY ingress..."
 
 INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
+echo "📋 Scope: $SCOPE_ID | Deployment: $DEPLOYMENT_ID"
+echo "📋 Template: $TEMPLATE"
+echo "📋 Output: $INGRESS_FILE"
+
 echo "$CONTEXT" > "$CONTEXT_PATH"
 
-gomplate -c .="$CONTEXT_PATH" \
+echo "📝 Building ingress template..."
+
+if ! gomplate -c .="$CONTEXT_PATH" \
   --file "$TEMPLATE" \
-  --out "$INGRESS_FILE"
+  --out "$INGRESS_FILE" 2>&1; then
+    echo "❌ Failed to build ingress template" >&2
+    echo "💡 Possible causes:" >&2
+    echo "   - Template file does not exist or is invalid" >&2
+    echo "   - Scope attributes may be missing" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   - Verify template exists: ls -la $TEMPLATE" >&2
+    echo "   - Verify that your scope has all required attributes" >&2
+    rm -f "$CONTEXT_PATH"
+    exit 1
+fi
 
 rm "$CONTEXT_PATH"
+
+echo "✅ Ingress template created: $INGRESS_FILE"

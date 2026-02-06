@@ -1,12 +1,28 @@
 #!/bin/bash
 
+echo "🔍 Starting cluster objects cleanup..."
+
 OBJECTS_TO_DELETE="deployment,service,hpa,ingress,pdb,secret,configmap"
 
 # Function to delete all resources for a given deployment_id
 delete_deployment_resources() {
     local DEPLOYMENT_ID_TO_DELETE="$1"
-    kubectl delete "$OBJECTS_TO_DELETE" \
-      -l deployment_id="$DEPLOYMENT_ID_TO_DELETE" -n "$K8S_NAMESPACE" --cascade=foreground --wait=true
+    echo "📝 Deleting resources for deployment_id=$DEPLOYMENT_ID_TO_DELETE..."
+
+    if ! kubectl delete "$OBJECTS_TO_DELETE" \
+      -l deployment_id="$DEPLOYMENT_ID_TO_DELETE" -n "$K8S_NAMESPACE" --cascade=foreground --wait=true; then
+        echo "❌ Failed to delete resources for deployment_id=$DEPLOYMENT_ID_TO_DELETE" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - Resources may have finalizers preventing deletion" >&2
+        echo "   - Network connectivity issues with Kubernetes API" >&2
+        echo "   - Insufficient permissions to delete resources" >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - Check for stuck finalizers: kubectl get all -l deployment_id=$DEPLOYMENT_ID_TO_DELETE -n $K8S_NAMESPACE -o yaml | grep finalizers" >&2
+        echo "   - Verify kubeconfig and cluster connectivity" >&2
+        echo "   - Check RBAC permissions for the service account" >&2
+        return 1
+    fi
+    echo "✅ Resources deleted for deployment_id=$DEPLOYMENT_ID_TO_DELETE"
 }
 
 CURRENT_ACTIVE=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
@@ -15,15 +31,21 @@ if [ "$DEPLOYMENT" = "blue" ]; then
     # Deleting blue (old) deployment, keeping green (new)
     DEPLOYMENT_TO_CLEAN="$CURRENT_ACTIVE"
     DEPLOYMENT_TO_KEEP="$DEPLOYMENT_ID"
+    echo "📋 Strategy: Deleting blue (old) deployment, keeping green (new)"
 elif [ "$DEPLOYMENT" = "green" ]; then
     # Deleting green (new) deployment, keeping blue (old)
     DEPLOYMENT_TO_CLEAN="$DEPLOYMENT_ID"
     DEPLOYMENT_TO_KEEP="$CURRENT_ACTIVE"
+    echo "📋 Strategy: Deleting green (new) deployment, keeping blue (old)"
 fi
 
-delete_deployment_resources "$DEPLOYMENT_TO_CLEAN"
+echo "📋 Deployment to clean: $DEPLOYMENT_TO_CLEAN | Deployment to keep: $DEPLOYMENT_TO_KEEP"
 
-echo "Verifying cleanup for scope_id: $SCOPE_ID in namespace: $K8S_NAMESPACE"
+if ! delete_deployment_resources "$DEPLOYMENT_TO_CLEAN"; then
+    exit 1
+fi
+
+echo "🔍 Verifying cleanup for scope_id=$SCOPE_ID in namespace=$K8S_NAMESPACE..."
 
 # Get all unique deployment_ids for this scope_id
 ALL_DEPLOYMENT_IDS=$(kubectl get "$OBJECTS_TO_DELETE" -n "$K8S_NAMESPACE" \
@@ -32,12 +54,18 @@ ALL_DEPLOYMENT_IDS=$(kubectl get "$OBJECTS_TO_DELETE" -n "$K8S_NAMESPACE" \
 
 # Delete all deployment_ids except DEPLOYMENT_TO_KEEP
 if [ -n "$ALL_DEPLOYMENT_IDS" ]; then
+    EXTRA_COUNT=0
     while IFS= read -r EXTRA_DEPLOYMENT_ID; do
         if [ "$EXTRA_DEPLOYMENT_ID" != "$DEPLOYMENT_TO_KEEP" ]; then
+            echo "📝 Found orphaned deployment: $EXTRA_DEPLOYMENT_ID"
             delete_deployment_resources "$EXTRA_DEPLOYMENT_ID"
+            EXTRA_COUNT=$((EXTRA_COUNT + 1))
         fi
     done <<< "$ALL_DEPLOYMENT_IDS"
+    if [ "$EXTRA_COUNT" -gt 0 ]; then
+        echo "✅ Cleaned up $EXTRA_COUNT orphaned deployment(s)"
+    fi
 fi
 
-
-echo "Cleanup verification successful: Only deployment_id=$DEPLOYMENT_TO_KEEP remains for scope_id=$SCOPE_ID"
+echo "✨ Cluster cleanup completed successfully"
+echo "📋 Only deployment_id=$DEPLOYMENT_TO_KEEP remains for scope_id=$SCOPE_ID"

@@ -8,19 +8,38 @@ BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
 
 if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
   GREEN_DEPLOYMENT_NAME="d-$SCOPE_ID-$GREEN_DEPLOYMENT_ID"
-
-  kubectl scale deployment "$GREEN_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$GREEN_REPLICAS"
-
   BLUE_DEPLOYMENT_NAME="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
 
-  kubectl scale deployment "$BLUE_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$BLUE_REPLICAS"
+  echo "📝 Scaling deployments for rolling strategy..."
+  echo "📋 Green deployment: $GREEN_DEPLOYMENT_NAME -> $GREEN_REPLICAS replicas"
+  echo "📋 Blue deployment: $BLUE_DEPLOYMENT_NAME -> $BLUE_REPLICAS replicas"
+  echo ""
+
+  echo "📝 Scaling green deployment..."
+  if kubectl scale deployment "$GREEN_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$GREEN_REPLICAS"; then
+    echo "   ✅ Green deployment scaled to $GREEN_REPLICAS replicas"
+  else
+    echo "   ❌ Failed to scale green deployment"
+    exit 1
+  fi
+
+  echo "📝 Scaling blue deployment..."
+  if kubectl scale deployment "$BLUE_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$BLUE_REPLICAS"; then
+    echo "   ✅ Blue deployment scaled to $BLUE_REPLICAS replicas"
+  else
+    echo "   ❌ Failed to scale blue deployment"
+    exit 1
+  fi
 
   DEFAULT_TIMEOUT_TEN_MINUTES=600
-  
+
   export TIMEOUT=${DEPLOYMENT_MAX_WAIT_IN_SECONDS-$DEFAULT_TIMEOUT_TEN_MINUTES}
   export SKIP_DEPLOYMENT_STATUS_CHECK=true
   source "$SERVICE_PATH/deployment/wait_blue_deployment_active"
 
   unset TIMEOUT
   unset SKIP_DEPLOYMENT_STATUS_CHECK
+
+  echo ""
+  echo "✨ Deployments scaled successfully"
 fi

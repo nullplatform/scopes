@@ -20,7 +20,7 @@ SWITCH_TRAFFIC=$(echo "$CONTEXT" | jq -r ".deployment.strategy_data.desired_swit
 MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
 MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
 
-DEPLOYMENT_STATUS=$(echo $CONTEXT | jq -r ".deployment.status")
+DEPLOYMENT_STATUS=$(echo "$CONTEXT" | jq -r ".deployment.status")
 
 validate_status() {
   local action="$1"
@@ -44,12 +44,12 @@ validate_status() {
       expected_status="deleting, rolling_back or cancelling"
       ;;
     *)
-      echo "🔄 Running action '$action', any deployment status is accepted"
+      echo "📝 Running action '$action', any deployment status is accepted"
       return 0
       ;;
   esac
 
-  echo "🔄 Running action '$action' (current status: '$status', expected: $expected_status)"
+  echo "📝 Running action '$action' (current status: '$status', expected: $expected_status)"
 
   case "$action" in
     start-initial|start-blue-green)
@@ -72,14 +72,16 @@ validate_status() {
 
 if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
   echo "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'" >&2
+  echo "💡 Possible causes:" >&2
+  echo "   - Deployment status changed during workflow execution" >&2
+  echo "   - Another action is already running on this deployment" >&2
+  echo "   - Deployment was modified externally" >&2
+  echo "🔧 How to fix:" >&2
+  echo "   - Wait for any in-progress actions to complete" >&2
+  echo "   - Check the deployment status in the nullplatform dashboard" >&2
+  echo "   - Retry the action once the deployment is in the expected state" >&2
   exit 1
 fi
-
-DEPLOY_STRATEGY=$(get_config_value \
-  --env DEPLOY_STRATEGY \
-  --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
-  --default "blue-green"
-)
 
 if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; then
   GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
@@ -95,24 +97,8 @@ fi
 if [[ -n "$PULL_SECRETS" ]]; then
   IMAGE_PULL_SECRETS=$PULL_SECRETS
 else
-  # Use env var if set, otherwise build from flat properties
-  if [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
-    IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
-  else
-    PULL_SECRETS_ENABLED=$(get_config_value \
-      --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
-      --default "false"
-    )
-    PULL_SECRETS_LIST=$(get_config_value \
-      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
-      --default "[]"
-    )
-
-    IMAGE_PULL_SECRETS=$(jq -n \
-      --argjson enabled "$PULL_SECRETS_ENABLED" \
-      --argjson secrets "$PULL_SECRETS_LIST" \
-      '{ENABLED: $enabled, SECRETS: $secrets}')
-  fi
+  IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-"{}"}"
+  IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
 fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
@@ -123,56 +109,15 @@ if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
   TRAFFIC_CONTAINER_VERSION="websocket2"
 fi
 
-TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
-  --env TRAFFIC_CONTAINER_IMAGE \
-  --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
-  --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
-)
+TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"}
 
 # Pod Disruption Budget configuration
-PDB_ENABLED=$(get_config_value \
-  --env POD_DISRUPTION_BUDGET_ENABLED \
-  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
-  --default "false"
-)
-PDB_MAX_UNAVAILABLE=$(get_config_value \
-  --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
-  --default "25%"
-)
+PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
+PDB_MAX_UNAVAILABLE=${POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE:-"25%"}
 
-# IAM configuration - build from flat properties or use env var
-if [ -n "${IAM:-}" ]; then
-  IAM="$IAM"
-else
-  IAM_ENABLED_RAW=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_enabled' \
-    --default "false"
-  )
-  IAM_PREFIX=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_prefix' \
-    --default ""
-  )
-  IAM_POLICIES=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_policies | @json' \
-    --default "[]"
-  )
-  IAM_BOUNDARY=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_boundary_arn' \
-    --default ""
-  )
+IAM=${IAM-"{}"}
 
-  IAM=$(jq -n \
-    --argjson enabled "$IAM_ENABLED_RAW" \
-    --arg prefix "$IAM_PREFIX" \
-    --argjson policies "$IAM_POLICIES" \
-    --arg boundary "$IAM_BOUNDARY" \
-    '{ENABLED: $enabled, PREFIX: $prefix, ROLE: {POLICIES: $policies, BOUNDARY_ARN: $boundary}} |
-     if .ROLE.BOUNDARY_ARN == "" then .ROLE |= del(.BOUNDARY_ARN) else . end |
-     if .PREFIX == "" then del(.PREFIX) else . end')
-fi
-
-IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
+IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
 
 SERVICE_ACCOUNT_NAME=""
 
@@ -180,18 +125,21 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
-TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
-  --env TRAFFIC_MANAGER_CONFIG_MAP \
-  --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
-  --default ""
-)
+TRAFFIC_MANAGER_CONFIG_MAP=${TRAFFIC_MANAGER_CONFIG_MAP:-""}
 
 if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     echo "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
 
     # Check if the ConfigMap exists
     if ! kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" &>/dev/null; then
-        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - ConfigMap was not created before deployment" >&2
+        echo "   - ConfigMap name is misspelled in values.yaml" >&2
+        echo "   - ConfigMap was deleted or exists in a different namespace" >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - Create the ConfigMap: kubectl create configmap $TRAFFIC_MANAGER_CONFIG_MAP -n $K8S_NAMESPACE --from-file=nginx.conf --from-file=default.conf" >&2
+        echo "   - Verify the ConfigMap name in your scope configuration" >&2
         exit 1
     fi
     echo "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
@@ -204,14 +152,19 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
 
     for key in "${REQUIRED_KEYS[@]}"; do
         if ! echo "$CONFIGMAP_KEYS" | grep -qx "$key"; then
-            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
-            echo "💡 The ConfigMap must contain data entries for: ${REQUIRED_KEYS[*]}"
+            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'" >&2
+            echo "💡 Possible causes:" >&2
+            echo "   - ConfigMap was created without all required files" >&2
+            echo "   - Key name is different from expected: ${REQUIRED_KEYS[*]}" >&2
+            echo "🔧 How to fix:" >&2
+            echo "   - Update the ConfigMap to include the missing key '$key'" >&2
+            echo "   - Required keys: ${REQUIRED_KEYS[*]}" >&2
             exit 1
         fi
         echo "✅ Found required key '$key' in ConfigMap"
     done
 
-    echo "🎉 ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+    echo "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
 CONTEXT=$(echo "$CONTEXT" | jq \
@@ -249,3 +202,6 @@ export DEPLOYMENT_ID
 export BLUE_DEPLOYMENT_ID
 
 mkdir -p "$OUTPUT_DIR"
+
+echo "✨ Deployment context built successfully"
+echo "📋 Deployment ID: $DEPLOYMENT_ID | Replicas: green=$GREEN_REPLICAS, blue=$BLUE_REPLICAS"

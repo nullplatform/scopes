@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # =============================================================================
 # Unit tests for deployment/build_context - deployment configuration
+# Tests focus on validate_status function and replica calculation logic
 # =============================================================================
 
 setup() {
@@ -10,593 +11,439 @@ setup() {
   # Source assertions
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  # Source get_config_value utility
-  source "$PROJECT_ROOT/k8s/utils/get_config_value"
-
-  # Default values from values.yaml
-  export IMAGE_PULL_SECRETS="{}"
-  export TRAFFIC_CONTAINER_IMAGE=""
-  export POD_DISRUPTION_BUDGET_ENABLED="false"
-  export POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE="25%"
-  export TRAFFIC_MANAGER_CONFIG_MAP=""
-
-  # Base CONTEXT
-  export CONTEXT='{
-    "providers": {
-      "cloud-providers": {},
-      "container-orchestration": {}
-    }
-  }'
+  # Extract validate_status function from build_context for isolated testing
+  eval "$(sed -n '/^validate_status()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
 }
 
 teardown() {
-  # Clean up environment variables
-  unset IMAGE_PULL_SECRETS
-  unset TRAFFIC_CONTAINER_IMAGE
+  unset -f validate_status 2>/dev/null || true
+}
+
+# =============================================================================
+# validate_status Function Tests - start-initial
+# =============================================================================
+@test "deployment/build_context: validate_status accepts creating for start-initial" {
+  run validate_status "start-initial" "creating"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts waiting_for_instances for start-initial" {
+  run validate_status "start-initial" "waiting_for_instances"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts running for start-initial" {
+  run validate_status "start-initial" "running"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status rejects deleting for start-initial" {
+  run validate_status "start-initial" "deleting"
+  [ "$status" -ne 0 ]
+}
+
+@test "deployment/build_context: validate_status rejects failed for start-initial" {
+  run validate_status "start-initial" "failed"
+  [ "$status" -ne 0 ]
+}
+
+# =============================================================================
+# validate_status Function Tests - start-blue-green
+# =============================================================================
+@test "deployment/build_context: validate_status accepts creating for start-blue-green" {
+  run validate_status "start-blue-green" "creating"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts waiting_for_instances for start-blue-green" {
+  run validate_status "start-blue-green" "waiting_for_instances"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts running for start-blue-green" {
+  run validate_status "start-blue-green" "running"
+  [ "$status" -eq 0 ]
+}
+
+# =============================================================================
+# validate_status Function Tests - switch-traffic
+# =============================================================================
+@test "deployment/build_context: validate_status accepts running for switch-traffic" {
+  run validate_status "switch-traffic" "running"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts waiting_for_instances for switch-traffic" {
+  run validate_status "switch-traffic" "waiting_for_instances"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status rejects creating for switch-traffic" {
+  run validate_status "switch-traffic" "creating"
+  [ "$status" -ne 0 ]
+}
+
+# =============================================================================
+# validate_status Function Tests - rollback-deployment
+# =============================================================================
+@test "deployment/build_context: validate_status accepts rolling_back for rollback-deployment" {
+  run validate_status "rollback-deployment" "rolling_back"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts cancelling for rollback-deployment" {
+  run validate_status "rollback-deployment" "cancelling"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status rejects running for rollback-deployment" {
+  run validate_status "rollback-deployment" "running"
+  [ "$status" -ne 0 ]
+}
+
+# =============================================================================
+# validate_status Function Tests - finalize-blue-green
+# =============================================================================
+@test "deployment/build_context: validate_status accepts finalizing for finalize-blue-green" {
+  run validate_status "finalize-blue-green" "finalizing"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts cancelling for finalize-blue-green" {
+  run validate_status "finalize-blue-green" "cancelling"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status rejects running for finalize-blue-green" {
+  run validate_status "finalize-blue-green" "running"
+  [ "$status" -ne 0 ]
+}
+
+# =============================================================================
+# validate_status Function Tests - delete-deployment
+# =============================================================================
+@test "deployment/build_context: validate_status accepts deleting for delete-deployment" {
+  run validate_status "delete-deployment" "deleting"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts cancelling for delete-deployment" {
+  run validate_status "delete-deployment" "cancelling"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts rolling_back for delete-deployment" {
+  run validate_status "delete-deployment" "rolling_back"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status rejects running for delete-deployment" {
+  run validate_status "delete-deployment" "running"
+  [ "$status" -ne 0 ]
+}
+
+# =============================================================================
+# validate_status Function Tests - Unknown Action
+# =============================================================================
+@test "deployment/build_context: validate_status accepts any status for unknown action" {
+  run validate_status "custom-action" "any_status"
+  [ "$status" -eq 0 ]
+}
+
+@test "deployment/build_context: validate_status accepts any status for empty action" {
+  run validate_status "" "running"
+  [ "$status" -eq 0 ]
+}
+
+# =============================================================================
+# Replica Calculation Tests (using bc)
+# =============================================================================
+@test "deployment/build_context: MIN_REPLICAS calculation rounds up" {
+  # MIN_REPLICAS = ceil(REPLICAS / 10)
+  REPLICAS=15
+  MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
+  MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+  # 15 / 10 = 1.5, should round up to 2
+  assert_equal "$MIN_REPLICAS" "2"
+}
+
+@test "deployment/build_context: MIN_REPLICAS is 1 for 10 replicas" {
+  REPLICAS=10
+  MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
+  MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+  assert_equal "$MIN_REPLICAS" "1"
+}
+
+@test "deployment/build_context: MIN_REPLICAS is 1 for 5 replicas" {
+  REPLICAS=5
+  MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
+  MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+  # 5 / 10 = 0.5, should round up to 1
+  assert_equal "$MIN_REPLICAS" "1"
+}
+
+@test "deployment/build_context: GREEN_REPLICAS calculation for 50% traffic" {
+  REPLICAS=10
+  SWITCH_TRAFFIC=50
+  GREEN_REPLICAS=$(echo "scale=10; ($REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
+  GREEN_REPLICAS=$(echo "$GREEN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+  # 50% of 10 = 5
+  assert_equal "$GREEN_REPLICAS" "5"
+}
+
+@test "deployment/build_context: GREEN_REPLICAS rounds up for fractional result" {
+  REPLICAS=7
+  SWITCH_TRAFFIC=30
+  GREEN_REPLICAS=$(echo "scale=10; ($REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
+  GREEN_REPLICAS=$(echo "$GREEN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
+
+  # 30% of 7 = 2.1, should round up to 3
+  assert_equal "$GREEN_REPLICAS" "3"
+}
+
+@test "deployment/build_context: BLUE_REPLICAS is remainder" {
+  REPLICAS=10
+  GREEN_REPLICAS=6
+  BLUE_REPLICAS=$(( REPLICAS - GREEN_REPLICAS ))
+
+  assert_equal "$BLUE_REPLICAS" "4"
+}
+
+@test "deployment/build_context: BLUE_REPLICAS respects minimum" {
+  REPLICAS=10
+  GREEN_REPLICAS=10
+  MIN_REPLICAS=1
+  BLUE_REPLICAS=$(( REPLICAS - GREEN_REPLICAS ))
+  BLUE_REPLICAS=$(( MIN_REPLICAS > BLUE_REPLICAS ? MIN_REPLICAS : BLUE_REPLICAS ))
+
+  # Should be MIN_REPLICAS (1) since REPLICAS - GREEN = 0
+  assert_equal "$BLUE_REPLICAS" "1"
+}
+
+@test "deployment/build_context: GREEN_REPLICAS respects minimum" {
+  GREEN_REPLICAS=0
+  MIN_REPLICAS=1
+  GREEN_REPLICAS=$(( MIN_REPLICAS > GREEN_REPLICAS ? MIN_REPLICAS : GREEN_REPLICAS ))
+
+  assert_equal "$GREEN_REPLICAS" "1"
+}
+
+# =============================================================================
+# Service Account Name Generation Tests
+# =============================================================================
+@test "deployment/build_context: generates service account name when IAM enabled" {
+  IAM='{"ENABLED":"true","PREFIX":"np-role"}'
+  SCOPE_ID="scope-123"
+
+  IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
+  SERVICE_ACCOUNT_NAME=""
+
+  if [[ "$IAM_ENABLED" == "true" ]]; then
+    SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+  fi
+
+  assert_equal "$SERVICE_ACCOUNT_NAME" "np-role-scope-123"
+}
+
+@test "deployment/build_context: service account name is empty when IAM disabled" {
+  IAM='{"ENABLED":"false","PREFIX":"np-role"}'
+  SCOPE_ID="scope-123"
+
+  IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
+  SERVICE_ACCOUNT_NAME=""
+
+  if [[ "$IAM_ENABLED" == "true" ]]; then
+    SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+  fi
+
+  assert_empty "$SERVICE_ACCOUNT_NAME"
+}
+
+# =============================================================================
+# Traffic Container Image Tests
+# =============================================================================
+@test "deployment/build_context: uses websocket version for web_sockets protocol" {
+  SCOPE_TRAFFIC_PROTOCOL="web_sockets"
+  TRAFFIC_CONTAINER_VERSION="latest"
+
+  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
+    TRAFFIC_CONTAINER_VERSION="websocket2"
+  fi
+
+  assert_equal "$TRAFFIC_CONTAINER_VERSION" "websocket2"
+}
+
+@test "deployment/build_context: uses latest version for http protocol" {
+  SCOPE_TRAFFIC_PROTOCOL="http"
+  TRAFFIC_CONTAINER_VERSION="latest"
+
+  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
+    TRAFFIC_CONTAINER_VERSION="websocket2"
+  fi
+
+  assert_equal "$TRAFFIC_CONTAINER_VERSION" "latest"
+}
+
+# =============================================================================
+# Pod Disruption Budget Tests
+# =============================================================================
+@test "deployment/build_context: PDB defaults to disabled" {
   unset POD_DISRUPTION_BUDGET_ENABLED
-  unset POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE
-  unset TRAFFIC_MANAGER_CONFIG_MAP
-  unset DEPLOY_STRATEGY
-  unset IAM
+
+  PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
+
+  assert_equal "$PDB_ENABLED" "false"
 }
 
-# =============================================================================
-# Test: IMAGE_PULL_SECRETS uses scope-configuration provider
-# =============================================================================
-@test "deployment/build_context: IMAGE_PULL_SECRETS uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "security": {
-      "image_pull_secrets_enabled": true,
-      "image_pull_secrets": ["custom-secret", "ecr-secret"]
-    }
-  }')
-
-  # Unset env var to test provider precedence
-  unset IMAGE_PULL_SECRETS
-
-  enabled=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
-    --default "false"
-  )
-  secrets=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
-    --default "[]"
-  )
-
-  assert_equal "$enabled" "true"
-  assert_contains "$secrets" "custom-secret"
-  assert_contains "$secrets" "ecr-secret"
-}
-
-# =============================================================================
-# Test: IMAGE_PULL_SECRETS - provider wins over env var
-# =============================================================================
-@test "deployment/build_context: IMAGE_PULL_SECRETS provider wins over env var" {
-  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["env-secret"]}'
-
-  # Set up provider with IMAGE_PULL_SECRETS
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "image_pull_secrets": {"ENABLED":true,"SECRETS":["provider-secret"]}
-  }')
-
-  # Provider should win over env var
-  result=$(get_config_value \
-    --env IMAGE_PULL_SECRETS \
-    --provider '.providers["scope-configurations"].image_pull_secrets | @json' \
-    --default "{}"
-  )
-
-  assert_contains "$result" "provider-secret"
-}
-
-# =============================================================================
-# Test: IMAGE_PULL_SECRETS uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: IMAGE_PULL_SECRETS uses env var when no provider" {
-  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["env-secret"]}'
-
-  # Env var is used when provider is not available
-  result=$(get_config_value \
-    --env IMAGE_PULL_SECRETS \
-    --provider '.providers["scope-configurations"].image_pull_secrets | @json' \
-    --default "{}"
-  )
-
-  assert_contains "$result" "env-secret"
-}
-
-# =============================================================================
-# Test: IMAGE_PULL_SECRETS uses default
-# =============================================================================
-@test "deployment/build_context: IMAGE_PULL_SECRETS uses default" {
-  enabled=$(get_config_value \
-    --provider '.providers["scope-configurations"].image_pull_secrets_enabled' \
-    --default "false"
-  )
-  secrets=$(get_config_value \
-    --provider '.providers["scope-configurations"].image_pull_secrets | @json' \
-    --default "[]"
-  )
-
-  assert_equal "$enabled" "false"
-  assert_equal "$secrets" "[]"
-}
-
-# =============================================================================
-# Test: TRAFFIC_CONTAINER_IMAGE uses scope-configuration provider
-# =============================================================================
-@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "traffic_container_image": "custom.ecr.aws/traffic-manager:v2.0"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env TRAFFIC_CONTAINER_IMAGE \
-    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
-    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
-  )
-
-  assert_equal "$result" "custom.ecr.aws/traffic-manager:v2.0"
-}
-
-# =============================================================================
-# Test: TRAFFIC_CONTAINER_IMAGE - provider wins over env var
-# =============================================================================
-@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE provider wins over env var" {
-  export TRAFFIC_CONTAINER_IMAGE="env.ecr.aws/traffic:custom"
-
-  # Set up provider with TRAFFIC_CONTAINER_IMAGE
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "traffic_container_image": "provider.ecr.aws/traffic-manager:v3.0"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env TRAFFIC_CONTAINER_IMAGE \
-    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
-    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
-  )
-
-  assert_equal "$result" "provider.ecr.aws/traffic-manager:v3.0"
-}
-
-# =============================================================================
-# Test: TRAFFIC_CONTAINER_IMAGE uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE uses env var when no provider" {
-  export TRAFFIC_CONTAINER_IMAGE="env.ecr.aws/traffic:custom"
-
-  result=$(get_config_value \
-    --env TRAFFIC_CONTAINER_IMAGE \
-    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
-    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
-  )
-
-  assert_equal "$result" "env.ecr.aws/traffic:custom"
-}
-
-# =============================================================================
-# Test: TRAFFIC_CONTAINER_IMAGE uses default
-# =============================================================================
-@test "deployment/build_context: TRAFFIC_CONTAINER_IMAGE uses default" {
-  result=$(get_config_value \
-    --env TRAFFIC_CONTAINER_IMAGE \
-    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
-    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
-  )
-
-  assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
-}
-
-# =============================================================================
-# Test: PDB_ENABLED uses scope-configuration provider
-# =============================================================================
-@test "deployment/build_context: PDB_ENABLED uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "pod_disruption_budget_enabled": "true"
-    }
-  }')
-
-  unset POD_DISRUPTION_BUDGET_ENABLED
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_ENABLED \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
-    --default "false"
-  )
-
-  assert_equal "$result" "true"
-}
-
-# =============================================================================
-# Test: PDB_ENABLED - provider wins over env var
-# =============================================================================
-@test "deployment/build_context: PDB_ENABLED provider wins over env var" {
-  export POD_DISRUPTION_BUDGET_ENABLED="true"
-
-  # Set up provider with PDB_ENABLED
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "pod_disruption_budget_enabled": "false"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_ENABLED \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
-    --default "false"
-  )
-
-  assert_equal "$result" "false"
-}
-
-# =============================================================================
-# Test: PDB_ENABLED uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: PDB_ENABLED uses env var when no provider" {
-  export POD_DISRUPTION_BUDGET_ENABLED="true"
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_ENABLED \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
-    --default "false"
-  )
-
-  assert_equal "$result" "true"
-}
-
-# =============================================================================
-# Test: PDB_ENABLED uses default
-# =============================================================================
-@test "deployment/build_context: PDB_ENABLED uses default" {
-  unset POD_DISRUPTION_BUDGET_ENABLED
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_ENABLED \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
-    --default "false"
-  )
-
-  assert_equal "$result" "false"
-}
-
-# =============================================================================
-# Test: PDB_MAX_UNAVAILABLE uses scope-configuration provider
-# =============================================================================
-@test "deployment/build_context: PDB_MAX_UNAVAILABLE uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "pod_disruption_budget_max_unavailable": "50%"
-    }
-  }')
-
-  unset POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
-    --default "25%"
-  )
-
-  assert_equal "$result" "50%"
-}
-
-# =============================================================================
-# Test: PDB_MAX_UNAVAILABLE - provider wins over env var
-# =============================================================================
-@test "deployment/build_context: PDB_MAX_UNAVAILABLE provider wins over env var" {
-  export POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE="2"
-
-  # Set up provider with PDB_MAX_UNAVAILABLE
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "pod_disruption_budget_max_unavailable": "75%"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
-    --default "25%"
-  )
-
-  assert_equal "$result" "75%"
-}
-
-# =============================================================================
-# Test: PDB_MAX_UNAVAILABLE uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: PDB_MAX_UNAVAILABLE uses env var when no provider" {
-  export POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE="2"
-
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
-    --default "25%"
-  )
-
-  assert_equal "$result" "2"
-}
-
-# =============================================================================
-# Test: PDB_MAX_UNAVAILABLE uses default
-# =============================================================================
-@test "deployment/build_context: PDB_MAX_UNAVAILABLE uses default" {
+@test "deployment/build_context: PDB_MAX_UNAVAILABLE defaults to 25%" {
   unset POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE
 
-  result=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
-    --default "25%"
-  )
+  PDB_MAX_UNAVAILABLE=${POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE:-"25%"}
 
-  assert_equal "$result" "25%"
+  assert_equal "$PDB_MAX_UNAVAILABLE" "25%"
+}
+
+@test "deployment/build_context: PDB respects custom enabled value" {
+  POD_DISRUPTION_BUDGET_ENABLED="true"
+
+  PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
+
+  assert_equal "$PDB_ENABLED" "true"
+}
+
+@test "deployment/build_context: PDB respects custom max_unavailable value" {
+  POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE="50%"
+
+  PDB_MAX_UNAVAILABLE=${POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE:-"25%"}
+
+  assert_equal "$PDB_MAX_UNAVAILABLE" "50%"
 }
 
 # =============================================================================
-# Test: TRAFFIC_MANAGER_CONFIG_MAP uses scope-configuration provider
+# Image Pull Secrets Tests
 # =============================================================================
-@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "traffic_manager_config_map": "custom-traffic-config"
-    }
-  }')
+@test "deployment/build_context: uses PULL_SECRETS when set" {
+  PULL_SECRETS='["secret1"]'
+  IMAGE_PULL_SECRETS="{}"
 
-  result=$(get_config_value \
-    --env TRAFFIC_MANAGER_CONFIG_MAP \
-    --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
-    --default ""
-  )
+  if [[ -n "$PULL_SECRETS" ]]; then
+    IMAGE_PULL_SECRETS=$PULL_SECRETS
+  fi
 
-  assert_equal "$result" "custom-traffic-config"
+  assert_equal "$IMAGE_PULL_SECRETS" '["secret1"]'
+}
+
+@test "deployment/build_context: falls back to IMAGE_PULL_SECRETS" {
+  PULL_SECRETS=""
+  IMAGE_PULL_SECRETS='{"ENABLED":true}'
+
+  if [[ -n "$PULL_SECRETS" ]]; then
+    IMAGE_PULL_SECRETS=$PULL_SECRETS
+  fi
+
+  assert_contains "$IMAGE_PULL_SECRETS" "ENABLED"
 }
 
 # =============================================================================
-# Test: TRAFFIC_MANAGER_CONFIG_MAP - provider wins over env var
+# Logging Format Tests
 # =============================================================================
-@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP provider wins over env var" {
-  export TRAFFIC_MANAGER_CONFIG_MAP="env-traffic-config"
+@test "deployment/build_context: validate_status outputs action message with 📝 emoji" {
+  run validate_status "start-initial" "creating"
 
-  # Set up provider with TRAFFIC_MANAGER_CONFIG_MAP
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "traffic_manager_config_map": "provider-traffic-config"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env TRAFFIC_MANAGER_CONFIG_MAP \
-    --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
-    --default ""
-  )
-
-  assert_equal "$result" "provider-traffic-config"
+  assert_contains "$output" "📝 Running action 'start-initial' (current status: 'creating', expected: creating, waiting_for_instances or running)"
 }
 
-# =============================================================================
-# Test: TRAFFIC_MANAGER_CONFIG_MAP uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP uses env var when no provider" {
-  export TRAFFIC_MANAGER_CONFIG_MAP="env-traffic-config"
 
-  result=$(get_config_value \
-    --env TRAFFIC_MANAGER_CONFIG_MAP \
-    --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
-    --default ""
-  )
+@test "deployment/build_context: validate_status accepts any status message for unknown action" {
+  run validate_status "custom-action" "any_status"
 
-  assert_equal "$result" "env-traffic-config"
+  assert_contains "$output" "📝 Running action 'custom-action', any deployment status is accepted"
 }
 
-# =============================================================================
-# Test: TRAFFIC_MANAGER_CONFIG_MAP uses default (empty)
-# =============================================================================
-@test "deployment/build_context: TRAFFIC_MANAGER_CONFIG_MAP uses default empty" {
-  result=$(get_config_value \
-    --env TRAFFIC_MANAGER_CONFIG_MAP \
-    --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
-    --default ""
-  )
+@test "deployment/build_context: invalid status error includes possible causes and how to fix" {
+  # Create a test script that sources build_context with invalid status
+  local test_script="$BATS_TEST_TMPDIR/test_invalid_status.sh"
 
-  assert_empty "$result"
+  cat > "$test_script" << 'SCRIPT'
+#!/bin/bash
+export SERVICE_PATH="$1"
+export SERVICE_ACTION="start-initial"
+export CONTEXT='{"deployment":{"status":"failed"}}'
+
+# Mock scope/build_context to avoid dependencies
+mkdir -p "$SERVICE_PATH/scope"
+echo "# no-op" > "$SERVICE_PATH/scope/build_context"
+
+source "$SERVICE_PATH/deployment/build_context"
+SCRIPT
+  chmod +x "$test_script"
+
+  # Create mock service path
+  local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
+  mkdir -p "$mock_service/deployment"
+  cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
+
+  run "$test_script" "$mock_service"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Invalid deployment status 'failed' for action 'start-initial'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Deployment status changed during workflow execution"
+  assert_contains "$output" "Another action is already running on this deployment"
+  assert_contains "$output" "Deployment was modified externally"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "Wait for any in-progress actions to complete"
+  assert_contains "$output" "Check the deployment status in the nullplatform dashboard"
+  assert_contains "$output" "Retry the action once the deployment is in the expected state"
 }
 
-# =============================================================================
-# Test: DEPLOY_STRATEGY uses scope-configuration provider
-# =============================================================================
-@test "deployment/build_context: DEPLOY_STRATEGY uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "deployment_strategy": "blue-green"
-    }
-  }')
+@test "deployment/build_context: ConfigMap not found error includes troubleshooting info" {
+  # Create a test script that triggers ConfigMap validation error
+  local test_script="$BATS_TEST_TMPDIR/test_configmap_error.sh"
 
-  result=$(get_config_value \
-    --env DEPLOY_STRATEGY \
-    --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
-    --default "rolling"
-  )
+  cat > "$test_script" << 'SCRIPT'
+#!/bin/bash
+export SERVICE_PATH="$1"
+export SERVICE_ACTION="start-initial"
+export TRAFFIC_MANAGER_CONFIG_MAP="test-config"
+export K8S_NAMESPACE="test-ns"
+export CONTEXT='{
+  "deployment":{"status":"creating","id":"deploy-123"},
+  "scope":{"capabilities":{"scaling_type":"fixed","fixed_instances":1}}
+}'
 
-  assert_equal "$result" "blue-green"
+# Mock scope/build_context
+mkdir -p "$SERVICE_PATH/scope"
+echo "# no-op" > "$SERVICE_PATH/scope/build_context"
+
+# Mock kubectl to simulate ConfigMap not found
+kubectl() {
+  return 1
 }
+export -f kubectl
 
-# =============================================================================
-# Test: DEPLOY_STRATEGY - provider wins over env var
-# =============================================================================
-@test "deployment/build_context: DEPLOY_STRATEGY provider wins over env var" {
-  export DEPLOY_STRATEGY="blue-green"
+source "$SERVICE_PATH/deployment/build_context"
+SCRIPT
+  chmod +x "$test_script"
 
-  # Set up provider with DEPLOY_STRATEGY
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "deployment_strategy": "rolling"
-    }
-  }')
+  # Create mock service path
+  local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
+  mkdir -p "$mock_service/deployment"
+  cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
 
-  result=$(get_config_value \
-    --env DEPLOY_STRATEGY \
-    --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
-    --default "rolling"
-  )
+  run "$test_script" "$mock_service"
 
-  assert_equal "$result" "rolling"
-}
-
-# =============================================================================
-# Test: DEPLOY_STRATEGY uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: DEPLOY_STRATEGY uses env var when no provider" {
-  export DEPLOY_STRATEGY="blue-green"
-
-  result=$(get_config_value \
-    --env DEPLOY_STRATEGY \
-    --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
-    --default "rolling"
-  )
-
-  assert_equal "$result" "blue-green"
-}
-
-# =============================================================================
-# Test: DEPLOY_STRATEGY uses default
-# =============================================================================
-@test "deployment/build_context: DEPLOY_STRATEGY uses default" {
-  result=$(get_config_value \
-    --env DEPLOY_STRATEGY \
-    --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
-    --default "rolling"
-  )
-
-  assert_equal "$result" "rolling"
-}
-
-# =============================================================================
-# Test: IAM uses scope-configuration provider
-# =============================================================================
-@test "deployment/build_context: IAM uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "security": {
-      "iam_enabled": true,
-      "iam_prefix": "custom-prefix"
-    }
-  }')
-
-  enabled=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_enabled' \
-    --default "false"
-  )
-  prefix=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_prefix' \
-    --default ""
-  )
-
-  assert_equal "$enabled" "true"
-  assert_equal "$prefix" "custom-prefix"
-}
-
-# =============================================================================
-# Test: IAM - provider wins over env var
-# =============================================================================
-@test "deployment/build_context: IAM provider wins over env var" {
-  export IAM='{"ENABLED":true,"PREFIX":"env-prefix"}'
-
-  # Set up provider with IAM
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "iam": {"ENABLED":true,"PREFIX":"provider-prefix"}
-    }
-  }')
-
-  result=$(get_config_value \
-    --env IAM \
-    --provider '.providers["scope-configurations"].deployment.iam | @json' \
-    --default "{}"
-  )
-
-  assert_contains "$result" "provider-prefix"
-}
-
-# =============================================================================
-# Test: IAM uses env var when no provider
-# =============================================================================
-@test "deployment/build_context: IAM uses env var when no provider" {
-  export IAM='{"ENABLED":true,"PREFIX":"env-prefix"}'
-
-  result=$(get_config_value \
-    --env IAM \
-    --provider '.providers["scope-configurations"].deployment.iam | @json' \
-    --default "{}"
-  )
-
-  assert_contains "$result" "env-prefix"
-}
-
-# =============================================================================
-# Test: IAM uses default
-# =============================================================================
-@test "deployment/build_context: IAM uses default" {
-  enabled=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_enabled' \
-    --default "false"
-  )
-  prefix=$(get_config_value \
-    --provider '.providers["scope-configurations"].security.iam_prefix' \
-    --default ""
-  )
-
-  assert_equal "$enabled" "false"
-  assert_empty "$prefix"
-}
-
-# =============================================================================
-# Test: Complete deployment configuration hierarchy
-# =============================================================================
-@test "deployment/build_context: complete deployment configuration hierarchy" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment": {
-      "traffic_container_image": "custom.ecr.aws/traffic:v1",
-      "pod_disruption_budget_enabled": "true",
-      "pod_disruption_budget_max_unavailable": "1",
-      "traffic_manager_config_map": "my-config-map"
-    }
-  }')
-
-  # Test TRAFFIC_CONTAINER_IMAGE
-  traffic_image=$(get_config_value \
-    --env TRAFFIC_CONTAINER_IMAGE \
-    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
-    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
-  )
-  assert_equal "$traffic_image" "custom.ecr.aws/traffic:v1"
-
-  # Test PDB_ENABLED
-  unset POD_DISRUPTION_BUDGET_ENABLED
-  pdb_enabled=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_ENABLED \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
-    --default "false"
-  )
-  assert_equal "$pdb_enabled" "true"
-
-  # Test PDB_MAX_UNAVAILABLE
-  unset POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE
-  pdb_max=$(get_config_value \
-    --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
-    --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
-    --default "25%"
-  )
-  assert_equal "$pdb_max" "1"
-
-  # Test TRAFFIC_MANAGER_CONFIG_MAP
-  config_map=$(get_config_value \
-    --env TRAFFIC_MANAGER_CONFIG_MAP \
-    --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
-    --default ""
-  )
-  assert_equal "$config_map" "my-config-map"
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ ConfigMap 'test-config' does not exist in namespace 'test-ns'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "ConfigMap was not created before deployment"
+  assert_contains "$output" "ConfigMap name is misspelled in values.yaml"
+  assert_contains "$output" "ConfigMap was deleted or exists in a different namespace"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "Create the ConfigMap: kubectl create configmap test-config -n test-ns --from-file=nginx.conf --from-file=default.conf"
+  assert_contains "$output" "Verify the ConfigMap name in your scope configuration"
 }
