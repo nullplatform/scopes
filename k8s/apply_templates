@@ -28,9 +28,7 @@ while IFS= read -r TEMPLATE_FILE; do
        IGNORE_NOT_FOUND="--ignore-not-found=true"
      fi
 
-     if kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
-       echo "   ✅ Applied successfully"
-     else
+     if ! kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
        echo "   ❌ Failed to apply"
      fi
    fi
