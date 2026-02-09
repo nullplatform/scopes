@@ -179,7 +179,7 @@ else
      if .PREFIX == "" then del(.PREFIX) else . end')
 fi
 
-IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
+IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 
 SERVICE_ACCOUNT_NAME=""
 
