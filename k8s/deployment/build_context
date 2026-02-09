@@ -20,7 +20,7 @@ SWITCH_TRAFFIC=$(echo "$CONTEXT" | jq -r ".deployment.strategy_data.desired_swit
 MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
 MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
 
-DEPLOYMENT_STATUS=$(echo $CONTEXT | jq -r ".deployment.status")
+DEPLOYMENT_STATUS=$(echo "$CONTEXT" | jq -r ".deployment.status")
 
 validate_status() {
   local action="$1"
@@ -44,12 +44,12 @@ validate_status() {
       expected_status="deleting, rolling_back or cancelling"
       ;;
     *)
-      echo "🔄 Running action '$action', any deployment status is accepted"
+      echo "📝 Running action '$action', any deployment status is accepted"
       return 0
       ;;
   esac
 
-  echo "🔄 Running action '$action' (current status: '$status', expected: $expected_status)"
+  echo "📝 Running action '$action' (current status: '$status', expected: $expected_status)"
 
   case "$action" in
     start-initial|start-blue-green)
@@ -72,6 +72,14 @@ validate_status() {
 
 if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
   echo "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'" >&2
+  echo "💡 Possible causes:" >&2
+  echo "   - Deployment status changed during workflow execution" >&2
+  echo "   - Another action is already running on this deployment" >&2
+  echo "   - Deployment was modified externally" >&2
+  echo "🔧 How to fix:" >&2
+  echo "   - Wait for any in-progress actions to complete" >&2
+  echo "   - Check the deployment status in the nullplatform dashboard" >&2
+  echo "   - Retry the action once the deployment is in the expected state" >&2
   exit 1
 fi
 
@@ -95,7 +103,6 @@ fi
 if [[ -n "$PULL_SECRETS" ]]; then
   IMAGE_PULL_SECRETS=$PULL_SECRETS
 else
-  # Use env var if set, otherwise build from flat properties
   if [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
     IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
   else
@@ -191,7 +198,14 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
 
     # Check if the ConfigMap exists
     if ! kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" &>/dev/null; then
-        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - ConfigMap was not created before deployment" >&2
+        echo "   - ConfigMap name is misspelled in values.yaml" >&2
+        echo "   - ConfigMap was deleted or exists in a different namespace" >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - Create the ConfigMap: kubectl create configmap $TRAFFIC_MANAGER_CONFIG_MAP -n $K8S_NAMESPACE --from-file=nginx.conf --from-file=default.conf" >&2
+        echo "   - Verify the ConfigMap name in your scope configuration" >&2
         exit 1
     fi
     echo "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
@@ -204,14 +218,19 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
 
     for key in "${REQUIRED_KEYS[@]}"; do
         if ! echo "$CONFIGMAP_KEYS" | grep -qx "$key"; then
-            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
-            echo "💡 The ConfigMap must contain data entries for: ${REQUIRED_KEYS[*]}"
+            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'" >&2
+            echo "💡 Possible causes:" >&2
+            echo "   - ConfigMap was created without all required files" >&2
+            echo "   - Key name is different from expected: ${REQUIRED_KEYS[*]}" >&2
+            echo "🔧 How to fix:" >&2
+            echo "   - Update the ConfigMap to include the missing key '$key'" >&2
+            echo "   - Required keys: ${REQUIRED_KEYS[*]}" >&2
             exit 1
         fi
         echo "✅ Found required key '$key' in ConfigMap"
     done
 
-    echo "🎉 ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+    echo "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
 CONTEXT=$(echo "$CONTEXT" | jq \
@@ -249,3 +268,6 @@ export DEPLOYMENT_ID
 export BLUE_DEPLOYMENT_ID
 
 mkdir -p "$OUTPUT_DIR"
+
+echo "✨ Deployment context built successfully"
+echo "📋 Deployment ID: $DEPLOYMENT_ID | Replicas: green=$GREEN_REPLICAS, blue=$BLUE_REPLICAS"

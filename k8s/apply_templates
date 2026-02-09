@@ -1,12 +1,25 @@
 #!/bin/bash
 
-echo "TEMPLATE DIR: $OUTPUT_DIR, ACTION: $ACTION, DRY_RUN: $DRY_RUN"
+echo "📝 Applying templates..."
+echo "📋 Directory: $OUTPUT_DIR"
+echo "📋 Action: $ACTION"
+echo "📋 Dry run: $DRY_RUN"
+echo ""
 
 APPLIED_FILES=()
 
 # Find all .yaml files that were not yet applied / deleted
 while IFS= read -r TEMPLATE_FILE; do
-   echo "kubectl $ACTION $TEMPLATE_FILE"
+   FILENAME="$(basename "$TEMPLATE_FILE")"
+   BASE_DIR="$(dirname "$TEMPLATE_FILE")"
+
+   # Check if file is empty or contains only whitespace
+   if [[ ! -s "$TEMPLATE_FILE" ]] || [[ -z "$(tr -d '[:space:]' < "$TEMPLATE_FILE")" ]]; then
+     echo "📋 Skipping empty template: $FILENAME"
+     continue
+   fi
+
+   echo "📝 kubectl $ACTION $FILENAME"
 
    if [[ "$DRY_RUN" == "false" ]]; then
      IGNORE_NOT_FOUND=""
@@ -15,11 +28,11 @@ while IFS= read -r TEMPLATE_FILE; do
        IGNORE_NOT_FOUND="--ignore-not-found=true"
      fi
 
-     kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND
+     if ! kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
+       echo "   ❌ Failed to apply"
+     fi
    fi
 
-   BASE_DIR="$(dirname "$TEMPLATE_FILE")"
-   FILENAME="$(basename "$TEMPLATE_FILE")"
    DEST_DIR="${BASE_DIR}/$ACTION"
 
    mkdir -p "$DEST_DIR"
@@ -31,6 +44,8 @@ while IFS= read -r TEMPLATE_FILE; do
 done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print)
 
 if [[ "$DRY_RUN" == "true" ]]; then
+  echo ""
+  echo "📋 Dry run mode - no changes were made"
   exit 1
 fi
 

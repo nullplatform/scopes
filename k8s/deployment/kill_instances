@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-echo "=== KILL INSTANCES ==="
+echo "🔍 Starting instance kill operation..."
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.parameters.deployment_id // .notification.parameters.deployment_id // empty')
 INSTANCE_NAME=$(echo "$CONTEXT" | jq -r '.parameters.instance_name // .notification.parameters.instance_name // empty')
@@ -16,17 +16,27 @@ if [[ -z "$INSTANCE_NAME" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
 fi
 
 if [[ -z "$DEPLOYMENT_ID" ]]; then
-    echo "ERROR: deployment_id parameter not found"
+    echo "❌ deployment_id parameter not found" >&2
+    echo "💡 Possible causes:" >&2
+    echo "   - Parameter not provided in action request" >&2
+    echo "   - Context structure is different than expected" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   - Ensure deployment_id is passed in the action parameters" >&2
     exit 1
 fi
 
 if [[ -z "$INSTANCE_NAME" ]]; then
-    echo "ERROR: instance_name parameter not found"
+    echo "❌ instance_name parameter not found" >&2
+    echo "💡 Possible causes:" >&2
+    echo "   - Parameter not provided in action request" >&2
+    echo "   - Context structure is different than expected" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   - Ensure instance_name is passed in the action parameters" >&2
     exit 1
 fi
 
-echo "Deployment ID: $DEPLOYMENT_ID"
-echo "Instance name: $INSTANCE_NAME"
+echo "📋 Deployment ID: $DEPLOYMENT_ID"
+echo "📋 Instance name: $INSTANCE_NAME"
 
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.tags.scope_id // .scope.id // .notification.tags.scope_id // empty')
 
@@ -39,86 +49,77 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
 ' 2>/dev/null || echo "nullplatform")
 
 if [[ -z "$SCOPE_ID" ]]; then
-    echo "ERROR: scope_id not found in context"
+    echo "❌ scope_id not found in context" >&2
+    echo "💡 Possible causes:" >&2
+    echo "   - Context missing scope information" >&2
+    echo "   - Action invoked outside of scope context" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   - Verify the action is invoked with proper scope context" >&2
     exit 1
 fi
 
-echo "Scope ID: $SCOPE_ID"
-echo "Namespace: $K8S_NAMESPACE"
+echo "📋 Scope ID: $SCOPE_ID"
+echo "📋 Namespace: $K8S_NAMESPACE"
 
+echo "🔍 Verifying pod exists..."
 if ! kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
-    echo "ERROR: Pod $INSTANCE_NAME not found in namespace $K8S_NAMESPACE"
+    echo "❌ Pod $INSTANCE_NAME not found in namespace $K8S_NAMESPACE" >&2
+    echo "💡 Possible causes:" >&2
+    echo "   - Pod was already terminated" >&2
+    echo "   - Pod name is incorrect" >&2
+    echo "   - Pod exists in a different namespace" >&2
+    echo "🔧 How to fix:" >&2
+    echo "   - List pods: kubectl get pods -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID" >&2
     exit 1
 fi
 
-echo ""
-echo "=== POD DETAILS ==="
+echo "📋 Fetching pod details..."
 POD_STATUS=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
 POD_NODE=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.nodeName}')
 POD_START_TIME=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.startTime}')
 
-echo "Pod: $INSTANCE_NAME"
-echo "Status: $POD_STATUS"
-echo "Node: $POD_NODE"
-echo "Start time: $POD_START_TIME"
+echo "📋 Pod: $INSTANCE_NAME | Status: $POD_STATUS | Node: $POD_NODE | Started: $POD_START_TIME"
 
 DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
-echo "Expected deployment: $DEPLOYMENT_NAME"
 
 POD_DEPLOYMENT=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
 if [[ -n "$POD_DEPLOYMENT" ]]; then
     REPLICASET_DEPLOYMENT=$(kubectl get replicaset "$POD_DEPLOYMENT" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
-    echo "Pod belongs to ReplicaSet: $POD_DEPLOYMENT"
-    echo "ReplicaSet belongs to Deployment: $REPLICASET_DEPLOYMENT"
-    
+    echo "📋 Pod ownership: ReplicaSet=$POD_DEPLOYMENT -> Deployment=$REPLICASET_DEPLOYMENT"
+
     if [[ "$REPLICASET_DEPLOYMENT" != "$DEPLOYMENT_NAME" ]]; then
-        echo "WARNING: Pod does not belong to expected deployment $DEPLOYMENT_NAME"
-        echo "Continuing anyway..."
+        echo "⚠️  Pod does not belong to expected deployment $DEPLOYMENT_NAME (continuing anyway)"
     fi
 else
-    echo "WARNING: Could not verify pod ownership"
+    echo "⚠️  Could not verify pod ownership"
 fi
 
-echo ""
-echo "=== KILLING POD ==="
-
+echo "📝 Deleting pod $INSTANCE_NAME with 30s grace period..."
 kubectl delete pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" --grace-period=30
 
-echo "Pod deletion initiated with 30 second grace period"
-
-echo "Waiting for pod to be terminated..."
-kubectl wait --for=delete pod/"$INSTANCE_NAME" -n "$K8S_NAMESPACE" --timeout=60s || echo "Pod deletion timeout reached"
+echo "📝 Waiting for pod termination..."
+kubectl wait --for=delete pod/"$INSTANCE_NAME" -n "$K8S_NAMESPACE" --timeout=60s || echo "⚠️  Pod deletion timeout reached"
 
 if kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
-    echo "WARNING: Pod still exists after deletion attempt"
     POD_STATUS_AFTER=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
-    echo "Current pod status: $POD_STATUS_AFTER"
+    echo "⚠️  Pod still exists after deletion attempt (status: $POD_STATUS_AFTER)"
 else
-    echo "Pod successfully terminated and removed"
+    echo "✅ Pod successfully terminated and removed"
 fi
 
-echo ""
-echo "=== DEPLOYMENT STATUS AFTER POD DELETION ==="
+echo "📋 Checking deployment status after pod deletion..."
 if kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
     DESIRED_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
     READY_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.readyReplicas}')
     AVAILABLE_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.availableReplicas}')
-    
-    echo "Deployment: $DEPLOYMENT_NAME"
-    echo "Desired replicas: $DESIRED_REPLICAS"
-    echo "Ready replicas: ${READY_REPLICAS:-0}"
-    echo "Available replicas: ${AVAILABLE_REPLICAS:-0}"
-    
-    # If this is a managed deployment (with HPA or desired replicas > 0), 
-    # Kubernetes will automatically create a new pod to replace the killed one
+
+    echo "📋 Deployment $DEPLOYMENT_NAME: desired=$DESIRED_REPLICAS, ready=${READY_REPLICAS:-0}, available=${AVAILABLE_REPLICAS:-0}"
+
     if [[ "$DESIRED_REPLICAS" -gt 0 ]]; then
-        echo ""
-        echo "Note: Kubernetes will automatically create a new pod to replace the terminated one"
-        echo "This is expected behavior for managed deployments"
+        echo "📋 Kubernetes will automatically create a replacement pod"
     fi
 else
-    echo "WARNING: Deployment $DEPLOYMENT_NAME not found"
+    echo "⚠️  Deployment $DEPLOYMENT_NAME not found"
 fi
 
-echo ""
-echo "Instance $INSTANCE_NAME kill operation completed"
+echo "✨ Instance kill operation completed for $INSTANCE_NAME"
