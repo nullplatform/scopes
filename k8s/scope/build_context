@@ -147,6 +147,7 @@ REGION=$(get_config_value \
 )
 
 SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
+JWT_AUTHORIZATION_ENABLED=$(echo "$CONTEXT" | jq -r '.scope.capabilities.jwt_authorization_enabled // false')
 
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     DOMAIN=$(get_config_value \
@@ -175,6 +176,7 @@ export APPLICATION_ID=\(capture("application=(?<id>\\d+)").id)
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 
 export SCOPE_VISIBILITY
+export JWT_AUTHORIZATION_ENABLED
 export SCOPE_DOMAIN
 
 if [ "$SCOPE_VISIBILITY" = "public" ]; then

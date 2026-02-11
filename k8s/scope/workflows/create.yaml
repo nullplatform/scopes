@@ -70,3 +70,11 @@ steps:
             - name: wait on balancer
               type: script
               file: "$SERVICE_PATH/scope/wait_on_balancer"
+  - name: security
+    type: workflow
+    steps:
+      - name: setup jwt authentication
+        type: script
+        file: "$SERVICE_PATH/scope/security/manage_jwt_auth"
+        configuration:
+          ACTION: create
