@@ -433,7 +433,10 @@
                   "default":10,
                   "maximum":300,
                   "minimum":1,
-                  "description":"Seconds between health checks"
+                  "description":"Seconds between health checks",
+                  "exclusiveMinimum": {
+                     "$data": "1/timeout_seconds"
+                  }
                },
                "timeout_seconds":{
                   "type":"integer",
