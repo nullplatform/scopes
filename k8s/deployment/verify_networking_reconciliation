@@ -2,12 +2,17 @@
 
 echo "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
 
-case "$DNS_TYPE" in
-  route53)
-    source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
-    ;;
-  *)
-    echo "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
-#    source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
-    ;;
-esac
+# Detect if using Istio HTTPRoute based on INITIAL_INGRESS_PATH
+if echo "$INITIAL_INGRESS_PATH" | grep -qi "httproute\|istio"; then
+  echo "🔍 Detected Istio HTTPRoute configuration, using HTTPRoute reconciliation"
+  source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
+else
+  case "$DNS_TYPE" in
+    route53)
+      source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
+      ;;
+    *)
+      echo "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
+      ;;
+  esac
+fi
