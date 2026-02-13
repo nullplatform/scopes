@@ -7,7 +7,7 @@ LATEST_TIMESTAMP=""
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 
 while true; do
-    ((iteration++))
+    ((++iteration))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
         echo "ERROR: Timeout waiting for deployment. Maximum iterations (${MAX_ITERATIONS}) reached."
 
