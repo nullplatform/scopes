@@ -1,0 +1,17 @@
+{
+  "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Network/dnszones/example.com",
+  "name": "example.com",
+  "type": "Microsoft.Network/dnszones",
+  "location": "global",
+  "tags": {},
+  "properties": {
+    "maxNumberOfRecordSets": 10000,
+    "numberOfRecordSets": 5,
+    "nameServers": [
+      "ns1-01.azure-dns.com.",
+      "ns2-01.azure-dns.net.",
+      "ns3-01.azure-dns.org.",
+      "ns4-01.azure-dns.info."
+    ]
+  }
+}

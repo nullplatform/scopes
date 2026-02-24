@@ -1,0 +1,3 @@
+#!/bin/bash
+
+echo "No action needed on this scope"

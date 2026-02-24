@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "body": {
+    "id": "s3-asset-repository-id",
+    "specification_id": "s3-asset-repository-spec-id",
+    "category": "assets-repository-id",
+    "attributes": {
+      "bucket": {
+        "name": "assets-bucket"
+      }
+    }
+  }
+}

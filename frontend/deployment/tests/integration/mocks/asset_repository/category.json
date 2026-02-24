@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "id": "assets-repository-id",
+        "slug": "assets-repository",
+        "name": "Assets Repository"
+      }
+    ]
+  }
+}

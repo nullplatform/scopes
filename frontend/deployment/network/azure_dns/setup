@@ -1,0 +1,174 @@
+#!/bin/bash
+
+echo "🔍 Validating Azure DNS network configuration..."
+
+public_dns_zone_name=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_name // empty')
+
+if [ -z "$public_dns_zone_name" ]; then
+  echo ""
+  echo "   ❌ public_dns_zone_name is not set in context"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    • Ensure there is an Azure cloud-provider configured at the correct NRN hierarchy level"
+  echo "    • Set the 'public_dns_zone_name' field with the Azure DNS zone name"
+  echo ""
+  exit 1
+fi
+echo "   ✅ public_dns_zone_name=$public_dns_zone_name"
+
+application_slug=$(echo "$CONTEXT" | jq -r .application.slug)
+scope_slug=$(echo "$CONTEXT" | jq -r .scope.slug)
+scope_id=$(echo "$CONTEXT" | jq -r .scope.id)
+public_dns_zone_resource_group_name=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.public_dns_zone_resource_group_name // empty')
+
+if [ -z "$public_dns_zone_resource_group_name" ]; then
+  echo ""
+  echo "   ❌ public_dns_zone_resource_group_name is not set in context"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    • Ensure the Azure cloud-provider has 'public_dns_zone_resource_group_name' configured"
+  echo ""
+  exit 1
+fi
+echo "   ✅ public_dns_zone_resource_group_name=$public_dns_zone_resource_group_name"
+
+echo ""
+echo "   📡 Verifying Azure DNS zone..."
+
+stderr_file=$(mktemp)
+az_output=$(az network dns zone show --name "$public_dns_zone_name" --resource-group "$public_dns_zone_resource_group_name" 2>"$stderr_file")
+az_exit_code=$?
+az_stderr=$(cat "$stderr_file")
+rm -f "$stderr_file"
+
+if [ $az_exit_code -ne 0 ]; then
+  echo ""
+  echo "   ❌ Failed to fetch Azure DNS zone information"
+  echo ""
+
+  if echo "$az_stderr" | grep -q "ResourceNotFound\|NotFound"; then
+    echo "  🔎 Error: DNS zone '$public_dns_zone_name' does not exist in resource group '$public_dns_zone_resource_group_name'"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The DNS zone name is incorrect or has a typo"
+    echo "    • The DNS zone was deleted"
+    echo "    • The resource group is incorrect"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Verify the DNS zone exists: az network dns zone list --resource-group $public_dns_zone_resource_group_name"
+    echo "    • Update 'public_dns_zone_name' in the Azure cloud-provider configuration"
+
+  elif echo "$az_stderr" | grep -q "AuthorizationFailed\|Forbidden\|403"; then
+    echo "  🔒 Error: Permission denied when accessing Azure DNS"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The Azure credentials don't have DNS Zone read permissions"
+    echo "    • The service principal is missing the 'DNS Zone Contributor' role"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Check the Azure credentials are configured correctly"
+    echo "    • Ensure the service principal has 'DNS Zone Reader' or 'DNS Zone Contributor' role"
+
+  elif echo "$az_stderr" | grep -q "InvalidSubscriptionId\|SubscriptionNotFound"; then
+    echo "  ⚠️  Error: Invalid subscription"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Verify the Azure subscription is correct"
+    echo "    • Check the service principal has access to the subscription"
+
+  elif echo "$az_stderr" | grep -q "AADSTS\|InvalidAuthenticationToken\|ExpiredAuthenticationToken"; then
+    echo "  🔑 Error: Azure credentials issue"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The nullplatform agent is not configured with Azure credentials"
+    echo "    • The service principal credentials have expired"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Configure Azure credentials in the nullplatform agent"
+    echo "    • Verify the service principal credentials are valid"
+
+  else
+    echo "  📋 Error details:"
+    echo "$az_stderr" | sed 's/^/    /'
+  fi
+
+  echo ""
+  exit 1
+fi
+
+network_domain=$(echo "$az_output" | jq -r '.name')
+
+if [ -z "$network_domain" ] || [ "$network_domain" = "null" ]; then
+  echo ""
+  echo "   ❌ Failed to extract domain name from DNS zone response"
+  echo ""
+  echo "  💡 Possible causes:"
+  echo "    • The DNS zone does not have a valid domain name configured"
+  echo ""
+  echo "  🔧 How to fix:"
+  echo "    • Verify the DNS zone has a valid domain: az network dns zone show --name $public_dns_zone_name --resource-group $public_dns_zone_resource_group_name"
+  echo ""
+  exit 1
+fi
+
+echo "   ✅ domain=$network_domain"
+
+network_subdomain="$application_slug-$scope_slug"
+echo "   ✅ subdomain=$network_subdomain"
+
+TOFU_VARIABLES=$(echo "$TOFU_VARIABLES" | jq \
+  --arg dns_zone_name "$public_dns_zone_name" \
+  --arg domain "$network_domain" \
+  --arg subdomain "$network_subdomain" \
+  '. + {
+    network_dns_zone_name: $dns_zone_name,
+    network_domain: $domain,
+    network_subdomain: $subdomain
+  }')
+
+scope_domain="$network_subdomain.$network_domain"
+
+echo ""
+echo "   📝 Setting scope domain to '$scope_domain'..."
+
+np_output=$(np scope patch --id "$scope_id" --body "{\"domain\":\"$scope_domain\"}" --format json 2>&1)
+np_exit_code=$?
+
+if [ $np_exit_code -ne 0 ]; then
+  echo ""
+  echo "   ❌ Failed to update scope domain"
+  echo ""
+
+  if echo "$np_output" | grep -q "unauthorized\|forbidden\|401\|403"; then
+    echo "  🔒 Error: Permission denied"
+    echo ""
+    echo "  💡 Possible causes:"
+    echo "    • The nullplatform API Key doesn't have 'Developer' permissions"
+    echo ""
+    echo "  🔧 How to fix:"
+    echo "    • Ensure the API Key has 'Developer' permissions at the correct NRN hierarchy level"
+
+  else
+    echo "  📋 Error details:"
+    echo "$np_output" | sed 's/^/    /'
+  fi
+
+  echo ""
+  exit 1
+fi
+
+echo "   ✅ Scope domain set successfully"
+
+echo ""
+echo "✨ Azure DNS network configured successfully"
+echo ""
+
+# Add module to composition list
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_name="${script_dir}/modules"
+
+if [[ -n $MODULES_TO_USE ]]; then
+  MODULES_TO_USE="$MODULES_TO_USE,$module_name"
+else
+  MODULES_TO_USE="$module_name"
+fi

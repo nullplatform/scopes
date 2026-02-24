@@ -1,0 +1,27 @@
+{
+  "results": [
+    {
+      "attributes": {
+        "ci": {
+          "access_key": "",
+          "region": "us-east-1",
+          "secret_key": ""
+        },
+        "setup": {
+          "naming_rule": "\"\\(.namespace.slug)/\\(.application.slug)\"",
+          "region": "us-east-1",
+          "role_arn": "arn:aws:iam::688720756067:role/null-application-manager"
+        }
+      },
+      "category": "assets-repository",
+      "created_at": "2024-10-25T12:47:52.552Z",
+      "dimensions": {},
+      "groups": [],
+      "id": "d397e46b-89b8-419d-ac14-2b483ace511c",
+      "nrn": "organization=1255165411:account=95118862",
+      "specification_id": "a6cf5ddf-ee3e-4960-b56a-ee9a13f8b5d2",
+      "tags": [],
+      "updated_at": "2025-08-21T01:58:19.844Z"
+    }
+  ]
+}
