@@ -74,6 +74,7 @@ spec:
       {{- end }}
     {{- end }}
       annotations:
+        sidecar.istio.io/inject: "true"
         nullplatform.logs.cloudwatch: 'true'
         nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
         nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
