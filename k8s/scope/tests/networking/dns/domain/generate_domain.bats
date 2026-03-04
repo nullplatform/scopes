@@ -82,7 +82,7 @@ MOCK
 # =============================================================================
 # domain-generate failure
 # =============================================================================
-@test "generate_domain: fails when domain-generate fails" {
+@test "generate_domain: fails with error details when domain-generate fails" {
   cat > "$SERVICE_PATH/scope/networking/dns/domain/domain-generate" << 'MOCK'
 #!/bin/bash
 echo "Error: generation failed" >&2
@@ -93,6 +93,11 @@ MOCK
   run bash -c 'source "$SCRIPT"'
 
   [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Failed to generate scope domain"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The domain-generate binary returned an error"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "Verify the input slugs are valid"
 }
 
 # =============================================================================

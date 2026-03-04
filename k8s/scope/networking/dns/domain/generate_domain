@@ -1,6 +1,4 @@
 #!/bin/bash
-set -euo pipefail
-
 echo "🔍 Generating scope domain..."
 
 ACCOUNT_NAME=$(echo "$CONTEXT" | jq .account.slug -r)
@@ -14,7 +12,18 @@ SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
   --applicationSlug="$APPLICATION_NAME" \
   --scopeSlug="$SCOPE_NAME" \
   --domain="$DOMAIN" \
-  --useAccountSlug="$USE_ACCOUNT_SLUG")
+  --useAccountSlug="$USE_ACCOUNT_SLUG") || {
+  echo "❌ Failed to generate scope domain" >&2
+  echo "" >&2
+  echo "💡 Possible causes:" >&2
+  echo "   The domain-generate binary returned an error" >&2
+  echo "" >&2
+  echo "🔧 How to fix:" >&2
+  echo "   • Check the domain-generate binary exists: ls -la $SERVICE_PATH/scope/networking/dns/domain/domain-generate" >&2
+  echo "   • Verify the input slugs are valid" >&2
+  echo "" >&2
+  return 1
+}
 
 echo "📋 Generated domain: $SCOPE_DOMAIN"
 

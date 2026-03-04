@@ -1,5 +1,4 @@
 #!/bin/bash
-set -euo pipefail
 
 echo "🔍 Building DNS context..."
 echo "📋 DNS type: $DNS_TYPE"
