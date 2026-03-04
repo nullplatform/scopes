@@ -152,9 +152,9 @@ build_query() {
       ;;
     "http.response_time")
       if [[ -n "$groupBy" ]]; then
-        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
+        echo "sum(rate(nullplatform_http_response_time{$filters}[$interval])) by ($groupBy)/sum(rate(nullplatform_http_response_time_count{$filters}[$interval])) by ($groupBy)"
       else
-        echo "sum(idelta(nullplatform_http_response_time{$filters}[$interval]))/sum(idelta(nullplatform_http_response_time_count{$filters}[$interval]))"
+        echo "sum(rate(nullplatform_http_response_time{$filters}[$interval]))/sum(rate(nullplatform_http_response_time_count{$filters}[$interval]))"
       fi
       ;;
     "http.rpm")
