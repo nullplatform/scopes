@@ -316,7 +316,7 @@ transform_response() {
     selector: .metric,
     data: .values | map({
       timestamp: (.[0] | tonumber | todate),
-      value: (.[1] | tonumber)
+      value: (if .[1] == "NaN" or .[1] == "+Inf" or .[1] == "-Inf" then 0 else (.[1] | tonumber) end)
     })
   })'
 }
