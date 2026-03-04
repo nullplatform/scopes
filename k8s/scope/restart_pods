@@ -9,29 +9,34 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-echo "Looking for deployment with label: name=d-$SCOPE_ID-$DEPLOYMENT_ID"
-DEPLOYMENT=$(kubectl get deployment -n "$K8S_NAMESPACE" -l "name=d-$SCOPE_ID-$DEPLOYMENT_ID" -o jsonpath="{.items[0].metadata.name}" 2>&1) || {
-    echo "ERROR: Failed to find deployment"
-    echo "Namespace: $K8S_NAMESPACE"
-    echo "Kubectl error: $DEPLOYMENT"
-    exit 1
-}
+find_deployment_by_label "$SCOPE_ID" "$DEPLOYMENT_ID" "$K8S_NAMESPACE"
 
-if [[ -z "$DEPLOYMENT" ]]; then
-    echo "ERROR: No deployment found with label name=d-$SCOPE_ID-$DEPLOYMENT_ID"
-    exit 1
-fi
-
-echo "Restarting deployment: $DEPLOYMENT"
+echo "📝 Restarting deployment: $DEPLOYMENT"
 kubectl rollout restart -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" || {
-    echo "ERROR: Failed to restart deployment $DEPLOYMENT"
+    echo "   ❌ Failed to restart deployment '$DEPLOYMENT'"
+    echo ""
+    echo "💡 Possible causes:"
+    echo "   The deployment may be in a bad state or kubectl lacks permissions"
+    echo ""
+    echo "🔧 How to fix:"
+    echo "   • Check deployment status: kubectl describe deployment $DEPLOYMENT -n $K8S_NAMESPACE"
+    echo ""
     exit 1
 }
 
-echo "Waiting for rollout to complete..."
+echo "🔍 Waiting for rollout to complete..."
 kubectl rollout status -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" -w || {
-    echo "ERROR: Rollout failed or timed out"
+    echo "   ❌ Rollout failed or timed out"
+    echo ""
+    echo "💡 Possible causes:"
+    echo "   Pods may be failing to start (image pull errors, crashes, resource limits)"
+    echo ""
+    echo "🔧 How to fix:"
+    echo "   • Check pod events: kubectl describe pods -n $K8S_NAMESPACE -l name=d-$SCOPE_ID-$DEPLOYMENT_ID"
+    echo "   • Check pod logs: kubectl logs -n $K8S_NAMESPACE -l name=d-$SCOPE_ID-$DEPLOYMENT_ID --tail=50"
+    echo ""
     exit 1
 }
 
-echo "Deployment restart completed successfully"
+echo ""
+echo "✅ Deployment restart completed successfully"
