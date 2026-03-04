@@ -1,5 +1,4 @@
 #!/bin/bash
-set -euo pipefail
 
 echo "🔍 Building gateway ingress..."
 echo "📋 Scope: $SCOPE_ID | Domain: $SCOPE_DOMAIN | Visibility: $INGRESS_VISIBILITY"
