@@ -1,6 +1,28 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 steps:
+  - name: load resource helpers
+    type: script
+    file: "$SERVICE_PATH/scope/require_resource"
+    output:
+      - name: require_hpa
+        type: function
+        parameters:
+          hpa_name: string
+          namespace: string
+          scope_id: string
+      - name: require_deployment
+        type: function
+        parameters:
+          deployment_name: string
+          namespace: string
+          scope_id: string
+      - name: find_deployment_by_label
+        type: function
+        parameters:
+          scope_id: string
+          deployment_id: string
+          namespace: string
   - name: resume autoscaling
     type: script
     file: "$SERVICE_PATH/scope/resume_autoscaling"

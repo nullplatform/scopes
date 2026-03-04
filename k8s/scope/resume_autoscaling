@@ -11,16 +11,13 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
 
 HPA_NAME="hpa-d-$SCOPE_ID-$DEPLOYMENT_ID"
 
-if ! kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
-    echo "HPA $HPA_NAME not found in namespace $K8S_NAMESPACE"
-    exit 1
-fi
+require_hpa "$HPA_NAME" "$K8S_NAMESPACE" "$SCOPE_ID"
 
 ANNOTATION_DATA=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.annotations.nullplatform\.com/autoscaling-paused}' 2>/dev/null || echo "")
 
 if [[ -z "$ANNOTATION_DATA" || "$ANNOTATION_DATA" == "null" ]]; then
-    echo "HPA $HPA_NAME is not currently paused"
-    exit 1
+    echo "   ✅ HPA '$HPA_NAME' is already active, no action needed"
+    exit 0
 fi
 
 ORIGINAL_MIN=$(echo "$ANNOTATION_DATA" | jq -r '.originalMinReplicas')
@@ -28,12 +25,12 @@ ORIGINAL_MAX=$(echo "$ANNOTATION_DATA" | jq -r '.originalMaxReplicas')
 
 PAUSED_AT=$(echo "$ANNOTATION_DATA" | jq -r '.pausedAt')
 
-echo "Found paused HPA configuration:"
-echo "  Original min replicas: $ORIGINAL_MIN"
-echo "  Original max replicas: $ORIGINAL_MAX"
-echo "  Paused at: $PAUSED_AT"
+echo "📋 Found paused HPA configuration:"
+echo "   Original min replicas: $ORIGINAL_MIN"
+echo "   Original max replicas: $ORIGINAL_MAX"
+echo "   Paused at: $PAUSED_AT"
 
-echo "Resuming autoscaling..."
+echo "📝 Resuming autoscaling..."
 
 PATCH=$(jq -n \
   --argjson originalMin "$ORIGINAL_MIN" \
@@ -52,8 +49,9 @@ PATCH=$(jq -n \
 
 kubectl patch hpa "$HPA_NAME" -n "$K8S_NAMESPACE" --type='merge' -p "$PATCH"
 
-echo "Autoscaling resumed successfully"
-echo "  HPA: $HPA_NAME"
-echo "  Namespace: $K8S_NAMESPACE"
-echo "  Min replicas: $ORIGINAL_MIN"
-echo "  Max replicas: $ORIGINAL_MAX"
+echo ""
+echo "✅ Autoscaling resumed successfully"
+echo "   HPA: $HPA_NAME"
+echo "   Namespace: $K8S_NAMESPACE"
+echo "   Min replicas: $ORIGINAL_MIN"
+echo "   Max replicas: $ORIGINAL_MAX"

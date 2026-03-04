@@ -1,11 +1,12 @@
 #!/bin/bash
+set -euo pipefail
 
-echo "Generating domain"
+echo "🔍 Generating scope domain..."
 
-ACCOUNT_NAME=$(echo $CONTEXT | jq .account.slug -r)
-NAMESPACE_NAME=$(echo $CONTEXT | jq .namespace.slug -r)
-APPLICATION_NAME=$(echo $CONTEXT | jq .application.slug -r)
-SCOPE_NAME=$(echo $CONTEXT | jq .scope.slug -r)
+ACCOUNT_NAME=$(echo "$CONTEXT" | jq .account.slug -r)
+NAMESPACE_NAME=$(echo "$CONTEXT" | jq .namespace.slug -r)
+APPLICATION_NAME=$(echo "$CONTEXT" | jq .application.slug -r)
+SCOPE_NAME=$(echo "$CONTEXT" | jq .scope.slug -r)
 
 SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
   --accountSlug="$ACCOUNT_NAME" \
@@ -15,13 +16,14 @@ SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
   --domain="$DOMAIN" \
   --useAccountSlug="$USE_ACCOUNT_SLUG")
 
-echo "Generated domain: $SCOPE_DOMAIN"
+echo "📋 Generated domain: $SCOPE_DOMAIN"
 
+echo "📝 Patching scope with domain..."
 np scope patch --id "$SCOPE_ID" --body "{\"domain\":\"$SCOPE_DOMAIN\"}"
+echo "   ✅ Scope domain updated"
 
 CONTEXT=$(echo "$CONTEXT" | jq \
   --arg scope_domain "$SCOPE_DOMAIN" \
   '.scope.domain = $scope_domain')
-
 
 export SCOPE_DOMAIN

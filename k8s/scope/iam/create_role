@@ -7,24 +7,38 @@ IAM=${IAM-"{}"}
 IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
 
 if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
-  echo "No IAM role configuration. Skipping role setup"
+  echo "📋 IAM is not enabled, skipping role creation"
   return
 fi
 
 ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 ROLE_PATH="/nullplatform/custom-scopes/"
 NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
-echo "Getting EKS OIDC provider for cluster: $CLUSTER_NAME"
+echo "🔍 Getting EKS OIDC provider for cluster: $CLUSTER_NAME"
 OIDC_PROVIDER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.identity.oidc.issuer" --output text 2>&1 | sed -e "s/^https:\/\///") || {
-  echo "ERROR: Failed to get OIDC provider for EKS cluster '$CLUSTER_NAME'"
-  echo "AWS Error: $OIDC_PROVIDER"
+  echo "   ❌ Failed to get OIDC provider for EKS cluster '$CLUSTER_NAME'"
+  echo ""
+  echo "💡 Possible causes:"
+  echo "   The OIDC provider may not be configured for this EKS cluster"
+  echo ""
+  echo "🔧 How to fix:"
+  echo "   • Verify OIDC is enabled: aws eks describe-cluster --name $CLUSTER_NAME --query cluster.identity.oidc"
+  echo "   • Enable OIDC provider: eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve"
+  echo ""
   exit 1
 }
 
-echo "Getting AWS account ID"
+echo "🔍 Getting AWS account ID..."
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1) || {
-  echo "ERROR: Failed to get AWS account ID"
-  echo "AWS Error: $AWS_ACCOUNT_ID"
+  echo "   ❌ Failed to get AWS account ID"
+  echo ""
+  echo "💡 Possible causes:"
+  echo "   AWS credentials may not be configured or have expired"
+  echo ""
+  echo "🔧 How to fix:"
+  echo "   • Check AWS credentials: aws sts get-caller-identity"
+  echo "   • Verify IAM permissions for the agent role"
+  echo ""
   exit 1
 }
 TRUST_POLICY_PATH="$OUTPUT_DIR/trust-policy.json"
@@ -86,22 +100,38 @@ if [[ -n "$DIMENSIONS" && "$DIMENSIONS" != "null" ]]; then
   done < <(echo "$DIMENSIONS" | jq -r 'keys[]')
 fi
 
+create_role_error() {
+  echo "   ❌ Failed to create IAM role '$ROLE_NAME'"
+  echo ""
+  echo "💡 Possible causes:"
+  echo "   The role may already exist or the agent lacks IAM permissions"
+  echo ""
+  echo "🔧 How to fix:"
+  echo "   • Check if role exists: aws iam get-role --role-name $ROLE_NAME"
+  echo "   • Verify IAM permissions for the agent role"
+  echo ""
+  exit 1
+}
+
+echo "📝 Creating IAM role: $ROLE_NAME"
 if [[ -n "$BOUNDARY_ARN" && "$BOUNDARY_ARN" != "null" ]]; then
+  echo "📋 Using permissions boundary: $BOUNDARY_ARN"
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --path "$ROLE_PATH" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --permissions-boundary "$BOUNDARY_ARN" \
     --tags "${BASE_TAGS[@]}" \
-    --no-paginate
+    --no-paginate || create_role_error
 else
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --path "$ROLE_PATH" \
     --assume-role-policy-document "file://$TRUST_POLICY_PATH" \
     --tags "${BASE_TAGS[@]}" \
-    --no-paginate
+    --no-paginate || create_role_error
 fi
+echo "   ✅ IAM role created successfully"
 
 rm "$TRUST_POLICY_PATH"
 
@@ -111,46 +141,54 @@ for ((i=0; i<$POLICIES_COUNT; i++)); do
   POLICY_TYPE=$(echo "$IAM" | jq -r ".ROLE.POLICIES[$i].TYPE")
   POLICY_VALUE=$(echo "$IAM" | jq -r ".ROLE.POLICIES[$i].VALUE")
 
-  echo "Processing policy $((i+1)): Type=$POLICY_TYPE"
+  echo "📋 Processing policy $((i+1)): Type=$POLICY_TYPE"
 
   if [[ "$POLICY_TYPE" == "arn" ]]; then
-    echo "Attaching managed policy: $POLICY_VALUE"
+    echo "📝 Attaching managed policy: $POLICY_VALUE"
     aws iam attach-role-policy \
       --role-name "$ROLE_NAME" \
-      --policy-arn "$POLICY_VALUE"
-
-    if [[ $? -eq 0 ]]; then
-      echo "✓ Successfully attached managed policy: $POLICY_VALUE"
-    else
-      echo "✗ Failed to attach managed policy: $POLICY_VALUE"
+      --policy-arn "$POLICY_VALUE" || {
+      echo "   ❌ Failed to attach managed policy: $POLICY_VALUE"
+      echo ""
+      echo "💡 Possible causes:"
+      echo "   The policy ARN may be invalid or the agent lacks IAM permissions"
+      echo ""
+      echo "🔧 How to fix:"
+      echo "   • Verify policy exists: aws iam get-policy --policy-arn $POLICY_VALUE"
+      echo "   • Check IAM permissions for the agent role"
+      echo ""
       exit 1
-    fi
+    }
+    echo "   ✅ Successfully attached managed policy: $POLICY_VALUE"
 
   elif [[ "$POLICY_TYPE" == "inline" ]]; then
-    # For inline policies, we need a policy name
     POLICY_NAME="inline-policy-$((i+1))"
-    echo "Attaching inline policy: $POLICY_NAME"
+    echo "📝 Attaching inline policy: $POLICY_NAME"
 
-    # Create temporary file for the inline policy
     TEMP_POLICY_FILE="/tmp/inline-policy-$i.json"
     echo "$POLICY_VALUE" > "$TEMP_POLICY_FILE"
 
     aws iam put-role-policy \
       --role-name "$ROLE_NAME" \
       --policy-name "$POLICY_NAME" \
-      --policy-document "file://$TEMP_POLICY_FILE"
-
-    if [[ $? -eq 0 ]]; then
-      echo "✓ Successfully attached inline policy: $POLICY_NAME"
-    else
-      echo "✗ Failed to attach inline policy: $POLICY_NAME"
+      --policy-document "file://$TEMP_POLICY_FILE" || {
+      echo "   ❌ Failed to attach inline policy: $POLICY_NAME"
+      echo ""
+      echo "💡 Possible causes:"
+      echo "   The inline policy JSON may be invalid or the agent lacks IAM permissions"
+      echo ""
+      echo "🔧 How to fix:"
+      echo "   • Validate the policy JSON syntax"
+      echo "   • Check IAM permissions for the agent role"
+      echo ""
+      rm -f "$TEMP_POLICY_FILE"
       exit 1
-    fi
+    }
+    echo "   ✅ Successfully attached inline policy: $POLICY_NAME"
 
-    # Clean up temp file
     rm -f "$TEMP_POLICY_FILE"
 
   else
-    echo "⚠ Unknown policy type: $POLICY_TYPE"
+    echo "⚠️  Unknown policy type: $POLICY_TYPE, skipping"
   fi
 done

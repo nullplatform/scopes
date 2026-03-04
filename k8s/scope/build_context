@@ -110,10 +110,10 @@ export MANIFEST_BACKUP
 export VAULT_ADDR
 export VAULT_TOKEN
 
-echo "Validating namespace $K8S_NAMESPACE exists"
+echo "🔍 Validating namespace '$K8S_NAMESPACE' exists..."
 
 if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
-  echo "Namespace '$K8S_NAMESPACE' does not exist in the cluster."
+  echo "   ❌ Namespace '$K8S_NAMESPACE' does not exist in the cluster"
 
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST=$(get_config_value \
     --env CREATE_K8S_NAMESPACE_IF_NOT_EXIST \
@@ -122,17 +122,26 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   )
 
   if [ "$CREATE_K8S_NAMESPACE_IF_NOT_EXIST" = "true" ]; then
-    echo "Creating namespace '$K8S_NAMESPACE'..."
-    
+    echo "📝 Creating namespace '$K8S_NAMESPACE'..."
+
     kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
       kubectl label -f - nullplatform=true --dry-run=client -o yaml | \
       kubectl apply -f -
 
-    echo "Namespace '$K8S_NAMESPACE' created successfully."
+    echo "   ✅ Namespace '$K8S_NAMESPACE' created successfully"
   else
-    echo "Error: Namespace '$K8S_NAMESPACE' does not exist and CREATE_K8S_NAMESPACE_IF_NOT_EXIST is set to false."
+    echo ""
+    echo "💡 Possible causes:"
+    echo "   The namespace does not exist and automatic creation is disabled"
+    echo ""
+    echo "🔧 How to fix:"
+    echo "   • Create the namespace manually: kubectl create namespace $K8S_NAMESPACE"
+    echo "   • Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
+    echo ""
     exit 1
   fi
+else
+  echo "   ✅ Namespace '$K8S_NAMESPACE' exists"
 fi
 
 USE_ACCOUNT_SLUG=$(get_config_value \
@@ -222,6 +231,9 @@ NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
 APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r .application.slug)
 COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-Z0-9]).*/\1/')
 
+echo "📋 Scope: $SCOPE_ID | Visibility: $SCOPE_VISIBILITY | Domain: $SCOPE_DOMAIN"
+echo "📋 Namespace: $K8S_NAMESPACE | Region: $REGION | Gateway: $GATEWAY_NAME | ALB: $ALB_NAME"
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \
           --arg k8s_namespace "$K8S_NAMESPACE" \
@@ -242,3 +254,5 @@ export CONTEXT
 export REGION
 
 mkdir -p "$OUTPUT_DIR"
+
+echo "✅ Scope context built successfully"

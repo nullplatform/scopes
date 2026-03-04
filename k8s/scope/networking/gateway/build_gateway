@@ -1,19 +1,31 @@
 #!/bin/bash
+set -euo pipefail
 
-echo "Creating ingress for scope $SCOPE_ID with domain $SCOPE_DOMAIN"
-
-echo "Creating $INGRESS_VISIBILITY ingress..."
+echo "🔍 Building gateway ingress..."
+echo "📋 Scope: $SCOPE_ID | Domain: $SCOPE_DOMAIN | Visibility: $INGRESS_VISIBILITY"
 
 INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$INGRESS_VISIBILITY.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
 echo "$CONTEXT" > "$CONTEXT_PATH"
 
-echo "Building Template: $TEMPLATE to $INGRESS_FILE"
+echo "📝 Building template: $TEMPLATE"
 
 gomplate -c .="$CONTEXT_PATH" \
   --file "$TEMPLATE" \
-  --out "$INGRESS_FILE"
+  --out "$INGRESS_FILE" || {
+  echo "❌ Failed to render ingress template" >&2
+  echo "" >&2
+  echo "💡 Possible causes:" >&2
+  echo "   The template file may contain invalid gomplate syntax" >&2
+  echo "" >&2
+  echo "🔧 How to fix:" >&2
+  echo "   • Verify template exists: ls -la $TEMPLATE" >&2
+  echo "   • Check the template is valid gomplate YAML" >&2
+  echo "" >&2
+  exit 1
+}
 
+echo "   ✅ Ingress manifest created: $INGRESS_FILE"
 
 rm "$CONTEXT_PATH"

@@ -1,24 +1,20 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for build_context - configuration value resolution
+# Unit tests for build_context
 # =============================================================================
 
 setup() {
-  # Get project root directory (tests are in k8s/scope/tests, so go up 3 levels)
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-
-  # Source assertions
   source "$PROJECT_ROOT/testing/assertions.sh"
-
-  # Source get_config_value utility
   source "$PROJECT_ROOT/k8s/utils/get_config_value"
 
-  # Mock kubectl to avoid actual cluster operations
+  export SCRIPT="$PROJECT_ROOT/k8s/scope/build_context"
+
+  # Mock kubectl - namespace exists by default
   kubectl() {
     case "$1" in
       get)
         if [ "$2" = "namespace" ]; then
-          # Simulate namespace exists
           return 0
         fi
         ;;
@@ -29,13 +25,12 @@ setup() {
   }
   export -f kubectl
 
-  # Set required environment variables
+  # Create temp output directory
+  export NP_OUTPUT_DIR="$(mktemp -d)"
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
-  export SCOPE_ID="test-scope-123"
 
   # Default values from values.yaml
   export K8S_NAMESPACE="nullplatform"
-  export CREATE_K8S_NAMESPACE_IF_NOT_EXIST="true"
   export DOMAIN="nullapps.io"
   export USE_ACCOUNT_SLUG="false"
   export PUBLIC_GATEWAY_NAME="gateway-public"
@@ -86,599 +81,305 @@ setup() {
 }
 
 teardown() {
-  # Clean up environment variables
+  rm -rf "$NP_OUTPUT_DIR"
   unset NAMESPACE_OVERRIDE
-  unset CREATE_K8S_NAMESPACE_IF_NOT_EXIST
   unset K8S_MODIFIERS
+  unset -f kubectl
 }
 
 # =============================================================================
-# Test: K8S_NAMESPACE uses scope-configuration provider first
+# Success flow - logging
 # =============================================================================
-@test "build_context: K8S_NAMESPACE uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "cluster": {
-      "namespace": "scope-config-ns"
-    }
-  }')
+@test "build_context: success flow - displays all messages" {
+  run bash -c 'source "$SCRIPT"'
 
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "$K8S_NAMESPACE"
-  )
-
-  assert_equal "$result" "scope-config-ns"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "🔍 Validating namespace 'default-namespace' exists..."
+  assert_contains "$output" "✅ Namespace 'default-namespace' exists"
+  assert_contains "$output" "📋 Scope: test-scope-123 | Visibility: public | Domain: test.nullapps.io"
+  assert_contains "$output" "📋 Namespace: default-namespace | Region: us-east-1 | Gateway: co-gateway-public | ALB: co-balancer-public"
+  assert_contains "$output" "✅ Scope context built successfully"
 }
 
 # =============================================================================
-# Test: K8S_NAMESPACE falls back to container-orchestration
+# Full CONTEXT validation (public visibility)
 # =============================================================================
-@test "build_context: K8S_NAMESPACE falls back to container-orchestration" {
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "$K8S_NAMESPACE"
-  )
+@test "build_context: produces complete CONTEXT with all expected fields (public)" {
+  source "$SCRIPT"
 
-  assert_equal "$result" "default-namespace"
-}
-
-# =============================================================================
-# Test: K8S_NAMESPACE - provider wins over env var
-# =============================================================================
-@test "build_context: K8S_NAMESPACE provider wins over NAMESPACE_OVERRIDE env var" {
-  export NAMESPACE_OVERRIDE="env-override-ns"
-
-  # Set up context with namespace in container-orchestration provider
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {
-    "cluster": {
-      "namespace": "provider-namespace"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "$K8S_NAMESPACE"
-  )
-
-  assert_equal "$result" "provider-namespace"
-}
-
-# =============================================================================
-# Test: K8S_NAMESPACE uses env var when no provider
-# =============================================================================
-@test "build_context: K8S_NAMESPACE uses NAMESPACE_OVERRIDE when no provider" {
-  export NAMESPACE_OVERRIDE="env-override-ns"
-
-  # Remove namespace from providers so env var can win
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace)')
-
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "$K8S_NAMESPACE"
-  )
-
-  assert_equal "$result" "env-override-ns"
-}
-
-# =============================================================================
-# Test: K8S_NAMESPACE uses values.yaml default
-# =============================================================================
-@test "build_context: K8S_NAMESPACE uses values.yaml default" {
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace)')
-
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "$K8S_NAMESPACE"
-  )
-
-  assert_equal "$result" "nullplatform"
-}
-
-# =============================================================================
-# Test: K8S_NAMESPACE - NAMESPACE_OVERRIDE has priority over K8S_NAMESPACE
-# =============================================================================
-@test "build_context: NAMESPACE_OVERRIDE has priority over K8S_NAMESPACE env var" {
-  export NAMESPACE_OVERRIDE="override-namespace"
-  export K8S_NAMESPACE="secondary-namespace"
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace) | del(.providers["scope-configurations"])')
-
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --env K8S_NAMESPACE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "nullplatform"
-  )
-
-  assert_equal "$result" "override-namespace"
-}
-
-# =============================================================================
-# Test: K8S_NAMESPACE uses K8S_NAMESPACE when NAMESPACE_OVERRIDE not set
-# =============================================================================
-@test "build_context: K8S_NAMESPACE env var used when NAMESPACE_OVERRIDE not set" {
-  unset NAMESPACE_OVERRIDE
-  export K8S_NAMESPACE="k8s-namespace"
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace) | del(.providers["scope-configurations"])')
-
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --env K8S_NAMESPACE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "nullplatform"
-  )
-
-  assert_equal "$result" "k8s-namespace"
-}
-
-# =============================================================================
-# Test: K8S_NAMESPACE uses default when no env vars and no providers
-# =============================================================================
-@test "build_context: K8S_NAMESPACE uses default when no env vars and no providers" {
-  unset NAMESPACE_OVERRIDE
-  unset K8S_NAMESPACE
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace) | del(.providers["scope-configurations"])')
-
-  result=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --env K8S_NAMESPACE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "nullplatform"
-  )
-
-  assert_equal "$result" "nullplatform"
-}
-
-# =============================================================================
-# Test: REGION only uses cloud-providers (not scope-configuration)
-# =============================================================================
-@test "build_context: REGION only uses cloud-providers" {
-  # Set up context with region in cloud-providers
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["cloud-providers"] = {
-    "account": {
-      "region": "eu-west-1"
-    }
-  }')
-
-  result=$(get_config_value \
-    --provider '.providers["cloud-providers"].account.region' \
-    --default "us-east-1"
-  )
-
-  assert_equal "$result" "eu-west-1"
-}
-
-# =============================================================================
-# Test: REGION falls back to default when cloud-providers not available
-# =============================================================================
-@test "build_context: REGION falls back to default" {
-  result=$(get_config_value \
-    --provider '.providers["cloud-providers"].account.region' \
-    --default "us-east-1"
-  )
-
-  assert_equal "$result" "us-east-1"
-}
-
-# =============================================================================
-# Test: USE_ACCOUNT_SLUG uses scope-configuration provider
-# =============================================================================
-@test "build_context: USE_ACCOUNT_SLUG uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "application_domain": "true"
-    }
-  }')
-
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.application_domain' \
-    --provider '.providers["cloud-providers"].networking.application_domain' \
-    --default "$USE_ACCOUNT_SLUG"
-  )
-
-  assert_equal "$result" "true"
-}
-
-# =============================================================================
-# Test: DOMAIN (public) uses scope-configuration provider
-# =============================================================================
-@test "build_context: DOMAIN (public) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "domain_name": "scope-config-domain.io"
-    }
-  }')
-
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.domain_name' \
-    --provider '.providers["cloud-providers"].networking.domain_name' \
-    --default "$DOMAIN"
-  )
-
-  assert_equal "$result" "scope-config-domain.io"
-}
-
-# =============================================================================
-# Test: DOMAIN (public) falls back to cloud-providers
-# =============================================================================
-@test "build_context: DOMAIN (public) falls back to cloud-providers" {
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.domain_name' \
-    --provider '.providers["cloud-providers"].networking.domain_name' \
-    --default "$DOMAIN"
-  )
-
-  assert_equal "$result" "cloud-domain.io"
-}
-
-# =============================================================================
-# Test: DOMAIN (private) uses scope-configuration provider
-# =============================================================================
-@test "build_context: DOMAIN (private) uses scope-configuration private domain" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.visibility = "private" |
-    .providers["scope-configurations"] = {
-    "networking": {
-      "private_domain_name": "private-scope.io"
+  local expected_json='{
+    "scope": {
+      "id": "test-scope-123",
+      "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
+      "domain": "test.nullapps.io",
+      "capabilities": {
+        "visibility": "public"
       }
-    }')
+    },
+    "namespace": {
+      "slug": "test-namespace"
+    },
+    "application": {
+      "slug": "test-app"
+    },
+    "providers": {
+      "cloud-providers": {
+        "account": {
+          "region": "us-east-1"
+        },
+        "networking": {
+          "domain_name": "cloud-domain.io",
+          "application_domain": "false"
+        }
+      },
+      "container-orchestration": {
+        "cluster": {
+          "namespace": "default-namespace"
+        },
+        "gateway": {
+          "public_name": "co-gateway-public",
+          "private_name": "co-gateway-private"
+        },
+        "balancer": {
+          "public_name": "co-balancer-public",
+          "private_name": "co-balancer-private"
+        }
+      }
+    },
+    "ingress_visibility": "internet-facing",
+    "k8s_namespace": "default-namespace",
+    "region": "us-east-1",
+    "gateway_name": "co-gateway-public",
+    "alb_name": "co-balancer-public",
+    "component": "test-namespace-test-app",
+    "k8s_modifiers": {}
+  }'
 
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.private_domain_name' \
-    --provider '.providers["cloud-providers"].networking.private_domain_name' \
-    --provider '.providers["scope-configurations"].networking.domain_name' \
-    --provider '.providers["cloud-providers"].networking.domain_name' \
-    --default "${PRIVATE_DOMAIN:-$DOMAIN}"
-  )
-
-  assert_equal "$result" "private-scope.io"
+  assert_json_equal "$CONTEXT" "$expected_json" "Complete CONTEXT (public)"
 }
 
 # =============================================================================
-# Test: GATEWAY_NAME (public) uses scope-configuration provider
+# Full CONTEXT validation (private visibility)
 # =============================================================================
-@test "build_context: GATEWAY_NAME (public) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "gateway_public_name": "scope-gateway-public"
-    }
-  }')
+@test "build_context: produces complete CONTEXT with all expected fields (private)" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.visibility = "private"')
 
-  GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.gateway_public_name' \
-    --provider '.providers["container-orchestration"].gateway.public_name' \
-    --default "$GATEWAY_DEFAULT"
-  )
+  source "$SCRIPT"
 
-  assert_equal "$result" "scope-gateway-public"
+  local expected_json='{
+    "scope": {
+      "id": "test-scope-123",
+      "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
+      "domain": "test.nullapps.io",
+      "capabilities": {
+        "visibility": "private"
+      }
+    },
+    "namespace": {
+      "slug": "test-namespace"
+    },
+    "application": {
+      "slug": "test-app"
+    },
+    "providers": {
+      "cloud-providers": {
+        "account": {
+          "region": "us-east-1"
+        },
+        "networking": {
+          "domain_name": "cloud-domain.io",
+          "application_domain": "false"
+        }
+      },
+      "container-orchestration": {
+        "cluster": {
+          "namespace": "default-namespace"
+        },
+        "gateway": {
+          "public_name": "co-gateway-public",
+          "private_name": "co-gateway-private"
+        },
+        "balancer": {
+          "public_name": "co-balancer-public",
+          "private_name": "co-balancer-private"
+        }
+      }
+    },
+    "ingress_visibility": "internal",
+    "k8s_namespace": "default-namespace",
+    "region": "us-east-1",
+    "gateway_name": "co-gateway-private",
+    "alb_name": "co-balancer-private",
+    "component": "test-namespace-test-app",
+    "k8s_modifiers": {}
+  }'
+
+  assert_json_equal "$CONTEXT" "$expected_json" "Complete CONTEXT (private)"
+}
+
+@test "build_context: private visibility displays correct summary" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.visibility = "private"')
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Scope: test-scope-123 | Visibility: private | Domain: test.nullapps.io"
+  assert_contains "$output" "📋 Namespace: default-namespace | Region: us-east-1 | Gateway: co-gateway-private | ALB: co-balancer-private"
 }
 
 # =============================================================================
-# Test: GATEWAY_NAME (public) falls back to container-orchestration
+# Exported variables
 # =============================================================================
-@test "build_context: GATEWAY_NAME (public) falls back to container-orchestration" {
-  GATEWAY_DEFAULT="${PUBLIC_GATEWAY_NAME:-gateway-public}"
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.gateway_public_name' \
-    --provider '.providers["container-orchestration"].gateway.public_name' \
-    --default "$GATEWAY_DEFAULT"
-  )
+@test "build_context: exports NRN IDs from scope nrn" {
+  source "$SCRIPT"
 
-  assert_equal "$result" "co-gateway-public"
+  assert_equal "$ORGANIZATION_ID" "100"
+  assert_equal "$ACCOUNT_ID" "200"
+  assert_equal "$NAMESPACE_ID" "300"
+  assert_equal "$APPLICATION_ID" "400"
+}
+
+@test "build_context: exports all expected environment variables" {
+  source "$SCRIPT"
+
+  assert_equal "$DNS_TYPE" "route53"
+  assert_equal "$ALB_RECONCILIATION_ENABLED" "false"
+  assert_equal "$DEPLOYMENT_MAX_WAIT_IN_SECONDS" "600"
+  assert_equal "$SCOPE_VISIBILITY" "public"
+  assert_equal "$SCOPE_DOMAIN" "test.nullapps.io"
+  assert_equal "$INGRESS_VISIBILITY" "internet-facing"
+  assert_equal "$GATEWAY_NAME" "co-gateway-public"
+  assert_equal "$REGION" "us-east-1"
+}
+
+@test "build_context: creates OUTPUT_DIR" {
+  source "$SCRIPT"
+
+  assert_equal "$OUTPUT_DIR" "$NP_OUTPUT_DIR/output/test-scope-123"
+  assert_directory_exists "$OUTPUT_DIR"
+}
+
+@test "build_context: uses SERVICE_PATH when NP_OUTPUT_DIR is not set" {
+  unset NP_OUTPUT_DIR
+
+  source "$SCRIPT"
+
+  assert_equal "$OUTPUT_DIR" "$SERVICE_PATH/output/test-scope-123"
+  assert_directory_exists "$OUTPUT_DIR"
 }
 
 # =============================================================================
-# Test: GATEWAY_NAME (private) uses scope-configuration provider
+# Namespace validation
 # =============================================================================
-@test "build_context: GATEWAY_NAME (private) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "gateway_private_name": "scope-gateway-private"
-    }
-  }')
+@test "build_context: creates namespace when it does not exist and creation is enabled" {
+  kubectl() {
+    case "$1" in
+      get)
+        if [ "$2" = "namespace" ]; then
+          return 1
+        fi
+        ;;
+      *)
+        echo "kubectl $*"
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
 
-  GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.gateway_private_name' \
-    --provider '.providers["container-orchestration"].gateway.private_name' \
-    --default "$GATEWAY_DEFAULT"
-  )
+  run bash -c 'source "$SCRIPT"'
 
-  assert_equal "$result" "scope-gateway-private"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "🔍 Validating namespace 'default-namespace' exists..."
+  assert_contains "$output" "❌ Namespace 'default-namespace' does not exist in the cluster"
+  assert_contains "$output" "📝 Creating namespace 'default-namespace'..."
+  assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
 }
 
-# =============================================================================
-# Test: ALB_NAME (public) uses scope-configuration provider
-# =============================================================================
-@test "build_context: ALB_NAME (public) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "balancer_public_name": "scope-balancer-public"
-    }
-  }')
+@test "build_context: fails when namespace does not exist and creation is disabled" {
+  kubectl() {
+    if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then
+      return 1
+    fi
+    return 0
+  }
+  export -f kubectl
+  export CREATE_K8S_NAMESPACE_IF_NOT_EXIST="false"
 
-  ALB_NAME="k8s-nullplatform-internet-facing"
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.balancer_public_name' \
-    --provider '.providers["container-orchestration"].balancer.public_name' \
-    --default "$ALB_NAME"
-  )
+  run bash -c 'source "$SCRIPT"'
 
-  assert_equal "$result" "scope-balancer-public"
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Namespace 'default-namespace' does not exist in the cluster"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The namespace does not exist and automatic creation is disabled"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "Create the namespace manually: kubectl create namespace default-namespace"
+  assert_contains "$output" "Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
 }
 
-# =============================================================================
-# Test: ALB_NAME (private) uses scope-configuration provider
-# =============================================================================
-@test "build_context: ALB_NAME (private) uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "balancer_private_name": "scope-balancer-private"
-    }
-  }')
+@test "build_context: CREATE_K8S_NAMESPACE_IF_NOT_EXIST resolves from provider" {
+  kubectl() {
+    if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then
+      return 1
+    fi
+    return 0
+  }
+  export -f kubectl
+  unset CREATE_K8S_NAMESPACE_IF_NOT_EXIST
 
-  ALB_NAME="k8s-nullplatform-internal"
-  result=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.balancer_private_name' \
-    --provider '.providers["container-orchestration"].balancer.private_name' \
-    --default "$ALB_NAME"
-  )
-
-  assert_equal "$result" "scope-balancer-private"
-}
-
-# =============================================================================
-# Test: CREATE_K8S_NAMESPACE_IF_NOT_EXIST uses scope-configuration provider
-# =============================================================================
-@test "build_context: CREATE_K8S_NAMESPACE_IF_NOT_EXIST uses scope-configuration provider" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "cluster": {
       "create_namespace_if_not_exist": "false"
     }
   }')
 
-  # Unset the env var to test provider precedence
-  unset CREATE_K8S_NAMESPACE_IF_NOT_EXIST
+  run bash -c 'source "$SCRIPT"'
 
-  result=$(get_config_value \
-    --env CREATE_K8S_NAMESPACE_IF_NOT_EXIST \
-    --provider '.providers["scope-configurations"].cluster.create_namespace_if_not_exist' \
-    --default "true"
-  )
-
-  assert_equal "$result" "false"
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Namespace 'default-namespace' does not exist in the cluster"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The namespace does not exist and automatic creation is disabled"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "Create the namespace manually: kubectl create namespace default-namespace"
+  assert_contains "$output" "Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
 }
 
 # =============================================================================
-# Test: K8S_MODIFIERS uses scope-configuration provider
+# COMPONENT truncation
 # =============================================================================
-@test "build_context: K8S_MODIFIERS uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "object_modifiers": "{\"global\":{\"labels\":{\"environment\":\"production\"}}}"
-  }')
+@test "build_context: COMPONENT truncates to 63 chars ending with alphanumeric" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .namespace.slug = "very-long-namespace-slug-that-goes-on" |
+    .application.slug = "and-on-with-app-slug-extending-past-limit"
+  ')
 
-  # Unset the env var to test provider precedence
-  unset K8S_MODIFIERS
+  source "$SCRIPT"
 
-  result=$(get_config_value \
-    --env K8S_MODIFIERS \
-    --provider '.providers["scope-configurations"].object_modifiers' \
-    --default "{}"
-  )
-
-  # Parse and verify it's valid JSON with the expected structure
-  assert_contains "$result" "production"
-  assert_contains "$result" "environment"
+  local component=$(echo "$CONTEXT" | jq -r .component)
+  [ ${#component} -le 63 ]
+  [[ "$component" =~ [a-zA-Z0-9]$ ]]
 }
 
 # =============================================================================
-# Test: K8S_MODIFIERS uses env var
+# Scope-configurations override (end-to-end)
 # =============================================================================
-@test "build_context: K8S_MODIFIERS uses env var" {
-  export K8S_MODIFIERS='{"custom":"value"}'
-
-  result=$(get_config_value \
-    --env K8S_MODIFIERS \
-    --provider '.providers["scope-configurations"].object_modifiers' \
-    --default "${K8S_MODIFIERS:-"{}"}"
-  )
-
-  assert_contains "$result" "custom"
-  assert_contains "$result" "value"
-}
-
-# =============================================================================
-# Test: Complete hierarchy for all configuration values
-# =============================================================================
-@test "build_context: complete configuration hierarchy works end-to-end" {
-  # Set up a complete scope-configuration provider
+@test "build_context: scope-configurations override produces correct CONTEXT" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
     "cluster": {
-      "namespace": "scope-ns",
-      "create_namespace_if_not_exist": "false",
-      "region": "ap-south-1"
+      "namespace": "scope-ns"
     },
     "networking": {
       "domain_name": "scope-domain.io",
       "application_domain": "true",
       "gateway_public_name": "scope-gw-public",
       "balancer_public_name": "scope-alb-public"
-    },
-    "object_modifiers": "{\"test\":\"value\"}"
-  }')
-
-  # Test K8S_NAMESPACE
-  k8s_namespace=$(get_config_value \
-    --env NAMESPACE_OVERRIDE \
-    --provider '.providers["scope-configurations"].cluster.namespace' \
-    --provider '.providers["container-orchestration"].cluster.namespace' \
-    --default "$K8S_NAMESPACE"
-  )
-  assert_equal "$k8s_namespace" "scope-ns"
-
-  # Test REGION
-  region=$(get_config_value \
-    --provider '.providers["scope-configurations"].cluster.region' \
-    --provider '.providers["cloud-providers"].account.region' \
-    --default "us-east-1"
-  )
-  assert_equal "$region" "ap-south-1"
-
-  # Test DOMAIN
-  domain=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.domain_name' \
-    --provider '.providers["cloud-providers"].networking.domain_name' \
-    --default "$DOMAIN"
-  )
-  assert_equal "$domain" "scope-domain.io"
-
-  # Test USE_ACCOUNT_SLUG
-  use_account_slug=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.application_domain' \
-    --provider '.providers["cloud-providers"].networking.application_domain' \
-    --default "$USE_ACCOUNT_SLUG"
-  )
-  assert_equal "$use_account_slug" "true"
-}
-
-# =============================================================================
-# Test: DNS_TYPE uses scope-configuration provider
-# =============================================================================
-@test "build_context: DNS_TYPE uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "dns_type": "azure"
     }
   }')
 
-  result=$(get_config_value \
-    --env DNS_TYPE \
-    --provider '.providers["scope-configurations"].networking.dns_type' \
-    --default "route53"
-  )
+  source "$SCRIPT"
 
-  assert_equal "$result" "azure"
-}
-
-# =============================================================================
-# Test: DNS_TYPE uses default
-# =============================================================================
-@test "build_context: DNS_TYPE uses default" {
-  result=$(get_config_value \
-    --env DNS_TYPE \
-    --provider '.providers["scope-configurations"].networking.dns_type' \
-    --default "route53"
-  )
-
-  assert_equal "$result" "route53"
-}
-
-# =============================================================================
-# Test: ALB_RECONCILIATION_ENABLED uses scope-configuration provider
-# =============================================================================
-@test "build_context: ALB_RECONCILIATION_ENABLED uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "networking": {
-      "alb_reconciliation_enabled": "true"
-    }
-  }')
-
-  result=$(get_config_value \
-    --env ALB_RECONCILIATION_ENABLED \
-    --provider '.providers["scope-configurations"].networking.alb_reconciliation_enabled' \
-    --default "false"
-  )
-
-  assert_equal "$result" "true"
-}
-
-# =============================================================================
-# Test: DEPLOYMENT_MAX_WAIT_IN_SECONDS uses scope-configuration provider
-# =============================================================================
-@test "build_context: DEPLOYMENT_MAX_WAIT_IN_SECONDS uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "deployment_max_wait_seconds": 900
-  }')
-
-  result=$(get_config_value \
-    --env DEPLOYMENT_MAX_WAIT_IN_SECONDS \
-    --provider '.providers["scope-configurations"].deployment_max_wait_seconds' \
-    --default "600"
-  )
-
-  assert_equal "$result" "900"
-}
-
-# =============================================================================
-# Test: MANIFEST_BACKUP uses scope-configuration provider
-# =============================================================================
-@test "build_context: MANIFEST_BACKUP uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "manifest_backup_enabled": true,
-    "manifest_backup_type": "s3",
-    "manifest_backup_bucket": "my-bucket"
-  }')
-
-  enabled=$(get_config_value \
-    --provider '.providers["scope-configurations"].manifest_backup_enabled' \
-    --default "false"
-  )
-  type=$(get_config_value \
-    --provider '.providers["scope-configurations"].manifest_backup_type' \
-    --default ""
-  )
-  bucket=$(get_config_value \
-    --provider '.providers["scope-configurations"].manifest_backup_bucket' \
-    --default ""
-  )
-
-  assert_equal "$enabled" "true"
-  assert_equal "$type" "s3"
-  assert_equal "$bucket" "my-bucket"
-}
-
-# =============================================================================
-# Test: VAULT_ADDR uses scope-configuration provider
-# =============================================================================
-@test "build_context: VAULT_ADDR uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "vault_address": "https://vault.example.com"
-  }')
-
-  result=$(get_config_value \
-    --env VAULT_ADDR \
-    --provider '.providers["scope-configurations"].vault_address' \
-    --default ""
-  )
-
-  assert_equal "$result" "https://vault.example.com"
-}
-
-# =============================================================================
-# Test: VAULT_TOKEN uses scope-configuration provider
-# =============================================================================
-@test "build_context: VAULT_TOKEN uses scope-configuration provider" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
-    "vault_token": "s.xxxxxxxxxxxxxxx"
-  }')
-
-  result=$(get_config_value \
-    --env VAULT_TOKEN \
-    --provider '.providers["scope-configurations"].vault_token' \
-    --default ""
-  )
-
-  assert_equal "$result" "s.xxxxxxxxxxxxxxx"
+  assert_equal "$(echo "$CONTEXT" | jq -r .k8s_namespace)" "scope-ns"
+  assert_equal "$(echo "$CONTEXT" | jq -r .gateway_name)" "scope-gw-public"
+  assert_equal "$(echo "$CONTEXT" | jq -r .alb_name)" "scope-alb-public"
+  assert_equal "$GATEWAY_NAME" "scope-gw-public"
 }
