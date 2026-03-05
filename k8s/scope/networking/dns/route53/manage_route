@@ -48,21 +48,26 @@ fi
 log info "✅ Found load balancer DNS: $ELB_DNS_NAME"
 
 HOSTED_ZONES=()
+ZONE_TYPES=()
 
 if [[ -n "$HOSTED_PRIVATE_ZONE_ID" ]] && [[ "$HOSTED_PRIVATE_ZONE_ID" != "null" ]]; then
     HOSTED_ZONES+=("$HOSTED_PRIVATE_ZONE_ID")
+    ZONE_TYPES+=("private")
 fi
 
 if [[ -n "$HOSTED_PUBLIC_ZONE_ID" ]] && [[ "$HOSTED_PUBLIC_ZONE_ID" != "null" ]]; then
     if [[ "$HOSTED_PUBLIC_ZONE_ID" != "$HOSTED_PRIVATE_ZONE_ID" ]]; then
         HOSTED_ZONES+=("$HOSTED_PUBLIC_ZONE_ID")
+        ZONE_TYPES+=("public")
         log debug "📋 Will create records in both public and private zones"
     fi
 fi
 
-for ZONE_ID in "${HOSTED_ZONES[@]}"; do
+for i in "${!HOSTED_ZONES[@]}"; do
+    ZONE_ID="${HOSTED_ZONES[$i]}"
+    ZONE_TYPE="${ZONE_TYPES[$i]}"
     log info ""
-    log debug "📝 ${ACTION}ing Route53 record in hosted zone: $ZONE_ID"
+    log debug "📝 ${ACTION%E}ING Route53 record in hosted zone: $ZONE_ID"
     log debug "📋 Domain: $SCOPE_DOMAIN -> $ELB_DNS_NAME"
 
     ROUTE53_OUTPUT=$(aws route53 change-resource-record-sets \
@@ -104,7 +109,7 @@ for ZONE_ID in "${HOSTED_ZONES[@]}"; do
         exit 1
     }
 
-    log info "✅ Successfully ${ACTION}ed Route53 record"
+    log info "✅ Successfully ${ACTION%E}ED $ZONE_TYPE Route53 record"
 done
 
 log info ""
