@@ -43,10 +43,10 @@ setup() {
   assert_contains "$output" "📡 Looking for load balancer: my-alb in region us-east-1..."
   assert_contains "$output" "✅ Found load balancer DNS: my-alb-dns.us-east-1.elb.amazonaws.com"
   assert_contains "$output" "📋 Will create records in both public and private zones"
-  assert_contains "$output" "📝 CREATEing Route53 record in hosted zone: Z_PRIVATE_123"
+  assert_contains "$output" "📝 CREATING Route53 record in hosted zone: Z_PRIVATE_123"
   assert_contains "$output" "📋 Domain: test.nullapps.io -> my-alb-dns.us-east-1.elb.amazonaws.com"
-  assert_contains "$output" "✅ Successfully CREATEed Route53 record"
-  assert_contains "$output" "📝 CREATEing Route53 record in hosted zone: Z_PUBLIC_456"
+  assert_contains "$output" "✅ Successfully CREATED public Route53 record"
+  assert_contains "$output" "📝 CREATING Route53 record in hosted zone: Z_PUBLIC_456"
   assert_contains "$output" "✨ Route53 DNS configuration completed"
 }
 
@@ -59,8 +59,9 @@ setup() {
   run bash "$SCRIPT" --action=CREATE
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 CREATEing Route53 record in hosted zone: Z_PRIVATE_123"
-  assert_contains "$output" "✅ Successfully CREATEed Route53 record"
+  assert_contains "$output" "📝 CREATING Route53 record in hosted zone: Z_PRIVATE_123"
+  assert_contains "$output" "✅ Successfully CREATED private Route53 record"
+
   assert_contains "$output" "✨ Route53 DNS configuration completed"
 }
 
@@ -73,7 +74,7 @@ setup() {
   run bash "$SCRIPT" --action=UPSERT
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 UPSERTing Route53 record in hosted zone: Z_PRIVATE_123"
+  assert_contains "$output" "📝 UPSERTING Route53 record in hosted zone: Z_PRIVATE_123"
   assert_contains "$output" "✨ Route53 DNS configuration completed"
 }
 
@@ -189,7 +190,7 @@ setup() {
   run bash "$SCRIPT" --action=DELETE
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 DELETEing Route53 record in hosted zone: Z_PRIVATE_123"
-  assert_contains "$output" "✅ Successfully DELETEed Route53 record"
+  assert_contains "$output" "📝 DELETING Route53 record in hosted zone: Z_PRIVATE_123"
+  assert_contains "$output" "✅ Successfully DELETED private Route53 record"
   assert_contains "$output" "✨ Route53 DNS configuration completed"
 }
