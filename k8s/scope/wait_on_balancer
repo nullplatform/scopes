@@ -1,6 +1,9 @@
 #!/bin/bash
 
-echo "Waiting for balancer/DNS setup to complete..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
+log debug "🔍 Waiting for balancer/DNS setup to complete..."
 
 MAX_ITERATIONS=${MAX_ITERATIONS:-30}
 iteration=0
@@ -10,50 +13,58 @@ case "$DNS_TYPE" in
     SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
     SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
-    
-    echo "Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
-    
+
+    log debug "📋 Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
+
     while true; do
         iteration=$((iteration + 1))
         if [ $iteration -gt $MAX_ITERATIONS ]; then
-            echo "⚠️  DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
-            echo "ExternalDNS may still be processing the DNSEndpoint resource"
-            echo "You can check manually with: kubectl get dnsendpoint -A"
+            log error ""
+            log error "   ❌ DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
+            log error ""
+            log error "💡 Possible causes:"
+            log error "   ExternalDNS may still be processing the DNSEndpoint resource"
+            log error ""
+            log error "🔧 How to fix:"
+            log error "   • Check DNSEndpoint resources: kubectl get dnsendpoint -A"
+            log error "   • Check ExternalDNS logs: kubectl logs -n external-dns -l app=external-dns --tail=50"
+            log error ""
             exit 1
         fi
-        
-        echo "Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
-        
+
+        log debug "🔍 Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
+
         DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
-        echo "Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
-        
+        log debug "📋 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
+
         DNS_STATUS=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || echo "not found")
 
         if [ "$DNS_STATUS" != "not found" ] && [ -n "$DNS_STATUS" ]; then
-            echo "DNSEndpoint status: $DNS_STATUS"
+            log debug "📋 DNSEndpoint status: $DNS_STATUS"
         fi
-        
+
         if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
-            echo "✓ DNS record for $SCOPE_DOMAIN is now resolvable"
-            
+            log info "   ✅ DNS record for $SCOPE_DOMAIN is now resolvable"
+
             RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
-            echo "✓ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
-            
+            log info "   ✅ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
+
             break
         fi
-        
-        echo "DNS record not yet available, waiting 10s..."
+
+        log debug "📋 DNS record not yet available, waiting 10s..."
         sleep 10
     done
-    
-    echo "✓ ExternalDNS setup completed successfully"
+
+    log info ""
+    log info "✨ ExternalDNS setup completed successfully"
     ;;
   route53|azure)
-    echo "DNS Type $DNS_TYPE - DNS should already be configured"
-    echo "Skipping DNS wait check"
+    log debug "📋 DNS Type $DNS_TYPE - DNS should already be configured"
+    log debug "📋 Skipping DNS wait check"
     ;;
   *)
-    echo "Unknown DNS type: $DNS_TYPE"
-    echo "Skipping DNS wait check"
+    log debug "📋 Unknown DNS type: $DNS_TYPE"
+    log debug "📋 Skipping DNS wait check"
     ;;
 esac
