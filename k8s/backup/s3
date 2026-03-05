@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 ACTION=""
 FILES=()
 
@@ -26,16 +29,16 @@ done
 BUCKET=$(echo "$MANIFEST_BACKUP" | jq -r .BUCKET)
 PREFIX=$(echo "$MANIFEST_BACKUP" | jq -r .PREFIX)
 
-echo "📝 Starting S3 manifest backup..."
-echo "📋 Action: $ACTION"
-echo "📋 Bucket: $BUCKET"
-echo "📋 Prefix: $PREFIX"
-echo "📋 Files: ${#FILES[@]}"
-echo ""
+log debug "📝 Starting S3 manifest backup..."
+log debug "📋 Action: $ACTION"
+log debug "📋 Bucket: $BUCKET"
+log debug "📋 Prefix: $PREFIX"
+log debug "📋 Files: ${#FILES[@]}"
+log debug ""
 
 # Now you can iterate over the files
 for file in "${FILES[@]}"; do
-  echo "📝 Processing: $(basename "$file")"
+  log debug "📝 Processing: $(basename "$file")"
 
   # Extract the path after 'output/' and remove the action folder (apply/delete)
   # Example: /root/.np/services/k8s/output/1862688057-34121609/apply/secret-1862688057-34121609.yaml
@@ -59,60 +62,60 @@ for file in "${FILES[@]}"; do
 
 
   if [[ "$ACTION" == "apply" ]]; then
-    echo "   📡 Uploading to s3://$BUCKET/$s3_key"
+    log debug "   📡 Uploading to s3://$BUCKET/$s3_key"
 
     # Upload to S3
     if aws s3 cp --region "$REGION" "$file" "s3://$BUCKET/$s3_key" >/dev/null; then
-      echo "   ✅ Upload successful"
+      log info "   ✅ Upload successful"
     else
-      echo "   ❌ Upload failed"
-      echo ""
-      echo "💡 Possible causes:"
-      echo "   • S3 bucket does not exist or is not accessible"
-      echo "   • IAM permissions are missing for s3:PutObject"
-      echo ""
-      echo "🔧 How to fix:"
-      echo "   • Verify bucket '$BUCKET' exists and is accessible"
-      echo "   • Check IAM permissions for the agent"
-      echo ""
+      log error "   ❌ Upload failed"
+      log error ""
+      log error "💡 Possible causes:"
+      log error "   • S3 bucket does not exist or is not accessible"
+      log error "   • IAM permissions are missing for s3:PutObject"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Verify bucket '$BUCKET' exists and is accessible"
+      log error "   • Check IAM permissions for the agent"
+      log error ""
       exit 1
     fi
 
   elif [[ "$ACTION" == "delete" ]]; then
-    echo "   📡 Deleting s3://$BUCKET/$s3_key"
+    log debug "   📡 Deleting s3://$BUCKET/$s3_key"
 
     # Delete from S3 with error handling
     aws_output=$(aws s3 rm --region "$REGION" "s3://$BUCKET/$s3_key" 2>&1)
     aws_exit_code=$?
 
     if [[ $aws_exit_code -eq 0 ]]; then
-      echo "   ✅ Deletion successful"
+      log info "   ✅ Deletion successful"
     elif [[ "$aws_output" == *"NoSuchKey"* ]] || [[ "$aws_output" == *"Not Found"* ]]; then
-      echo "   📋 File not found in S3, skipping"
+      log debug "   📋 File not found in S3, skipping"
     else
-      echo "   ❌ Deletion failed"
-      echo "📋 AWS Error: $aws_output"
-      echo ""
-      echo "💡 Possible causes:"
-      echo "   • S3 bucket does not exist or is not accessible"
-      echo "   • IAM permissions are missing for s3:DeleteObject"
-      echo ""
-      echo "🔧 How to fix:"
-      echo "   • Verify bucket '$BUCKET' exists and is accessible"
-      echo "   • Check IAM permissions for the agent"
-      echo ""
+      log error "   ❌ Deletion failed"
+      log error "📋 AWS Error: $aws_output"
+      log error ""
+      log error "💡 Possible causes:"
+      log error "   • S3 bucket does not exist or is not accessible"
+      log error "   • IAM permissions are missing for s3:DeleteObject"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Verify bucket '$BUCKET' exists and is accessible"
+      log error "   • Check IAM permissions for the agent"
+      log error ""
       exit 1
     fi
 
   else
-    echo "❌ Invalid action: '$ACTION'"
-    echo ""
-    echo "💡 Possible causes:"
-    echo "   The action parameter must be 'apply' or 'delete'"
-    echo ""
+    log error "❌ Invalid action: '$ACTION'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The action parameter must be 'apply' or 'delete'"
+    log error ""
     exit 1
   fi
 done
 
-echo ""
-echo "✨ S3 backup operation completed successfully"
+log info ""
+log info "✨ S3 backup operation completed successfully"
