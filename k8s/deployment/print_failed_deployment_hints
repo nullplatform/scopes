@@ -1,22 +1,25 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r .scope.capabilities.health_check.path)
 REQUESTED_MEMORY=$(echo "$CONTEXT" | jq -r .scope.capabilities.ram_memory)
 SCOPE_NAME=$(echo "$CONTEXT" | jq -r .scope.name)
 SCOPE_DIMENSIONS=$(echo "$CONTEXT" | jq -r .scope.dimensions)
 
-echo ""
-echo "⚠️  Application Startup Issue Detected"
-echo ""
-echo "💡 Possible causes:"
-echo "   Your application was unable to start within the expected timeframe"
-echo ""
-echo "🔧 How to fix:"
-echo "   1. Port Configuration: Ensure your application listens on port 8080"
-echo "   2. Health Check Endpoint: Verify your app responds to: $HEALTH_CHECK_PATH"
-echo "   3. Application Logs: Review logs for startup errors (database connections,"
-echo "      missing dependencies, or initialization errors)"
-echo "   4. Memory Allocation: Current allocation is ${REQUESTED_MEMORY}Mi - increase if needed"
-echo "   5. Environment Variables: Verify all required variables are configured in"
-echo "      parameters for scope '$SCOPE_NAME' or dimensions: $SCOPE_DIMENSIONS"
-echo ""
+log error ""
+log error "⚠️  Application Startup Issue Detected"
+log error ""
+log error "💡 Possible causes:"
+log error "   Your application was unable to start within the expected timeframe"
+log error ""
+log error "🔧 How to fix:"
+log error "   1. Port Configuration: Ensure your application listens on port 8080"
+log error "   2. Health Check Endpoint: Verify your app responds to: $HEALTH_CHECK_PATH"
+log error "   3. Application Logs: Review logs for startup errors (database connections,"
+log error "      missing dependencies, or initialization errors)"
+log error "   4. Memory Allocation: Current allocation is ${REQUESTED_MEMORY}Mi - increase if needed"
+log error "   5. Environment Variables: Verify all required variables are configured in"
+log error "      parameters for scope '$SCOPE_NAME' or dimensions: $SCOPE_DIMENSIONS"
+log error ""

@@ -6,6 +6,8 @@
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
+  log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+  export -f log
 
   export K8S_NAMESPACE="test-namespace"
   export SCOPE_ID="scope-123"

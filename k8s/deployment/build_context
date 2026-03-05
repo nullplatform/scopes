@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 # Build scope and tags env variables
 source "$SERVICE_PATH/scope/build_context"
 
@@ -44,12 +47,12 @@ validate_status() {
       expected_status="deleting, rolling_back or cancelling"
       ;;
     *)
-      echo "📝 Running action '$action', any deployment status is accepted"
+      log debug "📝 Running action '$action', any deployment status is accepted"
       return 0
       ;;
   esac
 
-  echo "📝 Running action '$action' (current status: '$status', expected: $expected_status)"
+  log debug "📝 Running action '$action' (current status: '$status', expected: $expected_status)"
 
   case "$action" in
     start-initial|start-blue-green)
@@ -71,15 +74,15 @@ validate_status() {
 }
 
 if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
-  echo "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'" >&2
-  echo "💡 Possible causes:" >&2
-  echo "   - Deployment status changed during workflow execution" >&2
-  echo "   - Another action is already running on this deployment" >&2
-  echo "   - Deployment was modified externally" >&2
-  echo "🔧 How to fix:" >&2
-  echo "   - Wait for any in-progress actions to complete" >&2
-  echo "   - Check the deployment status in the nullplatform dashboard" >&2
-  echo "   - Retry the action once the deployment is in the expected state" >&2
+  log error "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'"
+  log error "💡 Possible causes:"
+  log error "   - Deployment status changed during workflow execution"
+  log error "   - Another action is already running on this deployment"
+  log error "   - Deployment was modified externally"
+  log error "🔧 How to fix:"
+  log error "   - Wait for any in-progress actions to complete"
+  log error "   - Check the deployment status in the nullplatform dashboard"
+  log error "   - Retry the action once the deployment is in the expected state"
   exit 1
 fi
 
@@ -194,21 +197,21 @@ TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
 )
 
 if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
-    echo "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
+    log debug "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
 
     # Check if the ConfigMap exists
     if ! kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" &>/dev/null; then
-        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'" >&2
-        echo "💡 Possible causes:" >&2
-        echo "   - ConfigMap was not created before deployment" >&2
-        echo "   - ConfigMap name is misspelled in values.yaml" >&2
-        echo "   - ConfigMap was deleted or exists in a different namespace" >&2
-        echo "🔧 How to fix:" >&2
-        echo "   - Create the ConfigMap: kubectl create configmap $TRAFFIC_MANAGER_CONFIG_MAP -n $K8S_NAMESPACE --from-file=nginx.conf --from-file=default.conf" >&2
-        echo "   - Verify the ConfigMap name in your scope configuration" >&2
+        log error "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        log error "💡 Possible causes:"
+        log error "   - ConfigMap was not created before deployment"
+        log error "   - ConfigMap name is misspelled in values.yaml"
+        log error "   - ConfigMap was deleted or exists in a different namespace"
+        log error "🔧 How to fix:"
+        log error "   - Create the ConfigMap: kubectl create configmap $TRAFFIC_MANAGER_CONFIG_MAP -n $K8S_NAMESPACE --from-file=nginx.conf --from-file=default.conf"
+        log error "   - Verify the ConfigMap name in your scope configuration"
         exit 1
     fi
-    echo "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
+    log info "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
 
     # Check for required keys (subPaths)
     REQUIRED_KEYS=("nginx.conf" "default.conf")
@@ -218,19 +221,19 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
 
     for key in "${REQUIRED_KEYS[@]}"; do
         if ! echo "$CONFIGMAP_KEYS" | grep -qx "$key"; then
-            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'" >&2
-            echo "💡 Possible causes:" >&2
-            echo "   - ConfigMap was created without all required files" >&2
-            echo "   - Key name is different from expected: ${REQUIRED_KEYS[*]}" >&2
-            echo "🔧 How to fix:" >&2
-            echo "   - Update the ConfigMap to include the missing key '$key'" >&2
-            echo "   - Required keys: ${REQUIRED_KEYS[*]}" >&2
+            log error "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
+            log error "💡 Possible causes:"
+            log error "   - ConfigMap was created without all required files"
+            log error "   - Key name is different from expected: ${REQUIRED_KEYS[*]}"
+            log error "🔧 How to fix:"
+            log error "   - Update the ConfigMap to include the missing key '$key'"
+            log error "   - Required keys: ${REQUIRED_KEYS[*]}"
             exit 1
         fi
-        echo "✅ Found required key '$key' in ConfigMap"
+        log info "✅ Found required key '$key' in ConfigMap"
     done
 
-    echo "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+    log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
 CONTEXT=$(echo "$CONTEXT" | jq \
@@ -269,5 +272,5 @@ export BLUE_DEPLOYMENT_ID
 
 mkdir -p "$OUTPUT_DIR"
 
-echo "✨ Deployment context built successfully"
-echo "📋 Deployment ID: $DEPLOYMENT_ID | Replicas: green=$GREEN_REPLICAS, blue=$BLUE_REPLICAS"
+log info "✨ Deployment context built successfully"
+log debug "📋 Deployment ID: $DEPLOYMENT_ID | Replicas: green=$GREEN_REPLICAS, blue=$BLUE_REPLICAS"

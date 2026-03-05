@@ -1,18 +1,21 @@
 #!/bin/bash
 
-echo "🔍 Rolling back traffic to previous deployment..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../logging"; fi
+
+log debug "🔍 Rolling back traffic to previous deployment..."
 
 export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
 export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
 
-echo "📋 Current deployment: $NEW_DEPLOYMENT_ID"
-echo "📋 Rollback target: $DEPLOYMENT_ID"
+log debug "📋 Current deployment: $NEW_DEPLOYMENT_ID"
+log debug "📋 Rollback target: $DEPLOYMENT_ID"
 
 CONTEXT=$(echo "$CONTEXT" | jq \
   --arg deployment_id "$DEPLOYMENT_ID" \
   '.deployment.id = $deployment_id')
 
-echo "📝 Creating ingress for rollback deployment..."
+log debug "📝 Creating ingress for rollback deployment..."
 
 source "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
 
@@ -22,4 +25,4 @@ CONTEXT=$(echo "$CONTEXT" | jq \
   --arg deployment_id "$DEPLOYMENT_ID" \
   '.deployment.id = $deployment_id')
 
-echo "✅ Traffic rollback configuration created"
+log info "✅ Traffic rollback configuration created"

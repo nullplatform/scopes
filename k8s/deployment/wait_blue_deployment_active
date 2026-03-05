@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
 
 export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)

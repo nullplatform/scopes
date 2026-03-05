@@ -1,13 +1,16 @@
 #!/bin/bash
 
-echo "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
+log debug "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
 
 case "$DNS_TYPE" in
   route53)
     source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
     ;;
   *)
-    echo "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
+    log warn "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
 #    source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
     ;;
 esac

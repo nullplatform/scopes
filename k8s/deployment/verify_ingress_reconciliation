@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
 ALB_NAME=$(echo "$CONTEXT" | jq -r .alb_name)
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r .scope.domain)
@@ -8,33 +11,33 @@ MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-120}
 CHECK_INTERVAL=${CHECK_INTERVAL:-10}
 elapsed=0
 
-echo "🔍 Verifying ingress reconciliation..."
-echo "📋 Ingress: $INGRESS_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
+log debug "🔍 Verifying ingress reconciliation..."
+log debug "📋 Ingress: $INGRESS_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
 
 ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-false}"
 
 DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r ".deployment.strategy")
 
 if [ "$ALB_RECONCILIATION_ENABLED" = "false" ] && [ "$DEPLOYMENT_STRATEGY" = "blue_green" ]; then
-    echo "⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)"
+    log warn "⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)"
     return 0
 fi
 
 if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
-    echo "📋 ALB validation enabled: $ALB_NAME for domain $SCOPE_DOMAIN"
+    log debug "📋 ALB validation enabled: $ALB_NAME for domain $SCOPE_DOMAIN"
 else
-    echo "📋 ALB reconciliation disabled, checking cluster events only"
+    log debug "📋 ALB reconciliation disabled, checking cluster events only"
 fi
 
 INGRESS_JSON=$(kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
 
 if [ $? -ne 0 ]; then
-    echo "❌ Failed to get ingress $INGRESS_NAME"
-    echo "💡 Possible causes:"
-    echo "   - Ingress does not exist yet"
-    echo "   - Namespace $K8S_NAMESPACE is incorrect"
-    echo "🔧 How to fix:"
-    echo "   - List ingresses: kubectl get ingress -n $K8S_NAMESPACE"
+    log error "❌ Failed to get ingress $INGRESS_NAME"
+    log error "💡 Possible causes:"
+    log error "   - Ingress does not exist yet"
+    log error "   - Namespace $K8S_NAMESPACE is incorrect"
+    log error "🔧 How to fix:"
+    log error "   - List ingresses: kubectl get ingress -n $K8S_NAMESPACE"
     exit 1
 fi
 
@@ -58,7 +61,7 @@ if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
             --output text 2>&1)
 
     if [ $? -ne 0 ] || [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
-        echo "⚠️  Could not find ALB: $ALB_NAME"
+        log warn "⚠️  Could not find ALB: $ALB_NAME"
         return 1
     fi
 fi
@@ -70,14 +73,14 @@ validate_alb_config() {
         --output json 2>&1)
 
     if [ $? -ne 0 ]; then
-        echo "⚠️  Could not get listeners for ALB"
+        log warn "⚠️  Could not get listeners for ALB"
         return 1
     fi
 
     local all_domains_found=true
 
     for domain in "${ALL_DOMAINS[@]}"; do
-        echo "📝 Checking domain: $domain"
+        log debug "📝 Checking domain: $domain"
         local domain_found=false
 
         LISTENER_ARNS=$(echo "$LISTENERS" | jq -r '.Listeners[].ListenerArn')
@@ -101,7 +104,7 @@ validate_alb_config() {
             ')
 
             if [ -n "$MATCHING_RULE" ]; then
-                echo "   ✅ Found rule for domain: $domain"
+                log info "   ✅ Found rule for domain: $domain"
 
                 if [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
                     BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
@@ -123,14 +126,14 @@ validate_alb_config() {
 
                     if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
                         if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
-                            echo "   ✅ Weights match (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
+                            log info "   ✅ Weights match (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
                             domain_found=true
                         else
-                            echo "   ❌ Weights mismatch: expected=$EXPECTED_WEIGHTS actual=$ACTUAL_WEIGHTS"
+                            log error "   ❌ Weights mismatch: expected=$EXPECTED_WEIGHTS actual=$ACTUAL_WEIGHTS"
                             domain_found=false
                         fi
                     else
-                        echo "   ⚠️  Could not extract weights for comparison"
+                        log warn "   ⚠️  Could not extract weights for comparison"
                         domain_found=false
                     fi
                 else
@@ -141,16 +144,16 @@ validate_alb_config() {
         done
 
         if [ "$domain_found" = false ]; then
-            echo "   ❌ Domain not found in ALB rules: $domain"
+            log error "   ❌ Domain not found in ALB rules: $domain"
             all_domains_found=false
         fi
     done
 
     if [ "$all_domains_found" = true ]; then
-        echo "✅ All domains configured in ALB"
+        log info "✅ All domains configured in ALB"
         return 0
     else
-        echo "⚠️  Some domains missing from ALB configuration"
+        log warn "⚠️  Some domains missing from ALB configuration"
         return 1
     fi
 }
@@ -158,10 +161,10 @@ validate_alb_config() {
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
         if validate_alb_config; then
-            echo "✅ ALB configuration validated successfully"
+            log info "✅ ALB configuration validated successfully"
             return 0
         fi
-        echo "📝 ALB validation incomplete, checking Kubernetes events..."
+        log debug "📝 ALB validation incomplete, checking Kubernetes events..."
     fi
 
     events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
@@ -181,48 +184,48 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         event_message=$(echo "$newest_event" | jq -r '.message')
 
         if [ "$event_reason" == "SuccessfullyReconciled" ]; then
-            echo "✅ Ingress successfully reconciled"
+            log info "✅ Ingress successfully reconciled"
             return 0
         fi
 
         if echo "$event_message" | grep -q "no certificate found for host"; then
-            echo "❌ Certificate error detected"
-            echo "💡 Possible causes:"
-            echo "   - Ingress hostname does not match any SSL/TLS certificate in ACM"
-            echo "   - Certificate does not cover the hostname (check wildcards)"
-            echo "   - Message: $event_message"
-            echo "🔧 How to fix:"
-            echo "   - Verify hostname matches certificate in ACM"
-            echo "   - Ensure certificate includes exact hostname or matching wildcard"
+            log error "❌ Certificate error detected"
+            log error "💡 Possible causes:"
+            log error "   - Ingress hostname does not match any SSL/TLS certificate in ACM"
+            log error "   - Certificate does not cover the hostname (check wildcards)"
+            log error "   - Message: $event_message"
+            log error "🔧 How to fix:"
+            log error "   - Verify hostname matches certificate in ACM"
+            log error "   - Ensure certificate includes exact hostname or matching wildcard"
             exit 1
         fi
 
         if [ "$event_type" == "Error" ]; then
-            echo "❌ Ingress reconciliation failed"
-            echo "💡 Error messages:"
-            echo "$relevant_events" | jq -r '.[] | "   - \(.message)"'
+            log error "❌ Ingress reconciliation failed"
+            log error "💡 Error messages:"
+            echo "$relevant_events" | jq -r '.[] | "   - \(.message)"' >&2
             exit 1
         fi
 
         if [ "$event_type" == "Warning" ]; then
-            echo "⚠️  Potential issues with ingress:"
+            log warn "⚠️  Potential issues with ingress:"
             echo "$relevant_events" | jq -r '.[] | "   - \(.message)"'
         fi
     fi
 
-    echo "📝 Waiting for ALB reconciliation... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
+    log debug "📝 Waiting for ALB reconciliation... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
     sleep $CHECK_INTERVAL
     elapsed=$((elapsed + CHECK_INTERVAL))
 done
 
-echo "❌ Timeout waiting for ingress reconciliation after ${MAX_WAIT_SECONDS}s"
-echo "💡 Possible causes:"
-echo "   - ALB Ingress Controller not running or unhealthy"
-echo "   - Network connectivity issues"
-echo "🔧 How to fix:"
-echo "   - Check controller: kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller"
-echo "   - Check ingress: kubectl describe ingress $INGRESS_NAME -n $K8S_NAMESPACE"
-echo "📋 Recent events:"
+log error "❌ Timeout waiting for ingress reconciliation after ${MAX_WAIT_SECONDS}s"
+log error "💡 Possible causes:"
+log error "   - ALB Ingress Controller not running or unhealthy"
+log error "   - Network connectivity issues"
+log error "🔧 How to fix:"
+log error "   - Check controller: kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller"
+log error "   - Check ingress: kubectl describe ingress $INGRESS_NAME -n $K8S_NAMESPACE"
+log error "📋 Recent events:"
 
 events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
     --field-selector "involvedObject.name=$INGRESS_NAME,involvedObject.kind=Ingress" \
