@@ -8,6 +8,8 @@ setup() {
 
   # Source assertions
   source "$PROJECT_ROOT/testing/assertions.sh"
+  log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+  export -f log
 
   # Script under test
   export SCRIPT="$BATS_TEST_DIRNAME/../../iam/create_role"

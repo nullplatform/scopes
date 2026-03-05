@@ -6,6 +6,8 @@
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../../../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
+  log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+  export -f log
 
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export SCRIPT="$SERVICE_PATH/scope/networking/dns/az-records/manage_route"
@@ -267,7 +269,7 @@ setup() {
     --hosted-zone-rg=dns-rg
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Azure API returned HTTP 403"
+  assert_contains "$output" "❌ Azure API returned an error creating DNS record (HTTP 403)"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "The DNS zone or resource group may not exist, or permissions are insufficient"
 }

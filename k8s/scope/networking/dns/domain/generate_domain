@@ -1,5 +1,8 @@
 #!/bin/bash
-echo "🔍 Generating scope domain..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../../logging"; fi
+
+log debug "🔍 Generating scope domain..."
 
 ACCOUNT_NAME=$(echo "$CONTEXT" | jq .account.slug -r)
 NAMESPACE_NAME=$(echo "$CONTEXT" | jq .namespace.slug -r)
@@ -13,23 +16,23 @@ SCOPE_DOMAIN=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
   --scopeSlug="$SCOPE_NAME" \
   --domain="$DOMAIN" \
   --useAccountSlug="$USE_ACCOUNT_SLUG") || {
-  echo "❌ Failed to generate scope domain" >&2
-  echo "" >&2
-  echo "💡 Possible causes:" >&2
-  echo "   The domain-generate binary returned an error" >&2
-  echo "" >&2
-  echo "🔧 How to fix:" >&2
-  echo "   • Check the domain-generate binary exists: ls -la $SERVICE_PATH/scope/networking/dns/domain/domain-generate" >&2
-  echo "   • Verify the input slugs are valid" >&2
-  echo "" >&2
+  log error "❌ Failed to generate scope domain"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   The domain-generate binary returned an error"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Check the domain-generate binary exists: ls -la $SERVICE_PATH/scope/networking/dns/domain/domain-generate"
+  log error "   • Verify the input slugs are valid"
+  log error ""
   return 1
 }
 
-echo "📋 Generated domain: $SCOPE_DOMAIN"
+log debug "📋 Generated domain: $SCOPE_DOMAIN"
 
-echo "📝 Patching scope with domain..."
+log debug "📝 Patching scope with domain..."
 np scope patch --id "$SCOPE_ID" --body "{\"domain\":\"$SCOPE_DOMAIN\"}"
-echo "   ✅ Scope domain updated"
+log info "✅ Scope domain updated"
 
 CONTEXT=$(echo "$CONTEXT" | jq \
   --arg scope_domain "$SCOPE_DOMAIN" \

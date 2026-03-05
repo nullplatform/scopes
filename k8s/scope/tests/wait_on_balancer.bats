@@ -9,6 +9,8 @@ setup() {
 
   # Source assertions
   source "$PROJECT_ROOT/testing/assertions.sh"
+  log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+  export -f log
 
   # Default environment
   export K8S_NAMESPACE="default-namespace"

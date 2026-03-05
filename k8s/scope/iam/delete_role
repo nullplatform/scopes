@@ -2,68 +2,69 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../logging"; fi
+
 IAM=${IAM-"{}"}
 
 IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
 
 if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
-  echo "📋 IAM is not enabled, skipping role deletion"
+  log debug "📋 IAM is not enabled, skipping role deletion"
   return
 fi
 
-echo "🔍 Looking for IAM role: $SERVICE_ACCOUNT_NAME"
+log debug "🔍 Looking for IAM role: $SERVICE_ACCOUNT_NAME"
 ROLE_ARN=$(aws iam get-role --role-name "$SERVICE_ACCOUNT_NAME" --query 'Role.Arn' --output text 2>&1) || {
   if [[ "$ROLE_ARN" == *"NoSuchEntity"* ]] && [[ "$ROLE_ARN" == *"cannot be found"* ]]; then
-    echo "📋 IAM role '$SERVICE_ACCOUNT_NAME' does not exist, skipping role deletion"
+    log debug "📋 IAM role '$SERVICE_ACCOUNT_NAME' does not exist, skipping role deletion"
     return 0
   fi
 
-  echo "   ❌ Failed to find IAM role '$SERVICE_ACCOUNT_NAME'"
-  echo ""
-  echo "💡 Possible causes:"
-  echo "   The IAM role may not exist or the agent lacks IAM permissions"
-  echo ""
-  echo "🔧 How to fix:"
-  echo "   • Verify the role exists: aws iam get-role --role-name $SERVICE_ACCOUNT_NAME"
-  echo "   • Check IAM permissions for the agent role"
-  echo ""
+  log error "   ❌ Failed to find IAM role '$SERVICE_ACCOUNT_NAME'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   The IAM role may not exist or the agent lacks IAM permissions"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify the role exists: aws iam get-role --role-name $SERVICE_ACCOUNT_NAME"
+  log error "   • Check IAM permissions for the agent role"
+  log error ""
   exit 1
 }
 
 ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 
-echo "📝 Detaching managed policies..."
-# Use tr to convert tabs/spaces to newlines, then filter out empty lines
+log debug "📝 Detaching managed policies..."
 aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[].PolicyArn' --output text | \
 tr '\t' '\n' | while read policy_arn; do
-  if [ ! -z "$policy_arn" ]; then
-    echo "📋 Detaching policy: $policy_arn"
+  if [ -n "$policy_arn" ]; then
+    log debug "📋 Detaching policy: $policy_arn"
     aws iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$policy_arn"
-    echo "   ✅ Detached policy: $policy_arn"
+    log info "   ✅ Detached policy: $policy_arn"
   fi
 done
 
-echo "📝 Deleting inline policies..."
-# Use tr to convert tabs/spaces to newlines, then filter out empty lines
+log debug "📝 Deleting inline policies..."
 aws iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames' --output text | \
 tr '\t' '\n' | while read policy_name; do
-  if [ ! -z "$policy_name" ]; then
-    echo "📋 Deleting inline policy: $policy_name"
+  if [ -n "$policy_name" ]; then
+    log debug "📋 Deleting inline policy: $policy_name"
     aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$policy_name"
-    echo "   ✅ Deleted inline policy: $policy_name"
+    log info "   ✅ Deleted inline policy: $policy_name"
   fi
 done
 
-echo "📝 Deleting IAM role: $ROLE_NAME"
+log debug "📝 Deleting IAM role: $ROLE_NAME"
 aws iam delete-role --role-name "$ROLE_NAME" 2>&1 || {
-  echo "   ⚠️  Failed to delete IAM role '$ROLE_NAME'"
-  echo ""
-  echo "💡 Possible causes:"
-  echo "   The role may still have attached policies, instance profiles, or was already deleted"
-  echo ""
-  echo "🔧 How to fix:"
-  echo "   • Check attached policies: aws iam list-attached-role-policies --role-name $ROLE_NAME"
-  echo "   • Check instance profiles: aws iam list-instance-profiles-for-role --role-name $ROLE_NAME"
-  echo ""
+  log warn "   ⚠️  Failed to delete IAM role '$ROLE_NAME'"
+  log warn ""
+  log warn "💡 Possible causes:"
+  log warn "   The role may still have attached policies, instance profiles, or was already deleted"
+  log warn ""
+  log warn "🔧 How to fix:"
+  log warn "   • Check attached policies: aws iam list-attached-role-policies --role-name $ROLE_NAME"
+  log warn "   • Check instance profiles: aws iam list-instance-profiles-for-role --role-name $ROLE_NAME"
+  log warn ""
 }
-echo "   ✅ IAM role deletion completed"
+log info "   ✅ IAM role deletion completed"
