@@ -1,10 +1,13 @@
 #!/bin/bash
 
-echo "📝 Applying templates..."
-echo "📋 Directory: $OUTPUT_DIR"
-echo "📋 Action: $ACTION"
-echo "📋 Dry run: $DRY_RUN"
-echo ""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/logging"; fi
+
+log debug "📝 Applying templates..."
+log debug "📋 Directory: $OUTPUT_DIR"
+log debug "📋 Action: $ACTION"
+log debug "📋 Dry run: $DRY_RUN"
+log debug ""
 
 APPLIED_FILES=()
 
@@ -15,11 +18,11 @@ while IFS= read -r TEMPLATE_FILE; do
 
    # Check if file is empty or contains only whitespace
    if [[ ! -s "$TEMPLATE_FILE" ]] || [[ -z "$(tr -d '[:space:]' < "$TEMPLATE_FILE")" ]]; then
-     echo "📋 Skipping empty template: $FILENAME"
+     log debug "📋 Skipping empty template: $FILENAME"
      continue
    fi
 
-   echo "📝 kubectl $ACTION $FILENAME"
+   log debug "📝 kubectl $ACTION $FILENAME"
 
    if [[ "$DRY_RUN" == "false" ]]; then
      IGNORE_NOT_FOUND=""
@@ -29,7 +32,7 @@ while IFS= read -r TEMPLATE_FILE; do
      fi
 
      if ! kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
-       echo "   ❌ Failed to apply"
+       log error "   ❌ Failed to apply"
      fi
    fi
 
@@ -44,8 +47,8 @@ while IFS= read -r TEMPLATE_FILE; do
 done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print)
 
 if [[ "$DRY_RUN" == "true" ]]; then
-  echo ""
-  echo "📋 Dry run mode - no changes were made"
+  log debug ""
+  log debug "📋 Dry run mode - no changes were made"
   exit 1
 fi
 
