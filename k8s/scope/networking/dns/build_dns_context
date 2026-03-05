@@ -1,7 +1,9 @@
 #!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../logging"; fi
 
-echo "🔍 Building DNS context..."
-echo "📋 DNS type: $DNS_TYPE"
+log debug "🔍 Building DNS context..."
+log debug "📋 DNS type: $DNS_TYPE"
 
 case "$DNS_TYPE" in
   route53)
@@ -11,29 +13,29 @@ case "$DNS_TYPE" in
     GATEWAY_TYPE="${GATEWAY_TYPE:-istio}"
     export GATEWAY_TYPE
 
-    echo "📋 Azure DNS configuration:"
-    echo "   Gateway type: $GATEWAY_TYPE"
-    echo "   Hosted zone: $HOSTED_ZONE_NAME (RG: $HOSTED_ZONE_RG)"
-    echo "   Subscription: $AZURE_SUBSCRIPTION_ID"
-    echo "   Resource group: $RESOURCE_GROUP"
-    echo "   Public gateway: $PUBLIC_GATEWAY_NAME"
-    echo "   Private gateway: $PRIVATE_GATEWAY_NAME"
+    log debug "📋 Azure DNS configuration:"
+    log debug "   Gateway type: $GATEWAY_TYPE"
+    log debug "   Hosted zone: $HOSTED_ZONE_NAME (RG: $HOSTED_ZONE_RG)"
+    log debug "   Subscription: $AZURE_SUBSCRIPTION_ID"
+    log debug "   Resource group: $RESOURCE_GROUP"
+    log debug "   Public gateway: $PUBLIC_GATEWAY_NAME"
+    log debug "   Private gateway: $PRIVATE_GATEWAY_NAME"
     ;;
   external_dns)
-    echo "📋 DNS records will be managed automatically by External DNS operator"
+    log debug "📋 DNS records will be managed automatically by External DNS operator"
     ;;
   *)
-    echo "❌ Unsupported DNS type: '$DNS_TYPE'" >&2
-    echo "" >&2
-    echo "💡 Possible causes:" >&2
-    echo "   The DNS_TYPE value in values.yaml is not one of: route53, azure, external_dns" >&2
-    echo "" >&2
-    echo "🔧 How to fix:" >&2
-    echo "   • Check DNS_TYPE in values.yaml" >&2
-    echo "   • Supported types: route53, azure, external_dns" >&2
-    echo "" >&2
+    log error "❌ Unsupported DNS type: '$DNS_TYPE'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The DNS_TYPE value in values.yaml is not one of: route53, azure, external_dns"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check DNS_TYPE in values.yaml"
+    log error "   • Supported types: route53, azure, external_dns"
+    log error ""
     exit 1
     ;;
 esac
 
-echo "✅ DNS context ready"
+log info "✅ DNS context ready"
