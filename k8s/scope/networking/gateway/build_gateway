@@ -1,19 +1,32 @@
 #!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../logging"; fi
 
-echo "Creating ingress for scope $SCOPE_ID with domain $SCOPE_DOMAIN"
-
-echo "Creating $INGRESS_VISIBILITY ingress..."
+log debug "🔍 Building gateway ingress..."
+log debug "📋 Scope: $SCOPE_ID | Domain: $SCOPE_DOMAIN | Visibility: $INGRESS_VISIBILITY"
 
 INGRESS_FILE="$OUTPUT_DIR/ingress-$SCOPE_ID-$INGRESS_VISIBILITY.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
 echo "$CONTEXT" > "$CONTEXT_PATH"
 
-echo "Building Template: $TEMPLATE to $INGRESS_FILE"
+log debug "📝 Building template: $TEMPLATE"
 
 gomplate -c .="$CONTEXT_PATH" \
   --file "$TEMPLATE" \
-  --out "$INGRESS_FILE"
+  --out "$INGRESS_FILE" || {
+  log error "❌ Failed to render ingress template"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   The template file may contain invalid gomplate syntax"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify template exists: ls -la $TEMPLATE"
+  log error "   • Check the template is valid gomplate YAML"
+  log error ""
+  exit 1
+}
 
+log info "✅ Ingress manifest created: $INGRESS_FILE"
 
 rm "$CONTEXT_PATH"

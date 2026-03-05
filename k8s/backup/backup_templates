@@ -1,12 +1,15 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 MANIFEST_BACKUP=${MANIFEST_BACKUP-"{}"}
 
 BACKUP_ENABLED=$(echo "$MANIFEST_BACKUP" | jq -r .ENABLED)
 TYPE=$(echo "$MANIFEST_BACKUP" | jq -r .TYPE)
 
 if [[ "$BACKUP_ENABLED" == "false" || "$BACKUP_ENABLED" == "null" ]]; then
-  echo "📋 Manifest backup is disabled, skipping"
+  log debug "📋 Manifest backup is disabled, skipping"
   return
 fi
 
@@ -40,14 +43,14 @@ case "$TYPE" in
     source "$SERVICE_PATH/backup/s3" --action="$ACTION" --files "${FILES[@]}"
     ;;
   *)
-    echo "❌ Unsupported manifest backup type: '$TYPE'"
-    echo ""
-    echo "💡 Possible causes:"
-    echo "   The MANIFEST_BACKUP.TYPE configuration is invalid"
-    echo ""
-    echo "🔧 How to fix:"
-    echo "   • Set MANIFEST_BACKUP.TYPE to 's3' in values.yaml"
-    echo ""
+    log error "❌ Unsupported manifest backup type: '$TYPE'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The MANIFEST_BACKUP.TYPE configuration is invalid"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set MANIFEST_BACKUP.TYPE to 's3' in values.yaml"
+    log error ""
     exit 1
     ;;
 esac

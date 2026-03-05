@@ -7,6 +7,7 @@ log debug "📝 Applying templates..."
 log debug "📋 Directory: $OUTPUT_DIR"
 log debug "📋 Action: $ACTION"
 log debug "📋 Dry run: $DRY_RUN"
+log debug ""
 
 APPLIED_FILES=()
 
@@ -46,6 +47,7 @@ while IFS= read -r TEMPLATE_FILE; do
 done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print)
 
 if [[ "$DRY_RUN" == "true" ]]; then
+  log debug ""
   log debug "📋 Dry run mode - no changes were made"
   exit 1
 fi
