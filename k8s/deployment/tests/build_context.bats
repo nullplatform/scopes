@@ -7,6 +7,8 @@
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
+  log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+  export -f log
   source "$PROJECT_ROOT/k8s/utils/get_config_value"
 
   # Base CONTEXT for tests

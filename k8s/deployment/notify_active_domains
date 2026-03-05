@@ -1,37 +1,40 @@
 #!/bin/bash
 
-echo "🔍 Checking for custom domains to activate..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
+log debug "🔍 Checking for custom domains to activate..."
 
 DOMAINS=$(echo "$CONTEXT" | jq .scope.domains)
 
 if [[ "$DOMAINS" == "null" || "$DOMAINS" == "[]" ]]; then
-    echo "📋 No domains configured, skipping activation"
+    log debug "📋 No domains configured, skipping activation"
     return
 fi
 
 DOMAIN_COUNT=$(echo "$DOMAINS" | jq length)
-echo "📋 Found $DOMAIN_COUNT custom domain(s) to activate"
+log debug "📋 Found $DOMAIN_COUNT custom domain(s) to activate"
 
 echo "$DOMAINS" | jq -r '.[] | "\(.id)|\(.name)"' | while IFS='|' read -r domain_id domain_name; do
-    echo "📝 Activating custom domain: $domain_name..."
+    log debug "📝 Activating custom domain: $domain_name..."
 
     np_output=$(np scope domain patch --id "$domain_id" --body '{"status": "active"}' --format json 2>&1)
     np_status=$?
 
     if [ $np_status -ne 0 ]; then
-        echo "❌ Failed to activate custom domain: $domain_name" >&2
-        echo "📋 Error: $np_output" >&2
-        echo "💡 Possible causes:" >&2
-        echo "   - Domain ID $domain_id may not exist" >&2
-        echo "   - Insufficient permissions (403 Forbidden)" >&2
-        echo "   - API connectivity issues" >&2
-        echo "🔧 How to fix:" >&2
-        echo "   - Verify domain exists: np scope domain get --id $domain_id" >&2
-        echo "   - Check API token permissions" >&2
+        log error "❌ Failed to activate custom domain: $domain_name"
+        log error "📋 Error: $np_output"
+        log error "💡 Possible causes:"
+        log error "   - Domain ID $domain_id may not exist"
+        log error "   - Insufficient permissions (403 Forbidden)"
+        log error "   - API connectivity issues"
+        log error "🔧 How to fix:"
+        log error "   - Verify domain exists: np scope domain get --id $domain_id"
+        log error "   - Check API token permissions"
         continue
     fi
 
-    echo "✅ Custom domain activated: $domain_name"
+    log info "✅ Custom domain activated: $domain_name"
 done
 
-echo "✨ Custom domain activation completed"
+log info "✨ Custom domain activation completed"

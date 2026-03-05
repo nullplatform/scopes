@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
 GREEN_REPLICAS=$(echo "$CONTEXT" | jq -r .green_replicas)
 GREEN_DEPLOYMENT_ID=$DEPLOYMENT_ID
 
@@ -10,24 +13,24 @@ if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
   GREEN_DEPLOYMENT_NAME="d-$SCOPE_ID-$GREEN_DEPLOYMENT_ID"
   BLUE_DEPLOYMENT_NAME="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
 
-  echo "📝 Scaling deployments for rolling strategy..."
-  echo "📋 Green deployment: $GREEN_DEPLOYMENT_NAME -> $GREEN_REPLICAS replicas"
-  echo "📋 Blue deployment: $BLUE_DEPLOYMENT_NAME -> $BLUE_REPLICAS replicas"
-  echo ""
+  log debug "📝 Scaling deployments for rolling strategy..."
+  log debug "📋 Green deployment: $GREEN_DEPLOYMENT_NAME -> $GREEN_REPLICAS replicas"
+  log debug "📋 Blue deployment: $BLUE_DEPLOYMENT_NAME -> $BLUE_REPLICAS replicas"
+  log debug ""
 
-  echo "📝 Scaling green deployment..."
+  log debug "📝 Scaling green deployment..."
   if kubectl scale deployment "$GREEN_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$GREEN_REPLICAS"; then
-    echo "   ✅ Green deployment scaled to $GREEN_REPLICAS replicas"
+    log info "   ✅ Green deployment scaled to $GREEN_REPLICAS replicas"
   else
-    echo "   ❌ Failed to scale green deployment"
+    log error "   ❌ Failed to scale green deployment"
     exit 1
   fi
 
-  echo "📝 Scaling blue deployment..."
+  log debug "📝 Scaling blue deployment..."
   if kubectl scale deployment "$BLUE_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" --replicas="$BLUE_REPLICAS"; then
-    echo "   ✅ Blue deployment scaled to $BLUE_REPLICAS replicas"
+    log info "   ✅ Blue deployment scaled to $BLUE_REPLICAS replicas"
   else
-    echo "   ❌ Failed to scale blue deployment"
+    log error "   ❌ Failed to scale blue deployment"
     exit 1
   fi
 
@@ -40,6 +43,6 @@ if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
   unset TIMEOUT
   unset SKIP_DEPLOYMENT_STATUS_CHECK
 
-  echo ""
-  echo "✨ Deployments scaled successfully"
+  log debug ""
+  log info "✨ Deployments scaled successfully"
 fi
