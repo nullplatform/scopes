@@ -6,7 +6,16 @@ ARCH=$(uname -m)
 KUBE_LOGGER_SCRIPT="$SERVICE_PATH/log/kube-logger-go/bin/$PLATFORM/exec-$ARCH"
 
 if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then
-    echo "Error: kube-logger bash script not found at $KUBE_LOGGER_SCRIPT" >&2
+    log error "❌ kube-logger binary not found"
+    log error "📋 Expected path: $KUBE_LOGGER_SCRIPT"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The kube-logger binary was not compiled for this platform/architecture"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the binary exists for $PLATFORM/$ARCH"
+    log error "   • Rebuild the kube-logger binary using 'make build'"
+    log error ""
     exit 1
 fi
 
@@ -42,13 +51,13 @@ fi
 # Add optional start time (convert from milliseconds to ISO format)
 if [ -n "$START_TIME" ]; then
     SECONDS=$(echo "$START_TIME/1000" | bc)
-    
+
     # Handle different date command versions for Alpine/busybox
     # Try different approaches for Alpine busybox date
     if ISO_DATE=$(date -u -d "@$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then
         # GNU date worked
         :
-    elif ISO_DATE=$(date -u -r "$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then  
+    elif ISO_DATE=$(date -u -r "$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then
         # BSD date worked
         :
     else
@@ -59,13 +68,13 @@ if [ -n "$START_TIME" ]; then
             # For a more robust solution, we would need a full date calculation
             print strftime("%Y-%m-%dT%H:%M:%SZ", ts)
         }' 2>/dev/null)
-        
+
         # If awk strftime failed, use a different approach
         if [ -z "$ISO_DATE" ] || [ "$ISO_DATE" = "" ]; then
             ISO_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         fi
     fi
-    
+
     CMD="$CMD --start-time $ISO_DATE"
 fi
 

@@ -10,6 +10,13 @@ export INSTANCE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.
 export LIMIT=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.arguments.limit // empty')
 
 if [ -z "$APPLICATION_ID" ]; then
-    echo "Error: Missing required parameters: APPLICATION_ID" >&2
+    log error "❌ APPLICATION_ID is missing"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The log request did not include the required application_id parameter"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Ensure the log action includes application_id in the request"
+    log error ""
     exit 1
 fi

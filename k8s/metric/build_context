@@ -14,7 +14,15 @@ else
 fi
 
 if [[ -z "$PROM_URL" ]]; then
-  echo "There is no prometheus provider configured. Please configure prometheus in Platform settings and try again." >&2
+  log error "❌ No Prometheus provider configured"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   A metrics provider has not been linked to this scope or its parent entities"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Configure a Prometheus provider in Platform Settings"
+  log error "   • Link the metrics provider to the scope, application, or namespace"
+  log error ""
   exit 1
 fi
 
