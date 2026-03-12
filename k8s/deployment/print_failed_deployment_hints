@@ -1,7 +1,5 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
 
 HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r .scope.capabilities.health_check.path)
 REQUESTED_MEMORY=$(echo "$CONTEXT" | jq -r .scope.capabilities.ram_memory)

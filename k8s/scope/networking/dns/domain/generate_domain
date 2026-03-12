@@ -1,6 +1,4 @@
 #!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../../logging"; fi
 
 log debug "🔍 Generating scope domain..."
 

@@ -1,7 +1,5 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
 
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
 K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"

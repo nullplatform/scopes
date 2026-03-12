@@ -1,7 +1,5 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
 
 DEPLOYMENT_PATH="$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SECRET_PATH="$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
