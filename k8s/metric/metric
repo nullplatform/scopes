@@ -110,17 +110,33 @@ build_query() {
 
   case "$metric" in
     "http.healthcheck_count")
-      if [[ -n "$groupBy" ]]; then
-        echo "sum(nullplatform_healthcheck_status{$filters}) by ($groupBy)"
+      if [[ "${TRAFFIC_PROXY:-nginx}" == "istio" ]]; then
+        if [[ -n "$groupBy" ]]; then
+          echo "sum(nullplatform_healthcheck_status{$filters}) by ($groupBy)"
+        else
+          echo "sum(nullplatform_healthcheck_status{$filters})"
+        fi
       else
-        echo "sum(nullplatform_healthcheck_status{$filters})"
+        if [[ -n "$groupBy" ]]; then
+          echo "sum(nullplatform_http_response_time_count{$filters,is_healthcheck=\"yes\"}) by ($groupBy)"
+        else
+          echo "sum(nullplatform_http_response_time_count{$filters,is_healthcheck=\"yes\"})"
+        fi
       fi
       ;;
     "http.healthcheck_fail")
-      if [[ -n "$groupBy" ]]; then
-        echo "sum(nullplatform_healthcheck_fail{$filters}) by ($groupBy)"
+      if [[ "${TRAFFIC_PROXY:-nginx}" == "istio" ]]; then
+        if [[ -n "$groupBy" ]]; then
+          echo "sum(nullplatform_healthcheck_fail{$filters}) by ($groupBy)"
+        else
+          echo "sum(nullplatform_healthcheck_fail{$filters})"
+        fi
       else
-        echo "sum(nullplatform_healthcheck_fail{$filters})"
+        if [[ -n "$groupBy" ]]; then
+          echo "sum(nullplatform_http_response_time_count{$filters,is_healthcheck=\"yes\",quality!=\"OK (2XX, 3XX)\"}) by ($groupBy)"
+        else
+          echo "sum(nullplatform_http_response_time_count{$filters,is_healthcheck=\"yes\",quality!=\"OK (2XX, 3XX)\"})"
+        fi
       fi
       ;;
     "system.cpu_usage_percentage_by_instance")

@@ -2,6 +2,7 @@ provider_categories:
   - container-orchestration
   - cloud-providers
 configuration:
+  TRAFFIC_PROXY: istio
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
   DOMAIN: nullapps.io
