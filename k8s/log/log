@@ -2,6 +2,8 @@
 
 PLATFORM=$(uname | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
+# Normalize aarch64 (Linux ARM64) to arm64 (Go build convention)
+[ "$ARCH" = "aarch64" ] && ARCH="arm64"
 
 KUBE_LOGGER_SCRIPT="$SERVICE_PATH/log/kube-logger-go/bin/$PLATFORM/exec-$ARCH"
 
