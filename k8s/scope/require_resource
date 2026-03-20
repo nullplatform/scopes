@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# Shared resource validation functions for scope workflows.
+# Loaded as a workflow step, exports functions for subsequent steps.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
+
+require_hpa() {
+  local hpa_name="$1"
+  local namespace="$2"
+  local scope_id="$3"
+
+  log debug "🔍 Looking for HPA '$hpa_name' in namespace '$namespace'..."
+
+  if ! kubectl get hpa "$hpa_name" -n "$namespace" >/dev/null 2>&1; then
+    log error "   ❌ HPA '$hpa_name' not found in namespace '$namespace'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The HPA may not exist or autoscaling is not configured for this deployment"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the HPA exists: kubectl get hpa -n $namespace"
+    log error "   • Check that autoscaling is configured for scope $scope_id"
+    log error ""
+    exit 1
+  fi
+}
+
+require_deployment() {
+  local deployment_name="$1"
+  local namespace="$2"
+  local scope_id="$3"
+
+  log debug "🔍 Looking for deployment '$deployment_name' in namespace '$namespace'..."
+
+  if ! kubectl get deployment "$deployment_name" -n "$namespace" >/dev/null 2>&1; then
+    log error "   ❌ Deployment '$deployment_name' not found in namespace '$namespace'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The deployment may not exist or was not created yet"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the deployment exists: kubectl get deployment -n $namespace"
+    log error "   • Check that scope $scope_id has an active deployment"
+    log error ""
+    exit 1
+  fi
+}
+
+find_deployment_by_label() {
+  local scope_id="$1"
+  local deployment_id="$2"
+  local namespace="$3"
+  local label="name=d-$scope_id-$deployment_id"
+
+  log debug "🔍 Looking for deployment with label: $label"
+
+  DEPLOYMENT=$(kubectl get deployment -n "$namespace" -l "$label" -o jsonpath="{.items[0].metadata.name}" 2>&1) || {
+    log error "   ❌ Failed to find deployment with label '$label' in namespace '$namespace'"
+    log debug "📋 Kubectl error: $DEPLOYMENT"
+    DEPLOYMENT=""
+  }
+
+  if [[ -z "$DEPLOYMENT" ]]; then
+    log error "   ❌ No deployment found with label '$label' in namespace '$namespace'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The deployment may not exist or was not created yet"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the deployment exists: kubectl get deployment -n $namespace -l $label"
+    log error "   • Check that scope $scope_id has an active deployment"
+    log error ""
+    exit 1
+  fi
+}

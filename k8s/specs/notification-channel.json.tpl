@@ -1,6 +1,7 @@
 {
   "nrn": "{{ env.Getenv "NRN" }}",
   "status": "active",
+  "description": "Channel to handle Containers scopes",
   "type": "agent",
   "source": [
     "telemetry",
