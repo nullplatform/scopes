@@ -1,0 +1,33 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main, beta]
+
+jobs:
+  go:
+    uses: nullplatform/actions-nullplatform/.github/workflows/pr-checks-go.yml@main
+    with:
+      working-directory: k8s/log/kube-logger-go
+      go-version: '1.25'
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        run: find . -name "*.sh" -not -path "./.git/*" | xargs shellcheck
+
+  bats:
+    name: BATS Unit Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Run BATS tests
+        run: ./testing/run_bats_tests.sh
