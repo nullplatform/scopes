@@ -138,3 +138,16 @@ np-agent-manifest.yaml
 
 # Git worktrees
 .worktrees/
+DS_Store
+# Integration test runtime data
+frontend/deployment/tests/integration/volume/
+
+# Terraform/OpenTofu
+.terraform/
+.terraform.lock.hcl
+
+# Generated test certificates
+testing/docker/certs/
+
+# Claude Code
+.claude/
