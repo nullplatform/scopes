@@ -136,7 +136,9 @@ k8s/output
 np-agent-manifest.yaml
 .minikube_mount_pid
 
-.DS_Store
+# Git worktrees
+.worktrees/
+DS_Store
 # Integration test runtime data
 frontend/deployment/tests/integration/volume/
 
