@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # =============================================================================
 # Shared assertion functions for BATS tests
 #
