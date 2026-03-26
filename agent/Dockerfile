@@ -1,7 +1,7 @@
 FROM alpine
 
 # Install essential tools and Go
-RUN apk add --no-cache curl ca-certificates bash openssl aws-cli gettext gomplate jq yq go
+RUN apk add --no-cache curl ca-certificates bash openssl aws-cli gettext gomplate jq yq go mise
 
 # Install Nullplatform tools
 RUN curl https://cli.nullplatform.com/install.sh | sh
@@ -18,9 +18,9 @@ ENV GOPATH=/go
 ENV PATH=$PATH:/go/bin
 
 # Copy files
-ADD start.sh /app/start.sh
+ADD /agent/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
-ADD .. /root/.np/services
+ADD .. /root/.np/scopes
 
 # Set PATH
 ENV PATH=$PATH:/root/.local/bin

@@ -1,82 +1,17 @@
 #!/bin/bash
 
-# Check if NP_ACTION_CONTEXT is set
-if [ -z "$NP_ACTION_CONTEXT" ]; then
-  echo "NP_ACTION_CONTEXT is not set. Exiting."
-  exit 1
-fi
+SCOPE_DIR="${SERVICE_PATH:-$(dirname "${BASH_SOURCE[0]}")}"
 
-CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
+echo "[DEBUG] working directory: $SCOPE_DIR"
+echo "[DEBUG] mise.toml path: $(ls -la "$SCOPE_DIR/mise.toml" 2>&1)"
+echo "[DEBUG] Trusting mise config..."
+MISE_YES=1 mise trust "$SCOPE_DIR/mise.toml"
+echo "[DEBUG] Starting mise install..."
+MISE_YES=1 MISE_CONFIG_FILE="$SCOPE_DIR/mise.toml" mise install
+echo "[DEBUG] mise install done (exit code: $?)"
+echo "[DEBUG] mise ls output:"
+mise ls
 
-export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
-
-# Parse the JSON properly - remove the extra quotes
-export CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
-
-export SCOPE_ID=$(echo "$CONTEXT" | jq -r '.parameters.scope_id // .tags.scope_id // .arguments.scope_id')
-
-# If the action has no scope_id update the original context so we can use the np service workflow build-context command
-export CONTEXT=$(echo "$CONTEXT" | jq --arg scope_id "$SCOPE_ID" '.parameters.scope_id = $scope_id')
-export NP_ACTION_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | jq --arg scope_id "$SCOPE_ID" '.notification.parameters.scope_id = $scope_id')
-
-export DEPLOYMENT_ID=$(echo $CONTEXT | jq -r '.parameters.deployment_id // "null"')
-export SERVICE_ACTION=$(echo $CONTEXT | jq -r '.slug')
-export SERVICE_ACTION_TYPE=$(echo $CONTEXT | jq -r '.type')
-export NOTIFICATION_ACTION=$(echo $CONTEXT | jq -r '.action')
-
-export WORKING_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-SERVICE_PATH=""
-OVERRIDES_PATH=""
-DEPLOYMENT_TEMPLATE_PATH=""
-BLUE_GREEN_INGRESS_TEMPLATE_PATH=""
-INITIAL_INGRESS_TEMPLATE_PATH=""
-
-for arg in "$@"; do
-  case $arg in
-    --service-path=*)
-      SERVICE_PATH="${arg#*=}"
-      ;;
-    --overrides-path=*)
-      OVERRIDE_VALUE="${arg#*=}"
-      IFS=',' read -ra SPLIT_PATHS <<< "$OVERRIDE_VALUE"
-      for path in "${SPLIT_PATHS[@]}"; do
-        path=$(echo "$path" | xargs)
-        OVERRIDES_PATHS+=("$path")
-      done
-      ;;
-    *)
-      echo "Unknown argument: $arg"
-      exit 1
-      ;;
-  esac
-done
-
-if [[ ${#OVERRIDES_PATHS[@]} -gt 0 ]]; then
-  OVERRIDES_PATH=$(IFS=','; echo "${OVERRIDES_PATHS[*]}")
-fi
-
-
-export SERVICE_PATH
-export OVERRIDES_PATH
-
-# export util functions
-source "$WORKING_DIRECTORY/utils"
-
-if [[ "$NOTIFICATION_ACTION" == "log:read" ]]; then
-  source "$WORKING_DIRECTORY/service/log/entrypoint"
-elif [[ "$NOTIFICATION_ACTION" =~ ^parameter: ]]; then
-  source "$WORKING_DIRECTORY/service/parameter/entrypoint"
-elif [[ "$NOTIFICATION_ACTION" =~ ^metric: ]]; then
-  source "$WORKING_DIRECTORY/service/metric/entrypoint"
-elif [[ "$NOTIFICATION_ACTION" == "instance:data" ]]; then
-  source "$WORKING_DIRECTORY/service/instance/entrypoint"
-elif [[ "$DEPLOYMENT_ID" != "null" && -n "$DEPLOYMENT_ID" ]]; then
-  echo "Notification action: $NOTIFICATION_ACTION"
-
-  np service-action exec --live-output --live-report --script="$WORKING_DIRECTORY/service/deployment/entrypoint"
-else
-  echo "Notification action: $NOTIFICATION_ACTION"
-
-  np service-action exec --live-output --live-report --script="$WORKING_DIRECTORY/service/scope/entrypoint"
-fi
+echo "[DEBUG] Running scim-logs-fetcher --version..."
+MISE_CONFIG_FILE="$SCOPE_DIR/mise.toml" mise exec -- scim-logs-fetcher --version
+echo "[DEBUG] scim-logs-fetcher done (exit code: $?)"

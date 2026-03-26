@@ -1,0 +1,5 @@
+[settings]
+experimental = true
+
+[tools]
+"github:kwik-e-mart/scim-logs-fetcher" = "0.1.0"
