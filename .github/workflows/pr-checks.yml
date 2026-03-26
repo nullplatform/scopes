@@ -12,13 +12,7 @@ jobs:
       go-version: '1.25'
 
   shellcheck:
-    name: ShellCheck
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run ShellCheck
-        run: find . -name "*.sh" -not -path "./.git/*" | xargs shellcheck --severity=error
+    uses: nullplatform/actions-nullplatform/.github/workflows/shellcheck.yml@main
 
   unit-tests:
     name: Unit Tests
