@@ -3,11 +3,12 @@
 SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
 
 HTTPROUTE_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
-MAX_WAIT_SECONDS=120
-CHECK_INTERVAL=10
+MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-120}
+CHECK_INTERVAL=${CHECK_INTERVAL:-10}
 elapsed=0
 
-echo "Waiting for HTTPRoute [$HTTPROUTE_NAME] reconciliation..."
+echo "🔍 Verifying HTTPRoute reconciliation..."
+echo "📋 HTTPRoute: $HTTPROUTE_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
 
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     sleep $CHECK_INTERVAL
@@ -17,8 +18,7 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     parents_count=$(echo "$httproute_json" | jq '.status.parents | length // 0')
 
     if [ "$parents_count" -eq 0 ]; then
-        echo "HTTPRoute is pending sync (no parent status yet). Waiting..."
-
+        echo "📝 HTTPRoute pending sync (no parent status yet)... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
         elapsed=$((elapsed + CHECK_INTERVAL))
         continue
     fi
@@ -27,7 +27,7 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     conditions_count=$(echo "$conditions" | jq 'length')
 
     if [ "$conditions_count" -eq 0 ]; then
-        echo "HTTPRoute is pending sync (no conditions yet). Waiting..."
+        echo "📝 HTTPRoute pending sync (no conditions yet)... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
         elapsed=$((elapsed + CHECK_INTERVAL))
         continue
     fi
@@ -41,76 +41,82 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     resolved_message=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .message')
 
     if [ "$accepted_status" == "True" ] && [ "$resolved_status" == "True" ]; then
-        echo "✓ HTTPRoute was successfully reconciled"
-        echo "  - Accepted: True"
-        echo "  - ResolvedRefs: True"
+        echo "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
         return 0
     fi
 
     # Check for certificate/TLS errors
     if echo "$accepted_message $resolved_message" | grep -qi "certificate\|tls\|secret.*not found"; then
-        echo "✗ Certificate/TLS error detected"
-        echo "Root cause: TLS certificate or secret configuration issue"
-        if [ "$accepted_status" == "False" ]; then
-            echo "Accepted condition: $accepted_reason - $accepted_message"
-        fi
-        if [ "$resolved_status" == "False" ]; then
-            echo "ResolvedRefs condition: $resolved_reason - $resolved_message"
-        fi
-        echo ""
-        echo "To fix this issue:"
-        echo "  1. Verify the TLS secret exists in the correct namespace"
-        echo "  2. Check the certificate is valid and not expired"
-        echo "  3. Ensure the Gateway references the correct certificate secret"
+        echo "❌ Certificate/TLS error detected" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - TLS secret does not exist in namespace $K8S_NAMESPACE" >&2
+        echo "   - Certificate is invalid or expired" >&2
+        echo "   - Gateway references incorrect certificate secret" >&2
+        [ "$accepted_status" == "False" ] && echo "   - Accepted: $accepted_reason - $accepted_message" >&2
+        [ "$resolved_status" == "False" ] && echo "   - ResolvedRefs: $resolved_reason - $resolved_message" >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - Verify TLS secret: kubectl get secret -n $K8S_NAMESPACE | grep tls" >&2
+        echo "   - Check certificate validity" >&2
+        echo "   - Ensure Gateway references the correct secret" >&2
         exit 1
     fi
 
     # Check for backend service errors
     if echo "$resolved_message" | grep -qi "service.*not found\|backend.*not found"; then
-        echo "✗ Backend service error detected"
-        echo "Root cause: Referenced service does not exist"
-        echo "Message: $resolved_message"
-        echo ""
-        echo "To fix this issue:"
-        echo "  1. Verify the backend service name is correct"
-        echo "  2. Check the service exists in the namespace: kubectl get svc -n $K8S_NAMESPACE"
-        echo "  3. Ensure the service has ready endpoints"
+        echo "❌ Backend service error detected" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - Referenced service does not exist" >&2
+        echo "   - Service name is misspelled in HTTPRoute" >&2
+        echo "   - Message: $resolved_message" >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - List services: kubectl get svc -n $K8S_NAMESPACE" >&2
+        echo "   - Verify backend service name in HTTPRoute" >&2
+        echo "   - Ensure service has ready endpoints" >&2
         exit 1
     fi
 
     # Accepted=False is an error
     if [ "$accepted_status" == "False" ]; then
-        echo "✗ HTTPRoute was not accepted by the Gateway"
-        echo "Reason: $accepted_reason"
-        echo "Message: $accepted_message"
-        echo ""
-        echo "All conditions:"
-        echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason)) - \(.message)"'
+        echo "❌ HTTPRoute not accepted by Gateway" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - Reason: $accepted_reason" >&2
+        echo "   - Message: $accepted_message" >&2
+        echo "📋 All conditions:" >&2
+        echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason)) - \(.message)"' >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - Check Gateway configuration" >&2
+        echo "   - Verify HTTPRoute spec matches Gateway requirements" >&2
         exit 1
     fi
 
     # ResolvedRefs=False is an error
     if [ "$resolved_status" == "False" ]; then
-        echo "✗ HTTPRoute references could not be resolved"
-        echo "Reason: $resolved_reason"
-        echo "Message: $resolved_message"
-        echo ""
-        echo "All conditions:"
-        echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason)) - \(.message)"'
+        echo "❌ HTTPRoute references could not be resolved" >&2
+        echo "💡 Possible causes:" >&2
+        echo "   - Reason: $resolved_reason" >&2
+        echo "   - Message: $resolved_message" >&2
+        echo "📋 All conditions:" >&2
+        echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason)) - \(.message)"' >&2
+        echo "🔧 How to fix:" >&2
+        echo "   - Verify all referenced services exist" >&2
+        echo "   - Check backend service ports match" >&2
         exit 1
     fi
 
-    echo "⚠ HTTPRoute is being reconciled..."
-    echo "Current status:"
-    echo "$conditions" | jq -r '.[] | "  - \(.type): \(.status) (\(.reason))"'
-    echo "Waiting for reconciliation to complete..."
+    echo "📝 HTTPRoute reconciling... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
+    echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason))"'
     elapsed=$((elapsed + CHECK_INTERVAL))
 done
 
-echo "✗ Timeout waiting for HTTPRoute reconciliation after ${MAX_WAIT_SECONDS} seconds"
-echo "Current conditions:"
+echo "❌ Timeout waiting for HTTPRoute reconciliation after ${MAX_WAIT_SECONDS}s" >&2
+echo "💡 Possible causes:" >&2
+echo "   - Gateway controller is not running" >&2
+echo "   - Network policies blocking reconciliation" >&2
+echo "   - Resource constraints on controller" >&2
+echo "📋 Current conditions:" >&2
 httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
-echo "$httproute_json" | jq -r '.status.parents[0].conditions[] | "  - \(.type): \(.status) (\(.reason)) - \(.message)"'
-echo ""
-echo "Verify your Gateway and Istio configuration"
+echo "$httproute_json" | jq -r '.status.parents[0].conditions[] | "   - \(.type): \(.status) (\(.reason)) - \(.message)"' >&2
+echo "🔧 How to fix:" >&2
+echo "   - Check Gateway controller logs" >&2
+echo "   - Verify Gateway and Istio configuration" >&2
 exit 1

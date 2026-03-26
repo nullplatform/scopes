@@ -1,6 +1,7 @@
 provider_categories:
   - container-orchestration
   - cloud-providers
+  - scope-configurations
 configuration:
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
@@ -18,6 +19,7 @@ configuration:
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"
   SERVICE_ACCOUNT_TEMPLATE: "$SERVICE_PATH/scope/templates/service-account.yaml.tpl"
+  LOG_LEVEL: info
 #  TRAFFIC_CONTAINER_IMAGE: "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
 #  TRAFFIC_MANAGER_CONFIG_MAP: traffic-manager-configuration
   IMAGE_PULL_SECRETS:

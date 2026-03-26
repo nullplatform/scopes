@@ -3,6 +3,8 @@
 PLATFORM=$(uname | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
+[ "$ARCH" = "aarch64" ] && ARCH="arm64"
+
 KUBE_LOGGER_SCRIPT="$SERVICE_PATH/log/kube-logger-go/bin/$PLATFORM/exec-$ARCH"
 
 if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then

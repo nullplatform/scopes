@@ -1,8 +1,12 @@
 #!/bin/bash
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../../logging"; fi
 
 get_azure_token() {
+    log debug "📡 Fetching Azure access token..."
+
     local token_response=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X POST \
         "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
@@ -10,27 +14,46 @@ get_azure_token() {
         -d "client_secret=${AZURE_CLIENT_SECRET}" \
         -d "scope=https://management.azure.com/.default" \
         -d "grant_type=client_credentials" 2>&1) || {
-        echo "ERROR: Failed to get Azure access token" >&2
+        log error "❌ Failed to get Azure access token"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The Azure credentials may be invalid or the token endpoint is unreachable"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET are set correctly"
+        log error ""
         return 1
     }
-    
+
     local http_code=$(echo "$token_response" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
     token_response=$(echo "$token_response" | sed 's/__HTTP_CODE__:[0-9]*//')
-    
+
     if [ "${http_code:-0}" -ne 200 ]; then
-        echo "ERROR: Failed to get Azure access token. HTTP code: ${http_code:-unknown}" >&2
-        echo "Response: $token_response" >&2
+        log error "❌ Failed to get Azure access token (HTTP ${http_code:-unknown})"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The Azure credentials may be invalid or expired"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET are set correctly"
+        log error ""
         return 1
     fi
-    
+
     local access_token=$(echo "$token_response" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
-    
+
     if [[ -z "$access_token" ]]; then
-        echo "ERROR: No access token in response" >&2
-        echo "Response: $token_response" >&2
+        log error "❌ No access token in Azure response"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The token endpoint returned an unexpected response format"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET are set correctly"
+        log error ""
         return 1
     fi
-    
+
     echo "$access_token"
 }
 
@@ -52,40 +75,49 @@ for arg in "$@"; do
   esac
 done
 
-# Get IP based on gateway type
+log debug "🔍 Managing Azure DNS record..."
+log debug "📋 Action: $ACTION | Gateway: $GATEWAY_NAME | Zone: $HOSTED_ZONE_NAME"
+
 if [ "${GATEWAY_TYPE:-istio}" = "aro_cluster" ]; then
-    # Get IP from OpenShift router service
+    log debug "📡 Getting IP from ARO router service..."
     GATEWAY_IP=$(kubectl get svc router-default -n openshift-ingress \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-    
+
     if [ -z "$GATEWAY_IP" ]; then
-        echo "Error: Could not get IP address from ARO router service" >&2
-        echo "Falling back to istio gateway..." >&2
-        # Fall back to istio gateway
+        log warn "⚠️  ARO router IP not found, falling back to istio gateway..."
         GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
             -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
     fi
 else
-    # Default: Get IP from Gateway resource (istio)
+    log debug "📡 Getting IP from gateway '$GATEWAY_NAME'..."
     GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
         -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
 fi
 
 if [ -z "$GATEWAY_IP" ]; then
-    echo "Error: Could not get IP address for gateway $GATEWAY_NAME" >&2
+    log error "❌ Could not get IP address for gateway '$GATEWAY_NAME'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The gateway may not be ready or the name is incorrect"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check gateway status: kubectl get gateway $GATEWAY_NAME -n gateways"
+    log error ""
     exit 1
 fi
+
+log info "✅ Gateway IP: $GATEWAY_IP"
 
 SCOPE_SUBDOMAIN="${SCOPE_SUBDOMAIN:-}"
 if [ -z "$SCOPE_SUBDOMAIN" ]; then
     SCOPE_SUBDOMAIN="${SCOPE_DOMAIN%.$HOSTED_ZONE_NAME}"
 fi
 
+log debug "📋 Subdomain: $SCOPE_SUBDOMAIN | Zone: $HOSTED_ZONE_NAME | IP: $GATEWAY_IP"
+
 if [ "$ACTION" = "CREATE" ]; then
-    # Get access token
     ACCESS_TOKEN=$(get_azure_token) || exit 1
 
-    # Create or update A record
     RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
 
     RECORD_BODY=$(cat <<EOF
@@ -101,45 +133,53 @@ if [ "$ACTION" = "CREATE" ]; then
 }
 EOF
 )
-    
+
+    log debug "📝 Creating Azure DNS record..."
     AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X PUT \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
         -d "${RECORD_BODY}" 2>&1) || {
-        echo "ERROR: Failed to create/update Azure DNS record" >&2
+        log error "❌ Failed to create Azure DNS record"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The Azure API may be unreachable or the credentials are invalid"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Verify subscription and resource group are correct"
+        log error "   • Check Azure service principal permissions for DNS zone"
+        log error ""
         exit 1
     }
-    
-    # Extract HTTP code
+
     http_code=$(echo "$AZURE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
     AZURE_RESPONSE=$(echo "$AZURE_RESPONSE" | sed 's/__HTTP_CODE__:[0-9]*//')
 
-    # Check if response contains error
-    if echo "$AZURE_RESPONSE" | grep -q '"error"'; then
-        echo "ERROR: Azure API returned error" >&2
-        echo "Response: $AZURE_RESPONSE" >&2
+    if echo "$AZURE_RESPONSE" | grep -q '"error"' || [ "${http_code:-0}" -lt 200 ] || [ "${http_code:-0}" -gt 299 ]; then
+        log error "❌ Azure API returned an error creating DNS record (HTTP ${http_code:-unknown})"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The DNS zone or resource group may not exist, or permissions are insufficient"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Verify DNS zone '$HOSTED_ZONE_NAME' exists in resource group '$HOSTED_ZONE_RG'"
+        log error "   • Check Azure service principal permissions"
+        log error ""
         exit 1
     fi
-    
-    # Check HTTP status code
-    if [ "${http_code:-0}" -lt 200 ] || [ "${http_code:-0}" -gt 299 ]; then
-        echo "ERROR: Azure API returned HTTP code: ${http_code:-unknown}" >&2
-        echo "Response: $AZURE_RESPONSE" >&2
-        exit 1
-    fi
-    
-    echo "DNS record created: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME -> $GATEWAY_IP"
-    
+
+    log info "✅ DNS record created: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME -> $GATEWAY_IP"
+
 elif [ "$ACTION" = "DELETE" ]; then
-    
+
     ACCESS_TOKEN=$(get_azure_token) || exit 1
-    
+
     RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
-    
+
+    log debug "📝 Deleting Azure DNS record..."
     curl --http1.1 -s -X DELETE \
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}"
-    
-    echo "DNS record deleted: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
+
+    log info "✅ DNS record deleted: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
 fi
