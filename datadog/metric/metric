@@ -105,10 +105,10 @@ build_datadog_query() {
   case "$metric" in
     # Custom nullplatform metrics with specific logic
     "http.healthcheck_count")
-      echo "sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step)"
+      echo "sum:nullplatform.scope.http_requests{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step)"
       ;;
     "http.healthcheck_fail")
-      echo "sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step) - sum:nullplatform.scope.request_count{$filters,is_healthcheck:yes,quality:ok_2xx_3xx} by {instance_id}.rollup(sum, $rollup_step)"
+      echo "sum:nullplatform.scope.http_requests{$filters,is_healthcheck:yes} by {instance_id}.rollup(sum, $rollup_step) - sum:nullplatform.scope.http_requests{$filters,is_healthcheck:yes,quality:ok_2xx_3xx} by {instance_id}.rollup(sum, $rollup_step)"
       ;;
     "system.memory_usage_percentage")
       echo "avg:nullplatform.scope.memory_usage_percentage{$filters}$group_clause"
@@ -120,13 +120,13 @@ build_datadog_query() {
       echo "avg:nullplatform.scope.memory_usage_kb{$filters}$group_clause"
       ;;
     "http.response_time")
-      echo "sum:nullplatform.scope.response_time{$filters}$group_clause.rollup(sum, 60) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)"
+      echo "sum:nullplatform.scope.http_response_time{$filters}$group_clause.rollup(sum, 60) / sum:nullplatform.scope.http_requests{$filters}$group_clause.rollup(sum, 60)"
       ;;
     "http.rpm")
-      echo "sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)"
+      echo "sum:nullplatform.scope.http_requests{$filters}$group_clause.rollup(sum, 60)"
       ;;
     "http.error_rate")
-      echo "((sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60) - sum:nullplatform.scope.request_count{$filters,quality:ok_2xx_3xx}$group_clause.rollup(sum, 60)) / sum:nullplatform.scope.request_count{$filters}$group_clause.rollup(sum, 60)) * 100"
+      echo "((sum:nullplatform.scope.http_requests{$filters}$group_clause.rollup(sum, 60) - sum:nullplatform.scope.http_requests{$filters,quality:ok_2xx_3xx}$group_clause.rollup(sum, 60)) / sum:nullplatform.scope.http_requests{$filters}$group_clause.rollup(sum, 60)) * 100"
       ;;
     "trace.http.request.p99")
       local env_name=$(echo "$CONTEXT" | jq -r '.service.dimensions.environment')
