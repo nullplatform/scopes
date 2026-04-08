@@ -1,0 +1,249 @@
+#!/bin/bash
+
+# Resolves the ALB name to use for the scope's ingress.
+#
+# When additional balancers are configured, queries AWS to find the ALB
+# with the fewest listener rules, distributing scopes across ALBs evenly.
+#
+# At deployment time, instead of recalculating, the script looks up the ALB
+# already assigned to this scope (via existing K8s ingress or Route53 record)
+# to ensure consistency between DNS and ingress routing.
+#
+# Inputs (env vars):
+#   INGRESS_VISIBILITY  - "internet-facing" or "internal"
+#   CONTEXT             - JSON with provider configuration
+#   REGION              - AWS region (for elbv2 API calls)
+#
+# Outputs (env vars):
+#   ALB_NAME            - The resolved ALB name to use
+
+_RESOLVE_BALANCER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! type -t log >/dev/null 2>&1; then
+  source "$_RESOLVE_BALANCER_DIR/../../logging"
+fi
+
+if ! type -t get_config_value >/dev/null 2>&1; then
+  source "$_RESOLVE_BALANCER_DIR/../../utils/get_config_value"
+fi
+
+# Queries AWS ELBv2 to count listener rules on an ALB's HTTPS (443) listener.
+# The default rule is excluded since it always exists.
+# Usage: get_alb_rule_count <alb_name>
+# Returns: integer rule count on stdout, non-zero exit on failure
+if ! type -t get_alb_rule_count >/dev/null 2>&1; then
+get_alb_rule_count() {
+  local alb_name="$1"
+
+  local alb_arn
+  alb_arn=$(aws elbv2 describe-load-balancers \
+    --names "$alb_name" \
+    --region "$REGION" \
+    --query 'LoadBalancers[0].LoadBalancerArn' \
+    --output text 2>/dev/null) || return 1
+
+  if [ -z "$alb_arn" ] || [ "$alb_arn" = "None" ]; then
+    return 1
+  fi
+
+  local listener_arn
+  listener_arn=$(aws elbv2 describe-listeners \
+    --load-balancer-arn "$alb_arn" \
+    --region "$REGION" \
+    --query 'Listeners[?Port==`443`].ListenerArn | [0]' \
+    --output text 2>/dev/null) || return 1
+
+  if [ -z "$listener_arn" ] || [ "$listener_arn" = "None" ]; then
+    return 1
+  fi
+
+  local rules_json
+  rules_json=$(aws elbv2 describe-rules \
+    --listener-arn "$listener_arn" \
+    --region "$REGION" \
+    --output json 2>/dev/null) || return 1
+
+  # Exclude the default rule (always present, not a routing rule)
+  echo "$rules_json" | jq '[.Rules[] | select(.IsDefault == false)] | length'
+}
+fi
+
+# Looks up the ALB name from an existing Kubernetes ingress for this scope.
+# Returns the ALB name on stdout, or non-zero exit if no ingress found.
+if ! type -t get_alb_from_ingress >/dev/null 2>&1; then
+get_alb_from_ingress() {
+  local scope_id="$1"
+  local namespace="$2"
+
+  local alb
+  alb=$(kubectl get ingress -l "scope_id=$scope_id" -n "$namespace" \
+    -o jsonpath='{.items[0].metadata.annotations.alb\.ingress\.kubernetes\.io/load-balancer-name}' 2>/dev/null) || return 1
+
+  if [ -z "$alb" ] || [ "$alb" = "null" ]; then
+    return 1
+  fi
+
+  echo "$alb"
+}
+fi
+
+# Looks up the Route53 A-record alias for the scope domain, then resolves
+# the ALB DNS name back to an ALB name.
+# Returns the ALB name on stdout, or non-zero exit if not found.
+if ! type -t get_alb_from_route53 >/dev/null 2>&1; then
+get_alb_from_route53() {
+  local domain="$1"
+  local region="$2"
+
+  local zone_id
+  zone_id=$(echo "$CONTEXT" | jq -r '
+    .providers["cloud-providers"].networking.hosted_public_zone_id //
+    .providers["cloud-providers"].networking.hosted_zone_id //
+    empty
+  ') || return 1
+
+  if [ -z "$zone_id" ]; then
+    return 1
+  fi
+
+  local alias_dns
+  alias_dns=$(aws route53 list-resource-record-sets \
+    --hosted-zone-id "$zone_id" \
+    --query "ResourceRecordSets[?Name=='${domain}.' && Type=='A'].AliasTarget.DNSName | [0]" \
+    --output text \
+    --region "$region" 2>/dev/null) || return 1
+
+  if [ -z "$alias_dns" ] || [ "$alias_dns" = "None" ]; then
+    return 1
+  fi
+
+  # Strip trailing dot from DNS name
+  alias_dns="${alias_dns%.}"
+
+  # Reverse-lookup: find ALB name from its DNS name
+  local alb_name
+  alb_name=$(aws elbv2 describe-load-balancers \
+    --query "LoadBalancers[?DNSName=='${alias_dns}'].LoadBalancerName | [0]" \
+    --output text \
+    --region "$region" 2>/dev/null) || return 1
+
+  if [ -z "$alb_name" ] || [ "$alb_name" = "None" ]; then
+    return 1
+  fi
+
+  echo "$alb_name"
+}
+fi
+
+# =============================================================================
+# Main logic
+# =============================================================================
+
+# Resolve the base ALB name from configuration
+ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
+
+if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+  ALB_NAME=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.balancer_public_name' \
+    --provider '.providers["container-orchestration"].balancer.public_name' \
+    --default "$ALB_NAME"
+  )
+else
+  ALB_NAME=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.balancer_private_name' \
+    --provider '.providers["container-orchestration"].balancer.private_name' \
+    --default "$ALB_NAME"
+  )
+fi
+
+# Check for additional balancers
+ADDITIONAL_BALANCERS=""
+if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+  ADDITIONAL_BALANCERS=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.additional_public_balancers' \
+    --default ""
+  )
+else
+  ADDITIONAL_BALANCERS=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.additional_private_balancers' \
+    --default ""
+  )
+fi
+
+# When additional balancers are configured, resolve which ALB to use
+if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
+
+  RESOLVED=false
+
+  # At deployment time, look up the ALB already assigned to this scope
+  # to ensure consistency with the Route53 record created at scope time.
+  DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id // empty')
+
+  if [ -n "$DEPLOYMENT_ID" ]; then
+    SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+    K8S_NS=$(echo "$CONTEXT" | jq -r '
+      .providers["scope-configurations"].cluster.namespace //
+      .providers["container-orchestration"].cluster.namespace //
+      "nullplatform"
+    ')
+    SCOPE_DOMAIN_VAL=$(echo "$CONTEXT" | jq -r '.scope.domain')
+
+    EXISTING_ALB=""
+
+    # Try ingress first (fastest, covers 2nd+ deployments)
+    EXISTING_ALB=$(get_alb_from_ingress "$SCOPE_ID" "$K8S_NS" 2>/dev/null) || true
+
+    if [ -n "$EXISTING_ALB" ]; then
+      log debug "📋 Found ALB '$EXISTING_ALB' from existing ingress for scope $SCOPE_ID"
+    else
+      # Fall back to Route53 record (covers first deployment after scope creation)
+      EXISTING_ALB=$(get_alb_from_route53 "$SCOPE_DOMAIN_VAL" "$REGION" 2>/dev/null) || true
+
+      if [ -n "$EXISTING_ALB" ]; then
+        log debug "📋 Found ALB '$EXISTING_ALB' from Route53 record for $SCOPE_DOMAIN_VAL"
+      fi
+    fi
+
+    if [ -n "$EXISTING_ALB" ]; then
+      log info "📝 Using existing ALB '$EXISTING_ALB' (consistent with DNS)"
+      ALB_NAME="$EXISTING_ALB"
+      RESOLVED=true
+    else
+      log warn "⚠️  Could not determine existing ALB from infrastructure, recalculating"
+    fi
+  fi
+
+  # Scope creation time (or deployment fallback): pick the ALB with fewest rules
+  if [ "$RESOLVED" = false ]; then
+    log debug "🔍 Additional balancers configured, resolving least-loaded ALB..."
+
+    CANDIDATES=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
+
+    log debug "📋 Candidate balancers: $(echo "$CANDIDATES" | paste -sd ',' - | sed 's/,/, /g')"
+
+    MIN_RULES=-1
+    BEST_ALB="$ALB_NAME"
+
+    for CANDIDATE in $CANDIDATES; do
+      RULE_COUNT=$(get_alb_rule_count "$CANDIDATE" 2>/dev/null) || {
+        log warn "⚠️  Could not query rules for ALB '$CANDIDATE', skipping"
+        continue
+      }
+
+      log debug "📋 ALB '$CANDIDATE': $RULE_COUNT rules"
+
+      if [ "$MIN_RULES" -eq -1 ] || [ "$RULE_COUNT" -lt "$MIN_RULES" ]; then
+        MIN_RULES=$RULE_COUNT
+        BEST_ALB="$CANDIDATE"
+      fi
+    done
+
+    if [ "$BEST_ALB" != "$ALB_NAME" ]; then
+      log info "📝 Selected ALB '$BEST_ALB' ($MIN_RULES rules) over default '$ALB_NAME'"
+    fi
+
+    ALB_NAME="$BEST_ALB"
+  fi
+fi
+
+export ALB_NAME
