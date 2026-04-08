@@ -208,21 +208,7 @@ K8S_MODIFIERS=$(get_config_value \
 )
 K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
 
-ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
-
-if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
-    ALB_NAME=$(get_config_value \
-      --provider '.providers["scope-configurations"].networking.balancer_public_name' \
-      --provider '.providers["container-orchestration"].balancer.public_name' \
-      --default "$ALB_NAME"
-    )
-else
-    ALB_NAME=$(get_config_value \
-      --provider '.providers["scope-configurations"].networking.balancer_private_name' \
-      --provider '.providers["container-orchestration"].balancer.private_name' \
-      --default "$ALB_NAME"
-    )
-fi
+source "$SCRIPT_DIR/networking/resolve_balancer"
 
 NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
 APPLICATION_SLUG=$(echo "$CONTEXT" | jq -r .application.slug)

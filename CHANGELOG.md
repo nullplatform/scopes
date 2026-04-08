@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add unit tests for **k8s/backup** module (backup_templates and s3 operations)
 - Add ALB capacity validation on scope creation. Requires additional AWS permissions: `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeListeners`, `elasticloadbalancing:DescribeRules`
 - Add ALB target group capacity validation on deployment. Requires additional AWS permission: `elasticloadbalancing:DescribeTargetGroups`
+- Extract ALB resolution into dedicated **k8s/scope/networking/resolve_balancer** script
+- Add support for distributing scopes across multiple ALBs via `additional_public_balancers` and `additional_private_balancers` provider configuration (selects the ALB with fewest listener rules)
+- Ensure deployment-time ALB consistency with DNS by looking up the existing ALB from K8s ingress or Route53 record instead of recalculating
+- Add 25 BATS tests for the resolve_balancer module
+- **New AWS permission required** (only when using additional balancers): `route53:ListResourceRecordSets` — used at deployment time to look up the ALB assigned during scope creation
 
 ## [1.10.1] - 2026-02-13
 - Hotfix on wait_deployment_iteration
