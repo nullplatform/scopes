@@ -1,6 +1,15 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 steps:
+  - name: load logging
+    type: script
+    file: "$SERVICE_PATH/logging"
+    output:
+      - name: log
+        type: function
+        parameters:
+          level: string
+          message: string
   - name: load resource helpers
     type: script
     file: "$SERVICE_PATH/scope/require_resource"

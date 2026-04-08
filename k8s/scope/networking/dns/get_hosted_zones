@@ -1,6 +1,4 @@
 #!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../../../logging"; fi
 
 log debug "🔍 Getting hosted zones..."
 HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id')

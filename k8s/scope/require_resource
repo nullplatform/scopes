@@ -3,8 +3,6 @@
 # Shared resource validation functions for scope workflows.
 # Loaded as a workflow step, exports functions for subsequent steps.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! type -t log >/dev/null 2>&1; then source "$SCRIPT_DIR/../logging"; fi
 
 require_hpa() {
   local hpa_name="$1"
