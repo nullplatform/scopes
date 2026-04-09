@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/../utils/get_config_value"
 ALB_MAX_CAPACITY=$(get_config_value \
   --env ALB_MAX_CAPACITY \
   --provider '.providers["scope-configurations"].networking.alb_max_capacity' \
+  --provider '.providers["container-orchestration"].balancer.alb_capacity_threshold' \
   --default "75"
 )
 
@@ -128,7 +129,7 @@ if [[ "$TOTAL_RULES" -ge "$ALB_MAX_CAPACITY" ]]; then
     log error ""
     log error "🔧 How to fix:"
     log error "   • Remove unused scopes or ingress rules from the ALB"
-    log error "   • Increase ALB_MAX_CAPACITY in values.yaml or scope-configurations provider (AWS limit is 100 per listener)"
+    log error "   • Increase ALB_MAX_CAPACITY in values.yaml or container-orchestration provider (AWS limit is 100 per listener)"
     log error "   • Request an AWS service quota increase for rules per ALB listener"
     log error "   • Consider using a separate ALB for additional scopes"
     log error ""
