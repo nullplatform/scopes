@@ -3,12 +3,11 @@
 # Publishes ALB rule count and target group count as custom metrics
 # to CloudWatch or Datadog for continuous monitoring and alerting.
 
-ALB_RECONCILIATION_ENABLED="${ALB_RECONCILIATION_ENABLED:-false}"
 ALB_METRICS_PUBLISH_ENABLED="${ALB_METRICS_PUBLISH_ENABLED:-false}"
 ALB_METRICS_PUBLISH_TARGET="${ALB_METRICS_PUBLISH_TARGET:-cloudwatch}"
 
-if [ "$ALB_RECONCILIATION_ENABLED" != "true" ] || [ "$ALB_METRICS_PUBLISH_ENABLED" != "true" ]; then
-    echo "ℹ ALB metrics publishing skipped (ALB_RECONCILIATION_ENABLED=$ALB_RECONCILIATION_ENABLED, ALB_METRICS_PUBLISH_ENABLED=$ALB_METRICS_PUBLISH_ENABLED)"
+if [ "$ALB_METRICS_PUBLISH_ENABLED" != "true" ]; then
+    echo "ℹ ALB metrics publishing skipped (ALB_METRICS_PUBLISH_ENABLED=$ALB_METRICS_PUBLISH_ENABLED)"
     return 0
 fi
 
