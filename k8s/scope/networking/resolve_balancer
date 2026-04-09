@@ -85,28 +85,36 @@ get_alb_from_route53() {
     return 1
   fi
 
+  # Use --start-record-name to jump directly to the record instead of
+  # scanning from the beginning (list-resource-record-sets does not
+  # auto-paginate and returns max 300 per page).
   local alias_dns
   alias_dns=$(aws route53 list-resource-record-sets \
     --hosted-zone-id "$zone_id" \
+    --start-record-name "${domain}." \
+    --start-record-type "A" \
+    --max-items 1 \
     --query "ResourceRecordSets[?Name=='${domain}.' && Type=='A'].AliasTarget.DNSName | [0]" \
     --output text \
     --region "$region" 2>/dev/null) || return 1
 
-  if [ -z "$alias_dns" ] || [ "$alias_dns" = "None" ]; then
+  if [ -z "$alias_dns" ] || [ "$alias_dns" = "None" ] || [ "$alias_dns" = "null" ]; then
     return 1
   fi
 
   # Strip trailing dot from DNS name
   alias_dns="${alias_dns%.}"
 
-  # Reverse-lookup: find ALB name from its DNS name
+  # Reverse-lookup: find ALB name from its DNS name (case-insensitive match)
   local alb_name
   alb_name=$(aws elbv2 describe-load-balancers \
-    --query "LoadBalancers[?DNSName=='${alias_dns}'].LoadBalancerName | [0]" \
-    --output text \
-    --region "$region" 2>/dev/null) || return 1
+    --region "$region" \
+    --output json 2>/dev/null \
+    | jq -r --arg dns "$alias_dns" \
+      '.LoadBalancers[] | select(.DNSName | ascii_downcase == ($dns | ascii_downcase)) | .LoadBalancerName' \
+    | head -1) || return 1
 
-  if [ -z "$alb_name" ] || [ "$alb_name" = "None" ]; then
+  if [ -z "$alb_name" ]; then
     return 1
   fi
 
