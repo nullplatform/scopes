@@ -77,10 +77,10 @@ echo "  Target Groups: $TG_COUNT"
 # Publish metrics based on target
 case "$ALB_METRICS_PUBLISH_TARGET" in
     cloudwatch)
-        echo "Publishing to CloudWatch (namespace: Nullplatform/ALB)..."
+        echo "Publishing to CloudWatch (namespace: nullplatform/ApplicationELB)..."
 
         aws cloudwatch put-metric-data \
-            --namespace "Nullplatform/ALB" \
+            --namespace "nullplatform/ApplicationELB" \
             --metric-data "[
                 {\"MetricName\":\"RuleCount\",\"Value\":$TOTAL_RULES,\"Unit\":\"Count\",\"Dimensions\":[{\"Name\":\"ALBName\",\"Value\":\"$ALB_NAME\"}]},
                 {\"MetricName\":\"TargetGroupCount\",\"Value\":$TG_COUNT,\"Unit\":\"Count\",\"Dimensions\":[{\"Name\":\"ALBName\",\"Value\":\"$ALB_NAME\"}]}
@@ -111,13 +111,13 @@ case "$ALB_METRICS_PUBLISH_TARGET" in
             -d "{
                 \"series\": [
                     {
-                        \"metric\": \"nullplatform.alb.rule_count\",
+                        \"metric\": \"nullplatform.applicationelb.rule_count\",
                         \"type\": 1,
                         \"points\": [{\"timestamp\": $TIMESTAMP, \"value\": $TOTAL_RULES}],
                         \"tags\": [\"alb_name:$ALB_NAME\", \"region:$REGION\"]
                     },
                     {
-                        \"metric\": \"nullplatform.alb.target_group_count\",
+                        \"metric\": \"nullplatform.applicationelb.target_group_count\",
                         \"type\": 1,
                         \"points\": [{\"timestamp\": $TIMESTAMP, \"value\": $TG_COUNT}],
                         \"tags\": [\"alb_name:$ALB_NAME\", \"region:$REGION\"]
