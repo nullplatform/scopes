@@ -67,4 +67,7 @@ steps:
           file: "$SERVICE_PATH/deployment/wait_deployment_active"
           configuration:
             TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
+        - name: publish_alb_metrics
+          type: script
+          file: "$SERVICE_PATH/deployment/publish_alb_metrics"
 
