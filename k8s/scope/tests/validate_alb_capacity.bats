@@ -123,7 +123,7 @@ teardown() {
   assert_contains "$output" "Too many scopes or ingress rules are configured on this ALB"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "Remove unused scopes or ingress rules from the ALB"
-  assert_contains "$output" "Increase ALB_MAX_CAPACITY in values.yaml or scope-configurations provider (AWS limit is 100 per listener)"
+  assert_contains "$output" "Increase ALB_MAX_CAPACITY in values.yaml or container-orchestration provider (AWS limit is 100 per listener)"
   assert_contains "$output" "Request an AWS service quota increase for rules per ALB listener"
   assert_contains "$output" "Consider using a separate ALB for additional scopes"
 }
@@ -193,6 +193,25 @@ teardown() {
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 100)"
   assert_contains "$output" "✅ ALB capacity validated: 60/100 rules"
+}
+
+@test "validate_alb_capacity: ALB_MAX_CAPACITY from container-orchestration provider" {
+  export CONTEXT='{"providers":{"container-orchestration":{"balancer":{"alb_capacity_threshold":"50"}}}}'
+  export ALB_MAX_CAPACITY="75"
+
+  run bash "$SCRIPT"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
+}
+
+@test "validate_alb_capacity: scope-configurations takes priority over container-orchestration" {
+  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_capacity":"100"}},"container-orchestration":{"balancer":{"alb_capacity_threshold":"50"}}}}'
+
+  run bash "$SCRIPT"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 100)"
 }
 
 # =============================================================================
