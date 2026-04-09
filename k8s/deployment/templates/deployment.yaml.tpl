@@ -145,8 +145,8 @@ spec:
               value: {{ .scope.capabilities.health_check.path }}
           resources:
             limits:
-              cpu: 93m
-              memory: 64Mi
+              cpu: {{ .container_cpu_in_millicores }}m
+              memory: {{ .container_memory_in_memory }}Mi
             requests:
               cpu: 31m
           livenessProbe:
@@ -198,8 +198,8 @@ spec:
               value: '{{ .port }}'
           resources:
             limits:
-              cpu: 93m
-              memory: 64Mi
+              cpu: {{ $.container_cpu_in_millicores }}m
+              memory: {{ $.container_memory_in_memory }}Mi
             requests:
               cpu: 31m
           livenessProbe:
