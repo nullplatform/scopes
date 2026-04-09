@@ -2,12 +2,13 @@
 
 # Resolves the ALB name to use for the scope's ingress.
 #
-# When additional balancers are configured, queries AWS to find the ALB
-# with the fewest listener rules, distributing scopes across ALBs evenly.
-#
-# At deployment time, instead of recalculating, the script looks up the ALB
-# already assigned to this scope (via existing K8s ingress or Route53 record)
-# to ensure consistency between DNS and ingress routing.
+# Resolution priority:
+#   1. Route53 — if a DNS record already exists for the scope domain,
+#      use the ALB it points to (ensures DNS/ingress consistency)
+#   2. Load balancing — when additional balancers are configured, pick
+#      the ALB with the fewest HTTPS listener rules
+#   3. Provider config — base ALB from scope-configurations or
+#      container-orchestration provider
 #
 # Inputs (env vars):
 #   INGRESS_VISIBILITY  - "internet-facing" or "internal"
@@ -31,7 +32,6 @@ fi
 # The default rule is excluded since it always exists.
 # Usage: get_alb_rule_count <alb_name>
 # Returns: integer rule count on stdout, non-zero exit on failure
-if ! type -t get_alb_rule_count >/dev/null 2>&1; then
 get_alb_rule_count() {
   local alb_name="$1"
 
@@ -66,31 +66,10 @@ get_alb_rule_count() {
   # Exclude the default rule (always present, not a routing rule)
   echo "$rules_json" | jq '[.Rules[] | select(.IsDefault == false)] | length'
 }
-fi
-
-# Looks up the ALB name from an existing Kubernetes ingress for this scope.
-# Returns the ALB name on stdout, or non-zero exit if no ingress found.
-if ! type -t get_alb_from_ingress >/dev/null 2>&1; then
-get_alb_from_ingress() {
-  local scope_id="$1"
-  local namespace="$2"
-
-  local alb
-  alb=$(kubectl get ingress -l "scope_id=$scope_id" -n "$namespace" \
-    -o jsonpath='{.items[0].metadata.annotations.alb\.ingress\.kubernetes\.io/load-balancer-name}' 2>/dev/null) || return 1
-
-  if [ -z "$alb" ] || [ "$alb" = "null" ]; then
-    return 1
-  fi
-
-  echo "$alb"
-}
-fi
 
 # Looks up the Route53 A-record alias for the scope domain, then resolves
 # the ALB DNS name back to an ALB name.
 # Returns the ALB name on stdout, or non-zero exit if not found.
-if ! type -t get_alb_from_route53 >/dev/null 2>&1; then
 get_alb_from_route53() {
   local domain="$1"
   local region="$2"
@@ -133,7 +112,6 @@ get_alb_from_route53() {
 
   echo "$alb_name"
 }
-fi
 
 # =============================================================================
 # Main logic
@@ -156,65 +134,35 @@ else
   )
 fi
 
-# Check for additional balancers
-ADDITIONAL_BALANCERS=""
-if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
-  ADDITIONAL_BALANCERS=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.additional_public_balancers' \
-    --default ""
-  )
-else
-  ADDITIONAL_BALANCERS=$(get_config_value \
-    --provider '.providers["scope-configurations"].networking.additional_private_balancers' \
-    --default ""
-  )
+# Priority 1: Check Route53 for an existing DNS record
+SCOPE_DOMAIN_VAL=$(echo "$CONTEXT" | jq -r '.scope.domain // empty')
+EXISTING_ALB=""
+
+if [ -n "$SCOPE_DOMAIN_VAL" ]; then
+  EXISTING_ALB=$(get_alb_from_route53 "$SCOPE_DOMAIN_VAL" "$REGION" 2>/dev/null) || true
 fi
 
-# When additional balancers are configured, resolve which ALB to use
-if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
-
-  RESOLVED=false
-
-  # At deployment time, look up the ALB already assigned to this scope
-  # to ensure consistency with the Route53 record created at scope time.
-  DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id // empty')
-
-  if [ -n "$DEPLOYMENT_ID" ]; then
-    SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
-    K8S_NS=$(echo "$CONTEXT" | jq -r '
-      .providers["scope-configurations"].cluster.namespace //
-      .providers["container-orchestration"].cluster.namespace //
-      "nullplatform"
-    ')
-    SCOPE_DOMAIN_VAL=$(echo "$CONTEXT" | jq -r '.scope.domain')
-
-    EXISTING_ALB=""
-
-    # Try ingress first (fastest, covers 2nd+ deployments)
-    EXISTING_ALB=$(get_alb_from_ingress "$SCOPE_ID" "$K8S_NS" 2>/dev/null) || true
-
-    if [ -n "$EXISTING_ALB" ]; then
-      log debug "📋 Found ALB '$EXISTING_ALB' from existing ingress for scope $SCOPE_ID"
-    else
-      # Fall back to Route53 record (covers first deployment after scope creation)
-      EXISTING_ALB=$(get_alb_from_route53 "$SCOPE_DOMAIN_VAL" "$REGION" 2>/dev/null) || true
-
-      if [ -n "$EXISTING_ALB" ]; then
-        log debug "📋 Found ALB '$EXISTING_ALB' from Route53 record for $SCOPE_DOMAIN_VAL"
-      fi
-    fi
-
-    if [ -n "$EXISTING_ALB" ]; then
-      log info "📝 Using existing ALB '$EXISTING_ALB' (consistent with DNS)"
-      ALB_NAME="$EXISTING_ALB"
-      RESOLVED=true
-    else
-      log warn "⚠️  Could not determine existing ALB from infrastructure, recalculating"
-    fi
+if [ -n "$EXISTING_ALB" ]; then
+  log info "📝 Using ALB '$EXISTING_ALB' from Route53 record for $SCOPE_DOMAIN_VAL"
+  ALB_NAME="$EXISTING_ALB"
+else
+  # Priority 2: If additional balancers configured, pick the least-loaded one
+  ADDITIONAL_BALANCERS=""
+  if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+    ADDITIONAL_BALANCERS=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.additional_public_balancers' \
+      --provider '.providers["container-orchestration"].balancer.additional_public_names' \
+      --default ""
+    )
+  else
+    ADDITIONAL_BALANCERS=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.additional_private_balancers' \
+      --provider '.providers["container-orchestration"].balancer.additional_private_names' \
+      --default ""
+    )
   fi
 
-  # Scope creation time (or deployment fallback): pick the ALB with fewest rules
-  if [ "$RESOLVED" = false ]; then
+  if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
     log debug "🔍 Additional balancers configured, resolving least-loaded ALB..."
 
     CANDIDATES=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')

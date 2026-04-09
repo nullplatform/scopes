@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ensure deployment-time ALB consistency with DNS by looking up the existing ALB from K8s ingress or Route53 record instead of recalculating
 - Add 25 BATS tests for the resolve_balancer module
 - **New AWS permission required** (only when using additional balancers): `route53:ListResourceRecordSets` — used at deployment time to look up the ALB assigned during scope creation
+- Add support for multiple ALBs
 
 ## [1.10.1] - 2026-02-13
 - Hotfix on wait_deployment_iteration
