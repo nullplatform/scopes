@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES 2>/dev/null || true
 }
 
 # =============================================================================
@@ -617,4 +617,82 @@ SCRIPT
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "Create the ConfigMap: kubectl create configmap test-config -n test-ns --from-file=nginx.conf --from-file=default.conf"
   assert_contains "$output" "Verify the ConfigMap name in your scope configuration"
+}
+
+# =============================================================================
+# CONTAINER_MEMORY_IN_MEMORY Tests (read from ConfigMap)
+# =============================================================================
+@test "container_memory_in_memory: uses values.yaml default when no ConfigMap is configured" {
+  export CONTAINER_MEMORY_IN_MEMORY="64"
+  assert_equal "$CONTAINER_MEMORY_IN_MEMORY" "64"
+}
+
+@test "container_memory_in_memory: reads value from ConfigMap when key exists" {
+  unset CONTAINER_MEMORY_IN_MEMORY
+  CONFIGMAP_KEYS=$'nginx.conf\ndefault.conf\ncontainer_memory_in_memory'
+
+  kubectl() {
+    if [[ "$*" == *"go-template"* && "$*" == *"container_memory_in_memory"* ]]; then
+      echo "128"
+      return 0
+    fi
+  }
+  export -f kubectl
+
+  if echo "$CONFIGMAP_KEYS" | grep -qx "container_memory_in_memory"; then
+    CONTAINER_MEMORY_IN_MEMORY=$(kubectl get configmap "test-cm" -n "test-ns" -o go-template='{{ index .data "container_memory_in_memory" }}')
+  fi
+  CONTAINER_MEMORY_IN_MEMORY=${CONTAINER_MEMORY_IN_MEMORY:-64}
+
+  assert_equal "$CONTAINER_MEMORY_IN_MEMORY" "128"
+}
+
+@test "container_memory_in_memory: keeps values.yaml default when ConfigMap exists but key is missing" {
+  export CONTAINER_MEMORY_IN_MEMORY="64"
+  CONFIGMAP_KEYS=$'nginx.conf\ndefault.conf'
+
+  if echo "$CONFIGMAP_KEYS" | grep -qx "container_memory_in_memory"; then
+    CONTAINER_MEMORY_IN_MEMORY="should-not-reach"
+  fi
+
+  assert_equal "$CONTAINER_MEMORY_IN_MEMORY" "64"
+}
+
+# =============================================================================
+# CONTAINER_CPU_IN_MILLICORES Tests (read from ConfigMap)
+# =============================================================================
+@test "container_cpu_in_millicores: uses values.yaml default when no ConfigMap is configured" {
+  export CONTAINER_CPU_IN_MILLICORES="93"
+  assert_equal "$CONTAINER_CPU_IN_MILLICORES" "93"
+}
+
+@test "container_cpu_in_millicores: reads value from ConfigMap when key exists" {
+  unset CONTAINER_CPU_IN_MILLICORES
+  CONFIGMAP_KEYS=$'nginx.conf\ndefault.conf\ncontainer_cpu_in_millicores'
+
+  kubectl() {
+    if [[ "$*" == *"go-template"* && "$*" == *"container_cpu_in_millicores"* ]]; then
+      echo "200"
+      return 0
+    fi
+  }
+  export -f kubectl
+
+  if echo "$CONFIGMAP_KEYS" | grep -qx "container_cpu_in_millicores"; then
+    CONTAINER_CPU_IN_MILLICORES=$(kubectl get configmap "test-cm" -n "test-ns" -o go-template='{{ index .data "container_cpu_in_millicores" }}')
+  fi
+  CONTAINER_CPU_IN_MILLICORES=${CONTAINER_CPU_IN_MILLICORES:-93}
+
+  assert_equal "$CONTAINER_CPU_IN_MILLICORES" "200"
+}
+
+@test "container_cpu_in_millicores: keeps values.yaml default when ConfigMap exists but key is missing" {
+  export CONTAINER_CPU_IN_MILLICORES="93"
+  CONFIGMAP_KEYS=$'nginx.conf\ndefault.conf'
+
+  if echo "$CONFIGMAP_KEYS" | grep -qx "container_cpu_in_millicores"; then
+    CONTAINER_CPU_IN_MILLICORES="should-not-reach"
+  fi
+
+  assert_equal "$CONTAINER_CPU_IN_MILLICORES" "93"
 }

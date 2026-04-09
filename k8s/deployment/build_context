@@ -231,6 +231,17 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
         log info "✅ Found required key '$key' in ConfigMap"
     done
 
+    # Read optional resource overrides from ConfigMap
+    if echo "$CONFIGMAP_KEYS" | grep -qx "container_memory_in_memory"; then
+        CONTAINER_MEMORY_IN_MEMORY=$(kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" -o go-template='{{ index .data "container_memory_in_memory" }}')
+        log info "✅ Using container_memory_in_memory=$CONTAINER_MEMORY_IN_MEMORY from ConfigMap"
+    fi
+
+    if echo "$CONFIGMAP_KEYS" | grep -qx "container_cpu_in_millicores"; then
+        CONTAINER_CPU_IN_MILLICORES=$(kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" -o go-template='{{ index .data "container_cpu_in_millicores" }}')
+        log info "✅ Using container_cpu_in_millicores=$CONTAINER_CPU_IN_MILLICORES from ConfigMap"
+    fi
+
     log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
@@ -245,6 +256,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
           --arg service_account_name "$SERVICE_ACCOUNT_NAME" \
           --arg traffic_manager_config_map "$TRAFFIC_MANAGER_CONFIG_MAP" \
+          --arg container_memory_in_memory "$CONTAINER_MEMORY_IN_MEMORY" \
+          --arg container_cpu_in_millicores "$CONTAINER_CPU_IN_MILLICORES" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -254,7 +267,9 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 pdb_enabled: $pdb_enabled,
                 pdb_max_unavailable: $pdb_max_unavailable,
                 service_account_name: $service_account_name,
-                traffic_manager_config_map: $traffic_manager_config_map
+                traffic_manager_config_map: $traffic_manager_config_map,
+                container_memory_in_memory: $container_memory_in_memory,
+                container_cpu_in_millicores: $container_cpu_in_millicores
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
