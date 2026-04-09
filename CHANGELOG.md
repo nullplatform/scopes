@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add ALB capacity validation on scope creation. Requires additional AWS permissions: `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeListeners`, `elasticloadbalancing:DescribeRules`
 - Add ALB target group capacity validation on deployment. Requires additional AWS permission: `elasticloadbalancing:DescribeTargetGroups`
 - Add support for multiple ALBs
+- Add configurable memory and cpu limit for traffic manager
 
 ## [1.10.1] - 2026-02-13
 - Hotfix on wait_deployment_iteration
