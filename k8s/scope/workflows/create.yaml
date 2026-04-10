@@ -22,9 +22,6 @@ steps:
         type: environment
       - name: OUTPUT_DIR
         type: environment
-  - name: validate alb capacity
-    type: script
-    file: "$SERVICE_PATH/scope/validate_alb_capacity"
   - name: iam
     type: workflow
     steps:
