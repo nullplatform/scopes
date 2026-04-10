@@ -1,3 +1,0 @@
-[submodule "testing"]
-	path = testing
-	url = git@github.com:nullplatform/scope-testing.git
