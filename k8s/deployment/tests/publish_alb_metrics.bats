@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../../.." && pwd)"
+  PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
 
   export SCRIPT="$PROJECT_ROOT/k8s/deployment/publish_alb_metrics"
