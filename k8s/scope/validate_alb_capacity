@@ -5,6 +5,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
 
+if [[ "$DNS_TYPE" != "route53" ]]; then
+    log debug "📋 DNS type is '$DNS_TYPE', ALB capacity validation only applies to route53, skipping"
+    return 0
+fi
+
 ALB_MAX_CAPACITY=$(get_config_value \
   --env ALB_MAX_CAPACITY \
   --provider '.providers["scope-configurations"].networking.alb_max_capacity' \
@@ -76,7 +81,7 @@ LISTENER_ARNS=$(aws elbv2 describe-listeners \
 
 if [[ -z "$LISTENER_ARNS" ]] || [[ "$LISTENER_ARNS" == "None" ]]; then
     log warn "⚠️  No listeners found on ALB '$ALB_NAME', skipping capacity check"
-    exit 0
+    return 0
 fi
 
 # Count rules across all listeners (excluding default rules)

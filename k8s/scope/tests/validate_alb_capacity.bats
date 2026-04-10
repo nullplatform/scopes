@@ -15,6 +15,7 @@ setup() {
   export ALB_NAME="k8s-nullplatform-internet-facing"
   export REGION="us-east-1"
   export ALB_MAX_CAPACITY="75"
+  export DNS_TYPE="route53"
 
   # Base CONTEXT
   export CONTEXT='{
@@ -49,7 +50,7 @@ teardown() {
 # Success flow
 # =============================================================================
 @test "validate_alb_capacity: success when under capacity" {
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "🔍 Validating ALB capacity for 'k8s-nullplatform-internet-facing'..."
@@ -60,7 +61,7 @@ teardown() {
 @test "validate_alb_capacity: displays debug info" {
   export LOG_LEVEL="debug"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB: k8s-nullplatform-internet-facing | Region: us-east-1 | Max capacity: 75 rules"
@@ -86,7 +87,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 10 rules (max capacity: 75)"
@@ -115,7 +116,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 75/75 rules"
@@ -147,7 +148,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 90/75 rules"
@@ -159,7 +160,7 @@ teardown() {
 @test "validate_alb_capacity: uses default ALB_MAX_CAPACITY of 75" {
   unset ALB_MAX_CAPACITY
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 75)"
@@ -168,7 +169,7 @@ teardown() {
 @test "validate_alb_capacity: ALB_MAX_CAPACITY from env var" {
   export ALB_MAX_CAPACITY="50"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
@@ -178,7 +179,7 @@ teardown() {
   export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_capacity":"50"}}}}'
   export ALB_MAX_CAPACITY="75"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
@@ -188,7 +189,7 @@ teardown() {
   export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_capacity":"100"}}}}'
   export ALB_MAX_CAPACITY="50"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 100)"
@@ -199,7 +200,7 @@ teardown() {
   export CONTEXT='{"providers":{"container-orchestration":{"balancer":{"alb_capacity_threshold":"50"}}}}'
   export ALB_MAX_CAPACITY="75"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
@@ -208,7 +209,7 @@ teardown() {
 @test "validate_alb_capacity: scope-configurations takes priority over container-orchestration" {
   export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_capacity":"100"}},"container-orchestration":{"balancer":{"alb_capacity_threshold":"50"}}}}'
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 100)"
@@ -228,7 +229,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Failed to find load balancer 'k8s-nullplatform-internet-facing' in region 'us-east-1'"
@@ -250,7 +251,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'"
@@ -276,7 +277,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Failed to describe listeners for ALB 'k8s-nullplatform-internet-facing'"
@@ -301,7 +302,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "⚠️  No listeners found on ALB 'k8s-nullplatform-internet-facing', skipping capacity check"
@@ -326,7 +327,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Failed to describe rules for listener"
@@ -359,7 +360,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 0 rules (max capacity: 75)"
@@ -385,7 +386,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "✅ ALB capacity validated: 74/75 rules"
@@ -410,7 +411,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Unexpected non-numeric rule count from listener"
@@ -425,7 +426,7 @@ teardown() {
 @test "validate_alb_capacity: fails when ALB_MAX_CAPACITY is non-numeric" {
   export ALB_MAX_CAPACITY="abc"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB_MAX_CAPACITY must be a numeric value, got: 'abc'"
@@ -444,8 +445,48 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'"
+}
+
+# =============================================================================
+# DNS_TYPE guard
+# =============================================================================
+@test "validate_alb_capacity: skips when DNS_TYPE is external_dns" {
+  export DNS_TYPE="external_dns"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"🔍 Validating ALB capacity"* ]]
+}
+
+@test "validate_alb_capacity: skips when DNS_TYPE is azure" {
+  export DNS_TYPE="azure"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"🔍 Validating ALB capacity"* ]]
+}
+
+@test "validate_alb_capacity: skips with debug message for non-route53 DNS" {
+  export DNS_TYPE="external_dns"
+  export LOG_LEVEL="debug"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "DNS type is 'external_dns', ALB capacity validation only applies to route53, skipping"
+}
+
+@test "validate_alb_capacity: runs when DNS_TYPE is route53" {
+  export DNS_TYPE="route53"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "🔍 Validating ALB capacity for 'k8s-nullplatform-internet-facing'..."
 }
