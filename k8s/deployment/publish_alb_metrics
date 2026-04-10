@@ -1,0 +1,141 @@
+#!/bin/bash
+# Post-deployment ALB metrics publisher
+# Publishes ALB rule count and target group count as custom metrics
+# to CloudWatch or Datadog for continuous monitoring and alerting.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value"
+
+ALB_METRICS_PUBLISH_ENABLED=$(get_config_value \
+  --env ALB_METRICS_PUBLISH_ENABLED \
+  --provider '.providers["scope-configurations"].networking.alb_metrics_enabled' \
+  --default "false"
+)
+
+ALB_METRICS_PUBLISH_TARGET=$(get_config_value \
+  --env ALB_METRICS_PUBLISH_TARGET \
+  --provider '.providers["scope-configurations"].networking.alb_metrics_target' \
+  --default "cloudwatch"
+)
+
+if [ "$ALB_METRICS_PUBLISH_ENABLED" != "true" ]; then
+    return 0
+fi
+
+ALB_NAME=$(echo "$CONTEXT" | jq -r '.alb_name')
+REGION=$(echo "$CONTEXT" | jq -r '.region')
+
+if [ -z "$ALB_NAME" ] || [ "$ALB_NAME" = "null" ]; then
+    log warn "⚠️ ALB metrics: ALB name not found in context"
+    return 0
+fi
+
+# Resolve ALB ARN
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+    --names "$ALB_NAME" \
+    --region "$REGION" \
+    --query 'LoadBalancers[0].LoadBalancerArn' \
+    --output text 2>/dev/null)
+
+if [ $? -ne 0 ] || [ "$ALB_ARN" = "None" ] || [ -z "$ALB_ARN" ]; then
+    log warn "⚠️ ALB metrics: could not find ALB [$ALB_NAME]"
+    return 0
+fi
+
+# Count rules across all listeners
+TOTAL_RULES=0
+LISTENERS=$(aws elbv2 describe-listeners \
+    --load-balancer-arn "$ALB_ARN" \
+    --region "$REGION" \
+    --output json 2>/dev/null)
+
+if [ $? -ne 0 ]; then
+    log warn "⚠️ ALB metrics: could not retrieve listeners"
+    return 0
+fi
+
+LISTENER_ARNS=$(echo "$LISTENERS" | jq -r '.Listeners[].ListenerArn')
+
+for listener_arn in $LISTENER_ARNS; do
+    RULES=$(aws elbv2 describe-rules \
+        --listener-arn "$listener_arn" \
+        --region "$REGION" \
+        --output json 2>/dev/null)
+
+    if [ $? -eq 0 ]; then
+        LISTENER_RULE_COUNT=$(echo "$RULES" | jq '[.Rules[] | select(.IsDefault != true)] | length')
+        TOTAL_RULES=$((TOTAL_RULES + LISTENER_RULE_COUNT))
+    fi
+done
+
+# Count target groups
+TARGET_GROUPS=$(aws elbv2 describe-target-groups \
+    --load-balancer-arn "$ALB_ARN" \
+    --region "$REGION" \
+    --output json 2>/dev/null)
+
+TG_COUNT=0
+if [ $? -eq 0 ]; then
+    TG_COUNT=$(echo "$TARGET_GROUPS" | jq '.TargetGroups | length')
+fi
+
+# Publish metrics
+case "$ALB_METRICS_PUBLISH_TARGET" in
+    cloudwatch)
+        aws cloudwatch put-metric-data \
+            --namespace "nullplatform/ApplicationELB" \
+            --metric-data "[
+                {\"MetricName\":\"RuleCount\",\"Value\":$TOTAL_RULES,\"Unit\":\"Count\",\"Dimensions\":[{\"Name\":\"ALBName\",\"Value\":\"$ALB_NAME\"}]},
+                {\"MetricName\":\"TargetGroupCount\",\"Value\":$TG_COUNT,\"Unit\":\"Count\",\"Dimensions\":[{\"Name\":\"ALBName\",\"Value\":\"$ALB_NAME\"}]}
+            ]" \
+            --region "$REGION" 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            log info "✅ ALB metrics published to CloudWatch (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
+        else
+            log error "❌ ALB metrics: failed to publish to CloudWatch"
+        fi
+        ;;
+
+    datadog)
+        if [ -z "$DATADOG_API_KEY" ]; then
+            log warn "⚠️ ALB metrics: DATADOG_API_KEY not set"
+            return 0
+        fi
+
+        DATADOG_SITE="${DATADOG_SITE:-datadoghq.com}"
+        TIMESTAMP=$(date +%s)
+
+        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://api.${DATADOG_SITE}/api/v2/series" \
+            -H "DD-API-KEY: $DATADOG_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"series\": [
+                    {
+                        \"metric\": \"nullplatform.applicationelb.rule_count\",
+                        \"type\": 1,
+                        \"points\": [{\"timestamp\": $TIMESTAMP, \"value\": $TOTAL_RULES}],
+                        \"tags\": [\"alb_name:$ALB_NAME\", \"region:$REGION\"]
+                    },
+                    {
+                        \"metric\": \"nullplatform.applicationelb.target_group_count\",
+                        \"type\": 1,
+                        \"points\": [{\"timestamp\": $TIMESTAMP, \"value\": $TG_COUNT}],
+                        \"tags\": [\"alb_name:$ALB_NAME\", \"region:$REGION\"]
+                    }
+                ]
+            }" 2>/dev/null)
+
+        if [ "$RESPONSE" = "202" ]; then
+            log info "✅ ALB metrics published to Datadog (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
+        else
+            log error "❌ ALB metrics: failed to publish to Datadog (HTTP $RESPONSE)"
+        fi
+        ;;
+
+    *)
+        log warn "⚠️ ALB metrics: unknown target '$ALB_METRICS_PUBLISH_TARGET'"
+        ;;
+esac
+
+return 0
