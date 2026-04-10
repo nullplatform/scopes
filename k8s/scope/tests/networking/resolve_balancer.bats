@@ -12,6 +12,7 @@ setup() {
 
   export SCRIPT="$PROJECT_ROOT/k8s/scope/networking/resolve_balancer"
   export REGION="us-east-1"
+  export DNS_TYPE="route53"
 
   # Default: aws returns failure (no Route53 record, no ALBs)
   aws() { return 1; }
@@ -72,7 +73,7 @@ mock_route53_alb() {
         return 0
         ;;
       *describe-load-balancers*)
-        echo '${alb_name}'
+        echo '{\"LoadBalancers\":[{\"LoadBalancerName\":\"${alb_name}\",\"DNSName\":\"${alb_dns}\"}]}'
         return 0
         ;;
       *)
@@ -452,4 +453,47 @@ mock_alb_rules() {
   source "$SCRIPT"
 
   assert_equal "$ALB_NAME" "co-balancer-public"
+}
+
+# =============================================================================
+# DNS_TYPE guard — non-route53 skips Route53 lookup and load balancing
+# =============================================================================
+@test "resolve_balancer: skips Route53 and load balancing for external_dns" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export DNS_TYPE="external_dns"
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["scope-configurations"].networking.additional_public_balancers = ["alb-extra-1"]
+  ')
+  mock_route53_alb "alb-from-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "co-balancer-public"
+}
+
+@test "resolve_balancer: skips Route53 and load balancing for azure" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export DNS_TYPE="azure"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "co-balancer-public"
+}
+
+@test "resolve_balancer: uses provider config for non-route53 (private)" {
+  export INGRESS_VISIBILITY="internal"
+  export DNS_TYPE="external_dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "co-balancer-private"
+}
+
+@test "resolve_balancer: logs skip message for non-route53 DNS" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export DNS_TYPE="external_dns"
+
+  run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"'
+
+  assert_contains "$output" "DNS type is 'external_dns', skipping Route53 lookup and load balancing"
 }
