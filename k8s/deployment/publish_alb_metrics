@@ -7,7 +7,6 @@ ALB_METRICS_PUBLISH_ENABLED="${ALB_METRICS_PUBLISH_ENABLED:-false}"
 ALB_METRICS_PUBLISH_TARGET="${ALB_METRICS_PUBLISH_TARGET:-cloudwatch}"
 
 if [ "$ALB_METRICS_PUBLISH_ENABLED" != "true" ]; then
-    echo "ℹ ALB metrics publishing skipped (ALB_METRICS_PUBLISH_ENABLED=$ALB_METRICS_PUBLISH_ENABLED)"
     return 0
 fi
 
@@ -15,21 +14,19 @@ ALB_NAME=$(echo "$CONTEXT" | jq -r '.alb_name')
 REGION=$(echo "$CONTEXT" | jq -r '.region')
 
 if [ -z "$ALB_NAME" ] || [ "$ALB_NAME" = "null" ]; then
-    echo "⚠ ALB name not found in context, skipping metrics publishing"
+    echo "⚠ ALB metrics: ALB name not found in context"
     return 0
 fi
-
-echo "Publishing ALB metrics for [$ALB_NAME] in region [$REGION]..."
 
 # Resolve ALB ARN
 ALB_ARN=$(aws elbv2 describe-load-balancers \
     --names "$ALB_NAME" \
     --region "$REGION" \
     --query 'LoadBalancers[0].LoadBalancerArn' \
-    --output text 2>&1)
+    --output text 2>/dev/null)
 
 if [ $? -ne 0 ] || [ "$ALB_ARN" = "None" ] || [ -z "$ALB_ARN" ]; then
-    echo "⚠ Could not find ALB [$ALB_NAME], skipping metrics publishing"
+    echo "⚠ ALB metrics: could not find ALB [$ALB_NAME]"
     return 0
 fi
 
@@ -38,10 +35,10 @@ TOTAL_RULES=0
 LISTENERS=$(aws elbv2 describe-listeners \
     --load-balancer-arn "$ALB_ARN" \
     --region "$REGION" \
-    --output json 2>&1)
+    --output json 2>/dev/null)
 
 if [ $? -ne 0 ]; then
-    echo "⚠ Could not retrieve listeners for ALB [$ALB_NAME], skipping metrics publishing"
+    echo "⚠ ALB metrics: could not retrieve listeners"
     return 0
 fi
 
@@ -51,7 +48,7 @@ for listener_arn in $LISTENER_ARNS; do
     RULES=$(aws elbv2 describe-rules \
         --listener-arn "$listener_arn" \
         --region "$REGION" \
-        --output json 2>&1)
+        --output json 2>/dev/null)
 
     if [ $? -eq 0 ]; then
         LISTENER_RULE_COUNT=$(echo "$RULES" | jq '[.Rules[] | select(.IsDefault != true)] | length')
@@ -63,41 +60,34 @@ done
 TARGET_GROUPS=$(aws elbv2 describe-target-groups \
     --load-balancer-arn "$ALB_ARN" \
     --region "$REGION" \
-    --output json 2>&1)
+    --output json 2>/dev/null)
 
 TG_COUNT=0
 if [ $? -eq 0 ]; then
     TG_COUNT=$(echo "$TARGET_GROUPS" | jq '.TargetGroups | length')
 fi
 
-echo "  Rules: $TOTAL_RULES"
-echo "  Target Groups: $TG_COUNT"
-
-# Publish metrics based on target
+# Publish metrics
 case "$ALB_METRICS_PUBLISH_TARGET" in
     cloudwatch)
-        echo "Publishing to CloudWatch (namespace: nullplatform/ApplicationELB)..."
-
         aws cloudwatch put-metric-data \
             --namespace "nullplatform/ApplicationELB" \
             --metric-data "[
                 {\"MetricName\":\"RuleCount\",\"Value\":$TOTAL_RULES,\"Unit\":\"Count\",\"Dimensions\":[{\"Name\":\"ALBName\",\"Value\":\"$ALB_NAME\"}]},
                 {\"MetricName\":\"TargetGroupCount\",\"Value\":$TG_COUNT,\"Unit\":\"Count\",\"Dimensions\":[{\"Name\":\"ALBName\",\"Value\":\"$ALB_NAME\"}]}
             ]" \
-            --region "$REGION" 2>&1
+            --region "$REGION" 2>/dev/null
 
         if [ $? -eq 0 ]; then
-            echo "✓ CloudWatch metrics published successfully"
+            echo "✓ ALB metrics published to CloudWatch (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
         else
-            echo "⚠ Failed to publish CloudWatch metrics (check IAM permissions for cloudwatch:PutMetricData)"
+            echo "⚠ ALB metrics: failed to publish to CloudWatch"
         fi
         ;;
 
     datadog)
-        echo "Publishing to Datadog..."
-
         if [ -z "$DATADOG_API_KEY" ]; then
-            echo "⚠ DATADOG_API_KEY not set, skipping Datadog metrics publishing"
+            echo "⚠ ALB metrics: DATADOG_API_KEY not set"
             return 0
         fi
 
@@ -122,17 +112,17 @@ case "$ALB_METRICS_PUBLISH_TARGET" in
                         \"tags\": [\"alb_name:$ALB_NAME\", \"region:$REGION\"]
                     }
                 ]
-            }" 2>&1)
+            }" 2>/dev/null)
 
         if [ "$RESPONSE" = "202" ]; then
-            echo "✓ Datadog metrics published successfully"
+            echo "✓ ALB metrics published to Datadog (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
         else
-            echo "⚠ Failed to publish Datadog metrics (HTTP $RESPONSE)"
+            echo "⚠ ALB metrics: failed to publish to Datadog (HTTP $RESPONSE)"
         fi
         ;;
 
     *)
-        echo "⚠ Unknown metrics target: $ALB_METRICS_PUBLISH_TARGET (expected: cloudwatch or datadog)"
+        echo "⚠ ALB metrics: unknown target '$ALB_METRICS_PUBLISH_TARGET'"
         ;;
 esac
 
