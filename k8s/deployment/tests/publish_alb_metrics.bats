@@ -46,6 +46,14 @@ setup() {
     echo "202"
   }
   export -f curl
+
+  # Mock log function (from k8s/logging)
+  log() {
+    local level="${1:-info}"
+    local message="${2:-}"
+    echo "$message"
+  }
+  export -f log
 }
 
 run_script() {

@@ -14,7 +14,7 @@ ALB_NAME=$(echo "$CONTEXT" | jq -r '.alb_name')
 REGION=$(echo "$CONTEXT" | jq -r '.region')
 
 if [ -z "$ALB_NAME" ] || [ "$ALB_NAME" = "null" ]; then
-    echo "⚠ ALB metrics: ALB name not found in context"
+    log warn "⚠️ ALB metrics: ALB name not found in context"
     return 0
 fi
 
@@ -26,7 +26,7 @@ ALB_ARN=$(aws elbv2 describe-load-balancers \
     --output text 2>/dev/null)
 
 if [ $? -ne 0 ] || [ "$ALB_ARN" = "None" ] || [ -z "$ALB_ARN" ]; then
-    echo "⚠ ALB metrics: could not find ALB [$ALB_NAME]"
+    log warn "⚠️ ALB metrics: could not find ALB [$ALB_NAME]"
     return 0
 fi
 
@@ -38,7 +38,7 @@ LISTENERS=$(aws elbv2 describe-listeners \
     --output json 2>/dev/null)
 
 if [ $? -ne 0 ]; then
-    echo "⚠ ALB metrics: could not retrieve listeners"
+    log warn "⚠️ ALB metrics: could not retrieve listeners"
     return 0
 fi
 
@@ -79,15 +79,15 @@ case "$ALB_METRICS_PUBLISH_TARGET" in
             --region "$REGION" 2>/dev/null
 
         if [ $? -eq 0 ]; then
-            echo "✓ ALB metrics published to CloudWatch (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
+            log info "✅ ALB metrics published to CloudWatch (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
         else
-            echo "⚠ ALB metrics: failed to publish to CloudWatch"
+            log error "❌ ALB metrics: failed to publish to CloudWatch"
         fi
         ;;
 
     datadog)
         if [ -z "$DATADOG_API_KEY" ]; then
-            echo "⚠ ALB metrics: DATADOG_API_KEY not set"
+            log warn "⚠️ ALB metrics: DATADOG_API_KEY not set"
             return 0
         fi
 
@@ -115,14 +115,14 @@ case "$ALB_METRICS_PUBLISH_TARGET" in
             }" 2>/dev/null)
 
         if [ "$RESPONSE" = "202" ]; then
-            echo "✓ ALB metrics published to Datadog (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
+            log info "✅ ALB metrics published to Datadog (rules: $TOTAL_RULES, target_groups: $TG_COUNT)"
         else
-            echo "⚠ ALB metrics: failed to publish to Datadog (HTTP $RESPONSE)"
+            log error "❌ ALB metrics: failed to publish to Datadog (HTTP $RESPONSE)"
         fi
         ;;
 
     *)
-        echo "⚠ ALB metrics: unknown target '$ALB_METRICS_PUBLISH_TARGET'"
+        log warn "⚠️ ALB metrics: unknown target '$ALB_METRICS_PUBLISH_TARGET'"
         ;;
 esac
 
