@@ -15,6 +15,7 @@ setup() {
   export ALB_NAME="k8s-nullplatform-internet-facing"
   export REGION="us-east-1"
   export ALB_MAX_TARGET_GROUPS="98"
+  export DNS_TYPE="route53"
 
   # Base CONTEXT
   export CONTEXT='{
@@ -45,7 +46,7 @@ teardown() {
 # Success flow
 # =============================================================================
 @test "validate_alb_target_group_capacity: success when under capacity" {
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "🔍 Validating ALB target group capacity for 'k8s-nullplatform-internet-facing'..."
@@ -56,7 +57,7 @@ teardown() {
 @test "validate_alb_target_group_capacity: displays debug info" {
   export LOG_LEVEL="debug"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB: k8s-nullplatform-internet-facing | Region: us-east-1 | Max target groups: 98"
@@ -81,7 +82,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 98/98"
@@ -109,7 +110,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 100/98"
@@ -121,7 +122,7 @@ teardown() {
 @test "validate_alb_target_group_capacity: uses default ALB_MAX_TARGET_GROUPS of 98" {
   unset ALB_MAX_TARGET_GROUPS
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 98)"
@@ -130,7 +131,7 @@ teardown() {
 @test "validate_alb_target_group_capacity: ALB_MAX_TARGET_GROUPS from env var" {
   export ALB_MAX_TARGET_GROUPS="30"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
@@ -140,7 +141,7 @@ teardown() {
   export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"30"}}}}'
   export ALB_MAX_TARGET_GROUPS="98"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
@@ -150,7 +151,7 @@ teardown() {
   export CONTEXT='{"providers":{"container-orchestration":{"balancer":{"alb_max_target_groups":"30"}}}}'
   export ALB_MAX_TARGET_GROUPS="98"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
@@ -159,7 +160,7 @@ teardown() {
 @test "validate_alb_target_group_capacity: scope-configurations takes priority over container-orchestration" {
   export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"100"}},"container-orchestration":{"balancer":{"alb_max_target_groups":"30"}}}}'
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 100)"
@@ -169,7 +170,7 @@ teardown() {
   export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"100"}}}}'
   export ALB_MAX_TARGET_GROUPS="30"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 100)"
@@ -190,7 +191,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Failed to find load balancer 'k8s-nullplatform-internet-facing' in region 'us-east-1'"
@@ -212,7 +213,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'"
@@ -233,7 +234,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Failed to describe target groups for ALB 'k8s-nullplatform-internet-facing'"
@@ -261,7 +262,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 0 target groups (max: 98)"
@@ -283,7 +284,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
   assert_contains "$output" "✅ ALB target group capacity validated: 97/98"
@@ -304,7 +305,7 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Unexpected non-numeric target group count from ALB"
@@ -317,7 +318,7 @@ teardown() {
 @test "validate_alb_target_group_capacity: fails when ALB_MAX_TARGET_GROUPS is non-numeric" {
   export ALB_MAX_TARGET_GROUPS="abc"
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ ALB_MAX_TARGET_GROUPS must be a numeric value, got: 'abc'"
@@ -336,8 +337,48 @@ teardown() {
   }
   export -f aws
 
-  run bash "$SCRIPT"
+  run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'"
+}
+
+# =============================================================================
+# DNS_TYPE guard
+# =============================================================================
+@test "validate_alb_target_group_capacity: skips when DNS_TYPE is external_dns" {
+  export DNS_TYPE="external_dns"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"🔍 Validating ALB target group capacity"* ]]
+}
+
+@test "validate_alb_target_group_capacity: skips when DNS_TYPE is azure" {
+  export DNS_TYPE="azure"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"🔍 Validating ALB target group capacity"* ]]
+}
+
+@test "validate_alb_target_group_capacity: skips with debug message for non-route53 DNS" {
+  export DNS_TYPE="external_dns"
+  export LOG_LEVEL="debug"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "DNS type is 'external_dns', ALB target group validation only applies to route53, skipping"
+}
+
+@test "validate_alb_target_group_capacity: runs when DNS_TYPE is route53" {
+  export DNS_TYPE="route53"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "🔍 Validating ALB target group capacity for 'k8s-nullplatform-internet-facing'..."
 }
