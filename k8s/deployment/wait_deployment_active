@@ -1,53 +1,62 @@
 #!/bin/bash
 
+
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
 K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0
 LATEST_TIMESTAMP=""
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 
+log debug "🔍 Waiting for deployment '$K8S_DEPLOYMENT_NAME' to become active..."
+log debug "📋 Namespace: $K8S_NAMESPACE"
+log debug "📋 Timeout: ${TIMEOUT}s (max $MAX_ITERATIONS iterations)"
+log debug ""
+
 while true; do
     ((++iteration))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
-        echo "ERROR: Timeout waiting for deployment. Maximum iterations (${MAX_ITERATIONS}) reached."
+        log error ""
+        log error "❌ Timeout waiting for deployment"
+        log error "📋 Maximum iterations ($MAX_ITERATIONS) reached"
 
         source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 
         exit 1
     fi
-    
-    echo "Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
+
+    log debug "📡 Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
     D_STATUS=$(np deployment read --id $DEPLOYMENT_ID --api-key $NP_API_KEY --query .status 2>&1) || {
-        echo "ERROR: Failed to read deployment status"
-        echo "NP CLI error: $D_STATUS"
+        log error "   ❌ Failed to read deployment status"
+        log error "📋 NP CLI error: $D_STATUS"
         exit 1
     }
-    
+
     if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
-        echo "ERROR: Deployment status not found for ID $DEPLOYMENT_ID"
+        log error "   ❌ Deployment status not found for ID $DEPLOYMENT_ID"
         exit 1
     fi
 
     if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
         if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
-            echo "Deployment it's not running anymore [$D_STATUS]"
+            log error "   ❌ Deployment is no longer running (status: $D_STATUS)"
             exit 1
         fi
     fi
 
     deployment_status=$(kubectl get deployment "$K8S_DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o json 2>/dev/null)
     if [ $? -ne 0 ]; then
-        echo "Error: Deployment '$K8S_DEPLOYMENT_NAME' not found in namespace '$K8S_NAMESPACE'"
+        log error "   ❌ Deployment '$K8S_DEPLOYMENT_NAME' not found in namespace '$K8S_NAMESPACE'"
         exit 1
     fi
     desired=$(echo "$deployment_status" | jq '.spec.replicas')
     current=$(echo "$deployment_status" | jq '.status.availableReplicas // 0')
     updated=$(echo "$deployment_status" | jq '.status.updatedReplicas // 0')
     ready=$(echo "$deployment_status" | jq '.status.readyReplicas // 0')
-    echo "$(date): Iteration $iteration - Deployment status - Available: $current/$desired, Updated: $updated/$desired, Ready: $ready/$desired"
+    log debug "🔍 $(date): Iteration $iteration - Deployment status - Available: $current/$desired, Updated: $updated/$desired, Ready: $ready/$desired"
 
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
-        echo "Success: All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
+        log debug ""
+        log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
         break
     fi
 
@@ -55,46 +64,53 @@ while true; do
     POD_NAMES=$(kubectl get pods -n $K8S_NAMESPACE -l $POD_SELECTOR -o jsonpath='{.items[*].metadata.name}')
     # Get events for the deployment first
     DEPLOYMENT_EVENTS=$(kubectl get events -n $K8S_NAMESPACE --field-selector involvedObject.kind=Deployment,involvedObject.name=$K8S_DEPLOYMENT_NAME -o json)
-    
+
     ALL_EVENTS="$DEPLOYMENT_EVENTS"
 
     for POD in $POD_NAMES; do
-        echo "Checking events for pod: $POD"
+        log debug "Checking events for pod: $POD"
         POD_EVENTS=$(kubectl get events -n $K8S_NAMESPACE --field-selector involvedObject.kind=Pod,involvedObject.name=$POD -o json)
         # Combine events using jq
         if [ ! -z "$POD_EVENTS" ] && [ "$POD_EVENTS" != "{}" ]; then
         ALL_EVENTS=$(echo "$ALL_EVENTS" "$POD_EVENTS" | jq -s '.[0].items = (.[0].items + .[1].items) | .[0]')
         fi
     done
-    
+
     PROCESSED_EVENTS=$(echo "$ALL_EVENTS" | jq '.items = (.items | map(. + {
         effectiveTimestamp: (
-        if .eventTime then .eventTime 
-        elif .lastTimestamp then .lastTimestamp 
+        if .eventTime then .eventTime
+        elif .lastTimestamp then .lastTimestamp
         elif .firstTimestamp then .firstTimestamp
         else .metadata.creationTimestamp
         end
         )
     }))')
-    
+
     # Find the newest timestamp in all events
     NEWEST_TIMESTAMP=$(echo "$PROCESSED_EVENTS" | jq -r '.items | map(.effectiveTimestamp) | max // empty')
-    
+
     # Process events with jq, showing only events newer than what we've seen
+    # Output format: TYPE<TAB>message — so we can route Warning events to log warn
     NEW_EVENTS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
-        .items | 
-        sort_by(.effectiveTimestamp) | 
-        .[] | 
-        select($timestamp == "" or (.effectiveTimestamp > $timestamp)) | 
-        "\(.effectiveTimestamp) [\(.type)] \(.involvedObject.kind)/\(.involvedObject.name): \(.reason) - \(.message)"
+        .items |
+        sort_by(.effectiveTimestamp) |
+        .[] |
+        select($timestamp == "" or (.effectiveTimestamp > $timestamp)) |
+        "\(.type)\t\(.effectiveTimestamp) [\(.type)] \(.involvedObject.kind)/\(.involvedObject.name): \(.reason) - \(.message)"
     ')
-    
+
     # If we have new events, show them and update the timestamp
     if [ ! -z "$NEW_EVENTS" ]; then
-        echo "$NEW_EVENTS"
+        while IFS=$'\t' read -r event_type event_line; do
+            if [ "$event_type" = "Warning" ]; then
+                log warn "$event_line"
+            else
+                log debug "$event_line"
+            fi
+        done <<< "$NEW_EVENTS"
         # Store the newest timestamp for next iteration
         LATEST_TIMESTAMP="$NEWEST_TIMESTAMP"
-        echo "Updated timestamp to: $LATEST_TIMESTAMP"
+        log debug "Updated timestamp to: $LATEST_TIMESTAMP"
     fi
 
     sleep 10

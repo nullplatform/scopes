@@ -1,6 +1,7 @@
 provider_categories:
   - container-orchestration
   - cloud-providers
+  - scope-configurations
 configuration:
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
@@ -9,6 +10,8 @@ configuration:
   USE_ACCOUNT_SLUG: false
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
   ALB_RECONCILIATION_ENABLED: false
+  ALB_MAX_CAPACITY: 75
+  ALB_MAX_TARGET_GROUPS: 98
   ALB_METRICS_PUBLISH_ENABLED: false
 # ALB_METRICS_PUBLISH_TARGET: cloudwatch # Available values: cloudwatch | datadog
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
@@ -20,6 +23,9 @@ configuration:
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/blue-green-ingress.yaml.tpl"
   SERVICE_ACCOUNT_TEMPLATE: "$SERVICE_PATH/scope/templates/service-account.yaml.tpl"
+  CONTAINER_MEMORY_IN_MEMORY: 64
+  CONTAINER_CPU_IN_MILLICORES: 93
+  LOG_LEVEL: info
 #  TRAFFIC_CONTAINER_IMAGE: "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
 #  TRAFFIC_MANAGER_CONFIG_MAP: traffic-manager-configuration
   IMAGE_PULL_SECRETS:

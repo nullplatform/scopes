@@ -1,0 +1,139 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value"
+
+ALB_MAX_CAPACITY=$(get_config_value \
+  --env ALB_MAX_CAPACITY \
+  --provider '.providers["scope-configurations"].networking.alb_max_capacity' \
+  --provider '.providers["container-orchestration"].balancer.alb_capacity_threshold' \
+  --default "75"
+)
+
+if ! [[ "$ALB_MAX_CAPACITY" =~ ^[0-9]+$ ]]; then
+    log error "❌ ALB_MAX_CAPACITY must be a numeric value, got: '$ALB_MAX_CAPACITY'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set a numeric value in values.yaml or scope-configurations provider"
+    log error ""
+    exit 1
+fi
+
+log info "🔍 Validating ALB capacity for '$ALB_NAME'..."
+log debug "📋 ALB: $ALB_NAME | Region: $REGION | Max capacity: $ALB_MAX_CAPACITY rules"
+
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+    --names "$ALB_NAME" \
+    --region "$REGION" \
+    --query 'LoadBalancers[0].LoadBalancerArn' \
+    --output text \
+    --no-paginate 2>&1) || {
+    log error "❌ Failed to find load balancer '$ALB_NAME' in region '$REGION'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The load balancer may not exist or the agent lacks permissions"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the ALB exists: aws elbv2 describe-load-balancers --names $ALB_NAME --region $REGION"
+    log error "   • Check IAM permissions for elbv2:DescribeLoadBalancers"
+    log error ""
+    exit 1
+}
+
+if [[ -z "$ALB_ARN" ]] || [[ "$ALB_ARN" == "None" ]]; then
+    log error "❌ Load balancer '$ALB_NAME' not found in region '$REGION'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The load balancer name may be incorrect or it was deleted"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • List available ALBs: aws elbv2 describe-load-balancers --region $REGION"
+    log error "   • Check the balancer name in values.yaml or scope-configurations provider"
+    log error ""
+    exit 1
+fi
+
+log debug "📋 ALB ARN: $ALB_ARN"
+
+LISTENER_ARNS=$(aws elbv2 describe-listeners \
+    --load-balancer-arn "$ALB_ARN" \
+    --region "$REGION" \
+    --query 'Listeners[].ListenerArn' \
+    --output text \
+    --no-paginate 2>&1) || {
+    log error "❌ Failed to describe listeners for ALB '$ALB_NAME'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The agent may lack permissions to describe listeners"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check IAM permissions for elbv2:DescribeListeners"
+    log error ""
+    exit 1
+}
+
+if [[ -z "$LISTENER_ARNS" ]] || [[ "$LISTENER_ARNS" == "None" ]]; then
+    log warn "⚠️  No listeners found on ALB '$ALB_NAME', skipping capacity check"
+    exit 0
+fi
+
+# Count rules across all listeners (excluding default rules)
+TOTAL_RULES=0
+
+for LISTENER_ARN in $LISTENER_ARNS; do
+    RULE_COUNT=$(aws elbv2 describe-rules \
+        --listener-arn "$LISTENER_ARN" \
+        --region "$REGION" \
+        --query 'length(Rules[?!IsDefault])' \
+        --output text \
+        --no-paginate 2>&1) || {
+        log error "❌ Failed to describe rules for listener"
+        log error "📋 Listener ARN: $LISTENER_ARN"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The agent may lack permissions to describe rules"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Check IAM permissions for elbv2:DescribeRules"
+        log error ""
+        exit 1
+    }
+
+    if ! [[ "$RULE_COUNT" =~ ^[0-9]+$ ]]; then
+        log error "❌ Unexpected non-numeric rule count from listener"
+        log error "📋 Listener ARN: $LISTENER_ARN"
+        log error "📋 Received value: $RULE_COUNT"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The AWS CLI returned an unexpected response format"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Verify AWS CLI version and credentials are correct"
+        log error "   • Run manually: aws elbv2 describe-rules --listener-arn $LISTENER_ARN --region $REGION --query 'length(Rules[?!IsDefault])'"
+        log error ""
+        exit 1
+    fi
+
+    TOTAL_RULES=$((TOTAL_RULES + RULE_COUNT))
+done
+
+log info "📋 ALB '$ALB_NAME' has $TOTAL_RULES rules (max capacity: $ALB_MAX_CAPACITY)"
+
+if [[ "$TOTAL_RULES" -ge "$ALB_MAX_CAPACITY" ]]; then
+    log error "❌ ALB '$ALB_NAME' has reached capacity: $TOTAL_RULES/$ALB_MAX_CAPACITY rules"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   Too many scopes or ingress rules are configured on this ALB"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Remove unused scopes or ingress rules from the ALB"
+    log error "   • Increase ALB_MAX_CAPACITY in values.yaml or container-orchestration provider (AWS limit is 100 per listener)"
+    log error "   • Request an AWS service quota increase for rules per ALB listener"
+    log error "   • Consider using a separate ALB for additional scopes"
+    log error ""
+    exit 1
+fi
+
+log info "✅ ALB capacity validated: $TOTAL_RULES/$ALB_MAX_CAPACITY rules"

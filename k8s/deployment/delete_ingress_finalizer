@@ -1,9 +1,25 @@
 #!/bin/bash
 
+
+log debug "🔍 Checking for ingress finalizers to remove..."
+
 INGRESS_NAME=$(echo "$CONTEXT" | jq -r '"k-8-s-" + .scope.slug + "-" + (.scope.id | tostring) + "-" + .ingress_visibility')
+log debug "📋 Ingress name: $INGRESS_NAME"
 
 # If the scope uses ingress, remove any finalizers attached to it
 if kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" &>/dev/null; then
-  kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge
+  log debug "📝 Removing finalizers from ingress $INGRESS_NAME..."
+  if ! kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge; then
+    log error "❌ Failed to remove finalizers from ingress $INGRESS_NAME"
+    log error "💡 Possible causes:"
+    log error "   - Ingress was deleted while patching"
+    log error "   - Insufficient permissions to patch ingress"
+    log error "🔧 How to fix:"
+    log error "   - Verify ingress still exists: kubectl get ingress $INGRESS_NAME -n $K8S_NAMESPACE"
+    log error "   - Check RBAC permissions for patching ingress resources"
+    exit 1
+  fi
+  log info "✅ Finalizers removed from ingress $INGRESS_NAME"
+else
+  log debug "📋 Ingress $INGRESS_NAME not found, skipping finalizer removal"
 fi
-# Do nothing if the scope does not use ingress (e.x: uses http route or has no network component)

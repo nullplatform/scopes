@@ -1,22 +1,27 @@
 #!/bin/bash
-
 set -euo pipefail
 
-echo "Managing DNS records"
-echo "DNS Type: $DNS_TYPE"
-echo "Action: $ACTION"
-echo "Scope Domain: $SCOPE_DOMAIN"
+log debug "🔍 Managing DNS records..."
+log debug "📋 DNS type: $DNS_TYPE | Action: $ACTION | Domain: $SCOPE_DOMAIN"
 
 if [[ "$ACTION" == "DELETE" ]] && [[ -z "${SCOPE_DOMAIN:-}" || "${SCOPE_DOMAIN:-}" == "To be defined" ]]; then
-    echo "Skipping route53 action as the scope has no domain"
+    log warn "⚠️  Skipping DNS action — scope has no domain"
     return 0
 fi
 
 case "$DNS_TYPE" in
   route53)
-    echo "Using Route53 DNS provider"
+    log debug "📝 Using Route53 DNS provider"
     source "$SERVICE_PATH/scope/networking/dns/route53/manage_route" --action="$ACTION" || {
-        echo "ERROR: Route53 DNS management failed"
+        log error "❌ Route53 DNS management failed"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The hosted zone may not exist or the agent lacks Route53 permissions"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Check hosted zone exists: aws route53 list-hosted-zones"
+        log error "   • Verify IAM permissions for route53:ChangeResourceRecordSets"
+        log error ""
         exit 1
     }
     ;;
@@ -26,7 +31,7 @@ case "$DNS_TYPE" in
     else
       GATEWAY_NAME="$PRIVATE_GATEWAY_NAME"
     fi
-    
+    log debug "📝 Using Azure DNS provider (gateway: $GATEWAY_NAME)"
     source "$SERVICE_PATH/scope/networking/dns/az-records/manage_route" \
       --action="$ACTION" \
       --resource-group="$RESOURCE_GROUP" \
@@ -36,15 +41,32 @@ case "$DNS_TYPE" in
       --hosted-zone-rg="$HOSTED_ZONE_RG"
     ;;
   external_dns)
-    echo "Using external_dns provider"
+    log debug "📝 Using External DNS provider"
     source "$SERVICE_PATH/scope/networking/dns/external_dns/manage_route" || {
-        echo "ERROR: External DNS management failed"
+        log error "❌ External DNS management failed"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The External DNS operator may not be running or lacks permissions"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Check operator status: kubectl get pods -l app=external-dns"
+        log error "   • Review operator logs: kubectl logs -l app=external-dns"
+        log error ""
         exit 1
     }
     ;;
   *)
-    echo "Error: Unsupported dns type '$DNS_TYPE'"
+    log error "❌ Unsupported DNS type: '$DNS_TYPE'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The DNS_TYPE value in values.yaml is not one of: route53, azure, external_dns"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check DNS_TYPE in values.yaml"
+    log error "   • Supported types: route53, azure, external_dns"
+    log error ""
     exit 1
     ;;
 esac
 
+log info "✅ DNS records managed successfully"

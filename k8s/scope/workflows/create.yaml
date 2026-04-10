@@ -1,6 +1,15 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 steps:
+  - name: load logging
+    type: script
+    file: "$SERVICE_PATH/logging"
+    output:
+      - name: log
+        type: function
+        parameters:
+          level: string
+          message: string
   - name: build context
     type: script
     file: "$SERVICE_PATH/scope/build_context"
@@ -13,6 +22,9 @@ steps:
         type: environment
       - name: OUTPUT_DIR
         type: environment
+  - name: validate alb capacity
+    type: script
+    file: "$SERVICE_PATH/scope/validate_alb_capacity"
   - name: iam
     type: workflow
     steps:

@@ -433,7 +433,10 @@
                   "default":10,
                   "maximum":300,
                   "minimum":1,
-                  "description":"Seconds between health checks"
+                  "description":"Seconds between health checks",
+                  "exclusiveMinimum": {
+                     "$data": "1/timeout_seconds"
+                  }
                },
                "timeout_seconds":{
                   "type":"integer",
@@ -476,7 +479,7 @@
          "cpu_millicores":{
             "type":"integer",
             "title":"CPU Millicores",
-            "default":500,
+            "default":100,
             "maximum":4000,
             "minimum":100,
             "description":"Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)"
@@ -630,10 +633,10 @@
   },
   "name": "Containers",
   "selectors": {
-    "category": "any",
+    "category": "Scope",
     "imported": false,
-    "provider": "any",
-    "sub_category": "any"
+    "provider": "Agent",
+    "sub_category": "Containers"
   },
   "type": "scope",
   "use_default_actions": false,

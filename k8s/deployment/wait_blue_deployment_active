@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
 
 export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)

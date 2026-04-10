@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
 SCOPE_ID=$(echo "$CONTEXT" | jq .scope.id -r)
 
@@ -9,29 +10,34 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-echo "Looking for deployment with label: name=d-$SCOPE_ID-$DEPLOYMENT_ID"
-DEPLOYMENT=$(kubectl get deployment -n "$K8S_NAMESPACE" -l "name=d-$SCOPE_ID-$DEPLOYMENT_ID" -o jsonpath="{.items[0].metadata.name}" 2>&1) || {
-    echo "ERROR: Failed to find deployment"
-    echo "Namespace: $K8S_NAMESPACE"
-    echo "Kubectl error: $DEPLOYMENT"
-    exit 1
-}
+find_deployment_by_label "$SCOPE_ID" "$DEPLOYMENT_ID" "$K8S_NAMESPACE"
 
-if [[ -z "$DEPLOYMENT" ]]; then
-    echo "ERROR: No deployment found with label name=d-$SCOPE_ID-$DEPLOYMENT_ID"
-    exit 1
-fi
-
-echo "Restarting deployment: $DEPLOYMENT"
+log debug "📝 Restarting deployment: $DEPLOYMENT"
 kubectl rollout restart -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" || {
-    echo "ERROR: Failed to restart deployment $DEPLOYMENT"
+    log error "   ❌ Failed to restart deployment '$DEPLOYMENT'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The deployment may be in a bad state or kubectl lacks permissions"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check deployment status: kubectl describe deployment $DEPLOYMENT -n $K8S_NAMESPACE"
+    log error ""
     exit 1
 }
 
-echo "Waiting for rollout to complete..."
+log debug "🔍 Waiting for rollout to complete..."
 kubectl rollout status -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" -w || {
-    echo "ERROR: Rollout failed or timed out"
+    log error "   ❌ Rollout failed or timed out"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   Pods may be failing to start (image pull errors, crashes, resource limits)"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check pod events: kubectl describe pods -n $K8S_NAMESPACE -l name=d-$SCOPE_ID-$DEPLOYMENT_ID"
+    log error "   • Check pod logs: kubectl logs -n $K8S_NAMESPACE -l name=d-$SCOPE_ID-$DEPLOYMENT_ID --tail=50"
+    log error ""
     exit 1
 }
 
-echo "Deployment restart completed successfully"
+log info ""
+log info "✅ Deployment restart completed successfully"
