@@ -3,8 +3,20 @@
 # Publishes ALB rule count and target group count as custom metrics
 # to CloudWatch or Datadog for continuous monitoring and alerting.
 
-ALB_METRICS_PUBLISH_ENABLED="${ALB_METRICS_PUBLISH_ENABLED:-false}"
-ALB_METRICS_PUBLISH_TARGET="${ALB_METRICS_PUBLISH_TARGET:-cloudwatch}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value"
+
+ALB_METRICS_PUBLISH_ENABLED=$(get_config_value \
+  --env ALB_METRICS_PUBLISH_ENABLED \
+  --provider '.providers["scope-configurations"].networking.alb_metrics_enabled' \
+  --default "false"
+)
+
+ALB_METRICS_PUBLISH_TARGET=$(get_config_value \
+  --env ALB_METRICS_PUBLISH_TARGET \
+  --provider '.providers["scope-configurations"].networking.alb_metrics_target' \
+  --default "cloudwatch"
+)
 
 if [ "$ALB_METRICS_PUBLISH_ENABLED" != "true" ]; then
     return 0

@@ -47,6 +47,10 @@ setup() {
   }
   export -f curl
 
+  # Source real get_config_value (uses CONTEXT + env vars already set)
+  source "$PROJECT_ROOT/k8s/utils/get_config_value"
+  export -f get_config_value
+
   # Mock log function (from k8s/logging)
   log() {
     local level="${1:-info}"
