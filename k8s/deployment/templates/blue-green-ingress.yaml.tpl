@@ -114,11 +114,30 @@ metadata:
   {{- end }}
 {{- end }}
   annotations:
+{{- $port_key := "" -}}
+{{- if eq .type "HTTP" -}}
+  {{- $port_key = printf "http-%v" .port -}}
+{{- else -}}
+  {{- $port_key = printf "grpc-%v" .port -}}
+{{- end -}}
+{{- $blue_svc_exists := true -}}
+{{- if $.blue_additional_port_services -}}
+  {{- if not (index $.blue_additional_port_services $port_key) -}}
+    {{- $blue_svc_exists = false -}}
+  {{- end -}}
+{{- end -}}
+{{- if $blue_svc_exists }}
     alb.ingress.kubernetes.io/actions.bg-deployment-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
         {"serviceName":"d-{{ $.scope.id }}-{{ $.blue_deployment_id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":{{ sub 100 $.deployment.strategy_data.desired_switched_traffic }}},
         {"serviceName":"d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":{{ $.deployment.strategy_data.desired_switched_traffic }}}
       ]}}
+{{- else }}
+    alb.ingress.kubernetes.io/actions.bg-deployment-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}: >-
+      {"type":"forward","forwardConfig":{"targetGroups":[
+        {"serviceName":"d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":100}
+      ]}}
+{{- end }}
     alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
     alb.ingress.kubernetes.io/group.name: {{ $.alb_name }}
     alb.ingress.kubernetes.io/load-balancer-name: {{ $.alb_name }}
