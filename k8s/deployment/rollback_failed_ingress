@@ -1,0 +1,50 @@
+#!/bin/bash
+# Rolls back a failed ingress to prevent sync poisoning of the ALB group.
+# When a broken ingress is applied, the ALB Ingress Controller fails to
+# reconcile ALL ingresses in the same group.name. By deleting the bad
+# ingress, the rest of the group can resume normal reconciliation.
+#
+# Only deletes ingresses — deployments/services/secrets are left in place
+# so that retries don't need to re-create them.
+
+ALB_ROLLBACK_ON_RECONCILIATION_FAILURE="${ALB_ROLLBACK_ON_RECONCILIATION_FAILURE:-true}"
+
+if [[ "$ALB_ROLLBACK_ON_RECONCILIATION_FAILURE" != "true" ]]; then
+    log debug "📋 Ingress rollback disabled (ALB_ROLLBACK_ON_RECONCILIATION_FAILURE=$ALB_ROLLBACK_ON_RECONCILIATION_FAILURE), skipping"
+    return 0
+fi
+
+if [[ "$DNS_TYPE" != "route53" ]]; then
+    log debug "📋 DNS type is '$DNS_TYPE', ingress rollback only applies to route53, skipping"
+    return 0
+fi
+
+SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
+INGRESS_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
+ALB_NAME=$(echo "$CONTEXT" | jq -r .alb_name)
+
+log warn "🔄 Rolling back ingress [$INGRESS_NAME] to prevent ALB sync poisoning..."
+log warn "📋 ALB group: $ALB_NAME | Namespace: $K8S_NAMESPACE"
+
+# Delete the main ingress
+if kubectl delete ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" --ignore-not-found=true 2>/dev/null; then
+    log info "   ✅ Deleted ingress: $INGRESS_NAME"
+else
+    log warn "   ⚠️  Could not delete ingress: $INGRESS_NAME"
+fi
+
+# Delete additional port ingresses for this scope (they share the same scope_id label)
+ADDITIONAL_INGRESSES=$(kubectl get ingress -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+for ing_name in $ADDITIONAL_INGRESSES; do
+    if [[ "$ing_name" != "$INGRESS_NAME" ]]; then
+        if kubectl delete ingress "$ing_name" -n "$K8S_NAMESPACE" --ignore-not-found=true 2>/dev/null; then
+            log info "   ✅ Deleted additional port ingress: $ing_name"
+        else
+            log warn "   ⚠️  Could not delete additional port ingress: $ing_name"
+        fi
+    fi
+done
+
+log warn "🔄 Rollback complete — other scopes on ALB group '$ALB_NAME' should resume normal reconciliation"

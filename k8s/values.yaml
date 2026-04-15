@@ -11,7 +11,8 @@ configuration:
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
   ALB_RECONCILIATION_ENABLED: false
   ALB_MAX_CAPACITY: 75
-  ALB_MAX_TARGET_GROUPS: 98
+  ALB_MAX_TARGET_GROUPS: 90
+  ALB_ROLLBACK_ON_RECONCILIATION_FAILURE: true
   ALB_METRICS_PUBLISH_ENABLED: false
 # ALB_METRICS_PUBLISH_TARGET: cloudwatch # Available values: cloudwatch | datadog
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600

@@ -19,7 +19,8 @@ setup() {
 
   # Base CONTEXT
   export CONTEXT='{
-    "providers": {}
+    "providers": {},
+    "deployment": {"strategy": "rolling"}
   }'
 
   # Mock aws - default: ALB with 40 target groups
@@ -50,8 +51,8 @@ teardown() {
 
   assert_equal "$status" "0"
   assert_contains "$output" "🔍 Validating ALB target group capacity for 'k8s-nullplatform-internet-facing'..."
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 98)"
-  assert_contains "$output" "✅ ALB target group capacity validated: 40/98"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups, this deployment would add ~1 (projected: 41, max: 98)"
+  assert_contains "$output" "✅ ALB target group capacity validated: 41/98 (current: 40, new: ~1)"
 }
 
 @test "validate_alb_target_group_capacity: displays debug info" {
@@ -85,7 +86,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 98/98"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed target group capacity: 98 current + 1 new = 99/98"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "Too many services or deployments are attached to this ALB"
   assert_contains "$output" "🔧 How to fix:"
@@ -113,7 +114,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 100/98"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed target group capacity: 100 current + 1 new = 101/98"
 }
 
 # =============================================================================
@@ -125,7 +126,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 98)"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups, this deployment would add ~1 (projected: 41, max: 98)"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_TARGET_GROUPS from env var" {
@@ -134,47 +135,47 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed target group capacity: 40 current + 1 new = 41/30"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_TARGET_GROUPS from scope-configurations provider" {
-  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"30"}}}}'
+  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"30"}}},"deployment":{"strategy":"rolling"}}'
   export ALB_MAX_TARGET_GROUPS="98"
 
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed target group capacity: 40 current + 1 new = 41/30"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_TARGET_GROUPS from container-orchestration provider" {
-  export CONTEXT='{"providers":{"container-orchestration":{"balancer":{"alb_max_target_groups":"30"}}}}'
+  export CONTEXT='{"providers":{"container-orchestration":{"balancer":{"alb_max_target_groups":"30"}}},"deployment":{"strategy":"rolling"}}'
   export ALB_MAX_TARGET_GROUPS="98"
 
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed target group capacity: 40 current + 1 new = 41/30"
 }
 
 @test "validate_alb_target_group_capacity: scope-configurations takes priority over container-orchestration" {
-  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"100"}},"container-orchestration":{"balancer":{"alb_max_target_groups":"30"}}}}'
+  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"100"}},"container-orchestration":{"balancer":{"alb_max_target_groups":"30"}}},"deployment":{"strategy":"rolling"}}'
 
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 100)"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups, this deployment would add ~1 (projected: 41, max: 100)"
 }
 
 @test "validate_alb_target_group_capacity: provider takes priority over env var" {
-  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"100"}}}}'
+  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_target_groups":"100"}}},"deployment":{"strategy":"rolling"}}'
   export ALB_MAX_TARGET_GROUPS="30"
 
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups (max: 100)"
-  assert_contains "$output" "✅ ALB target group capacity validated: 40/100"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 40 target groups, this deployment would add ~1 (projected: 41, max: 100)"
+  assert_contains "$output" "✅ ALB target group capacity validated: 41/100 (current: 40, new: ~1)"
 }
 
 # =============================================================================
@@ -265,8 +266,8 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 0 target groups (max: 98)"
-  assert_contains "$output" "✅ ALB target group capacity validated: 0/98"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 0 target groups, this deployment would add ~1 (projected: 1, max: 98)"
+  assert_contains "$output" "✅ ALB target group capacity validated: 1/98 (current: 0, new: ~1)"
 }
 
 @test "validate_alb_target_group_capacity: passes at exactly one below capacity" {
@@ -277,7 +278,7 @@ teardown() {
         return 0
         ;;
       *"describe-target-groups"*)
-        echo "97"
+        echo "96"
         return 0
         ;;
     esac
@@ -287,7 +288,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "✅ ALB target group capacity validated: 97/98"
+  assert_contains "$output" "✅ ALB target group capacity validated: 97/98 (current: 96, new: ~1)"
 }
 
 @test "validate_alb_target_group_capacity: fails when target group count is non-numeric" {

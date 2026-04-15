@@ -22,7 +22,7 @@ setup() {
     "providers": {}
   }'
 
-  # Mock aws - default: ALB with 2 listeners, 30 rules each
+  # Mock aws - default: ALB with HTTPS (443) listener, 50 rules
   aws() {
     case "$*" in
       *"describe-load-balancers"*)
@@ -30,11 +30,11 @@ setup() {
         return 0
         ;;
       *"describe-listeners"*)
-        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:listener/app/k8s-nullplatform-internet-facing/abc123/listener1 arn:aws:elasticloadbalancing:us-east-1:123456789:listener/app/k8s-nullplatform-internet-facing/abc123/listener2"
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:listener/app/k8s-nullplatform-internet-facing/abc123/listener1"
         return 0
         ;;
       *"describe-rules"*)
-        echo "30"
+        echo "50"
         return 0
         ;;
     esac
@@ -54,8 +54,8 @@ teardown() {
 
   assert_equal "$status" "0"
   assert_contains "$output" "🔍 Validating ALB capacity for 'k8s-nullplatform-internet-facing'..."
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 75)"
-  assert_contains "$output" "✅ ALB capacity validated: 60/75 rules"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' HTTPS listener has 50 rules, this scope would add ~1 (projected: 51, max: 75)"
+  assert_contains "$output" "✅ ALB capacity validated: 51/75 rules (current: 50, new: ~1)"
 }
 
 @test "validate_alb_capacity: displays debug info" {
@@ -90,8 +90,8 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 10 rules (max capacity: 75)"
-  assert_contains "$output" "✅ ALB capacity validated: 10/75 rules"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' HTTPS listener has 10 rules, this scope would add ~1 (projected: 11, max: 75)"
+  assert_contains "$output" "✅ ALB capacity validated: 11/75 rules (current: 10, new: ~1)"
 }
 
 # =============================================================================
@@ -119,12 +119,12 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 75/75 rules"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed capacity: 75 current + 1 new = 76/75 rules"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "Too many scopes or ingress rules are configured on this ALB"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "Remove unused scopes or ingress rules from the ALB"
-  assert_contains "$output" "Increase ALB_MAX_CAPACITY in values.yaml or container-orchestration provider (AWS limit is 100 per listener)"
+  assert_contains "$output" "Increase ALB_MAX_CAPACITY in values.yaml or scope-configurations provider (AWS limit is 100 per listener)"
   assert_contains "$output" "Request an AWS service quota increase for rules per ALB listener"
   assert_contains "$output" "Consider using a separate ALB for additional scopes"
 }
@@ -151,7 +151,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 90/75 rules"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed capacity: 90 current + 1 new = 91/75 rules"
 }
 
 # =============================================================================
@@ -163,7 +163,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 75)"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' HTTPS listener has 50 rules, this scope would add ~1 (projected: 51, max: 75)"
 }
 
 @test "validate_alb_capacity: ALB_MAX_CAPACITY from env var" {
@@ -172,7 +172,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed capacity: 50 current + 1 new = 51/50 rules"
 }
 
 @test "validate_alb_capacity: ALB_MAX_CAPACITY from scope-configurations provider" {
@@ -182,7 +182,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed capacity: 50 current + 1 new = 51/50 rules"
 }
 
 @test "validate_alb_capacity: provider takes priority over env var" {
@@ -192,8 +192,8 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 100)"
-  assert_contains "$output" "✅ ALB capacity validated: 60/100 rules"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' HTTPS listener has 50 rules, this scope would add ~1 (projected: 51, max: 100)"
+  assert_contains "$output" "✅ ALB capacity validated: 51/100 rules (current: 50, new: ~1)"
 }
 
 @test "validate_alb_capacity: ALB_MAX_CAPACITY from container-orchestration provider" {
@@ -203,7 +203,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached capacity: 60/50 rules"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' would exceed capacity: 50 current + 1 new = 51/50 rules"
 }
 
 @test "validate_alb_capacity: scope-configurations takes priority over container-orchestration" {
@@ -212,7 +212,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 60 rules (max capacity: 100)"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' HTTPS listener has 50 rules, this scope would add ~1 (projected: 51, max: 100)"
 }
 
 # =============================================================================
@@ -305,7 +305,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "⚠️  No listeners found on ALB 'k8s-nullplatform-internet-facing', skipping capacity check"
+  assert_contains "$output" "⚠️  No HTTPS (443) listener found on ALB 'k8s-nullplatform-internet-facing', skipping capacity check"
 }
 
 @test "validate_alb_capacity: fails when describe-rules fails" {
@@ -330,7 +330,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Failed to describe rules for listener"
+  assert_contains "$output" "❌ Failed to describe rules for HTTPS listener"
   assert_contains "$output" "📋 Listener ARN: arn:aws:elasticloadbalancing:us-east-1:123456789:listener/app/alb/abc123/listener1"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "The agent may lack permissions to describe rules"
@@ -363,8 +363,8 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 0 rules (max capacity: 75)"
-  assert_contains "$output" "✅ ALB capacity validated: 0/75 rules"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' HTTPS listener has 0 rules, this scope would add ~1 (projected: 1, max: 75)"
+  assert_contains "$output" "✅ ALB capacity validated: 1/75 rules (current: 0, new: ~1)"
 }
 
 @test "validate_alb_capacity: passes at exactly one below capacity" {
@@ -379,7 +379,7 @@ teardown() {
         return 0
         ;;
       *"describe-rules"*)
-        echo "74"
+        echo "73"
         return 0
         ;;
     esac
@@ -389,7 +389,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "✅ ALB capacity validated: 74/75 rules"
+  assert_contains "$output" "✅ ALB capacity validated: 74/75 rules (current: 73, new: ~1)"
 }
 
 @test "validate_alb_capacity: fails when rule count is non-numeric" {
@@ -414,7 +414,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Unexpected non-numeric rule count from listener"
+  assert_contains "$output" "❌ Unexpected non-numeric rule count from HTTPS listener"
   assert_contains "$output" "📋 Listener ARN: arn:aws:elasticloadbalancing:us-east-1:123456789:listener/app/alb/abc123/listener1"
   assert_contains "$output" "📋 Received value: WARNING: something unexpected"
   assert_contains "$output" "💡 Possible causes:"

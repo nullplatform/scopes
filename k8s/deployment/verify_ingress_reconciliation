@@ -1,5 +1,11 @@
 #!/bin/bash
 
+handle_reconciliation_failure() {
+    if [[ -f "$SERVICE_PATH/deployment/rollback_failed_ingress" ]]; then
+        source "$SERVICE_PATH/deployment/rollback_failed_ingress"
+    fi
+    exit 1
+}
 
 SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
 ALB_NAME=$(echo "$CONTEXT" | jq -r .alb_name)
@@ -246,14 +252,14 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
             log error "🔧 How to fix:"
             log error "   - Verify hostname matches certificate in ACM"
             log error "   - Ensure certificate includes exact hostname or matching wildcard"
-            exit 1
+            handle_reconciliation_failure
         fi
 
         if [ "$event_type" == "Error" ]; then
             log error "❌ Ingress reconciliation failed"
             log error "💡 Error messages:"
             echo "$relevant_events" | jq -r '.[] | "   - \(.message)"' >&2
-            exit 1
+            handle_reconciliation_failure
         fi
 
         if [ "$event_type" == "Warning" ]; then
@@ -281,4 +287,4 @@ events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
     -o json)
 echo "$events_json" | jq -r '.items | sort_by(.lastTimestamp) | .[] | "  [\(.type)] \(.reason): \(.message)"' | tail -10
 
-exit 1
+handle_reconciliation_failure

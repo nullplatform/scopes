@@ -94,10 +94,22 @@ if ! [[ "$TARGET_GROUP_COUNT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-log info "📋 ALB '$ALB_NAME' has $TARGET_GROUP_COUNT target groups (max: $ALB_MAX_TARGET_GROUPS)"
+# Estimate target groups this deployment will add
+ADDITIONAL_PORT_COUNT=$(echo "$CONTEXT" | jq '.scope.capabilities.additional_ports // [] | length')
+DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r '.deployment.strategy // "initial"')
+if [[ "$DEPLOYMENT_STRATEGY" == "blue_green" ]]; then
+    # Blue-green creates TGs for both blue and green backends
+    ESTIMATED_NEW_TGS=$(( (1 + ADDITIONAL_PORT_COUNT) * 2 ))
+else
+    ESTIMATED_NEW_TGS=$(( 1 + ADDITIONAL_PORT_COUNT ))
+fi
 
-if [[ "$TARGET_GROUP_COUNT" -ge "$ALB_MAX_TARGET_GROUPS" ]]; then
-    log error "❌ ALB '$ALB_NAME' has reached target group capacity: $TARGET_GROUP_COUNT/$ALB_MAX_TARGET_GROUPS"
+PROJECTED_TOTAL=$((TARGET_GROUP_COUNT + ESTIMATED_NEW_TGS))
+
+log info "📋 ALB '$ALB_NAME' has $TARGET_GROUP_COUNT target groups, this deployment would add ~$ESTIMATED_NEW_TGS (projected: $PROJECTED_TOTAL, max: $ALB_MAX_TARGET_GROUPS)"
+
+if [[ "$PROJECTED_TOTAL" -ge "$ALB_MAX_TARGET_GROUPS" ]]; then
+    log error "❌ ALB '$ALB_NAME' would exceed target group capacity: $TARGET_GROUP_COUNT current + $ESTIMATED_NEW_TGS new = $PROJECTED_TOTAL/$ALB_MAX_TARGET_GROUPS"
     log error ""
     log error "💡 Possible causes:"
     log error "   Too many services or deployments are attached to this ALB"
@@ -111,4 +123,4 @@ if [[ "$TARGET_GROUP_COUNT" -ge "$ALB_MAX_TARGET_GROUPS" ]]; then
     exit 1
 fi
 
-log info "✅ ALB target group capacity validated: $TARGET_GROUP_COUNT/$ALB_MAX_TARGET_GROUPS"
+log info "✅ ALB target group capacity validated: $PROJECTED_TOTAL/$ALB_MAX_TARGET_GROUPS (current: $TARGET_GROUP_COUNT, new: ~$ESTIMATED_NEW_TGS)"
