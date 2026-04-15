@@ -2,7 +2,9 @@
 
 handle_reconciliation_failure() {
     if [[ -f "$SERVICE_PATH/deployment/rollback_failed_ingress" ]]; then
-        source "$SERVICE_PATH/deployment/rollback_failed_ingress"
+        # Run in subshell so `return 0` in the sourced script cannot escape
+        # this function and skip the `exit 1` below
+        ( source "$SERVICE_PATH/deployment/rollback_failed_ingress" )
     fi
     exit 1
 }
