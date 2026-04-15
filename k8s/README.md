@@ -51,6 +51,9 @@ Configuration specific to AWS Route53 DNS provider. Visible only when `dns_type`
 | **ALB_NAME** (public) | Public Application Load Balancer name | `networking.balancer_public_name` |
 | **ALB_NAME** (private) | Private Application Load Balancer name | `networking.balancer_private_name` |
 | **ALB_RECONCILIATION_ENABLED** | Whether ALB reconciliation is enabled | `networking.alb_reconciliation_enabled` |
+| **ALB_MAX_CAPACITY** | Maximum number of rules allowed on the HTTPS listener before blocking new scopes (default: 75, AWS limit: 100) | `networking.alb_max_capacity` |
+| **ALB_MAX_TARGET_GROUPS** | Maximum number of target groups allowed on the ALB before blocking new deployments (default: 90, AWS limit: 100) | `networking.alb_max_target_groups` |
+| **ALB_ROLLBACK_ON_RECONCILIATION_FAILURE** | Whether to automatically delete a broken ingress when ALB reconciliation fails, preventing sync poisoning of the entire ALB group (default: true) | `networking.alb_rollback_on_reconciliation_failure` |
 
 #### Azure DNS
 
