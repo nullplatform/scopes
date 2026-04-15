@@ -174,7 +174,10 @@ validate_alb_config() {
                             log info "   ✅ Weights match on listener port $LISTENER_PORT (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
                             domain_found=true
                         else
-                            log error "   ❌ Weights mismatch on listener port $LISTENER_PORT: expected=$EXPECTED_WEIGHTS actual=$ACTUAL_WEIGHTS"
+                            local _exp_fmt _act_fmt
+                            _exp_fmt=$(echo "$EXPECTED_WEIGHTS" | tr '\n' '/' | sed 's/\/$//')
+                            _act_fmt=$(echo "$ACTUAL_WEIGHTS" | tr '\n' '/' | sed 's/\/$//')
+                            log error "   ❌ Weights mismatch on listener port $LISTENER_PORT: expected=$_exp_fmt actual=$_act_fmt"
                             domain_found=false
                         fi
                     else

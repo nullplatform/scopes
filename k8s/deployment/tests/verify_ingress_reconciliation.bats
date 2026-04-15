@@ -244,7 +244,7 @@ teardown() {
   assert_contains "$output" "📋 ALB validation enabled: k8s-test-alb for domain app.example.com"
   assert_contains "$output" "📝 Checking domain: app.example.com"
   assert_contains "$output" "✅ Found rule for domain: app.example.com"
-  assert_contains "$output" "❌ Weights mismatch on listener port 443"
+  assert_contains "$output" "❌ Weights mismatch on listener port 443: expected=50/50 actual=20/80"
 }
 
 @test "verify_ingress_reconciliation: skips weight check on additional port listener when blue has no service" {
