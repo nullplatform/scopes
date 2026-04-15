@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add support for multiple ALBs
 - Add configurable memory and cpu limit for traffic manager
 - Add ALB metrics publishing to CloudWatch or Datadog (rule count and target group count per ALB)
+- Fix blue-green switch-traffic failure when `additional_ports` (e.g., gRPC) are added to a scope after the initial deployment
 
 ## [1.10.1] - 2026-02-13
 - Hotfix on wait_deployment_iteration

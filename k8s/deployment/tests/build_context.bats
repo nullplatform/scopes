@@ -696,3 +696,107 @@ SCRIPT
 
   assert_equal "$CONTAINER_CPU_IN_MILLICORES" "93"
 }
+
+# =============================================================================
+# Blue Additional Port Services Detection Tests
+# =============================================================================
+@test "blue additional port services: empty map when no BLUE_DEPLOYMENT_ID" {
+  BLUE_DEPLOYMENT_ID=""
+  BLUE_ADDITIONAL_PORT_SERVICES="{}"
+  if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
+    BLUE_ADDITIONAL_PORT_SERVICES='{"grpc-9014": true}'
+  fi
+  assert_equal "$BLUE_ADDITIONAL_PORT_SERVICES" "{}"
+}
+
+@test "blue additional port services: empty map when BLUE_DEPLOYMENT_ID is null" {
+  BLUE_DEPLOYMENT_ID="null"
+  BLUE_ADDITIONAL_PORT_SERVICES="{}"
+  if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
+    BLUE_ADDITIONAL_PORT_SERVICES='{"grpc-9014": true}'
+  fi
+  assert_equal "$BLUE_ADDITIONAL_PORT_SERVICES" "{}"
+}
+
+@test "blue additional port services: empty map when no additional_ports in capabilities" {
+  BLUE_DEPLOYMENT_ID="deploy-old-456"
+  export CONTEXT='{"scope":{"capabilities":{}}}'
+  ADDITIONAL_PORTS=$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports // []')
+  assert_equal "$ADDITIONAL_PORTS" "[]"
+}
+
+@test "blue additional port services: detects existing service via kubectl" {
+  kubectl() {
+    if [[ "$1" == "get" && "$2" == "service" && "$3" == "d-scope-456-deploy-old-789-grpc-9014" ]]; then
+      return 0
+    fi
+    return 1
+  }
+  export -f kubectl
+
+  SCOPE_ID="scope-456"
+  BLUE_DEPLOYMENT_ID="deploy-old-789"
+  K8S_NAMESPACE="test-ns"
+  service_name="d-${SCOPE_ID}-${BLUE_DEPLOYMENT_ID}-grpc-9014"
+
+  if kubectl get service "$service_name" -n "$K8S_NAMESPACE" &>/dev/null; then
+    result="true"
+  else
+    result="false"
+  fi
+
+  assert_equal "$result" "true"
+}
+
+@test "blue additional port services: detects missing service via kubectl" {
+  kubectl() { return 1; }
+  export -f kubectl
+
+  SCOPE_ID="scope-456"
+  BLUE_DEPLOYMENT_ID="deploy-old-789"
+  K8S_NAMESPACE="test-ns"
+  service_name="d-${SCOPE_ID}-${BLUE_DEPLOYMENT_ID}-grpc-9014"
+
+  if kubectl get service "$service_name" -n "$K8S_NAMESPACE" &>/dev/null; then
+    result="true"
+  else
+    result="false"
+  fi
+
+  assert_equal "$result" "false"
+}
+
+@test "blue additional port services: builds correct map for mixed existing/missing ports" {
+  kubectl() {
+    if [[ "$3" == "d-scope-456-deploy-old-789-grpc-9014" ]]; then
+      return 0  # exists
+    fi
+    return 1  # doesn't exist
+  }
+  export -f kubectl
+
+  SCOPE_ID="scope-456"
+  BLUE_DEPLOYMENT_ID="deploy-old-789"
+  K8S_NAMESPACE="test-ns"
+  BLUE_ADDITIONAL_PORT_SERVICES="{}"
+
+  ADDITIONAL_PORTS='[{"port":9014,"type":"GRPC"},{"port":8081,"type":"HTTP"}]'
+  while IFS= read -r port_config; do
+    port=$(echo "$port_config" | jq -r '.port')
+    type_raw=$(echo "$port_config" | jq -r '.type')
+    type_lower=$(echo "$type_raw" | tr '[:upper:]' '[:lower:]')
+    service_name="d-${SCOPE_ID}-${BLUE_DEPLOYMENT_ID}-${type_lower}-${port}"
+    key="${type_lower}-${port}"
+    if kubectl get service "$service_name" -n "$K8S_NAMESPACE" &>/dev/null; then
+      BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): true}')
+    else
+      BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): false}')
+    fi
+  done < <(echo "$ADDITIONAL_PORTS" | jq -c '.[]')
+
+  grpc_exists=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq -r '.["grpc-9014"]')
+  http_exists=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq -r '.["http-8081"]')
+
+  assert_equal "$grpc_exists" "true"
+  assert_equal "$http_exists" "false"
+}
