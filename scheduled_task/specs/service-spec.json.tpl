@@ -121,6 +121,9 @@
             {
               "const": "0 0 * * *",
               "title": "Every day (midnight)"
+            },
+            {
+              "type": "string"
             }
           ],
           "description": "Specify how often the task should run. You can select a predefined option or enter a standard cron expression for custom schedules.",
