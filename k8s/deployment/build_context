@@ -245,6 +245,27 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
+# Check if blue deployment has K8s services for additional ports
+BLUE_ADDITIONAL_PORT_SERVICES="{}"
+if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
+    ADDITIONAL_PORTS=$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports // []')
+    if [ "$ADDITIONAL_PORTS" != "[]" ] && [ "$ADDITIONAL_PORTS" != "null" ]; then
+        while IFS= read -r port_config; do
+            port=$(echo "$port_config" | jq -r '.port')
+            type_raw=$(echo "$port_config" | jq -r '.type')
+            type_lower=$(echo "$type_raw" | tr '[:upper:]' '[:lower:]')
+            service_name="d-${SCOPE_ID}-${BLUE_DEPLOYMENT_ID}-${type_lower}-${port}"
+            key="${type_lower}-${port}"
+            if kubectl get service "$service_name" -n "$K8S_NAMESPACE" &>/dev/null; then
+                BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): true}')
+            else
+                BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): false}')
+                log info "Blue deployment service '$service_name' not found - additional port traffic will route to new deployment only"
+            fi
+        done < <(echo "$ADDITIONAL_PORTS" | jq -c '.[]')
+    fi
+fi
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
           --arg blue_replicas "$BLUE_REPLICAS" \
@@ -258,6 +279,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg traffic_manager_config_map "$TRAFFIC_MANAGER_CONFIG_MAP" \
           --arg container_memory_in_memory "$CONTAINER_MEMORY_IN_MEMORY" \
           --arg container_cpu_in_millicores "$CONTAINER_CPU_IN_MILLICORES" \
+          --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -269,7 +291,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 service_account_name: $service_account_name,
                 traffic_manager_config_map: $traffic_manager_config_map,
                 container_memory_in_memory: $container_memory_in_memory,
-                container_cpu_in_millicores: $container_cpu_in_millicores
+                container_cpu_in_millicores: $container_cpu_in_millicores,
+                blue_additional_port_services: $blue_additional_port_services
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
