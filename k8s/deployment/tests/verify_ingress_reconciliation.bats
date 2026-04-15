@@ -223,7 +223,7 @@ teardown() {
           echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
           ;;
         describe-listeners)
-          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/123\"}]}'
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/123\",\"Port\":443}]}'
           ;;
         describe-rules)
           echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":80},{\"Weight\":20}]}}]}]}'
@@ -244,7 +244,51 @@ teardown() {
   assert_contains "$output" "📋 ALB validation enabled: k8s-test-alb for domain app.example.com"
   assert_contains "$output" "📝 Checking domain: app.example.com"
   assert_contains "$output" "✅ Found rule for domain: app.example.com"
-  assert_contains "$output" "❌ Weights mismatch: expected="
+  assert_contains "$output" "❌ Weights mismatch on listener port 443"
+}
+
+@test "verify_ingress_reconciliation: skips weight check on additional port listener when blue has no service" {
+  # Scenario: gRPC (port 50051) was added to scope AFTER the blue deployment was created.
+  # The blue deployment has no K8s service for gRPC, so the ingress routes 100% to green.
+  # The verify script should skip weight verification on the gRPC listener and check the
+  # primary HTTP listener (port 443) instead.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old","capabilities":{"additional_ports":[{"port":50051,"type":"GRPC"}]}},"alb_name":"k8s-test-alb","blue_additional_port_services":{"grpc-50051":false},"deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/grpc\",\"Port\":50051},{\"ListenerArn\":\"arn:aws:listener/https\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          if [[ \"\$4\" == *\"grpc\"* ]]; then
+            echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":100}]}}]}]}'
+          else
+            echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          fi
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' VERIFY_WEIGHTS='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Skipping weight check on listener port 50051"
+  assert_contains "$output" "✅ Weights match on listener port 443"
+  assert_contains "$output" "✅ ALB configuration validated successfully"
 }
 
 @test "verify_ingress_reconciliation: detects domain not found in ALB rules" {

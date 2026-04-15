@@ -75,6 +75,30 @@ validate_alb_config() {
         return 1
     fi
 
+    # Build a set of additional port numbers where the blue deployment has no K8s service.
+    # When additional_ports are added to a scope after the initial deployment, the blue
+    # deployment won't have services for those ports. ALB listeners on those ports will
+    # have single-target weights (100% green) instead of the standard blue-green split.
+    local _blue_missing_ports=""
+    local _additional_ports
+    _additional_ports=$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports // []')
+    local _blue_port_svc
+    _blue_port_svc=$(echo "$CONTEXT" | jq -c '.blue_additional_port_services // {}')
+
+    if [ "$_additional_ports" != "[]" ] && [ "$_additional_ports" != "null" ] && [ "$_blue_port_svc" != "{}" ]; then
+        while IFS= read -r _pc; do
+            local _port _type _key _exists
+            _port=$(echo "$_pc" | jq -r '.port')
+            _type=$(echo "$_pc" | jq -r '.type' | tr '[:upper:]' '[:lower:]')
+            _key="${_type}-${_port}"
+            _exists=$(echo "$_blue_port_svc" | jq -r --arg k "$_key" 'if has($k) then .[$k] else true end')
+            if [ "$_exists" = "false" ]; then
+                _blue_missing_ports="${_blue_missing_ports} ${_port}"
+                log debug "📝 Blue deployment has no service for additional port ${_port} - expecting single-target weights"
+            fi
+        done < <(echo "$_additional_ports" | jq -c '.[]')
+    fi
+
     local all_domains_found=true
 
     for domain in "${ALL_DOMAINS[@]}"; do
@@ -102,9 +126,32 @@ validate_alb_config() {
             ')
 
             if [ -n "$MATCHING_RULE" ]; then
-                log info "   ✅ Found rule for domain: $domain"
-
                 if [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
+                    # Determine the listener port to check if this is an additional port
+                    # where the blue deployment has no service (added after initial deploy)
+                    local LISTENER_PORT
+                    LISTENER_PORT=$(echo "$LISTENERS" | jq -r --arg arn "$listener_arn" \
+                        '.Listeners[] | select(.ListenerArn == $arn) | .Port')
+
+                    local is_blue_missing_port=false
+                    for _mp in $_blue_missing_ports; do
+                        if [ "$LISTENER_PORT" = "$_mp" ]; then
+                            is_blue_missing_port=true
+                            break
+                        fi
+                    done
+
+                    if [ "$is_blue_missing_port" = "true" ]; then
+                        # Blue deployment was created before this additional port was added
+                        # to the scope config, so there's no blue K8s service for it.
+                        # Skip weight verification on this listener — the ingress correctly
+                        # routes 100% to green. Verify weights on the primary listener instead.
+                        log debug "   ⏭️  Skipping weight check on listener port $LISTENER_PORT (blue has no service for this port)"
+                        continue
+                    fi
+
+                    log info "   ✅ Found rule for domain: $domain"
+
                     BLUE_WEIGHT=$((100 - SWITCH_TRAFFIC))
                     GREEN_WEIGHT=$SWITCH_TRAFFIC
 
@@ -124,10 +171,10 @@ validate_alb_config() {
 
                     if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
                         if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
-                            log info "   ✅ Weights match (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
+                            log info "   ✅ Weights match on listener port $LISTENER_PORT (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
                             domain_found=true
                         else
-                            log error "   ❌ Weights mismatch: expected=$EXPECTED_WEIGHTS actual=$ACTUAL_WEIGHTS"
+                            log error "   ❌ Weights mismatch on listener port $LISTENER_PORT: expected=$EXPECTED_WEIGHTS actual=$ACTUAL_WEIGHTS"
                             domain_found=false
                         fi
                     else
@@ -135,6 +182,7 @@ validate_alb_config() {
                         domain_found=false
                     fi
                 else
+                    log info "   ✅ Found rule for domain: $domain"
                     domain_found=true
                 fi
                 break
