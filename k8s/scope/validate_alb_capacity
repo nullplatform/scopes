@@ -116,7 +116,9 @@ if ! [[ "$TOTAL_RULES" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Estimate rules this scope will add
+# Estimate rules this scope will add.
+# During scope creation, .scope.domain may be null (generated later in the workflow).
+# [null] has jq length 1, which is the correct estimate (the scope will get one domain).
 DOMAIN_COUNT=$(echo "$CONTEXT" | jq '[.scope.domain] + [.scope.domains[]?.name // empty] | length')
 ADDITIONAL_PORT_COUNT=$(echo "$CONTEXT" | jq '.scope.capabilities.additional_ports // [] | length')
 # Each domain creates 1 rule on the primary ingress; additional ports create separate ingresses with the same domain rules

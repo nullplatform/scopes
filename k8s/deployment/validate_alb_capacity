@@ -197,7 +197,12 @@ if ! [[ "$TARGET_GROUP_COUNT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Estimate target groups this deployment will add
+# Estimate target groups this deployment will add.
+# Re-parsed independently of the rule check above, which may have been skipped
+# if no HTTPS listener was found.
+# Note: for blue-green re-deployments, existing blue TGs are already in
+# TARGET_GROUP_COUNT, so this intentionally overcounts. Conservative is safer
+# than allowing the AWS hard limit (100) to be hit.
 ADDITIONAL_PORT_COUNT=$(echo "$CONTEXT" | jq '.scope.capabilities.additional_ports // [] | length')
 DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r '.deployment.strategy // "initial"')
 if [[ "$DEPLOYMENT_STRATEGY" == "blue_green" ]]; then
