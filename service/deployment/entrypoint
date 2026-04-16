@@ -37,7 +37,18 @@ esac
 
 WORKFLOW_PATH="$SERVICE_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
 
+NEEDS_PARAMS=true
+case "$SERVICE_ACTION" in
+  "switch-traffic"|"kill-instances"|"diagnose-deployment")
+    NEEDS_PARAMS=false
+    ;;
+esac
+
 CMD="np service workflow exec --workflow $WORKFLOW_PATH --build-context --include-secrets"
+
+if [ "$NEEDS_PARAMS" = "false" ] && np service workflow exec --help 2>&1 | grep -q "\-\-no-params"; then
+  CMD="$CMD --no-params"
+fi
 
 IFS=',' read -ra OVERRIDE_PATHS <<< "$OVERRIDES_PATH"
 for path in "${OVERRIDE_PATHS[@]}"; do
