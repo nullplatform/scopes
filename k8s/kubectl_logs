@@ -1,0 +1,88 @@
+#!/bin/bash
+# Read-only kubectl logs wrapper for troubleshooting.
+# Hardcodes `kubectl logs` so no other verb can be invoked, and rejects
+# flags that change auth/server/context or turn the call into a stream
+# (--follow / -f), which would hang the script. When no namespace flag
+# is supplied, defaults to $K8S_NAMESPACE so the agent can target the
+# scope's namespace without repeating it.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$(type -t log 2>/dev/null)" != "function" ]]; then source "$SCRIPT_DIR/logging"; fi
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") <kubectl logs args>
+
+Runs 'kubectl logs' with the provided arguments. Read-only: any other
+verb, auth/context override, or streaming flag (--follow / -f) is
+rejected to keep invocations bounded.
+
+Examples:
+  $(basename "$0") my-pod
+  $(basename "$0") my-pod -c my-container --tail 200
+  $(basename "$0") my-pod --previous
+  $(basename "$0") -l app=foo --tail 100
+  $(basename "$0") my-pod --since 1h --timestamps
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+BLOCKED_FLAGS=(
+  --server
+  --kubeconfig
+  --token
+  --as
+  --as-group
+  --as-uid
+  --certificate-authority
+  --client-certificate
+  --client-key
+  --username
+  --password
+  --user
+  --cluster
+  --context
+  --insecure-skip-tls-verify
+  -f
+  --follow
+)
+
+is_blocked() {
+  local flag_name="${1%%=*}"
+  for blocked in "${BLOCKED_FLAGS[@]}"; do
+    if [[ "$flag_name" == "$blocked" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+HAS_NAMESPACE_FLAG=false
+
+for arg in "$@"; do
+  if is_blocked "$arg"; then
+    log error "❌ Refusing argument '$arg': flag is blocked to keep this script read-only and non-streaming."
+    log error "   Blocked flags: ${BLOCKED_FLAGS[*]}"
+    exit 1
+  fi
+
+  case "${arg%%=*}" in
+    -n|--namespace)
+      HAS_NAMESPACE_FLAG=true
+      ;;
+  esac
+done
+
+ARGS=("$@")
+
+if [[ "$HAS_NAMESPACE_FLAG" == "false" ]] && [[ -n "${K8S_NAMESPACE:-}" ]]; then
+  ARGS+=(-n "$K8S_NAMESPACE")
+fi
+
+log debug "📋 Running: kubectl logs ${ARGS[*]}"
+
+kubectl logs "${ARGS[@]}"
