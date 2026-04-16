@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# Resolves the ALB name to use for the scope's ingress.
+#
+# Resolution priority (when DNS_TYPE is route53):
+#   1. Route53 — if a DNS record already exists for the scope domain,
+#      use the ALB it points to (ensures DNS/ingress consistency)
+#   2. Load balancing — when additional balancers are configured, pick
+#      the ALB with the fewest HTTPS listener rules
+#   3. Provider config — base ALB from scope-configurations or
+#      container-orchestration provider
+#
+# For non-route53 DNS types, only priority 3 (provider config) is used.
+#
+# Inputs (env vars):
+#   DNS_TYPE            - DNS provider type (route53, azure, external_dns)
+#   INGRESS_VISIBILITY  - "internet-facing" or "internal"
+#   CONTEXT             - JSON with provider configuration
+#   REGION              - AWS region (for elbv2 API calls)
+#
+# Outputs (env vars):
+#   ALB_NAME            - The resolved ALB name to use
+
+_RESOLVE_BALANCER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! type -t log >/dev/null 2>&1; then
+  source "$_RESOLVE_BALANCER_DIR/../../logging"
+fi
+
+if ! type -t get_config_value >/dev/null 2>&1; then
+  source "$_RESOLVE_BALANCER_DIR/../../utils/get_config_value"
+fi
+
+# Queries AWS ELBv2 to count listener rules on an ALB's HTTPS (443) listener.
+# The default rule is excluded since it always exists.
+# Usage: get_alb_rule_count <alb_name>
+# Returns: integer rule count on stdout, non-zero exit on failure
+get_alb_rule_count() {
+  local alb_name="$1"
+
+  local alb_arn
+  alb_arn=$(aws elbv2 describe-load-balancers \
+    --names "$alb_name" \
+    --region "$REGION" \
+    --query 'LoadBalancers[0].LoadBalancerArn' \
+    --output text 2>/dev/null) || return 1
+
+  if [ -z "$alb_arn" ] || [ "$alb_arn" = "None" ]; then
+    return 1
+  fi
+
+  local listener_arn
+  listener_arn=$(aws elbv2 describe-listeners \
+    --load-balancer-arn "$alb_arn" \
+    --region "$REGION" \
+    --query 'Listeners[?Port==`443`].ListenerArn | [0]' \
+    --output text 2>/dev/null) || return 1
+
+  if [ -z "$listener_arn" ] || [ "$listener_arn" = "None" ]; then
+    return 1
+  fi
+
+  local rules_json
+  rules_json=$(aws elbv2 describe-rules \
+    --listener-arn "$listener_arn" \
+    --region "$REGION" \
+    --output json 2>/dev/null) || return 1
+
+  # Exclude the default rule (always present, not a routing rule)
+  echo "$rules_json" | jq '[.Rules[] | select(.IsDefault == false)] | length'
+}
+
+# Looks up the Route53 A-record alias for the scope domain, then resolves
+# the ALB DNS name back to an ALB name.
+# Returns the ALB name on stdout, or non-zero exit if not found.
+get_alb_from_route53() {
+  local domain="$1"
+  local region="$2"
+
+  local zone_id
+  zone_id=$(echo "$CONTEXT" | jq -r '
+    .providers["cloud-providers"].networking.hosted_public_zone_id //
+    .providers["cloud-providers"].networking.hosted_zone_id //
+    empty
+  ') || return 1
+
+  if [ -z "$zone_id" ]; then
+    return 1
+  fi
+
+  # Use --start-record-name to jump directly to the record instead of
+  # scanning from the beginning (list-resource-record-sets does not
+  # auto-paginate and returns max 300 per page).
+  local alias_dns
+  alias_dns=$(aws route53 list-resource-record-sets \
+    --hosted-zone-id "$zone_id" \
+    --start-record-name "${domain}." \
+    --start-record-type "A" \
+    --max-items 1 \
+    --query "ResourceRecordSets[?Name=='${domain}.' && Type=='A'].AliasTarget.DNSName | [0]" \
+    --output text \
+    --region "$region" 2>/dev/null) || return 1
+
+  if [ -z "$alias_dns" ] || [ "$alias_dns" = "None" ] || [ "$alias_dns" = "null" ]; then
+    return 1
+  fi
+
+  # Strip trailing dot from DNS name
+  alias_dns="${alias_dns%.}"
+
+  # Reverse-lookup: find ALB name from its DNS name (case-insensitive match)
+  local alb_name
+  alb_name=$(aws elbv2 describe-load-balancers \
+    --region "$region" \
+    --output json 2>/dev/null \
+    | jq -r --arg dns "$alias_dns" \
+      '.LoadBalancers[] | select(.DNSName | ascii_downcase == ($dns | ascii_downcase)) | .LoadBalancerName' \
+    | head -1) || return 1
+
+  if [ -z "$alb_name" ]; then
+    return 1
+  fi
+
+  echo "$alb_name"
+}
+
+# =============================================================================
+# Main logic
+# =============================================================================
+
+# Resolve the base ALB name from configuration
+ALB_NAME="k8s-nullplatform-$INGRESS_VISIBILITY"
+
+if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+  ALB_NAME=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.balancer_public_name' \
+    --provider '.providers["container-orchestration"].balancer.public_name' \
+    --default "$ALB_NAME"
+  )
+else
+  ALB_NAME=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.balancer_private_name' \
+    --provider '.providers["container-orchestration"].balancer.private_name' \
+    --default "$ALB_NAME"
+  )
+fi
+
+if [[ "$DNS_TYPE" == "route53" ]]; then
+  # Priority 1: Check Route53 for an existing DNS record
+  SCOPE_DOMAIN_VAL=$(echo "$CONTEXT" | jq -r '.scope.domain // empty')
+  EXISTING_ALB=""
+
+  if [ -n "$SCOPE_DOMAIN_VAL" ]; then
+    EXISTING_ALB=$(get_alb_from_route53 "$SCOPE_DOMAIN_VAL" "$REGION" 2>/dev/null) || true
+  fi
+
+  if [ -n "$EXISTING_ALB" ]; then
+    log info "📝 Using ALB '$EXISTING_ALB' from Route53 record for $SCOPE_DOMAIN_VAL"
+    ALB_NAME="$EXISTING_ALB"
+  else
+    # Priority 2: If additional balancers configured, pick the least-loaded one
+    ADDITIONAL_BALANCERS=""
+    if [ "$INGRESS_VISIBILITY" = "internet-facing" ]; then
+      ADDITIONAL_BALANCERS=$(get_config_value \
+        --provider '.providers["scope-configurations"].networking.additional_public_balancers' \
+        --provider '.providers["container-orchestration"].balancer.additional_public_names' \
+        --default ""
+      )
+    else
+      ADDITIONAL_BALANCERS=$(get_config_value \
+        --provider '.providers["scope-configurations"].networking.additional_private_balancers' \
+        --provider '.providers["container-orchestration"].balancer.additional_private_names' \
+        --default ""
+      )
+    fi
+
+    if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
+      log debug "🔍 Additional balancers configured, resolving least-loaded ALB..."
+
+      CANDIDATES=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
+
+      log debug "📋 Candidate balancers: $(echo "$CANDIDATES" | paste -sd ',' - | sed 's/,/, /g')"
+
+      MIN_RULES=-1
+      BEST_ALB="$ALB_NAME"
+
+      for CANDIDATE in $CANDIDATES; do
+        RULE_COUNT=$(get_alb_rule_count "$CANDIDATE" 2>/dev/null) || {
+          log warn "⚠️  Could not query rules for ALB '$CANDIDATE', skipping"
+          continue
+        }
+
+        log debug "📋 ALB '$CANDIDATE': $RULE_COUNT rules"
+
+        if [ "$MIN_RULES" -eq -1 ] || [ "$RULE_COUNT" -lt "$MIN_RULES" ]; then
+          MIN_RULES=$RULE_COUNT
+          BEST_ALB="$CANDIDATE"
+        fi
+      done
+
+      if [ "$BEST_ALB" != "$ALB_NAME" ]; then
+        log info "📝 Selected ALB '$BEST_ALB' ($MIN_RULES rules) over default '$ALB_NAME'"
+      fi
+
+      ALB_NAME="$BEST_ALB"
+    fi
+  fi
+else
+  log debug "📋 DNS type is '$DNS_TYPE', skipping Route53 lookup and load balancing"
+fi
+
+export ALB_NAME

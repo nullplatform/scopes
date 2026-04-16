@@ -1,20 +1,20 @@
 #!/bin/bash
 
-echo "Getting hosted zones"
+log debug "🔍 Getting hosted zones..."
 HOSTED_PUBLIC_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_public_zone_id')
 HOSTED_PRIVATE_ZONE_ID=$(echo "$CONTEXT" | jq -r '.providers["cloud-providers"].networking.hosted_zone_id')
 
-echo "Public Hosted Zone ID: $HOSTED_PUBLIC_ZONE_ID"
-echo "Private Hosted Zone ID: $HOSTED_PRIVATE_ZONE_ID"
+log debug "📋 Public Hosted Zone ID: $HOSTED_PUBLIC_ZONE_ID"
+log debug "📋 Private Hosted Zone ID: $HOSTED_PRIVATE_ZONE_ID"
 
-# Check if both hosted zones are empty or null
 if [[ -z "$HOSTED_PUBLIC_ZONE_ID" || "$HOSTED_PUBLIC_ZONE_ID" == "null" ]] && [[ -z "$HOSTED_PRIVATE_ZONE_ID" || "$HOSTED_PRIVATE_ZONE_ID" == "null" ]]; then
-    echo "Unable to find any hosted zones (neither public nor private)" >&2
+    log warn "⚠️  No hosted zones found (neither public nor private)"
     exit 0
 fi
 
 export HOSTED_PUBLIC_ZONE_ID
 export HOSTED_PRIVATE_ZONE_ID
 
-mkdir -p "$SERVICE_PATH/tmp/"
-mkdir -p "$SERVICE_PATH/output/"
+mkdir -p "$SERVICE_PATH/tmp/" "$SERVICE_PATH/output/"
+
+log info "✅ Hosted zones loaded"

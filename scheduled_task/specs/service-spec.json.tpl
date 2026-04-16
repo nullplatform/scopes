@@ -87,7 +87,7 @@
               "type": "number"
             }
           ],
-          "default": 500,
+          "default": 100,
           "description": "Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)",
           "title": "CPU Millicores",
           "type": "integer"
@@ -121,6 +121,9 @@
             {
               "const": "0 0 * * *",
               "title": "Every day (midnight)"
+            },
+            {
+              "type": "string"
             }
           ],
           "description": "Specify how often the task should run. You can select a predefined option or enter a standard cron expression for custom schedules.",
@@ -285,10 +288,10 @@
   "dimensions": {},
   "name": "Scheduled task",
   "selectors": {
-    "category": "any",
+    "category": "Scope",
     "imported": false,
-    "provider": "any",
-    "sub_category": "any"
+    "provider": "Agent",
+    "sub_category": "Scheduled task"
   },
   "type": "scope",
   "use_default_actions": false,

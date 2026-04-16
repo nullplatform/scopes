@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # Build scope and tags env variables
 source "$SERVICE_PATH/scope/build_context"
 
@@ -20,7 +21,7 @@ SWITCH_TRAFFIC=$(echo "$CONTEXT" | jq -r ".deployment.strategy_data.desired_swit
 MIN_REPLICAS=$(echo "scale=10; $REPLICAS / 10" | bc)
 MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : int($1)+1)}')
 
-DEPLOYMENT_STATUS=$(echo $CONTEXT | jq -r ".deployment.status")
+DEPLOYMENT_STATUS=$(echo "$CONTEXT" | jq -r ".deployment.status")
 
 validate_status() {
   local action="$1"
@@ -44,12 +45,12 @@ validate_status() {
       expected_status="deleting, rolling_back or cancelling"
       ;;
     *)
-      echo "🔄 Running action '$action', any deployment status is accepted"
+      log debug "📝 Running action '$action', any deployment status is accepted"
       return 0
       ;;
   esac
 
-  echo "🔄 Running action '$action' (current status: '$status', expected: $expected_status)"
+  log debug "📝 Running action '$action' (current status: '$status', expected: $expected_status)"
 
   case "$action" in
     start-initial|start-blue-green)
@@ -71,9 +72,23 @@ validate_status() {
 }
 
 if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
-  echo "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'" >&2
+  log error "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'"
+  log error "💡 Possible causes:"
+  log error "   - Deployment status changed during workflow execution"
+  log error "   - Another action is already running on this deployment"
+  log error "   - Deployment was modified externally"
+  log error "🔧 How to fix:"
+  log error "   - Wait for any in-progress actions to complete"
+  log error "   - Check the deployment status in the nullplatform dashboard"
+  log error "   - Retry the action once the deployment is in the expected state"
   exit 1
 fi
+
+DEPLOY_STRATEGY=$(get_config_value \
+  --env DEPLOY_STRATEGY \
+  --provider '.providers["scope-configurations"].deployment.deployment_strategy' \
+  --default "blue-green"
+)
 
 if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; then
   GREEN_REPLICAS=$(echo "scale=10; ($GREEN_REPLICAS * $SWITCH_TRAFFIC) / 100" | bc)
@@ -89,8 +104,23 @@ fi
 if [[ -n "$PULL_SECRETS" ]]; then
   IMAGE_PULL_SECRETS=$PULL_SECRETS
 else
-  IMAGE_PULL_SECRETS="${IMAGE_PULL_SECRETS:-"{}"}"
-  IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
+  if [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
+    IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
+  else
+    PULL_SECRETS_ENABLED=$(get_config_value \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
+      --default "false"
+    )
+    PULL_SECRETS_LIST=$(get_config_value \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
+      --default "[]"
+    )
+
+    IMAGE_PULL_SECRETS=$(jq -n \
+      --argjson enabled "$PULL_SECRETS_ENABLED" \
+      --argjson secrets "$PULL_SECRETS_LIST" \
+      '{ENABLED: $enabled, SECRETS: $secrets}')
+  fi
 fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
@@ -101,15 +131,56 @@ if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
   TRAFFIC_CONTAINER_VERSION="websocket2"
 fi
 
-TRAFFIC_CONTAINER_IMAGE=${TRAFFIC_CONTAINER_IMAGE:-"public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"}
+TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
+  --env TRAFFIC_CONTAINER_IMAGE \
+  --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
+  --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
+)
 
 # Pod Disruption Budget configuration
-PDB_ENABLED=${POD_DISRUPTION_BUDGET_ENABLED:-"false"}
-PDB_MAX_UNAVAILABLE=${POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE:-"25%"}
+PDB_ENABLED=$(get_config_value \
+  --env POD_DISRUPTION_BUDGET_ENABLED \
+  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_enabled' \
+  --default "false"
+)
+PDB_MAX_UNAVAILABLE=$(get_config_value \
+  --env POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE \
+  --provider '.providers["scope-configurations"].deployment.pod_disruption_budget_max_unavailable' \
+  --default "25%"
+)
 
-IAM=${IAM-"{}"}
+# IAM configuration - build from flat properties or use env var
+if [ -n "${IAM:-}" ]; then
+  IAM="$IAM"
+else
+  IAM_ENABLED_RAW=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_enabled' \
+    --default "false"
+  )
+  IAM_PREFIX=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_prefix' \
+    --default ""
+  )
+  IAM_POLICIES=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_policies | @json' \
+    --default "[]"
+  )
+  IAM_BOUNDARY=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.iam_boundary_arn' \
+    --default ""
+  )
 
-IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED)
+  IAM=$(jq -n \
+    --argjson enabled "$IAM_ENABLED_RAW" \
+    --arg prefix "$IAM_PREFIX" \
+    --argjson policies "$IAM_POLICIES" \
+    --arg boundary "$IAM_BOUNDARY" \
+    '{ENABLED: $enabled, PREFIX: $prefix, ROLE: {POLICIES: $policies, BOUNDARY_ARN: $boundary}} |
+     if .ROLE.BOUNDARY_ARN == "" then .ROLE |= del(.BOUNDARY_ARN) else . end |
+     if .PREFIX == "" then del(.PREFIX) else . end')
+fi
+
+IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 
 SERVICE_ACCOUNT_NAME=""
 
@@ -117,17 +188,28 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
-TRAFFIC_MANAGER_CONFIG_MAP=${TRAFFIC_MANAGER_CONFIG_MAP:-""}
+TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
+  --env TRAFFIC_MANAGER_CONFIG_MAP \
+  --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
+  --default ""
+)
 
 if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
-    echo "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
+    log debug "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
 
     # Check if the ConfigMap exists
     if ! kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" &>/dev/null; then
-        echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        log error "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' does not exist in namespace '$K8S_NAMESPACE'"
+        log error "💡 Possible causes:"
+        log error "   - ConfigMap was not created before deployment"
+        log error "   - ConfigMap name is misspelled in values.yaml"
+        log error "   - ConfigMap was deleted or exists in a different namespace"
+        log error "🔧 How to fix:"
+        log error "   - Create the ConfigMap: kubectl create configmap $TRAFFIC_MANAGER_CONFIG_MAP -n $K8S_NAMESPACE --from-file=nginx.conf --from-file=default.conf"
+        log error "   - Verify the ConfigMap name in your scope configuration"
         exit 1
     fi
-    echo "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
+    log info "✅ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' exists"
 
     # Check for required keys (subPaths)
     REQUIRED_KEYS=("nginx.conf" "default.conf")
@@ -137,14 +219,51 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
 
     for key in "${REQUIRED_KEYS[@]}"; do
         if ! echo "$CONFIGMAP_KEYS" | grep -qx "$key"; then
-            echo "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
-            echo "💡 The ConfigMap must contain data entries for: ${REQUIRED_KEYS[*]}"
+            log error "❌ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' is missing required key '$key'"
+            log error "💡 Possible causes:"
+            log error "   - ConfigMap was created without all required files"
+            log error "   - Key name is different from expected: ${REQUIRED_KEYS[*]}"
+            log error "🔧 How to fix:"
+            log error "   - Update the ConfigMap to include the missing key '$key'"
+            log error "   - Required keys: ${REQUIRED_KEYS[*]}"
             exit 1
         fi
-        echo "✅ Found required key '$key' in ConfigMap"
+        log info "✅ Found required key '$key' in ConfigMap"
     done
 
-    echo "🎉 ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+    # Read optional resource overrides from ConfigMap
+    if echo "$CONFIGMAP_KEYS" | grep -qx "container_memory_in_memory"; then
+        CONTAINER_MEMORY_IN_MEMORY=$(kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" -o go-template='{{ index .data "container_memory_in_memory" }}')
+        log info "✅ Using container_memory_in_memory=$CONTAINER_MEMORY_IN_MEMORY from ConfigMap"
+    fi
+
+    if echo "$CONFIGMAP_KEYS" | grep -qx "container_cpu_in_millicores"; then
+        CONTAINER_CPU_IN_MILLICORES=$(kubectl get configmap "$TRAFFIC_MANAGER_CONFIG_MAP" -n "$K8S_NAMESPACE" -o go-template='{{ index .data "container_cpu_in_millicores" }}')
+        log info "✅ Using container_cpu_in_millicores=$CONTAINER_CPU_IN_MILLICORES from ConfigMap"
+    fi
+
+    log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
+fi
+
+# Check if blue deployment has K8s services for additional ports
+BLUE_ADDITIONAL_PORT_SERVICES="{}"
+if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
+    ADDITIONAL_PORTS=$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports // []')
+    if [ "$ADDITIONAL_PORTS" != "[]" ] && [ "$ADDITIONAL_PORTS" != "null" ]; then
+        while IFS= read -r port_config; do
+            port=$(echo "$port_config" | jq -r '.port')
+            type_raw=$(echo "$port_config" | jq -r '.type')
+            type_lower=$(echo "$type_raw" | tr '[:upper:]' '[:lower:]')
+            service_name="d-${SCOPE_ID}-${BLUE_DEPLOYMENT_ID}-${type_lower}-${port}"
+            key="${type_lower}-${port}"
+            if kubectl get service "$service_name" -n "$K8S_NAMESPACE" &>/dev/null; then
+                BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): true}')
+            else
+                BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): false}')
+                log info "Blue deployment service '$service_name' not found - additional port traffic will route to new deployment only"
+            fi
+        done < <(echo "$ADDITIONAL_PORTS" | jq -c '.[]')
+    fi
 fi
 
 CONTEXT=$(echo "$CONTEXT" | jq \
@@ -158,6 +277,9 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
           --arg service_account_name "$SERVICE_ACCOUNT_NAME" \
           --arg traffic_manager_config_map "$TRAFFIC_MANAGER_CONFIG_MAP" \
+          --arg container_memory_in_memory "$CONTAINER_MEMORY_IN_MEMORY" \
+          --arg container_cpu_in_millicores "$CONTAINER_CPU_IN_MILLICORES" \
+          --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -167,7 +289,10 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 pdb_enabled: $pdb_enabled,
                 pdb_max_unavailable: $pdb_max_unavailable,
                 service_account_name: $service_account_name,
-                traffic_manager_config_map: $traffic_manager_config_map
+                traffic_manager_config_map: $traffic_manager_config_map,
+                container_memory_in_memory: $container_memory_in_memory,
+                container_cpu_in_millicores: $container_cpu_in_millicores,
+                blue_additional_port_services: $blue_additional_port_services
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
@@ -182,3 +307,6 @@ export DEPLOYMENT_ID
 export BLUE_DEPLOYMENT_ID
 
 mkdir -p "$OUTPUT_DIR"
+
+log info "✨ Deployment context built successfully"
+log debug "📋 Deployment ID: $DEPLOYMENT_ID | Replicas: green=$GREEN_REPLICAS, blue=$BLUE_REPLICAS"

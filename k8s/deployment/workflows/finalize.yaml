@@ -3,6 +3,15 @@ include:
 configuration:
   INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
 steps:
+  - name: load logging
+    type: script
+    file: "$SERVICE_PATH/logging"
+    output:
+      - name: log
+        type: function
+        parameters:
+          level: string
+          message: string
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
@@ -45,11 +54,17 @@ steps:
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
     post:
-      name: verify_networking_reconciliation
-      type: script
-      file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
-      configuration:
-        VERIFY_WEIGHTS: false
+      name: post_apply_checks
+      type: workflow
+      steps:
+        - name: verify_networking_reconciliation
+          type: script
+          file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+          configuration:
+            VERIFY_WEIGHTS: false
+        - name: publish_alb_metrics
+          type: script
+          file: "$SERVICE_PATH/deployment/publish_alb_metrics"
   - name: build deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_blue_deployment"

@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 REPLICAS=$(echo "$CONTEXT" | jq -r .blue_replicas)
 
 export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID

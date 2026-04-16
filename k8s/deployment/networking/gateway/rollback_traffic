@@ -1,12 +1,19 @@
 #!/bin/bash
 
-export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
 
+log debug "🔍 Rolling back traffic to previous deployment..."
+
+export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
 export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+
+log debug "📋 Current deployment: $NEW_DEPLOYMENT_ID"
+log debug "📋 Rollback target: $DEPLOYMENT_ID"
 
 CONTEXT=$(echo "$CONTEXT" | jq \
   --arg deployment_id "$DEPLOYMENT_ID" \
   '.deployment.id = $deployment_id')
+
+log debug "📝 Creating ingress for rollback deployment..."
 
 source "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
 
@@ -15,3 +22,5 @@ export DEPLOYMENT_ID=$NEW_DEPLOYMENT_ID
 CONTEXT=$(echo "$CONTEXT" | jq \
   --arg deployment_id "$DEPLOYMENT_ID" \
   '.deployment.id = $deployment_id')
+
+log info "✅ Traffic rollback configuration created"

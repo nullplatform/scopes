@@ -1,15 +1,38 @@
 #!/bin/bash
 
+
+log debug "🔍 Checking for custom domains to activate..."
+
 DOMAINS=$(echo "$CONTEXT" | jq .scope.domains)
 
 if [[ "$DOMAINS" == "null" || "$DOMAINS" == "[]" ]]; then
+    log debug "📋 No domains configured, skipping activation"
     return
 fi
 
+DOMAIN_COUNT=$(echo "$DOMAINS" | jq length)
+log debug "📋 Found $DOMAIN_COUNT custom domain(s) to activate"
+
 echo "$DOMAINS" | jq -r '.[] | "\(.id)|\(.name)"' | while IFS='|' read -r domain_id domain_name; do
-    echo "Configuring domain: $domain_name"
+    log debug "📝 Activating custom domain: $domain_name..."
 
-    np scope domain patch --id "$domain_id" --body '{"status": "active"}'
+    np_output=$(np scope domain patch --id "$domain_id" --body '{"status": "active"}' --format json 2>&1)
+    np_status=$?
 
-    echo "Successfully configured domain: $domain_name"
+    if [ $np_status -ne 0 ]; then
+        log error "❌ Failed to activate custom domain: $domain_name"
+        log error "📋 Error: $np_output"
+        log error "💡 Possible causes:"
+        log error "   - Domain ID $domain_id may not exist"
+        log error "   - Insufficient permissions (403 Forbidden)"
+        log error "   - API connectivity issues"
+        log error "🔧 How to fix:"
+        log error "   - Verify domain exists: np scope domain get --id $domain_id"
+        log error "   - Check API token permissions"
+        continue
+    fi
+
+    log info "✅ Custom domain activated: $domain_name"
 done
+
+log info "✨ Custom domain activation completed"

@@ -3,6 +3,15 @@ include:
 configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
 steps:
+  - name: load logging
+    type: script
+    file: "$SERVICE_PATH/logging"
+    output:
+      - name: log
+        type: function
+        parameters:
+          level: string
+          message: string
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
@@ -48,8 +57,14 @@ steps:
       ACTION: apply
       DRY_RUN: false
     post:
-      name: verify_networking_reconciliation
-      type: script
-      file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
-      configuration:
-        VERIFY_WEIGHTS: true
+      name: post_apply_checks
+      type: workflow
+      steps:
+        - name: verify_networking_reconciliation
+          type: script
+          file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+          configuration:
+            VERIFY_WEIGHTS: true
+        - name: publish_alb_metrics
+          type: script
+          file: "$SERVICE_PATH/deployment/publish_alb_metrics"

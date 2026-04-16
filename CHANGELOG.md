@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-04-16
+- Add unit testing support
+- Add scope configuration
+- Improve **k8s/backup** logging format with detailed error messages and fix suggestions
+- Add unit tests for **k8s/backup** module (backup_templates and s3 operations)
+- Add ALB capacity validation on scope creation. Requires additional AWS permissions: `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeListeners`, `elasticloadbalancing:DescribeRules`
+- Add ALB target group capacity validation on deployment. Requires additional AWS permission: `elasticloadbalancing:DescribeTargetGroups`
+- Add support for multiple ALBs
+- Add configurable memory and cpu limit for traffic manager
+- Add ALB metrics publishing to CloudWatch or Datadog (rule count and target group count per ALB)
+- Fix blue-green switch-traffic failure when `additional_ports` (e.g., gRPC) are added to a scope after the initial deployment
+
 ## [1.10.1] - 2026-02-13
 - Hotfix on wait_deployment_iteration
 
