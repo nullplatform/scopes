@@ -1,6 +1,8 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 steps:
+  - name: validate alb target group capacity
+    action: skip
   - name: route traffic
     action: skip
   - name: create deployment
