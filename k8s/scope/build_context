@@ -49,6 +49,12 @@ ALB_RECONCILIATION_ENABLED=$(get_config_value \
   --default "false"
 )
 
+ALB_ROLLBACK_ON_RECONCILIATION_FAILURE=$(get_config_value \
+  --env ALB_ROLLBACK_ON_RECONCILIATION_FAILURE \
+  --provider '.providers["scope-configurations"].networking.alb_rollback_on_reconciliation_failure' \
+  --default "true"
+)
+
 DEPLOYMENT_MAX_WAIT_IN_SECONDS=$(get_config_value \
   --env DEPLOYMENT_MAX_WAIT_IN_SECONDS \
   --provider '.providers["scope-configurations"].deployment.deployment_max_wait_seconds' \
@@ -102,6 +108,7 @@ export HOSTED_ZONE_RG
 export AZURE_SUBSCRIPTION_ID
 export RESOURCE_GROUP
 export ALB_RECONCILIATION_ENABLED
+export ALB_ROLLBACK_ON_RECONCILIATION_FAILURE
 export DEPLOYMENT_MAX_WAIT_IN_SECONDS
 export MANIFEST_BACKUP
 export VAULT_ADDR
