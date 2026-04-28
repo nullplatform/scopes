@@ -1,0 +1,40 @@
+#!/bin/bash
+# =============================================================================
+# Retrieve Parameter from Azure Key Vault
+# =============================================================================
+# Reads the secret value identified by EXTERNAL_ID (set by build_context from
+# the NullPlatform action context).
+#
+# Required env vars:
+#   AZURE_KEY_VAULT_NAME - target Key Vault name
+#   EXTERNAL_ID          - Key Vault secret name produced by `store`
+# =============================================================================
+
+set -euo pipefail
+
+if [[ -z "${AZURE_KEY_VAULT_NAME:-}" ]]; then
+  echo "ERROR: AZURE_KEY_VAULT_NAME must be set" >&2
+  exit 1
+fi
+
+if [[ -z "${EXTERNAL_ID:-}" ]]; then
+  echo '{ "value": "value not found" }'
+  exit 0
+fi
+
+if ! VALUE=$(az keyvault secret show \
+  --vault-name "$AZURE_KEY_VAULT_NAME" \
+  --name "$EXTERNAL_ID" \
+  --query value -o tsv 2>/tmp/kv_get_err); then
+  if grep -qi 'SecretNotFound\|not found\|was not found' /tmp/kv_get_err; then
+    echo '{ "value": "value not found" }'
+    exit 0
+  fi
+  echo "ERROR: az keyvault secret show failed for ${EXTERNAL_ID}" >&2
+  cat /tmp/kv_get_err >&2 || true
+  exit 1
+fi
+
+echo "{
+  \"value\": $(printf '%s' "$VALUE" | jq -R -s .)
+}"

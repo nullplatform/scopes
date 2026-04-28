@@ -1,0 +1,10 @@
+steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/build_context"
+  - name: azure login
+    type: script
+    file: "$SERVICE_PATH/azure_login"
+  - name: retrieve
+    type: script
+    file: "$SERVICE_PATH/retrieve"

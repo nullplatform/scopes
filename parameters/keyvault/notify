@@ -1,0 +1,11 @@
+#!/bin/bash
+# =============================================================================
+# Notify hook (no-op)
+# =============================================================================
+# NullPlatform invokes this after a parameter lifecycle event. The Key Vault
+# integration has nothing to broadcast, so we just acknowledge success.
+# =============================================================================
+
+echo '{
+  "success": true
+}'

@@ -1,0 +1,7 @@
+steps:
+  - name: azure login
+    type: script
+    file: "$SERVICE_PATH/azure_login"
+  - name: store
+    type: script
+    file: "$SERVICE_PATH/store"

@@ -1,0 +1,37 @@
+#!/bin/bash
+# =============================================================================
+# Azure Service Principal Login
+# =============================================================================
+# Authenticates the `az` CLI session using a Service Principal so subsequent
+# `az keyvault secret` commands can run non-interactively.
+#
+# Required env vars:
+#   AZURE_CLIENT_ID     - SPN application (client) id
+#   AZURE_CLIENT_SECRET - SPN client secret
+#   AZURE_TENANT_ID     - Azure AD tenant id
+#
+# Optional env vars:
+#   AZURE_SUBSCRIPTION_ID - scope `az` to a specific subscription
+# =============================================================================
+
+set -euo pipefail
+
+if [[ -z "${AZURE_CLIENT_ID:-}" || -z "${AZURE_CLIENT_SECRET:-}" || -z "${AZURE_TENANT_ID:-}" ]]; then
+  echo "ERROR: AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and AZURE_TENANT_ID must be set" >&2
+  exit 1
+fi
+
+if ! command -v az >/dev/null 2>&1; then
+  echo "ERROR: az CLI is not installed in the runner image" >&2
+  exit 1
+fi
+
+az login --service-principal \
+  --username "$AZURE_CLIENT_ID" \
+  --password "$AZURE_CLIENT_SECRET" \
+  --tenant "$AZURE_TENANT_ID" \
+  --output none
+
+if [[ -n "${AZURE_SUBSCRIPTION_ID:-}" ]]; then
+  az account set --subscription "$AZURE_SUBSCRIPTION_ID" --output none
+fi

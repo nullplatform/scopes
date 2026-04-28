@@ -1,0 +1,18 @@
+provider_categories:
+  - parameters
+  - cloud-providers
+configuration:
+  # Azure Key Vault target
+  AZURE_KEY_VAULT_NAME: $AZURE_KEY_VAULT_NAME
+
+  # Service Principal credentials used for `az login --service-principal`
+  AZURE_CLIENT_ID: $AZURE_CLIENT_ID
+  AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET
+  AZURE_TENANT_ID: $AZURE_TENANT_ID
+
+  # Optional: subscription scoping (only required if SPN has access to >1 sub)
+  # AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID
+
+  # Optional: prefix prepended to every secret name to avoid collisions inside
+  # a shared key vault. Defaults to "nullplatform" when unset.
+  # AZURE_KEY_VAULT_SECRET_PREFIX: nullplatform

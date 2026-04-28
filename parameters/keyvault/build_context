@@ -1,0 +1,10 @@
+#!/bin/bash
+# =============================================================================
+# Build Parameter Context
+# =============================================================================
+# Extracts EXTERNAL_ID and PARAMETER_ID from the NullPlatform action context
+# so retrieve / delete know which Key Vault secret to operate on.
+# =============================================================================
+
+export EXTERNAL_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.external_id // empty')
+export PARAMETER_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameter_id // empty')

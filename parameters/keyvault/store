@@ -1,0 +1,82 @@
+#!/bin/bash
+# =============================================================================
+# Store Parameter in Azure Key Vault
+# =============================================================================
+# Writes the parameter value as an Azure Key Vault secret. Builds a secret
+# name from the application/scope/environment/parameter so a single key vault
+# can host many applications without collisions.
+#
+# Required env vars (in addition to those validated by azure_login):
+#   AZURE_KEY_VAULT_NAME - target Key Vault name
+#   NP_ACTION_CONTEXT    - NullPlatform action context JSON
+#
+# Optional env vars:
+#   AZURE_KEY_VAULT_SECRET_PREFIX - prefix prepended to every secret name
+#                                   (default: "nullplatform")
+# =============================================================================
+
+set -euo pipefail
+
+if [[ -z "${AZURE_KEY_VAULT_NAME:-}" ]]; then
+  echo "ERROR: AZURE_KEY_VAULT_NAME must be set" >&2
+  exit 1
+fi
+
+PARAMETER_NAME=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameter_name')
+PARAMETER_VALUE=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.value // empty')
+PARAMETER_SECRET=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.secret // false')
+PARAMETER_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameter_id')
+APPLICATION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.entities.application')
+SCOPE_ENTITY=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.value_entities.scope // .notification.entities.scope // empty')
+ENVIRONMENT=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.dimensions.environment // empty')
+
+# Azure Key Vault secret names are restricted to [a-zA-Z0-9-] and 1..127 chars.
+# Replace anything else with `-`, collapse repeats, and trim leading/trailing `-`.
+sanitize() {
+  echo "$1" | tr -c 'a-zA-Z0-9' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//'
+}
+
+PREFIX="${AZURE_KEY_VAULT_SECRET_PREFIX:-nullplatform}"
+SAFE_NAME=$(sanitize "$PARAMETER_NAME")
+
+SECRET_NAME="${PREFIX}-application-${APPLICATION_ID}"
+if [[ -n "$SCOPE_ENTITY" ]]; then
+  SECRET_NAME="${SECRET_NAME}-scope-$(sanitize "$SCOPE_ENTITY")"
+elif [[ -n "$ENVIRONMENT" ]]; then
+  SECRET_NAME="${SECRET_NAME}-$(sanitize "$ENVIRONMENT")"
+fi
+SECRET_NAME="${SECRET_NAME}-${SAFE_NAME}"
+
+# Enforce 127-char Key Vault secret-name limit; trim trailing `-` if cut hit one.
+SECRET_NAME="${SECRET_NAME:0:127}"
+SECRET_NAME="${SECRET_NAME%-}"
+
+# Build tag list: parameter_id + application_parameter (+ environment when present).
+TAGS=("application_parameter=true" "parameter_id=${PARAMETER_ID}")
+if [[ -n "$ENVIRONMENT" ]]; then
+  TAGS+=("environment=${ENVIRONMENT}")
+fi
+if [[ "${PARAMETER_SECRET}" == "true" ]]; then
+  TAGS+=("sensitive=true")
+fi
+
+# Pipe the value via stdin to avoid leaking it through the process arg list.
+if ! printf '%s' "$PARAMETER_VALUE" | az keyvault secret set \
+  --vault-name "$AZURE_KEY_VAULT_NAME" \
+  --name "$SECRET_NAME" \
+  --file /dev/stdin \
+  --tags "${TAGS[@]}" \
+  --output none 2>/tmp/kv_store_err; then
+  echo "ERROR: az keyvault secret set failed for ${SECRET_NAME}" >&2
+  cat /tmp/kv_store_err >&2 || true
+  exit 1
+fi
+
+echo "{
+  \"external_id\": \"$SECRET_NAME\",
+  \"metadata\": {
+    \"vault_name\": \"$AZURE_KEY_VAULT_NAME\",
+    \"secret_name\": \"$SECRET_NAME\",
+    \"parameter_id\": $PARAMETER_ID
+  }
+}"
