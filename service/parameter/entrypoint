@@ -4,7 +4,7 @@ IFS=':' read -ra ACTION_PARTS <<< "$NOTIFICATION_ACTION"
 
 ACTION_TO_EXECUTE="${ACTION_PARTS[1]}"
 
-WORKFLOW_PATH="$SERVICE_PATH/parameters/workflows/$ACTION_TO_EXECUTE.yaml"
+WORKFLOW_PATH="$SERVICE_PATH/workflows/$ACTION_TO_EXECUTE.yaml"
 
 CMD="np service workflow exec --no-output --workflow $WORKFLOW_PATH"
 
@@ -12,7 +12,7 @@ IFS=',' read -ra OVERRIDE_PATHS <<< "$OVERRIDES_PATH"
 for path in "${OVERRIDE_PATHS[@]}"; do
   # Trim whitespace
   path=$(echo "$path" | xargs)
-  OVERRIDE_WORKFLOW_PATH="$path/parameters/workflows/$ACTION_TO_EXECUTE.yaml"
+  OVERRIDE_WORKFLOW_PATH="$path/workflows/$ACTION_TO_EXECUTE.yaml"
   if [[ -f "$OVERRIDE_WORKFLOW_PATH" ]]; then
     CMD="$CMD --overrides $OVERRIDE_WORKFLOW_PATH"
   fi
