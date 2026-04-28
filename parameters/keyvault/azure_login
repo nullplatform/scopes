@@ -16,8 +16,8 @@
 
 set -euo pipefail
 
-if [[ -z "${AZURE_CLIENT_ID:-}" || -z "${AZURE_CLIENT_SECRET:-}" || -z "${AZURE_TENANT_ID:-}" ]]; then
-  echo "ERROR: AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and AZURE_TENANT_ID must be set" >&2
+if [[ -z "${AZURE_CLIENT_ID:-}" || -z "${AZURE_TENANT_ID:-}" ]]; then
+  echo "ERROR: AZURE_CLIENT_ID and AZURE_TENANT_ID must be set" >&2
   exit 1
 fi
 
@@ -26,11 +26,24 @@ if ! command -v az >/dev/null 2>&1; then
   exit 1
 fi
 
-az login --service-principal \
-  --username "$AZURE_CLIENT_ID" \
-  --password "$AZURE_CLIENT_SECRET" \
-  --tenant "$AZURE_TENANT_ID" \
-  --output none
+if [[ -n "${AZURE_FEDERATED_TOKEN_FILE:-}" ]]; then
+  # Workload identity: token is injected by the webhook
+  az login --service-principal \
+    --username "$AZURE_CLIENT_ID" \
+    --tenant "$AZURE_TENANT_ID" \
+    --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")" \
+    --output none
+elif [[ -n "${AZURE_CLIENT_SECRET:-}" ]]; then
+  # Service principal with client secret
+  az login --service-principal \
+    --username "$AZURE_CLIENT_ID" \
+    --password "$AZURE_CLIENT_SECRET" \
+    --tenant "$AZURE_TENANT_ID" \
+    --output none
+else
+  echo "ERROR: Either AZURE_FEDERATED_TOKEN_FILE (workload identity) or AZURE_CLIENT_SECRET must be set" >&2
+  exit 1
+fi
 
 if [[ -n "${AZURE_SUBSCRIPTION_ID:-}" ]]; then
   az account set --subscription "$AZURE_SUBSCRIPTION_ID" --output none
