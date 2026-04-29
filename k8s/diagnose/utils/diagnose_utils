@@ -79,6 +79,47 @@ exit_code_meaning() {
     esac
 }
 
+# Read the tail of a pre-collected pod log into a JSON array of lines (one
+# line per element). Reads from the pod_logs/ snapshot collected by
+# build_context — never makes live kubectl calls.
+#
+# Usage:
+#   read_log_tail <pod> <container> <which> [lines]
+#     which:   "current" or "previous"
+#     lines:   how many lines to take from the tail (default: $EVIDENCE_LOG_TAIL_LINES, fallback 50)
+#
+# Returns "[]" if:
+#   - POD_LOGS_DIR is unset (build_context did not run, or this is a unit test)
+#   - the log file does not exist (most containers do not have a previous log)
+#   - the file is empty (container produced no output yet)
+#
+# Why a snapshot rather than live kubectl: build_context took the snapshot
+# point-in-time at fail-time (diagnose runs before rollback). By the time the
+# AI summarizer reads evidence, the cluster state has likely moved on, so live
+# logs would be misleading or missing.
+read_log_tail() {
+    local pod="$1"
+    local container="$2"
+    local which="$3"
+    local lines="${4:-${EVIDENCE_LOG_TAIL_LINES:-50}}"
+
+    [[ -z "$POD_LOGS_DIR" ]] && { echo "[]"; return 0; }
+
+    local log_file
+    case "$which" in
+        previous) log_file="$POD_LOGS_DIR/${pod}.${container}.previous.log" ;;
+        current)  log_file="$POD_LOGS_DIR/${pod}.${container}.log" ;;
+        *)        echo "[]"; return 0 ;;
+    esac
+
+    if [[ ! -s "$log_file" ]]; then
+        echo "[]"
+        return 0
+    fi
+
+    tail -n "$lines" "$log_file" | jq -R -s 'split("\n") | map(select(length > 0))'
+}
+
 print_success() {
     echo -e "${GREEN}✓${NC} $1"
 }

@@ -54,6 +54,12 @@ for POD_NAME in $PODS; do
               [[ "$EXIT_CODE" == "137" ]] && NUM_OOM=$((NUM_OOM + 1))
               [[ "$EXIT_CODE" == "1"   ]] && NUM_APP_ERROR=$((NUM_APP_ERROR + 1))
 
+              # For CrashLoopBackOff, the useful logs are from the previous
+              # container instance (the one that crashed). The current instance
+              # is in waiting state and has no logs yet.
+              PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER" "previous")
+              CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER" "current")
+
               FACT=$(jq -nc \
                   --arg pod "$POD_NAME" \
                   --arg container "$CONTAINER" \
@@ -61,7 +67,18 @@ for POD_NAME in $PODS; do
                   --arg exit_code "$EXIT_CODE" \
                   --arg exit_meaning "$EXIT_MEANING" \
                   --arg reason "$TERMINATION_REASON" \
-                  '{pod: $pod, container: $container, restart_count: $restarts, exit_code: $exit_code, exit_code_meaning: $exit_meaning, termination_reason: $reason}')
+                  --argjson previous_logs "$PREVIOUS_LOGS" \
+                  --argjson current_logs "$CURRENT_LOGS" \
+                  '{
+                      pod: $pod,
+                      container: $container,
+                      restart_count: $restarts,
+                      exit_code: $exit_code,
+                      exit_code_meaning: $exit_meaning,
+                      termination_reason: $reason,
+                      previous_logs: $previous_logs,
+                      current_logs: $current_logs
+                  }')
               CRASH_LOOP_FACTS=$(echo "$CRASH_LOOP_FACTS" | jq --argjson f "$FACT" '. + [$f]')
           done
 
@@ -103,6 +120,12 @@ for POD_NAME in $PODS; do
               [[ "$EXIT_CODE" == "137" ]] && NUM_OOM=$((NUM_OOM + 1))
               [[ "$EXIT_CODE" == "1"   ]] && NUM_APP_ERROR=$((NUM_APP_ERROR + 1))
 
+              # For terminated (state.terminated, not waiting), the current logs
+              # are the ones from the still-terminated instance. Previous logs
+              # are also useful if the container has restarted before.
+              CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER" "current")
+              PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER" "previous")
+
               FACT=$(jq -nc \
                   --arg pod "$POD_NAME" \
                   --arg container "$CONTAINER" \
@@ -110,7 +133,18 @@ for POD_NAME in $PODS; do
                   --arg exit_code "$EXIT_CODE" \
                   --arg exit_meaning "$EXIT_MEANING" \
                   --arg reason "$TERMINATION_REASON" \
-                  '{pod: $pod, container: $container, restart_count: $restarts, exit_code: $exit_code, exit_code_meaning: $exit_meaning, termination_reason: $reason}')
+                  --argjson current_logs "$CURRENT_LOGS" \
+                  --argjson previous_logs "$PREVIOUS_LOGS" \
+                  '{
+                      pod: $pod,
+                      container: $container,
+                      restart_count: $restarts,
+                      exit_code: $exit_code,
+                      exit_code_meaning: $exit_meaning,
+                      termination_reason: $reason,
+                      current_logs: $current_logs,
+                      previous_logs: $previous_logs
+                  }')
               TERMINATED_FACTS=$(echo "$TERMINATED_FACTS" | jq --argjson f "$FACT" '. + [$f]')
           done
 
@@ -137,6 +171,11 @@ for POD_NAME in $PODS; do
 
               NUM_HIGH_RESTART=$((NUM_HIGH_RESTART + 1))
 
+              # High restart count: the container is currently running OK but
+              # has crashed multiple times. Previous logs are from the most
+              # recent crash — most useful for the AI to find a pattern.
+              PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER_NAME" "previous")
+
               FACT=$(jq -nc \
                   --arg pod "$POD_NAME" \
                   --arg container "$CONTAINER_NAME" \
@@ -144,7 +183,16 @@ for POD_NAME in $PODS; do
                   --arg last_exit "$LAST_EXIT_CODE" \
                   --arg last_meaning "$LAST_EXIT_MEANING" \
                   --arg last_reason "$LAST_REASON" \
-                  '{pod: $pod, container: $container, restart_count: $restarts, last_exit_code: $last_exit, last_exit_code_meaning: $last_meaning, last_termination_reason: $last_reason}')
+                  --argjson previous_logs "$PREVIOUS_LOGS" \
+                  '{
+                      pod: $pod,
+                      container: $container,
+                      restart_count: $restarts,
+                      last_exit_code: $last_exit,
+                      last_exit_code_meaning: $last_meaning,
+                      last_termination_reason: $last_reason,
+                      previous_logs: $previous_logs
+                  }')
               HIGH_RESTART_FACTS=$(echo "$HIGH_RESTART_FACTS" | jq --argjson f "$FACT" '. + [$f]')
           done <<< "$HIGH_RESTART_CONTAINERS"
 

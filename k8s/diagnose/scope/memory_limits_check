@@ -31,12 +31,24 @@ for POD_NAME in $PODS; do
             print_warning "  Memory Request: $MEMORY_REQUEST"
             print_action "Increase memory limits or optimize application memory usage"
 
+            # When OOM kills a container, the previous-instance logs are where
+            # the last application output lives — the current instance was
+            # restarted by the kubelet after the kill.
+            PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER" "previous")
+
             FACT=$(jq -nc \
                 --arg pod "$POD_NAME" \
                 --arg container "$CONTAINER" \
                 --arg memory_limit "$MEMORY_LIMIT" \
                 --arg memory_request "$MEMORY_REQUEST" \
-                '{pod: $pod, container: $container, memory_limit: $memory_limit, memory_request: $memory_request}')
+                --argjson previous_logs "$PREVIOUS_LOGS" \
+                '{
+                    pod: $pod,
+                    container: $container,
+                    memory_limit: $memory_limit,
+                    memory_request: $memory_request,
+                    previous_logs: $previous_logs
+                }')
             OOM_FACTS=$(echo "$OOM_FACTS" | jq --argjson f "$FACT" '. + [$f]')
         done
     fi

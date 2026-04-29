@@ -147,9 +147,25 @@ for POD_NAME in $PODS; do
               print_action "Check application health endpoint and ensure dependencies are available"
           fi
 
+          # For pods stuck in "not_ready" (not just starting), embed current
+          # logs of the first container so the AI can correlate readiness
+          # failure with what the app printed. We skip starting pods because
+          # their logs are still in flight and not informative yet.
+          POD_LOGS_PER_CONTAINER="[]"
+          if [[ "$POD_STATE" == "not_ready" ]]; then
+              # Iterate first regular container only — keep payload bounded
+              FIRST_CONTAINER=$(echo "$POD_INFO" | jq -r '.spec.containers[0].name // empty')
+              if [[ -n "$FIRST_CONTAINER" ]]; then
+                  CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$FIRST_CONTAINER" "current")
+                  POD_LOGS_PER_CONTAINER=$(jq -nc --arg c "$FIRST_CONTAINER" --argjson logs "$CURRENT_LOGS" \
+                      '[{container: $c, current_logs: $logs}]')
+              fi
+          fi
+
           FACT=$(jq -nc --arg p "$POD_NAME" --arg state "$POD_STATE" --arg phase "$POD_PHASE" --arg ready "$POD_READY" \
               --arg reason "$READY_REASON" --arg message "$READY_MESSAGE" --arg startup "$STARTUP_INFO" \
-              '{pod: $p, state: $state, phase: $phase, ready: $ready, reason: $reason, message: $message, startup_info: $startup}')
+              --argjson container_logs "$POD_LOGS_PER_CONTAINER" \
+              '{pod: $p, state: $state, phase: $phase, ready: $ready, reason: $reason, message: $message, startup_info: $startup, container_logs: $container_logs}')
           POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
       fi
 done

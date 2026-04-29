@@ -155,8 +155,14 @@ for POD_NAME in $PODS; do
                 print_action "Check application configuration and ensure it listens on port $PORT"
                 PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson port "$PORT" '. + [{port: $port, status: "not_listening"}]')
 
+                # The container is running but not listening on its declared
+                # port — current logs likely show why (binding error, config
+                # mismatch, app stuck during startup).
+                CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER_NAME" "current")
+
                 ISSUE=$(jq -nc --arg pod "$POD_NAME" --arg c "$CONTAINER_NAME" --argjson port "$PORT" \
-                    '{pod: $pod, container: $c, port: $port, issue: "port_not_listening"}')
+                    --argjson logs "$CURRENT_LOGS" \
+                    '{pod: $pod, container: $c, port: $port, issue: "port_not_listening", container_logs: $logs}')
                 ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
             fi
         done

@@ -83,6 +83,14 @@ test_http_probe() {
         classification="warning_connection"
     fi
 
+    # On failure, attach the container's current logs to the issue so the AI
+    # summarizer can correlate "probe says X" with "app logs say Y" without
+    # any extra calls.
+    local container_logs="[]"
+    if [[ "$classification" != "success" ]]; then
+        container_logs=$(read_log_tail "$pod" "$container" "current")
+    fi
+
     PROBE_FACT=$(jq -nc --arg pod "$pod" --arg c "$container" --arg pt "$probe_type" \
         --arg path "$path" --arg port "$port" --arg scheme "$scheme" \
         --arg http_response "$response" --arg status "$result_status" \
@@ -93,7 +101,8 @@ test_http_probe() {
         ISSUE=$(jq -nc --arg pod "$pod" --arg c "$container" --arg pt "$probe_type" \
             --arg path "$path" --arg port "$port" --arg http_response "$response" \
             --arg classification "$classification" \
-            '{pod: $pod, container: $c, probe_type: $pt, path: $path, port: $port, http_response: $http_response, issue: $classification}')
+            --argjson logs "$container_logs" \
+            '{pod: $pod, container: $c, probe_type: $pt, path: $path, port: $port, http_response: $http_response, issue: $classification, container_logs: $logs}')
         ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
         return 1
     fi
