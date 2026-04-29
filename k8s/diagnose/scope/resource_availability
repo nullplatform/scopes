@@ -2,16 +2,20 @@
 # Check: Resource Availability
 # Validates pod can be scheduled with requested resources
 
-# Validate pods exist
 require_pods || return 0
 
-# Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+UNSCHEDULABLE_FACTS="[]"
+AFFECTED_PODS="[]"
+HAS_INSUFFICIENT_CPU=0
+HAS_INSUFFICIENT_MEMORY=0
+
+mark_affected() {
+    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
+}
 
 for POD_NAME in $PODS; do
-    # Get pod info from pre-collected data
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
     POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
 
@@ -19,27 +23,73 @@ for POD_NAME in $PODS; do
         UNSCHEDULABLE=$(echo "$POD_INFO" | jq -r '.status.conditions[] | select(.reason=="Unschedulable") | .message')
 
         if [[ -n "$UNSCHEDULABLE" ]]; then
-            HAS_ISSUES=1
+            mark_affected "$POD_NAME"
             print_error "Pod $POD_NAME: Cannot be scheduled"
             print_warning "  Reason: $UNSCHEDULABLE"
 
+            POD_HAS_CPU_ISSUE=0
+            POD_HAS_MEMORY_ISSUE=0
             if echo "$UNSCHEDULABLE" | grep -qi "insufficient cpu"; then
                 print_warning "  Issue: Insufficient CPU in cluster"
+                HAS_INSUFFICIENT_CPU=1
+                POD_HAS_CPU_ISSUE=1
             fi
-
             if echo "$UNSCHEDULABLE" | grep -qi "insufficient memory"; then
                 print_warning "  Issue: Insufficient memory in cluster"
+                HAS_INSUFFICIENT_MEMORY=1
+                POD_HAS_MEMORY_ISSUE=1
             fi
 
             print_action "Reduce resource requests or add more nodes to cluster"
+
+            FACT=$(jq -nc \
+                --arg pod "$POD_NAME" \
+                --arg reason "$UNSCHEDULABLE" \
+                --argjson insufficient_cpu "$POD_HAS_CPU_ISSUE" \
+                --argjson insufficient_memory "$POD_HAS_MEMORY_ISSUE" \
+                '{pod: $pod, reason: $reason, insufficient_cpu: ($insufficient_cpu == 1), insufficient_memory: ($insufficient_memory == 1)}')
+            UNSCHEDULABLE_FACTS=$(echo "$UNSCHEDULABLE_FACTS" | jq --argjson f "$FACT" '. + [$f]')
         fi
     fi
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
-    POD_COUNT=$(echo "$PODS" | wc -w)
+POD_COUNT=$(echo "$PODS" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$UNSCHEDULABLE_FACTS" | jq 'length')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All $POD_COUNT pod(s) successfully scheduled with sufficient resources"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "All $POD_COUNT pod(s) successfully scheduled" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson count "$POD_COUNT" '{pods_checked: $count}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    SUMMARY_PARTS=()
+    [[ $HAS_INSUFFICIENT_CPU -eq 1 ]]    && SUMMARY_PARTS+=("insufficient CPU")
+    [[ $HAS_INSUFFICIENT_MEMORY -eq 1 ]] && SUMMARY_PARTS+=("insufficient memory")
+    if [[ ${#SUMMARY_PARTS[@]} -gt 0 ]]; then
+        SUMMARY_DETAIL=$(IFS=", "; echo "${SUMMARY_PARTS[*]}")
+        SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) unschedulable — $SUMMARY_DETAIL"
+    else
+        SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) unschedulable"
+    fi
+
+    DETAILS=$(jq -nc \
+        --argjson unscheduled "$UNSCHEDULABLE_FACTS" \
+        --argjson pod_count "$POD_COUNT" \
+        --argjson cpu "$HAS_INSUFFICIENT_CPU" \
+        --argjson mem "$HAS_INSUFFICIENT_MEMORY" \
+        '{
+            pod_count: $pod_count,
+            unschedulable_count: ($unscheduled | length),
+            cluster_insufficient_cpu: ($cpu == 1),
+            cluster_insufficient_memory: ($mem == 1),
+            unschedulable: $unscheduled
+        }')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+        '["Reduce resource requests or add more nodes to cluster"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

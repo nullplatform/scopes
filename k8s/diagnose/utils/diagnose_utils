@@ -1,11 +1,83 @@
 #!/bin/bash
 
+# =============================================================================
+# Evidence schema (passed to update_check_result --evidence)
+# =============================================================================
+# All checks must emit evidence following this schema so the backend / AI summarizer
+# can consume results uniformly:
+#
+#   {
+#     "summary":           "string — one-line human-readable summary of findings",
+#     "severity":          "critical" | "warning" | "info",
+#     "affected":          ["resource-name", ...],
+#     "details":           { /* check-specific structured data */ },
+#     "suggested_actions": ["actionable guidance items"]
+#   }
+#
+# severity mapping:
+#   - critical: status=failed with actionable data (e.g. pods OOMKilled)
+#   - warning:  status=warning, or partial issues
+#   - info:     status=success or skipped (no action required)
+#
+# Helper `evidence_json` below builds this schema from primitives.
+# =============================================================================
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Build a JSON evidence object following the schema documented above.
+# Usage:
+#   evidence_json <summary> <severity> <affected_json> <details_json> <actions_json>
+# Where:
+#   - summary:        plain string
+#   - severity:       "critical" | "warning" | "info"
+#   - affected_json:  JSON array of resource names, e.g. '["pod-1","pod-2"]'
+#   - details_json:   JSON object, check-specific. Pass '{}' for none.
+#   - actions_json:   JSON array of strings. Pass '[]' for none.
+evidence_json() {
+    local summary="$1"
+    local severity="$2"
+    local affected="$3"
+    local details="$4"
+    local actions="$5"
+
+    # Explicit defaults: bash's ${var:-{}} mis-parses the closing brace, so we
+    # branch instead of using parameter substitution.
+    [[ -z "$affected" ]] && affected="[]"
+    [[ -z "$details"  ]] && details="{}"
+    [[ -z "$actions"  ]] && actions="[]"
+
+    jq -n \
+        --arg summary "$summary" \
+        --arg severity "$severity" \
+        --argjson affected "$affected" \
+        --argjson details "$details" \
+        --argjson actions "$actions" \
+        '{
+            summary: $summary,
+            severity: $severity,
+            affected: $affected,
+            details: $details,
+            suggested_actions: $actions
+        }'
+}
+
+# Translate a Linux container exit code into a human-readable meaning.
+# Returns "Unknown" for codes we don't classify.
+exit_code_meaning() {
+    case "$1" in
+        0)   echo "Clean exit (container finished successfully)" ;;
+        1)   echo "Application error" ;;
+        137) echo "OOMKilled (out of memory)" ;;
+        139) echo "SIGSEGV (segmentation fault)" ;;
+        143) echo "SIGTERM (graceful termination)" ;;
+        *)   echo "Unknown" ;;
+    esac
+}
 
 print_success() {
     echo -e "${GREEN}✓${NC} $1"
@@ -37,7 +109,15 @@ require_resources() {
 
     if [[ -z "$resource_names" ]]; then
         print_warning "No ${resource_type} found with labels $label_selector in namespace $namespace, check was skipped."
-        update_check_result --status "skipped" --evidence "{}"
+        local skip_evidence
+        skip_evidence=$(evidence_json \
+            "No ${resource_type} found, check skipped" \
+            "info" \
+            "[]" \
+            "$(jq -nc --arg rt "$resource_type" --arg ls "$label_selector" --arg ns "$namespace" \
+                '{resource_type: $rt, label_selector: $ls, namespace: $ns}')" \
+            "[]")
+        update_check_result --status "skipped" --evidence "$skip_evidence"
         return 1
     fi
 

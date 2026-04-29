@@ -2,38 +2,66 @@
 # Check: Image Pull Status
 # Verifies container images can be pulled from registry
 
-# Validate pods exist
 require_pods || return 0
 
-# Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ERRORS=0
+PULL_FAILURES="[]"
+AFFECTED_PODS="[]"
+
+mark_affected() {
+    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
+}
 
 for POD_NAME in $PODS; do
-      # Get pod info from pre-collected data
       POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
       IMAGE_PULL_ERRORS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull") | .name')
 
       if [[ -n "$IMAGE_PULL_ERRORS" ]]; then
-          HAS_ERRORS=1
+          mark_affected "$POD_NAME"
           print_error "Pod $POD_NAME: ImagePullBackOff/ErrImagePull in container(s): $IMAGE_PULL_ERRORS"
 
           for CONTAINER in $IMAGE_PULL_ERRORS; do
               IMAGE=$(echo "$POD_INFO" | jq -r ".spec.containers[] | select(.name==\"$CONTAINER\") | .image")
-              MESSAGE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.waiting.message")
+              MESSAGE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.waiting.message // \"\"")
+              REASON=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.waiting.reason // \"\"")
               print_warning "  Image: $IMAGE"
               print_warning "  Reason: $MESSAGE"
+
+              FACT=$(jq -nc \
+                  --arg pod "$POD_NAME" \
+                  --arg container "$CONTAINER" \
+                  --arg image "$IMAGE" \
+                  --arg reason "$REASON" \
+                  --arg message "$MESSAGE" \
+                  '{pod: $pod, container: $container, image: $image, reason: $reason, message: $message}')
+              PULL_FAILURES=$(echo "$PULL_FAILURES" | jq --argjson f "$FACT" '. + [$f]')
           done
           print_action "Verify image exists and imagePullSecrets are configured for private registries"
       fi
 done
 
-if [[ $HAS_ERRORS -eq 0 ]]; then
-    POD_COUNT=$(echo "$PODS" | wc -w)
+POD_COUNT=$(echo "$PODS" | wc -w | tr -d ' ')
+FAIL_COUNT=$(echo "$PULL_FAILURES" | jq 'length')
+
+if [[ $FAIL_COUNT -eq 0 ]]; then
     print_success "All $POD_COUNT pod(s) have images pulled successfully"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "All $POD_COUNT pod(s) have images pulled successfully" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson count "$POD_COUNT" '{pods_checked: $count}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) failing to pull images"
+    DETAILS=$(jq -nc \
+        --argjson failures "$PULL_FAILURES" \
+        --argjson pod_count "$POD_COUNT" \
+        '{pod_count: $pod_count, failure_count: ($failures | length), failures: $failures}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+        '["Verify image exists and imagePullSecrets are configured for private registries"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

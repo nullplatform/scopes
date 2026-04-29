@@ -223,8 +223,8 @@ EOF
 
   source "$BATS_TEST_DIRNAME/../../scope/pod_readiness"
 
-  ready=$(jq -r '.evidence.ready' "$SCRIPT_OUTPUT_FILE")
-  total=$(jq -r '.evidence.total' "$SCRIPT_OUTPUT_FILE")
+  ready=$(jq -r '.evidence.details.ready' "$SCRIPT_OUTPUT_FILE")
+  total=$(jq -r '.evidence.details.total' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$ready" "1"
   assert_equal "$total" "1"
 }

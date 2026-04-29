@@ -2,16 +2,18 @@
 # Check: Storage Mounting
 # Verifies persistent volumes are bound and mounted
 
-# Validate pods exist
 require_pods || return 0
 
-# Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_STORAGE_ISSUES=0
+PVC_FACTS="[]"
+AFFECTED_PODS="[]"
+
+mark_affected() {
+    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
+}
 
 for POD_NAME in $PODS; do
-    # Get pod info from pre-collected data
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
     PVCS=$(echo "$POD_INFO" | jq -r '.spec.volumes[]? | select(.persistentVolumeClaim) | .persistentVolumeClaim.claimName')
@@ -21,20 +23,36 @@ for POD_NAME in $PODS; do
             PVC_STATUS=$(kubectl get pvc "$PVC" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
 
             if [[ "$PVC_STATUS" == "Pending" ]]; then
-                HAS_STORAGE_ISSUES=1
+                mark_affected "$POD_NAME"
                 print_error "Pod $POD_NAME: PVC $PVC is in Pending state"
 
                 PVC_INFO=$(kubectl get pvc "$PVC" -n "$NAMESPACE" -o json 2>/dev/null)
                 STORAGE_CLASS=$(echo "$PVC_INFO" | jq -r '.spec.storageClassName // "default"')
-                REQUESTED_SIZE=$(echo "$PVC_INFO" | jq -r '.spec.resources.requests.storage')
+                REQUESTED_SIZE=$(echo "$PVC_INFO" | jq -r '.spec.resources.requests.storage // ""')
 
                 print_warning "  Storage Class: $STORAGE_CLASS"
                 print_warning "  Requested Size: $REQUESTED_SIZE"
                 print_action "Check if StorageClass exists and has available capacity"
+
+                FACT=$(jq -nc \
+                    --arg pod "$POD_NAME" \
+                    --arg pvc "$PVC" \
+                    --arg status "$PVC_STATUS" \
+                    --arg storage_class "$STORAGE_CLASS" \
+                    --arg requested_size "$REQUESTED_SIZE" \
+                    '{pod: $pod, pvc: $pvc, status: $status, storage_class: $storage_class, requested_size: $requested_size}')
+                PVC_FACTS=$(echo "$PVC_FACTS" | jq --argjson f "$FACT" '. + [$f]')
             elif [[ "$PVC_STATUS" == "Bound" ]]; then
                 print_success "Pod $POD_NAME: PVC $PVC is Bound"
             else
                 print_warning "Pod $POD_NAME: PVC $PVC status is $PVC_STATUS"
+                mark_affected "$POD_NAME"
+                FACT=$(jq -nc \
+                    --arg pod "$POD_NAME" \
+                    --arg pvc "$PVC" \
+                    --arg status "${PVC_STATUS:-Unknown}" \
+                    '{pod: $pod, pvc: $pvc, status: $status}')
+                PVC_FACTS=$(echo "$PVC_FACTS" | jq --argjson f "$FACT" '. + [$f]')
             fi
         done
     fi
@@ -47,10 +65,26 @@ for POD_NAME in $PODS; do
     fi
 done
 
-if [[ $HAS_STORAGE_ISSUES -eq 0 ]]; then
-    POD_COUNT=$(echo "$PODS" | wc -w)
+POD_COUNT=$(echo "$PODS" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$PVC_FACTS" | jq 'length')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All volumes mounted successfully for $POD_COUNT pod(s)"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "All volumes mounted successfully for $POD_COUNT pod(s)" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson count "$POD_COUNT" '{pods_checked: $count}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) have storage issues"
+    DETAILS=$(jq -nc \
+        --argjson pvcs "$PVC_FACTS" \
+        --argjson pod_count "$POD_COUNT" \
+        '{pod_count: $pod_count, pvc_issue_count: ($pvcs | length), pvc_issues: $pvcs}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+        '["Check if StorageClass exists and has available capacity"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

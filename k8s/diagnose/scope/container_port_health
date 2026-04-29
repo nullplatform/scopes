@@ -2,52 +2,57 @@
 # Check: Container Port Health
 # Validates that containers are actually listening on their declared ports
 
-# Validate pods exist
 require_pods || return 0
 
-# Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_PORT_ISSUES=0
 CONTAINERS_TESTED=0
 CONTAINERS_SKIPPED=0
+ISSUE_FACTS="[]"
+POD_FACTS="[]"
+AFFECTED_PODS="[]"
+
+mark_affected() {
+    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
+}
 
 for POD_NAME in $PODS; do
-    # Get pod info from pre-collected data
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
-    # Check if pod is running
     POD_PHASE=$(echo "$POD_INFO" | jq -r '.status.phase')
     if [[ "$POD_PHASE" != "Running" ]]; then
         print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping port checks"
+        FACT=$(jq -nc --arg p "$POD_NAME" --arg phase "$POD_PHASE" '{pod: $p, status: "skipped", reason: "not_running", phase: $phase}')
+        POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
         continue
     fi
 
-    # Get pod IP
     POD_IP=$(echo "$POD_INFO" | jq -r '.status.podIP')
     if [[ -z "$POD_IP" || "$POD_IP" == "null" ]]; then
         print_warning "Pod $POD_NAME: No IP assigned, skipping port checks"
+        FACT=$(jq -nc --arg p "$POD_NAME" '{pod: $p, status: "skipped", reason: "no_ip"}')
+        POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
         continue
     fi
 
     print_info "Checking pod $POD_NAME:"
 
-    # Get all containers with their ports
     CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
+    POD_CONTAINER_FACTS="[]"
 
     for CONTAINER_B64 in $CONTAINERS; do
         CONTAINER_DATA=$(echo "$CONTAINER_B64" | base64 -d)
         CONTAINER_NAME=$(echo "$CONTAINER_DATA" | jq -r '.name')
 
-        # Check container status before testing ports
         CONTAINER_STATUS=$(echo "$POD_INFO" | jq -r --arg name "$CONTAINER_NAME" '.status.containerStatuses[]? | select(.name == $name)')
 
         if [[ -z "$CONTAINER_STATUS" ]]; then
             print_warning "  Container '$CONTAINER_NAME': Status not found, skipping"
+            CFACT=$(jq -nc --arg c "$CONTAINER_NAME" '{container: $c, status: "skipped", reason: "no_status"}')
+            POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
             continue
         fi
 
-        # Check if container is ready
         CONTAINER_READY=$(echo "$CONTAINER_STATUS" | jq -r '.ready')
         CONTAINER_STATE=$(echo "$CONTAINER_STATUS" | jq -r '
             if .state.running then "running"
@@ -57,28 +62,26 @@ for POD_NAME in $PODS; do
             end
         ')
 
-        # Get declared ports for this container
         CONTAINER_PORTS=$(echo "$CONTAINER_DATA" | jq -r '.ports[]? | .containerPort' | tr '\n' ' ')
 
         if [[ -z "$CONTAINER_PORTS" ]]; then
             print_info "  Container '$CONTAINER_NAME': No ports declared"
+            CFACT=$(jq -nc --arg c "$CONTAINER_NAME" '{container: $c, status: "no_ports_declared"}')
+            POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
             continue
         fi
 
         print_info "  Container '$CONTAINER_NAME':"
 
-        # If container is not running, explain why we can't test ports
         if [[ "$CONTAINER_STATE" != "running" ]]; then
             if [[ "$CONTAINER_STATE" == "waiting" ]]; then
                 WAITING_REASON=$(echo "$CONTAINER_STATUS" | jq -r '.state.waiting.reason // "Unknown"')
                 WAITING_MESSAGE=$(echo "$CONTAINER_STATUS" | jq -r '.state.waiting.message // ""')
 
-                # Check if it's a normal startup state or a problem
                 case "$WAITING_REASON" in
                     ContainerCreating|PodInitializing|Pulling)
                         CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
                         print_info "    Container is starting ($WAITING_REASON) - skipping port checks"
-                        continue
                         ;;
                     CrashLoopBackOff|ImagePullBackOff|ErrImagePull)
                         CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
@@ -87,37 +90,46 @@ for POD_NAME in $PODS; do
                             print_warning "    Message: $WAITING_MESSAGE"
                         fi
                         print_action "Fix container startup issues (check container_crash_detection results)"
-                        continue
                         ;;
                     *)
                         CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
                         print_warning "    Container waiting: $WAITING_REASON - skipping port checks"
-                        continue
                         ;;
                 esac
+
+                CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --arg reason "$WAITING_REASON" \
+                    '{container: $c, status: "skipped", state: "waiting", reason: $reason}')
+                POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+                continue
             elif [[ "$CONTAINER_STATE" == "terminated" ]]; then
                 EXIT_CODE=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.exitCode // "N/A"')
                 TERMINATION_REASON=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.reason // "Unknown"')
                 CONTAINERS_SKIPPED=$((CONTAINERS_SKIPPED + 1))
                 print_warning "    Cannot test ports - container terminated (Exit: $EXIT_CODE, Reason: $TERMINATION_REASON)"
                 print_action "Fix container termination (check container_crash_detection results)"
+
+                CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --arg ec "$EXIT_CODE" --arg reason "$TERMINATION_REASON" \
+                    '{container: $c, status: "skipped", state: "terminated", exit_code: $ec, termination_reason: $reason}')
+                POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
                 continue
             else
                 print_warning "    Container in unknown state - skipping port checks"
+                CFACT=$(jq -nc --arg c "$CONTAINER_NAME" '{container: $c, status: "skipped", state: "unknown"}')
+                POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
                 continue
             fi
         fi
 
-        # Container is running - check if it's ready
         if [[ "$CONTAINER_READY" != "true" ]]; then
             print_warning "    Container is running but not ready - port connectivity may fail"
         fi
 
-        # Test connectivity to each declared port from agent
         CONTAINERS_TESTED=$((CONTAINERS_TESTED + 1))
 
+        PORT_RESULTS="[]"
+        CONTAINER_HAS_PORT_ISSUE=0
+
         for PORT in $CONTAINER_PORTS; do
-            # Try nc first, then timeout + /dev/tcp, then curl
             if command -v nc >/dev/null 2>&1; then
                 timeout 2 nc -z -w 1 "$POD_IP" "$PORT" >/dev/null 2>&1
                 CONNECTIVITY_EXIT_CODE=$?
@@ -129,33 +141,77 @@ for POD_NAME in $PODS; do
                 CONNECTIVITY_EXIT_CODE=$?
             else
                 print_warning "    Port $PORT: Cannot test (nc/timeout/curl not available in agent)"
+                PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson port "$PORT" '. + [{port: $port, status: "untestable"}]')
                 continue
             fi
 
             if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
                 print_success "    Port $PORT: ✓ Listening"
+                PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson port "$PORT" '. + [{port: $port, status: "listening"}]')
             else
-                HAS_PORT_ISSUES=1
+                CONTAINER_HAS_PORT_ISSUE=1
+                mark_affected "$POD_NAME"
                 print_error "    Port $PORT: ✗ Declared but not listening or unreachable"
                 print_action "Check application configuration and ensure it listens on port $PORT"
+                PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson port "$PORT" '. + [{port: $port, status: "not_listening"}]')
+
+                ISSUE=$(jq -nc --arg pod "$POD_NAME" --arg c "$CONTAINER_NAME" --argjson port "$PORT" \
+                    '{pod: $pod, container: $c, port: $port, issue: "port_not_listening"}')
+                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
             fi
         done
+
+        CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --argjson ports "$PORT_RESULTS" --arg ready "$CONTAINER_READY" \
+            --argjson tested true \
+            '{container: $c, status: "tested", container_ready: ($ready == "true"), ports: $ports}')
+        POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
     done
+
+    POD_FACT=$(jq -nc --arg p "$POD_NAME" --arg ip "$POD_IP" --argjson containers "$POD_CONTAINER_FACTS" \
+        '{pod: $p, pod_ip: $ip, containers: $containers}')
+    POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$POD_FACT" '. + [$f]')
 done
 
 echo ""
+
+DETAILS=$(jq -nc \
+    --argjson tested "$CONTAINERS_TESTED" \
+    --argjson skipped "$CONTAINERS_SKIPPED" \
+    --argjson facts "$POD_FACTS" \
+    --argjson issues "$ISSUE_FACTS" \
+    '{
+        containers_tested: $tested,
+        containers_skipped: $skipped,
+        issue_count: ($issues | length),
+        pods: $facts,
+        issues: $issues
+    }')
+
 if [[ $CONTAINERS_TESTED -eq 0 ]]; then
-    # No containers were tested - all were skipped
     print_info "All containers skipped - no port checks could be performed"
-    update_check_result --status "skipped" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
-elif [[ $HAS_PORT_ISSUES -eq 0 ]]; then
-    # Some/all containers were tested and all passed
+    EVIDENCE=$(evidence_json \
+        "All containers skipped — no port checks performed" \
+        "info" \
+        "[]" \
+        "$DETAILS" \
+        "[]")
+    update_check_result --status "skipped" --evidence "$EVIDENCE"
+elif [[ $(echo "$ISSUE_FACTS" | jq 'length') -eq 0 ]]; then
     print_success "Port connectivity verified on $CONTAINERS_TESTED container(s)"
-    update_check_result --status "success" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+    EVIDENCE=$(evidence_json \
+        "Port connectivity verified on $CONTAINERS_TESTED container(s)" \
+        "info" \
+        "[]" \
+        "$DETAILS" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    # Some containers were tested and had issues
     if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
         print_warning "Port issues found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
     fi
-    update_check_result --status "failed" --evidence "{\"tested\":$CONTAINERS_TESTED,\"skipped\":$CONTAINERS_SKIPPED}"
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    SUMMARY="$AFFECTED_COUNT pod(s) with port connectivity issues"
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+        '["Check application configuration and ensure it listens on declared ports"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

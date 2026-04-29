@@ -2,35 +2,42 @@
 # Check: ALB Capacity Check
 # Checks for common ALB issues (IP exhaustion, certificate problems)
 
-# Validate ingresses exist
 require_ingresses || return 0
 
-# Read ingresses from pre-collected data
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+ISSUE_FACTS="[]"
+INGRESS_FACTS="[]"
+AFFECTED_INGRESSES="[]"
+HAS_IP_EXHAUSTION=0
+IP_EXHAUSTION_LOGS="[]"
 
-# Get ALB controller pods from pre-collected data
+mark_affected() {
+    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
+}
+
 ALB_CONTROLLER_PODS=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
 if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
     for POD in $ALB_CONTROLLER_PODS; do
-        # Look for IP exhaustion errors in pre-collected controller logs
         LOG_FILE="$ALB_CONTROLLER_LOGS_DIR/${POD}.log"
         if [[ -f "$LOG_FILE" ]] && [[ -r "$LOG_FILE" ]]; then
-            # Use tail and awk to handle massive log lines efficiently
             IP_ERRORS=$(tail -n 500 "$LOG_FILE" 2>/dev/null | \
                 awk 'length <= 10000' 2>/dev/null | \
                 grep -iE "no available ip|insufficient ip|ip address.*(exhausted|unavailable)" 2>/dev/null || true)
 
             if [[ -n "$IP_ERRORS" ]]; then
-                HAS_ISSUES=1
+                HAS_IP_EXHAUSTION=1
                 print_error "  ALB subnet IP exhaustion detected, Recent logs:"
                 if ! echo "$IP_ERRORS" | tail -n 3 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
                     print_warning "    [Log details could not be displayed]"
                 fi
                 print_action "Check subnet CIDR ranges and consider expanding or using different subnets"
                 print_info "  Annotation: alb.ingress.kubernetes.io/subnets=<subnet-ids>"
+
+                TRUNC=$(echo "$IP_ERRORS" | tail -n 3 | cut -c1-200 | jq -R . | jq -s .)
+                IP_EXHAUSTION_LOGS=$(echo "$IP_EXHAUSTION_LOGS" | jq --arg pod "$POD" --argjson lines "$TRUNC" \
+                    '. + [{controller_pod: $pod, lines: $lines}]')
                 break
             fi
         elif [[ -e "$LOG_FILE" ]] && [[ ! -r "$LOG_FILE" ]]; then
@@ -38,22 +45,32 @@ if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
         fi
     done
 
-    if [[ -z "$IP_ERRORS" ]]; then
+    if [[ $HAS_IP_EXHAUSTION -eq 0 ]]; then
         print_success "  No IP exhaustion issues detected"
     fi
 fi
 
-# Consolidated loop: check all ingress-related issues in one pass
-for INGRESS_NAME in $INGRESSES; do
-    # Get ingress info from pre-collected data (single read per ingress)
-    INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
+[[ $HAS_IP_EXHAUSTION -eq 1 ]] && {
+    ISSUE=$(jq -nc --argjson logs "$IP_EXHAUSTION_LOGS" \
+        '{issue: "subnet_ip_exhaustion", evidence_logs: $logs}')
+    ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+    # mark all ingresses as affected (cluster-wide issue)
+    for INGRESS_NAME in $INGRESSES; do mark_affected "$INGRESS_NAME"; done
+}
 
+for INGRESS_NAME in $INGRESSES; do
+    INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
     print_info "Checking ingress: $INGRESS_NAME"
 
-    # ===== TLS/Certificate Configuration Checks =====
+    INGRESS_HAS_ISSUE=0
     CERT_ARN=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/certificate-arn"] // empty')
     TLS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.tls[]?.hosts[]?' 2>/dev/null)
     INGRESS_HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[]?.host' 2>/dev/null)
+    SCHEME=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/scheme"] // empty')
+    SUBNETS=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/subnets"] // empty')
+
+    CERT_ERROR_LINES="[]"
+    HOST_TLS_MISMATCHES="[]"
 
     if [[ -n "$TLS_HOSTS" || -n "$CERT_ARN" ]]; then
         print_info "  SSL/TLS configured"
@@ -61,42 +78,51 @@ for INGRESS_NAME in $INGRESSES; do
         if [[ -n "$CERT_ARN" ]]; then
             print_info "    Certificate ARN: $CERT_ARN"
 
-            # Check controller logs for certificate errors
             if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
                 for POD in $ALB_CONTROLLER_PODS; do
                     LOG_FILE="$ALB_CONTROLLER_LOGS_DIR/${POD}.log"
                     if [[ -f "$LOG_FILE" ]] && [[ -r "$LOG_FILE" ]]; then
-                        # Use tail and awk to handle massive log lines efficiently
                         CERT_ERRORS=$(tail -n 500 "$LOG_FILE" 2>/dev/null | \
                             awk 'length <= 10000' 2>/dev/null | \
                             grep -iF "$INGRESS_NAME" 2>/dev/null | \
                             grep -iE "certificate.*(not found|invalid|failed|error)" 2>/dev/null || true)
 
                         if [[ -n "$CERT_ERRORS" ]]; then
-                            HAS_ISSUES=1
+                            mark_affected "$INGRESS_NAME"
+                            INGRESS_HAS_ISSUE=1
                             print_error "    Certificate validation errors found:"
                             if ! echo "$CERT_ERRORS" | tail -n 2 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/      /' 2>/dev/null; then
                                 print_warning "      [Certificate error details could not be displayed]"
                             fi
                             print_action "Verify certificate ARN exists in ACM and covers the required domains"
+
+                            TRUNC=$(echo "$CERT_ERRORS" | tail -n 2 | cut -c1-200 | jq -R . | jq -s .)
+                            CERT_ERROR_LINES=$(echo "$CERT_ERROR_LINES" | jq --arg pod "$POD" --argjson lines "$TRUNC" \
+                                '. + [{controller_pod: $pod, lines: $lines}]')
+                            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson lines "$TRUNC" \
+                                '{ingress: $ing, issue: "certificate_validation_errors", log_lines: $lines}')
+                            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
                         fi
                     fi
                 done
             fi
         fi
 
-        # Verify hosts match between rules and TLS
         if [[ -n "$TLS_HOSTS" && -n "$INGRESS_HOSTS" ]]; then
             for HOST in $INGRESS_HOSTS; do
                 if ! echo "$TLS_HOSTS" | grep -qw "$HOST"; then
-                    HAS_ISSUES=1
+                    mark_affected "$INGRESS_NAME"
+                    INGRESS_HAS_ISSUE=1
                     print_error "    Host '$HOST' in rules but not in TLS configuration"
                     print_action "Add host to spec.tls or ensure certificate covers this domain"
+                    HOST_TLS_MISMATCHES=$(echo "$HOST_TLS_MISMATCHES" | jq --arg h "$HOST" '. + [$h]')
+                    ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg host "$HOST" \
+                        '{ingress: $ing, host: $host, issue: "host_in_rules_not_in_tls"}')
+                    ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
                 fi
             done
         fi
 
-        # Check for missing certificate when TLS is configured
         if [[ -n "$TLS_HOSTS" && -z "$CERT_ARN" ]]; then
             print_warning "    TLS hosts configured but no ACM certificate ARN annotation"
             print_info "    Add annotation: alb.ingress.kubernetes.io/certificate-arn=<arn>"
@@ -105,8 +131,6 @@ for INGRESS_NAME in $INGRESSES; do
         print_info "  No SSL/TLS configured (HTTP only)"
     fi
 
-    # ===== Events Checks (subnet, security group, target group) =====
-    # Get events sorted by timestamp, most recent first
     EVENTS_JSON=$(jq --arg name "$INGRESS_NAME" --arg kind "Ingress" '
         .items
         | map(select(.involvedObject.name == $name and .involvedObject.kind == $kind))
@@ -114,65 +138,114 @@ for INGRESS_NAME in $INGRESSES; do
         | reverse
     ' "$EVENTS_FILE" 2>/dev/null)
 
+    SUBNET_ERROR_LINES="[]"
+    SG_ERROR_LINES="[]"
+    TG_ERROR_LINES="[]"
+
     EVENT_COUNT=$(echo "$EVENTS_JSON" | jq 'length' 2>/dev/null)
 
     if [[ "$EVENT_COUNT" -gt 0 ]]; then
-        # Get all error/warning events
-        ERROR_EVENTS=$(echo "$EVENTS_JSON" | jq -r '
-            .[]
-            | select(.type == "Warning" or .type == "Error")
-        ' 2>/dev/null)
+        ERROR_EVENTS=$(echo "$EVENTS_JSON" | jq -c '[.[] | select(.type == "Warning" or .type == "Error")]' 2>/dev/null)
 
-        if [[ -n "$ERROR_EVENTS" ]]; then
-            # Check for subnet errors
-            SUBNET_ERRORS=$(echo "$ERROR_EVENTS" | jq -r 'select(.message | test("subnet|availability zone"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
-            if [[ -n "$SUBNET_ERRORS" ]]; then
-                HAS_ISSUES=1
-                print_error "  Subnet configuration issues"
-                if ! echo "$SUBNET_ERRORS" | head -n 2 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
-                    print_warning "    [Event details could not be displayed]"
-                fi
-            fi
+        SUBNET_ERRORS_HUMAN=$(echo "$ERROR_EVENTS" | jq -r '.[] | select(.message | test("subnet|availability zone"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
+        if [[ -n "$SUBNET_ERRORS_HUMAN" ]]; then
+            mark_affected "$INGRESS_NAME"
+            INGRESS_HAS_ISSUE=1
+            print_error "  Subnet configuration issues"
+            echo "$SUBNET_ERRORS_HUMAN" | head -n 2 | sed 's/^/    /'
+            SUBNET_ERROR_LINES=$(echo "$ERROR_EVENTS" | jq -c '[.[] | select(.message | test("subnet|availability zone"; "i")) | {timestamp: .lastTimestamp, type: .type, reason: .reason, message: .message}] | .[:2]')
+            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson events "$SUBNET_ERROR_LINES" \
+                '{ingress: $ing, issue: "subnet_misconfiguration", events: $events}')
+            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+        fi
 
-            # Check for security group errors
-            SG_ERRORS=$(echo "$ERROR_EVENTS" | jq -r 'select(.message | test("security.?group"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
-            if [[ -n "$SG_ERRORS" ]]; then
-                HAS_ISSUES=1
-                print_error "  Security group issues"
-                if ! echo "$SG_ERRORS" | head -n 2 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
-                    print_warning "    [Event details could not be displayed]"
-                fi
-            fi
+        SG_ERRORS_HUMAN=$(echo "$ERROR_EVENTS" | jq -r '.[] | select(.message | test("security.?group"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
+        if [[ -n "$SG_ERRORS_HUMAN" ]]; then
+            mark_affected "$INGRESS_NAME"
+            INGRESS_HAS_ISSUE=1
+            print_error "  Security group issues"
+            echo "$SG_ERRORS_HUMAN" | head -n 2 | sed 's/^/    /'
+            SG_ERROR_LINES=$(echo "$ERROR_EVENTS" | jq -c '[.[] | select(.message | test("security.?group"; "i")) | {timestamp: .lastTimestamp, type: .type, reason: .reason, message: .message}] | .[:2]')
+            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson events "$SG_ERROR_LINES" \
+                '{ingress: $ing, issue: "security_group", events: $events}')
+            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+        fi
 
-            # Check for target group errors
-            TG_ERRORS=$(echo "$ERROR_EVENTS" | jq -r 'select(.message | test("target.?group"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
-            if [[ -n "$TG_ERRORS" ]]; then
-                HAS_ISSUES=1
-                print_error "  Target group registration issues"
-                if ! echo "$TG_ERRORS" | head -n 2 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
-                    print_warning "    [Event details could not be displayed]"
-                fi
-            fi
+        TG_ERRORS_HUMAN=$(echo "$ERROR_EVENTS" | jq -r '.[] | select(.message | test("target.?group"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
+        if [[ -n "$TG_ERRORS_HUMAN" ]]; then
+            mark_affected "$INGRESS_NAME"
+            INGRESS_HAS_ISSUE=1
+            print_error "  Target group registration issues"
+            echo "$TG_ERRORS_HUMAN" | head -n 2 | sed 's/^/    /'
+            TG_ERROR_LINES=$(echo "$ERROR_EVENTS" | jq -c '[.[] | select(.message | test("target.?group"; "i")) | {timestamp: .lastTimestamp, type: .type, reason: .reason, message: .message}] | .[:2]')
+            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson events "$TG_ERROR_LINES" \
+                '{ingress: $ing, issue: "target_group", events: $events}')
+            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
         fi
     fi
 
-    # ===== Annotation Checks (scheme, subnets) =====
-    SCHEME=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/scheme"] // empty')
     if [[ -z "$SCHEME" ]]; then
         print_warning "  No scheme annotation (defaulting to internal)"
         print_info "    Add annotation: alb.ingress.kubernetes.io/scheme=internet-facing (or internal)"
     fi
-
-    SUBNETS=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["alb.ingress.kubernetes.io/subnets"] // empty')
     if [[ -z "$SUBNETS" ]]; then
         print_info "  Using auto-discovered subnets"
         print_info "    Consider explicit subnets: alb.ingress.kubernetes.io/subnets=<subnet-ids>"
     fi
+
+    INGRESS_FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg cert "$CERT_ARN" --arg scheme "$SCHEME" --arg subnets "$SUBNETS" \
+        --argjson tls_configured "$([[ -n "$TLS_HOSTS" || -n "$CERT_ARN" ]] && echo true || echo false)" \
+        --argjson host_mismatches "$HOST_TLS_MISMATCHES" \
+        --argjson cert_errors "$CERT_ERROR_LINES" \
+        --argjson subnet_errors "$SUBNET_ERROR_LINES" \
+        --argjson sg_errors "$SG_ERROR_LINES" \
+        --argjson tg_errors "$TG_ERROR_LINES" \
+        '{
+            ingress: $ing,
+            tls_configured: $tls_configured,
+            certificate_arn: (if $cert == "" then null else $cert end),
+            scheme: (if $scheme == "" then null else $scheme end),
+            subnets_annotation: (if $subnets == "" then null else $subnets end),
+            host_tls_mismatches: $host_mismatches,
+            certificate_errors: $cert_errors,
+            subnet_errors: $subnet_errors,
+            security_group_errors: $sg_errors,
+            target_group_errors: $tg_errors
+        }')
+    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$INGRESS_FACT" '. + [$i]')
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
+INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "No critical ALB capacity or configuration issues detected"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "No critical ALB capacity or configuration issues detected" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) affected by ALB issues"
+    [[ $HAS_IP_EXHAUSTION -eq 1 ]] && SUMMARY="$SUMMARY — subnet IP exhaustion detected"
+
+    DETAILS=$(jq -nc \
+        --argjson facts "$INGRESS_FACTS" \
+        --argjson issues "$ISSUE_FACTS" \
+        --argjson count "$INGRESS_COUNT" \
+        --argjson ip_logs "$IP_EXHAUSTION_LOGS" \
+        --argjson ip_exhaustion "$HAS_IP_EXHAUSTION" \
+        '{
+            ingress_count: $count,
+            issue_count: ($issues | length),
+            ip_exhaustion_detected: ($ip_exhaustion == 1),
+            ip_exhaustion_logs: $ip_logs,
+            ingresses: $facts,
+            issues: $issues
+        }')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+        '["Check subnet capacity and certificate/security group configuration"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

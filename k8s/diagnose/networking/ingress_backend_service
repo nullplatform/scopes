@@ -2,99 +2,111 @@
 # Check: Ingress Backend Service
 # Checks if ingress backend services exist and are reachable
 
-# Validate ingresses exist
 require_ingresses || return 0
 
-# Get ingresses
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+ISSUE_FACTS="[]"
+INGRESS_FACTS="[]"
+AFFECTED_INGRESSES="[]"
+
+mark_affected() {
+    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
+}
 
 for INGRESS_NAME in $INGRESSES; do
     INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
-
     print_info "Checking backends for ingress: $INGRESS_NAME"
 
-    # Get default backend if exists
+    INGRESS_BACKEND_FACTS="[]"
+    INGRESS_HAS_ISSUE=0
+
     DEFAULT_BACKEND=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.name // empty')
 
     if [[ -n "$DEFAULT_BACKEND" ]]; then
         DEFAULT_PORT=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.port.number // .spec.defaultBackend.service.port.name // empty')
-
-        # Check if service exists in pre-collected data
         SERVICE_INFO=$(jq --arg name "$DEFAULT_BACKEND" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
 
         if [[ -n "$SERVICE_INFO" && "$SERVICE_INFO" != "null" ]]; then
-            # Check if service has endpoints from pre-collected data
             ENDPOINT_INFO=$(jq --arg name "$DEFAULT_BACKEND" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
             ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[].addresses[].ip' 2>/dev/null | tr '\n' ' ')
 
             if [[ -n "$ENDPOINTS" ]]; then
                 print_success "  Default backend: $DEFAULT_BACKEND:$DEFAULT_PORT (has endpoints)"
+                BFACT=$(jq -nc --arg svc "$DEFAULT_BACKEND" --arg port "$DEFAULT_PORT" \
+                    '{kind: "default", service: $svc, port: $port, status: "ok"}')
             else
-                HAS_ISSUES=1
+                mark_affected "$INGRESS_NAME"
+                INGRESS_HAS_ISSUE=1
                 print_error "  Default backend: $DEFAULT_BACKEND:$DEFAULT_PORT (no endpoints)"
+                BFACT=$(jq -nc --arg svc "$DEFAULT_BACKEND" --arg port "$DEFAULT_PORT" \
+                    '{kind: "default", service: $svc, port: $port, status: "no_endpoints"}')
+                ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$DEFAULT_BACKEND" \
+                    '{ingress: $ing, backend: $svc, issue: "default_backend_no_endpoints"}')
+                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
             fi
         else
-            HAS_ISSUES=1
+            mark_affected "$INGRESS_NAME"
+            INGRESS_HAS_ISSUE=1
             print_error "  Default backend: Service '$DEFAULT_BACKEND' not found"
+            BFACT=$(jq -nc --arg svc "$DEFAULT_BACKEND" \
+                '{kind: "default", service: $svc, status: "service_not_found"}')
+            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$DEFAULT_BACKEND" \
+                '{ingress: $ing, backend: $svc, issue: "default_backend_not_found"}')
+            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
         fi
+        INGRESS_BACKEND_FACTS=$(echo "$INGRESS_BACKEND_FACTS" | jq --argjson b "$BFACT" '. + [$b]')
     fi
 
-    # Get all rule backends
     BACKENDS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].http.paths[] | "\(.backend.service.name):\(.backend.service.port.number // .backend.service.port.name)"' 2>/dev/null)
 
-    if [[ -z "$BACKENDS" ]]; then
+    if [[ -z "$BACKENDS" && -z "$DEFAULT_BACKEND" ]]; then
         print_warning "  No path rules defined"
+        FACT=$(jq -nc --arg ing "$INGRESS_NAME" --argjson backends "$INGRESS_BACKEND_FACTS" \
+            '{ingress: $ing, backends: $backends}')
+        INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$FACT" '. + [$i]')
         continue
     fi
 
-    # Check each unique backend
-    # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
     while IFS=':' read -r SERVICE_NAME SERVICE_PORT; do
-        # Check if service exists in pre-collected data
+        [[ -z "$SERVICE_NAME" ]] && continue
+
         SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
 
         if [[ -n "$SERVICE_INFO" && "$SERVICE_INFO" != "null" ]]; then
-            # Check if service has endpoints from pre-collected data
             ENDPOINT_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
-            READY_ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[]?.addresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
-            NOT_READY_ENDPOINTS=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[]?.notReadyAddresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
+            READY_COUNT=$(echo "$ENDPOINT_INFO" | jq -r '[.subsets[]?.addresses[]?] | length' 2>/dev/null)
+            NOT_READY_COUNT=$(echo "$ENDPOINT_INFO" | jq -r '[.subsets[]?.notReadyAddresses[]?] | length' 2>/dev/null)
+            READY_COUNT=${READY_COUNT:-0}
+            NOT_READY_COUNT=${NOT_READY_COUNT:-0}
 
-            # Get port info
             PORT_NUMBER=$(echo "$ENDPOINT_INFO" | jq -r '.subsets[0]?.ports[0]?.port // empty' 2>/dev/null)
-
-            READY_COUNT=$(echo "$READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
-            NOT_READY_COUNT=$(echo "$NOT_READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
 
             if [[ $READY_COUNT -gt 0 ]]; then
                 print_success "  Backend: $SERVICE_NAME:$SERVICE_PORT ($READY_COUNT ready endpoint(s))"
-                echo "$READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
-                    [[ -n "$IP" ]] && print_success "    - $POD_NAME -> $IP:$PORT_NUMBER"
+                echo "$ENDPOINT_INFO" | jq -r --arg p "$PORT_NUMBER" '.subsets[]?.addresses[]? | "    - \(.targetRef.name // "unknown") -> \(.ip)" + (if $p == "" then "" else ":" + $p end)' | while IFS= read -r line; do
+                    print_success "$line"
                 done
-
                 if [[ $NOT_READY_COUNT -gt 0 ]]; then
                     print_warning "    Also has $NOT_READY_COUNT not ready endpoint(s)"
-                    echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
-                        [[ -n "$IP" ]] && print_warning "      - $POD_NAME -> $IP:$PORT_NUMBER"
+                    echo "$ENDPOINT_INFO" | jq -r --arg p "$PORT_NUMBER" '.subsets[]?.notReadyAddresses[]? | "      - \(.targetRef.name // "unknown") -> \(.ip)" + (if $p == "" then "" else ":" + $p end)' | while IFS= read -r line; do
+                        print_warning "$line"
                     done
                 fi
+                BFACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" --argjson ready "$READY_COUNT" --argjson nr "$NOT_READY_COUNT" \
+                    '{kind: "rule", service: $svc, port: $port, ready_count: $ready, not_ready_count: $nr, status: "ok"}')
             else
-                HAS_ISSUES=1
+                mark_affected "$INGRESS_NAME"
+                INGRESS_HAS_ISSUE=1
                 print_error "  Backend: $SERVICE_NAME:$SERVICE_PORT (no ready endpoints)"
 
-                # Get service selector to help debug
                 SERVICE_SELECTOR=$(echo "$SERVICE_INFO" | jq -c '.spec.selector // {}' 2>/dev/null)
-                print_info "    Service selector: $SERVICE_SELECTOR"
 
                 if [[ $NOT_READY_COUNT -gt 0 ]]; then
-                    print_warning "    Found $NOT_READY_COUNT not ready endpoint(s):"
-                    echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
-                        [[ -n "$IP" ]] && print_warning "      - $POD_NAME -> $IP:$PORT_NUMBER (not ready)"
-                    done
+                    print_warning "    Found $NOT_READY_COUNT not ready endpoint(s)"
                     print_action "Check pod readiness - pods exist but are not ready to serve traffic"
+                    SUB_ISSUE="endpoints_not_ready"
                 else
-                    # Check if there are any pods matching the selector
                     if [[ "$SERVICE_SELECTOR" != "{}" && "$SERVICE_SELECTOR" != "null" ]]; then
                         MATCHING_PODS=$(jq -r --argjson selectors "$SERVICE_SELECTOR" '
                             .items[] |
@@ -108,38 +120,77 @@ for INGRESS_NAME in $INGRESSES; do
                         ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
                         if [[ -n "$MATCHING_PODS" ]]; then
-                            print_warning "    Found pods matching selector but no endpoints: $MATCHING_PODS"
-                            print_action "Pods exist but endpoints not created - check pod readiness probes and status"
+                            print_warning "    Pods match selector but no endpoints — check readiness probes"
+                            SUB_ISSUE="pods_match_no_endpoints"
                         else
                             print_warning "    No pods found matching service selector"
-                            print_action "Create pods with labels matching the service selector: $SERVICE_SELECTOR"
+                            SUB_ISSUE="no_matching_pods"
                         fi
                     else
                         print_warning "    Service has no selector defined"
-                        print_action "Add selector to service or check if this is a headless/ExternalName service"
+                        SUB_ISSUE="no_selector"
                     fi
                 fi
+
+                BFACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" --argjson nr "$NOT_READY_COUNT" \
+                    --argjson selector "$SERVICE_SELECTOR" --arg issue "$SUB_ISSUE" \
+                    '{kind: "rule", service: $svc, port: $port, ready_count: 0, not_ready_count: $nr, selector: $selector, status: $issue}')
+                ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$SERVICE_NAME" --arg issue "$SUB_ISSUE" \
+                    '{ingress: $ing, backend: $svc, issue: $issue}')
+                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
             fi
 
-            # Verify port exists in service from pre-collected data
             SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[].port' 2>/dev/null | tr '\n' ' ')
-
             if ! echo "$SERVICE_PORTS" | grep -qw "$SERVICE_PORT"; then
-                HAS_ISSUES=1
+                mark_affected "$INGRESS_NAME"
+                INGRESS_HAS_ISSUE=1
                 print_error "  Backend: Port $SERVICE_PORT not found in service $SERVICE_NAME"
                 print_warning "    Available ports: $SERVICE_PORTS"
+                BFACT=$(echo "$BFACT" | jq --arg sp "$SERVICE_PORT" --arg ports "$SERVICE_PORTS" \
+                    '. + {port_status: "port_not_in_service", available_ports: ($ports | split(" ") | map(select(length > 0)))}')
+                ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" \
+                    '{ingress: $ing, backend: $svc, port: $port, issue: "port_not_in_service"}')
+                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
             fi
         else
-            HAS_ISSUES=1
+            mark_affected "$INGRESS_NAME"
+            INGRESS_HAS_ISSUE=1
             print_error "  Backend: Service '$SERVICE_NAME' not found in namespace"
+            BFACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" \
+                '{kind: "rule", service: $svc, port: $port, status: "service_not_found"}')
+            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$SERVICE_NAME" \
+                '{ingress: $ing, backend: $svc, issue: "service_not_found"}')
+            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
         fi
+
+        INGRESS_BACKEND_FACTS=$(echo "$INGRESS_BACKEND_FACTS" | jq --argjson b "$BFACT" '. + [$b]')
     done < <(echo "$BACKENDS" | sort -u)
+
+    FACT=$(jq -nc --arg ing "$INGRESS_NAME" --argjson backends "$INGRESS_BACKEND_FACTS" \
+        '{ingress: $ing, backends: $backends}')
+    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$FACT" '. + [$i]')
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
-    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All backend services healthy for $INGRESS_COUNT ingress(es)"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "All backend services healthy for $INGRESS_COUNT ingress(es)" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have backend issues"
+    DETAILS=$(jq -nc \
+        --argjson facts "$INGRESS_FACTS" \
+        --argjson issues "$ISSUE_FACTS" \
+        --argjson count "$INGRESS_COUNT" \
+        '{ingress_count: $count, issue_count: ($issues | length), ingresses: $facts, issues: $issues}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+        '["Verify backend services exist and have ready endpoints, and that ports match"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

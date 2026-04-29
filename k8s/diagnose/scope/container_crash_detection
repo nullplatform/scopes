@@ -8,70 +8,121 @@ require_pods || return 0
 # Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_CRASHES=0
+# Structured fact accumulators (JSON arrays — appended per-finding)
+CRASH_LOOP_FACTS="[]"
+TERMINATED_FACTS="[]"
+HIGH_RESTART_FACTS="[]"
+AFFECTED_PODS="[]"
+
+# Action accumulators (set so we don't repeat the same action multiple times)
+HAS_ACTION_CHECK_LOGS=0
+HAS_ACTION_CHECK_TERMINATION=0
+HAS_ACTION_CHECK_INTERMITTENT=0
+
+# Counters for summary
+NUM_CRASH_LOOP=0
+NUM_TERMINATED=0
+NUM_HIGH_RESTART=0
+NUM_OOM=0
+NUM_APP_ERROR=0
+
+mark_affected() {
+    local pod="$1"
+    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$pod" 'if any(. == $p) then . else . + [$p] end')
+}
 
 for POD_NAME in $PODS; do
-      # Get pod info from pre-collected data
       POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
-      # Check for containers in crash states
+      # ----- CrashLoopBackOff -----
       CRASH_LOOP=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.waiting.reason == "CrashLoopBackOff") | .name')
 
       if [[ -n "$CRASH_LOOP" ]]; then
-          HAS_CRASHES=1
+          mark_affected "$POD_NAME"
           print_error "Pod $POD_NAME: CrashLoopBackOff in container(s): $CRASH_LOOP"
 
           for CONTAINER in $CRASH_LOOP; do
               RESTART_COUNT=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .restartCount")
               EXIT_CODE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .lastState.terminated.exitCode // \"N/A\"")
               TERMINATION_REASON=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .lastState.terminated.reason // \"Unknown\"")
+              EXIT_MEANING=$(exit_code_meaning "$EXIT_CODE")
 
               print_warning "  Container: $CONTAINER | Restarts: $RESTART_COUNT | Exit Code: $EXIT_CODE | Reason: $TERMINATION_REASON"
+              [[ "$EXIT_MEANING" != "Unknown" ]] && print_warning "  Exit $EXIT_CODE = $EXIT_MEANING"
 
-              case "$EXIT_CODE" in
-                  137) print_warning "  Exit 137 = OOMKilled (out of memory)" ;;
-                  143) print_warning "  Exit 143 = SIGTERM (graceful termination)" ;;
-                  1)   print_warning "  Exit 1 = Application error" ;;
-                  139) print_warning "  Exit 139 = SIGSEGV (segmentation fault)" ;;
-              esac
+              NUM_CRASH_LOOP=$((NUM_CRASH_LOOP + 1))
+              [[ "$EXIT_CODE" == "137" ]] && NUM_OOM=$((NUM_OOM + 1))
+              [[ "$EXIT_CODE" == "1"   ]] && NUM_APP_ERROR=$((NUM_APP_ERROR + 1))
+
+              FACT=$(jq -nc \
+                  --arg pod "$POD_NAME" \
+                  --arg container "$CONTAINER" \
+                  --argjson restarts "${RESTART_COUNT:-0}" \
+                  --arg exit_code "$EXIT_CODE" \
+                  --arg exit_meaning "$EXIT_MEANING" \
+                  --arg reason "$TERMINATION_REASON" \
+                  '{pod: $pod, container: $container, restart_count: $restarts, exit_code: $exit_code, exit_code_meaning: $exit_meaning, termination_reason: $reason}')
+              CRASH_LOOP_FACTS=$(echo "$CRASH_LOOP_FACTS" | jq --argjson f "$FACT" '. + [$f]')
           done
 
           print_info "Last logs from $POD_NAME:"
-          kubectl logs "$POD_NAME" -n "$NAMESPACE" --tail=10 2>&1 | sed 's/^/  /'
+          # Logs are now pre-collected by build_context for problematic pods.
+          # Fall back to a live kubectl call only if the snapshot is missing.
+          PRINTED_LOGS=0
+          for CONTAINER in $CRASH_LOOP; do
+              LOG_FILE="$POD_LOGS_DIR/${POD_NAME}.${CONTAINER}.log"
+              if [[ -s "$LOG_FILE" ]]; then
+                  tail -n 10 "$LOG_FILE" | sed "s|^|  [$CONTAINER] |"
+                  PRINTED_LOGS=1
+              fi
+          done
+          if [[ $PRINTED_LOGS -eq 0 ]]; then
+              kubectl logs "$POD_NAME" -n "$NAMESPACE" --tail=10 2>&1 | sed 's/^/  /'
+          fi
           print_action "Check container logs and fix application startup issues"
+          HAS_ACTION_CHECK_LOGS=1
       fi
 
-      # Check for containers that terminated but haven't restarted yet
+      # ----- Terminated (state.terminated) -----
       TERMINATED_CONTAINERS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.state.terminated) | .name')
 
       if [[ -n "$TERMINATED_CONTAINERS" ]]; then
-          HAS_CRASHES=1
+          mark_affected "$POD_NAME"
           print_error "Pod $POD_NAME: Terminated container(s): $TERMINATED_CONTAINERS"
 
           for CONTAINER in $TERMINATED_CONTAINERS; do
               EXIT_CODE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.terminated.exitCode // \"N/A\"")
               TERMINATION_REASON=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .state.terminated.reason // \"Unknown\"")
               RESTART_COUNT=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER\") | .restartCount")
+              EXIT_MEANING=$(exit_code_meaning "$EXIT_CODE")
 
               print_warning "  Container: $CONTAINER | Exit Code: $EXIT_CODE | Reason: $TERMINATION_REASON | Restarts: $RESTART_COUNT"
+              [[ "$EXIT_MEANING" != "Unknown" ]] && print_warning "  Exit $EXIT_CODE = $EXIT_MEANING"
 
-              case "$EXIT_CODE" in
-                  137) print_warning "  Exit 137 = OOMKilled (out of memory)" ;;
-                  143) print_warning "  Exit 143 = SIGTERM (graceful termination)" ;;
-                  1)   print_warning "  Exit 1 = Application error" ;;
-                  139) print_warning "  Exit 139 = SIGSEGV (segmentation fault)" ;;
-                  0)   print_info "  Exit 0 = Clean exit (container finished successfully)" ;;
-              esac
+              NUM_TERMINATED=$((NUM_TERMINATED + 1))
+              [[ "$EXIT_CODE" == "137" ]] && NUM_OOM=$((NUM_OOM + 1))
+              [[ "$EXIT_CODE" == "1"   ]] && NUM_APP_ERROR=$((NUM_APP_ERROR + 1))
+
+              FACT=$(jq -nc \
+                  --arg pod "$POD_NAME" \
+                  --arg container "$CONTAINER" \
+                  --argjson restarts "${RESTART_COUNT:-0}" \
+                  --arg exit_code "$EXIT_CODE" \
+                  --arg exit_meaning "$EXIT_MEANING" \
+                  --arg reason "$TERMINATION_REASON" \
+                  '{pod: $pod, container: $container, restart_count: $restarts, exit_code: $exit_code, exit_code_meaning: $exit_meaning, termination_reason: $reason}')
+              TERMINATED_FACTS=$(echo "$TERMINATED_FACTS" | jq --argjson f "$FACT" '. + [$f]')
           done
 
           print_action "Check why container terminated and review logs"
+          HAS_ACTION_CHECK_TERMINATION=1
       fi
 
-      # Check for containers with high restart counts (even if currently running)
+      # ----- High restart count (currently running but unstable) -----
       HIGH_RESTART_CONTAINERS=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.restartCount >= 3) | "\(.name):\(.restartCount)"')
 
       if [[ -n "$HIGH_RESTART_CONTAINERS" ]]; then
-          HAS_CRASHES=1
+          mark_affected "$POD_NAME"
           print_warning "Pod $POD_NAME: Container(s) with high restart count:"
 
           while IFS= read -r CONTAINER_INFO; do
@@ -80,18 +131,82 @@ for POD_NAME in $PODS; do
 
               LAST_EXIT_CODE=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER_NAME\") | .lastState.terminated.exitCode // \"N/A\"")
               LAST_REASON=$(echo "$POD_INFO" | jq -r ".status.containerStatuses[] | select(.name==\"$CONTAINER_NAME\") | .lastState.terminated.reason // \"Unknown\"")
+              LAST_EXIT_MEANING=$(exit_code_meaning "$LAST_EXIT_CODE")
 
               print_warning "  Container: $CONTAINER_NAME | Restarts: $RESTART_COUNT | Last Exit: $LAST_EXIT_CODE | Reason: $LAST_REASON"
+
+              NUM_HIGH_RESTART=$((NUM_HIGH_RESTART + 1))
+
+              FACT=$(jq -nc \
+                  --arg pod "$POD_NAME" \
+                  --arg container "$CONTAINER_NAME" \
+                  --argjson restarts "${RESTART_COUNT:-0}" \
+                  --arg last_exit "$LAST_EXIT_CODE" \
+                  --arg last_meaning "$LAST_EXIT_MEANING" \
+                  --arg last_reason "$LAST_REASON" \
+                  '{pod: $pod, container: $container, restart_count: $restarts, last_exit_code: $last_exit, last_exit_code_meaning: $last_meaning, last_termination_reason: $last_reason}')
+              HIGH_RESTART_FACTS=$(echo "$HIGH_RESTART_FACTS" | jq --argjson f "$FACT" '. + [$f]')
           done <<< "$HIGH_RESTART_CONTAINERS"
 
           print_action "Container has restarted multiple times - check for intermittent issues"
+          HAS_ACTION_CHECK_INTERMITTENT=1
       fi
 done
 
-if [[ $HAS_CRASHES -eq 0 ]]; then
-    POD_COUNT=$(echo "$PODS" | wc -w)
+# Build evidence and finalize
+TOTAL_FINDINGS=$((NUM_CRASH_LOOP + NUM_TERMINATED + NUM_HIGH_RESTART))
+POD_COUNT=$(echo "$PODS" | wc -w | tr -d ' ')
+AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+
+if [[ $TOTAL_FINDINGS -eq 0 ]]; then
     print_success "All $POD_COUNT pod(s) running without crashes or errors"
-    update_check_result --status "success" --evidence "{}"
+
+    EVIDENCE=$(evidence_json \
+        "All $POD_COUNT pod(s) running without crashes or errors" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson total "$POD_COUNT" '{pods_checked: $total}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    # Build a precise summary that highlights the most actionable cause
+    SUMMARY_PARTS=()
+    [[ $NUM_OOM -gt 0       ]] && SUMMARY_PARTS+=("$NUM_OOM OOMKilled")
+    [[ $NUM_APP_ERROR -gt 0 ]] && SUMMARY_PARTS+=("$NUM_APP_ERROR app error")
+    [[ $NUM_CRASH_LOOP -gt 0 ]] && SUMMARY_PARTS+=("$NUM_CRASH_LOOP CrashLoopBackOff")
+    [[ $NUM_TERMINATED -gt 0 ]] && SUMMARY_PARTS+=("$NUM_TERMINATED terminated")
+    [[ $NUM_HIGH_RESTART -gt 0 ]] && SUMMARY_PARTS+=("$NUM_HIGH_RESTART high-restart")
+    SUMMARY_DETAIL=$(IFS=", "; echo "${SUMMARY_PARTS[*]}")
+    SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) crashing — $SUMMARY_DETAIL"
+
+    # Aggregate suggested actions (deduplicated)
+    ACTIONS_ARR=()
+    [[ $HAS_ACTION_CHECK_LOGS -eq 1        ]] && ACTIONS_ARR+=("Check container logs and fix application startup issues")
+    [[ $HAS_ACTION_CHECK_TERMINATION -eq 1 ]] && ACTIONS_ARR+=("Check why container terminated and review logs")
+    [[ $HAS_ACTION_CHECK_INTERMITTENT -eq 1 ]] && ACTIONS_ARR+=("Container has restarted multiple times - check for intermittent issues")
+    ACTIONS_JSON=$(printf '%s\n' "${ACTIONS_ARR[@]}" | jq -R . | jq -s .)
+
+    DETAILS=$(jq -nc \
+        --argjson crash_loop "$CRASH_LOOP_FACTS" \
+        --argjson terminated "$TERMINATED_FACTS" \
+        --argjson high_restart "$HIGH_RESTART_FACTS" \
+        --argjson pod_count "$POD_COUNT" \
+        --argjson oom_count "$NUM_OOM" \
+        --argjson app_error_count "$NUM_APP_ERROR" \
+        '{
+            pod_count: $pod_count,
+            counts: {
+                crash_loop_back_off: ($crash_loop | length),
+                terminated: ($terminated | length),
+                high_restart: ($high_restart | length),
+                oom_killed: $oom_count,
+                application_error: $app_error_count
+            },
+            crash_loop_back_off: $crash_loop,
+            terminated: $terminated,
+            high_restart: $high_restart
+        }')
+
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" "$ACTIONS_JSON")
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

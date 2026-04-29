@@ -2,20 +2,23 @@
 # Check: Ingress Host Rules
 # Verifies host and path rules are properly configured
 
-# Validate ingresses exist
 require_ingresses || return 0
 
-# Get ingresses
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+ISSUE_FACTS="[]"
+INGRESS_FACTS="[]"
+AFFECTED_INGRESSES="[]"
+
+mark_affected() {
+    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
+}
 
 for INGRESS_NAME in $INGRESSES; do
     INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
 
     print_info "Checking host rules for ingress: $INGRESS_NAME"
 
-    # Get ingress address/status
     INGRESS_ADDRESS=$(echo "$INGRESS_INFO" | jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // empty')
 
     if [[ -z "$INGRESS_ADDRESS" ]]; then
@@ -24,84 +27,121 @@ for INGRESS_NAME in $INGRESSES; do
         print_info "  Ingress address: $INGRESS_ADDRESS"
     fi
 
-    # Check if there are any rules
     RULE_COUNT=$(echo "$INGRESS_INFO" | jq '.spec.rules | length' 2>/dev/null)
+    DEFAULT_BACKEND=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.name // empty')
+
+    INGRESS_RULE_FACTS="[]"
+    INGRESS_HAS_ISSUE=0
 
     if [[ "$RULE_COUNT" -eq 0 ]]; then
-        # Check for default backend
-        DEFAULT_BACKEND=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.name // empty')
-
         if [[ -n "$DEFAULT_BACKEND" ]]; then
             print_success "  Catch-all rule using default backend: $DEFAULT_BACKEND"
         else
-            HAS_ISSUES=1
+            mark_affected "$INGRESS_NAME"
+            INGRESS_HAS_ISSUE=1
             print_error "  No rules and no default backend configured"
             print_action "Add at least one rule or configure default backend"
+
+            ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" '{ingress: $ing, issue: "no_rules_no_default_backend"}')
+            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
         fi
-        continue
-    fi
+    else
+        RULES=$(echo "$INGRESS_INFO" | jq -c '.spec.rules[]' 2>/dev/null)
 
-    # Check each rule
-    RULES=$(echo "$INGRESS_INFO" | jq -c '.spec.rules[]' 2>/dev/null)
+        while read -r RULE; do
+            HOST=$(echo "$RULE" | jq -r '.host // "*"')
 
-    # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
-    while read -r RULE; do
-        HOST=$(echo "$RULE" | jq -r '.host // "*"')
-
-        # Check if host is defined
-        if [[ "$HOST" == "*" ]]; then
-            print_warning "  Host: * (catch-all, consider specifying a hostname)"
-        else
-            print_success "  Host: $HOST"
-        fi
-
-        # Check paths
-        PATHS=$(echo "$RULE" | jq -c '.http.paths[]' 2>/dev/null)
-
-        if [[ -z "$PATHS" ]]; then
-            HAS_ISSUES=1
-            print_error "    No paths defined for host $HOST"
-            print_action "Define at least one path for this host"
-            continue
-        fi
-
-        # Use process substitution to avoid subshell and preserve HAS_ISSUES updates
-        while read -r PATH_RULE; do
-            PATH_VALUE=$(echo "$PATH_RULE" | jq -r '.path // "/"')
-            PATH_TYPE=$(echo "$PATH_RULE" | jq -r '.pathType // "Prefix"')
-            BACKEND_SERVICE=$(echo "$PATH_RULE" | jq -r '.backend.service.name')
-            BACKEND_PORT=$(echo "$PATH_RULE" | jq -r '.backend.service.port.number // .backend.service.port.name')
-
-            print_info "    Path: $PATH_VALUE ($PATH_TYPE) -> $BACKEND_SERVICE:$BACKEND_PORT"
-
-            # Validate pathType
-            if [[ "$PATH_TYPE" != "Exact" && "$PATH_TYPE" != "Prefix" && "$PATH_TYPE" != "ImplementationSpecific" ]]; then
-                HAS_ISSUES=1
-                print_error "      Invalid pathType: $PATH_TYPE (must be Exact, Prefix, or ImplementationSpecific)"
-                print_action "Use valid pathType value"
+            if [[ "$HOST" == "*" ]]; then
+                print_warning "  Host: * (catch-all, consider specifying a hostname)"
+            else
+                print_success "  Host: $HOST"
             fi
 
-            # Warn about path conventions
-            if [[ "$PATH_TYPE" == "Prefix" && "$PATH_VALUE" != "/" && ! "$PATH" =~ ^/.*[^/]$ ]]; then
-                print_warning "      Path ends with '/' - this may cause routing issues with Prefix type"
+            PATHS=$(echo "$RULE" | jq -c '.http.paths[]' 2>/dev/null)
+            HOST_PATH_FACTS="[]"
+
+            if [[ -z "$PATHS" ]]; then
+                mark_affected "$INGRESS_NAME"
+                INGRESS_HAS_ISSUE=1
+                print_error "    No paths defined for host $HOST"
+                print_action "Define at least one path for this host"
+
+                ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg host "$HOST" \
+                    '{ingress: $ing, host: $host, issue: "no_paths_for_host"}')
+                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+
+                RULE_FACT=$(jq -nc --arg host "$HOST" '{host: $host, paths: []}')
+                INGRESS_RULE_FACTS=$(echo "$INGRESS_RULE_FACTS" | jq --argjson r "$RULE_FACT" '. + [$r]')
+                continue
             fi
-        done < <(echo "$PATHS")
-    done < <(echo "$RULES")
 
-    # Check for conflicting rules
-    HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].host' 2>/dev/null | sort)
-    DUPLICATE_HOSTS=$(echo "$HOSTS" | uniq -d)
+            while read -r PATH_RULE; do
+                PATH_VALUE=$(echo "$PATH_RULE" | jq -r '.path // "/"')
+                PATH_TYPE=$(echo "$PATH_RULE" | jq -r '.pathType // "Prefix"')
+                BACKEND_SERVICE=$(echo "$PATH_RULE" | jq -r '.backend.service.name')
+                BACKEND_PORT=$(echo "$PATH_RULE" | jq -r '.backend.service.port.number // .backend.service.port.name')
 
-    if [[ -n "$DUPLICATE_HOSTS" ]]; then
-        print_warning "  Duplicate host rules found: $DUPLICATE_HOSTS"
-        print_info "    Multiple path rules for the same host are OK, but verify they don't conflict"
+                print_info "    Path: $PATH_VALUE ($PATH_TYPE) -> $BACKEND_SERVICE:$BACKEND_PORT"
+
+                PATH_VALID=true
+                if [[ "$PATH_TYPE" != "Exact" && "$PATH_TYPE" != "Prefix" && "$PATH_TYPE" != "ImplementationSpecific" ]]; then
+                    mark_affected "$INGRESS_NAME"
+                    INGRESS_HAS_ISSUE=1
+                    PATH_VALID=false
+                    print_error "      Invalid pathType: $PATH_TYPE (must be Exact, Prefix, or ImplementationSpecific)"
+                    print_action "Use valid pathType value"
+
+                    ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg host "$HOST" --arg path "$PATH_VALUE" --arg pt "$PATH_TYPE" \
+                        '{ingress: $ing, host: $host, path: $path, path_type: $pt, issue: "invalid_path_type"}')
+                    ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                fi
+
+                PATH_FACT=$(jq -nc --arg path "$PATH_VALUE" --arg pt "$PATH_TYPE" \
+                    --arg svc "$BACKEND_SERVICE" --arg port "$BACKEND_PORT" --argjson valid "$PATH_VALID" \
+                    '{path: $path, path_type: $pt, backend_service: $svc, backend_port: $port, valid: $valid}')
+                HOST_PATH_FACTS=$(echo "$HOST_PATH_FACTS" | jq --argjson p "$PATH_FACT" '. + [$p]')
+            done < <(echo "$PATHS")
+
+            RULE_FACT=$(jq -nc --arg host "$HOST" --argjson paths "$HOST_PATH_FACTS" \
+                '{host: $host, paths: $paths}')
+            INGRESS_RULE_FACTS=$(echo "$INGRESS_RULE_FACTS" | jq --argjson r "$RULE_FACT" '. + [$r]')
+        done < <(echo "$RULES")
+
+        HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].host' 2>/dev/null | sort)
+        DUPLICATE_HOSTS=$(echo "$HOSTS" | uniq -d)
+
+        if [[ -n "$DUPLICATE_HOSTS" ]]; then
+            print_warning "  Duplicate host rules found: $DUPLICATE_HOSTS"
+            print_info "    Multiple path rules for the same host are OK, but verify they don't conflict"
+        fi
     fi
+
+    INGRESS_FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg addr "$INGRESS_ADDRESS" --arg backend "$DEFAULT_BACKEND" \
+        --argjson rules "$INGRESS_RULE_FACTS" \
+        '{ingress: $ing, address: $addr, default_backend: (if $backend == "" then null else $backend end), rules: $rules}')
+    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$INGRESS_FACT" '. + [$i]')
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
-    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "Host and path rules valid for all $INGRESS_COUNT ingress(es)"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "Host and path rules valid for all $INGRESS_COUNT ingress(es)" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have host/path rule issues"
+    DETAILS=$(jq -nc \
+        --argjson facts "$INGRESS_FACTS" \
+        --argjson issues "$ISSUE_FACTS" \
+        --argjson count "$INGRESS_COUNT" \
+        '{ingress_count: $count, issue_count: ($issues | length), ingresses: $facts, issues: $issues}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+        '["Add at least one rule or configure default backend; use valid pathType values"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi
