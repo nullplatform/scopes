@@ -193,7 +193,7 @@ if [ "$SCOPE_VISIBILITY" = "public" ]; then
     )
 else
     export INGRESS_VISIBILITY="internal"
-    GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
+    GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-private}"
     export GATEWAY_NAME=$(get_config_value \
       --provider '.providers["scope-configurations"].networking.gateway_private_name' \
       --provider '.providers["container-orchestration"].gateway.private_name' \

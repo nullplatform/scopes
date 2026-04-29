@@ -28,6 +28,7 @@ metadata:
   {{- end }}
 {{- end }}
   annotations:
+    external-dns.alpha.kubernetes.io/visibility: {{ if eq .ingress_visibility "internet-facing" }}public{{ else }}private{{ end }}
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $annotations := index $global "annotations" }}
