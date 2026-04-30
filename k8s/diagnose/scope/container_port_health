@@ -8,13 +8,10 @@ PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
 CONTAINERS_TESTED=0
 CONTAINERS_SKIPPED=0
-ISSUE_FACTS="[]"
-POD_FACTS="[]"
-AFFECTED_PODS="[]"
+ISSUE_FACTS=()
+POD_FACTS=()
+AFFECTED_PODS=""
 
-mark_affected() {
-    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
-}
 
 for POD_NAME in $PODS; do
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
@@ -23,7 +20,7 @@ for POD_NAME in $PODS; do
     if [[ "$POD_PHASE" != "Running" ]]; then
         print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping port checks"
         FACT=$(jq -nc --arg p "$POD_NAME" --arg phase "$POD_PHASE" '{pod: $p, status: "skipped", reason: "not_running", phase: $phase}')
-        POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact POD_FACTS "$FACT"
         continue
     fi
 
@@ -31,14 +28,14 @@ for POD_NAME in $PODS; do
     if [[ -z "$POD_IP" || "$POD_IP" == "null" ]]; then
         print_warning "Pod $POD_NAME: No IP assigned, skipping port checks"
         FACT=$(jq -nc --arg p "$POD_NAME" '{pod: $p, status: "skipped", reason: "no_ip"}')
-        POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact POD_FACTS "$FACT"
         continue
     fi
 
     print_info "Checking pod $POD_NAME:"
 
     CONTAINERS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | @base64')
-    POD_CONTAINER_FACTS="[]"
+    POD_CONTAINER_FACTS=()
 
     for CONTAINER_B64 in $CONTAINERS; do
         CONTAINER_DATA=$(echo "$CONTAINER_B64" | base64 -d)
@@ -49,7 +46,7 @@ for POD_NAME in $PODS; do
         if [[ -z "$CONTAINER_STATUS" ]]; then
             print_warning "  Container '$CONTAINER_NAME': Status not found, skipping"
             CFACT=$(jq -nc --arg c "$CONTAINER_NAME" '{container: $c, status: "skipped", reason: "no_status"}')
-            POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+            add_fact POD_CONTAINER_FACTS "$CFACT"
             continue
         fi
 
@@ -67,7 +64,7 @@ for POD_NAME in $PODS; do
         if [[ -z "$CONTAINER_PORTS" ]]; then
             print_info "  Container '$CONTAINER_NAME': No ports declared"
             CFACT=$(jq -nc --arg c "$CONTAINER_NAME" '{container: $c, status: "no_ports_declared"}')
-            POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+            add_fact POD_CONTAINER_FACTS "$CFACT"
             continue
         fi
 
@@ -99,7 +96,7 @@ for POD_NAME in $PODS; do
 
                 CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --arg reason "$WAITING_REASON" \
                     '{container: $c, status: "skipped", state: "waiting", reason: $reason}')
-                POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+                add_fact POD_CONTAINER_FACTS "$CFACT"
                 continue
             elif [[ "$CONTAINER_STATE" == "terminated" ]]; then
                 EXIT_CODE=$(echo "$CONTAINER_STATUS" | jq -r '.state.terminated.exitCode // "N/A"')
@@ -110,12 +107,12 @@ for POD_NAME in $PODS; do
 
                 CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --arg ec "$EXIT_CODE" --arg reason "$TERMINATION_REASON" \
                     '{container: $c, status: "skipped", state: "terminated", exit_code: $ec, termination_reason: $reason}')
-                POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+                add_fact POD_CONTAINER_FACTS "$CFACT"
                 continue
             else
                 print_warning "    Container in unknown state - skipping port checks"
                 CFACT=$(jq -nc --arg c "$CONTAINER_NAME" '{container: $c, status: "skipped", state: "unknown"}')
-                POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+                add_fact POD_CONTAINER_FACTS "$CFACT"
                 continue
             fi
         fi
@@ -126,7 +123,7 @@ for POD_NAME in $PODS; do
 
         CONTAINERS_TESTED=$((CONTAINERS_TESTED + 1))
 
-        PORT_RESULTS="[]"
+        PORT_RESULTS=()
         CONTAINER_HAS_PORT_ISSUE=0
 
         for PORT in $CONTAINER_PORTS; do
@@ -150,7 +147,7 @@ for POD_NAME in $PODS; do
                 PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson port "$PORT" '. + [{port: $port, status: "listening"}]')
             else
                 CONTAINER_HAS_PORT_ISSUE=1
-                mark_affected "$POD_NAME"
+                mark_affected AFFECTED_PODS "$POD_NAME"
                 print_error "    Port $PORT: ✗ Declared but not listening or unreachable"
                 print_action "Check application configuration and ensure it listens on port $PORT"
                 PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson port "$PORT" '. + [{port: $port, status: "not_listening"}]')
@@ -163,19 +160,19 @@ for POD_NAME in $PODS; do
                 ISSUE=$(jq -nc --arg pod "$POD_NAME" --arg c "$CONTAINER_NAME" --argjson port "$PORT" \
                     --argjson logs "$CURRENT_LOGS" \
                     '{pod: $pod, container: $c, port: $port, issue: "port_not_listening", container_logs: $logs}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
             fi
         done
 
-        CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --argjson ports "$PORT_RESULTS" --arg ready "$CONTAINER_READY" \
+        CFACT=$(jq -nc --arg c "$CONTAINER_NAME" --argjson ports "$(facts_to_json_array PORT_RESULTS)" --arg ready "$CONTAINER_READY" \
             --argjson tested true \
             '{container: $c, status: "tested", container_ready: ($ready == "true"), ports: $ports}')
-        POD_CONTAINER_FACTS=$(echo "$POD_CONTAINER_FACTS" | jq --argjson c "$CFACT" '. + [$c]')
+        add_fact POD_CONTAINER_FACTS "$CFACT"
     done
 
-    POD_FACT=$(jq -nc --arg p "$POD_NAME" --arg ip "$POD_IP" --argjson containers "$POD_CONTAINER_FACTS" \
+    POD_FACT=$(jq -nc --arg p "$POD_NAME" --arg ip "$POD_IP" --argjson containers "$(facts_to_json_array POD_CONTAINER_FACTS)" \
         '{pod: $p, pod_ip: $ip, containers: $containers}')
-    POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$POD_FACT" '. + [$f]')
+    add_fact POD_FACTS "$POD_FACT"
 done
 
 echo ""
@@ -183,8 +180,8 @@ echo ""
 DETAILS=$(jq -nc \
     --argjson tested "$CONTAINERS_TESTED" \
     --argjson skipped "$CONTAINERS_SKIPPED" \
-    --argjson facts "$POD_FACTS" \
-    --argjson issues "$ISSUE_FACTS" \
+    --argjson facts "$(facts_to_json_array POD_FACTS)" \
+    --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
     '{
         containers_tested: $tested,
         containers_skipped: $skipped,
@@ -215,9 +212,9 @@ else
     if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
         print_warning "Port issues found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
     fi
-    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | wc -w | tr -d ' ')
     SUMMARY="$AFFECTED_COUNT pod(s) with port connectivity issues"
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_PODS)" "$DETAILS" \
         '["Check application configuration and ensure it listens on declared ports"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

@@ -17,12 +17,9 @@ STARTING_PODS=0
 HAS_TERMINATING_PODS=0
 HAS_STARTING_PODS=0
 
-POD_FACTS="[]"
-AFFECTED_PODS="[]"
+POD_FACTS=()
+AFFECTED_PODS=""
 
-mark_affected() {
-    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
-}
 
 for POD_NAME in $PODS; do
       TOTAL_PODS=$((TOTAL_PODS + 1))
@@ -37,7 +34,7 @@ for POD_NAME in $PODS; do
           HAS_TERMINATING_PODS=1
           print_info "Pod $POD_NAME: Terminating (rollout in progress)"
           FACT=$(jq -nc --arg p "$POD_NAME" '{pod: $p, state: "terminating"}')
-          POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+          add_fact POD_FACTS "$FACT"
           continue
       fi
 
@@ -45,12 +42,12 @@ for POD_NAME in $PODS; do
           READY_PODS=$((READY_PODS + 1))
           print_success "Pod $POD_NAME: Running and Ready"
           FACT=$(jq -nc --arg p "$POD_NAME" '{pod: $p, state: "ready", phase: "Running"}')
-          POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+          add_fact POD_FACTS "$FACT"
       elif [[ "$POD_PHASE" == "Succeeded" ]]; then
           SUCCEEDED_PODS=$((SUCCEEDED_PODS + 1))
           print_success "Pod $POD_NAME: Completed successfully"
           FACT=$(jq -nc --arg p "$POD_NAME" '{pod: $p, state: "succeeded", phase: "Succeeded"}')
-          POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+          add_fact POD_FACTS "$FACT"
       else
           NOT_READY_PODS=$((NOT_READY_PODS + 1))
           IS_STARTING=0
@@ -110,7 +107,7 @@ for POD_NAME in $PODS; do
                   print_info "Pod $POD_NAME: Phase=$POD_PHASE (starting up)"
               fi
           else
-              mark_affected "$POD_NAME"
+              mark_affected AFFECTED_PODS "$POD_NAME"
               print_warning "Pod $POD_NAME: Phase=$POD_PHASE, Ready=$POD_READY"
           fi
 
@@ -166,7 +163,7 @@ for POD_NAME in $PODS; do
               --arg reason "$READY_REASON" --arg message "$READY_MESSAGE" --arg startup "$STARTUP_INFO" \
               --argjson container_logs "$POD_LOGS_PER_CONTAINER" \
               '{pod: $p, state: $state, phase: $phase, ready: $ready, reason: $reason, message: $message, startup_info: $startup, container_logs: $container_logs}')
-          POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+          add_fact POD_FACTS "$FACT"
       fi
 done
 
@@ -179,7 +176,7 @@ DETAILS_BASE=$(jq -nc \
     --argjson not_ready "$NOT_READY_PODS" \
     --argjson terminating "$TERMINATING_PODS" \
     --argjson starting "$STARTING_PODS" \
-    --argjson facts "$POD_FACTS" \
+    --argjson facts "$(facts_to_json_array POD_FACTS)" \
     '{
         total: $total,
         ready: $ready,
@@ -228,7 +225,7 @@ else
     EVIDENCE=$(evidence_json \
         "$READY_PODS/$TOTAL_PODS pods ready — $NOT_READY_PODS pod(s) have issues" \
         "critical" \
-        "$AFFECTED_PODS" \
+        "$(set_to_json_array AFFECTED_PODS)" \
         "$DETAILS_BASE" \
         '["Check application health endpoint and ensure dependencies are available"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"

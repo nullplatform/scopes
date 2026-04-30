@@ -6,12 +6,9 @@ require_ingresses || return 0
 
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-CLASS_FACTS="[]"
-AFFECTED_INGRESSES="[]"
+CLASS_FACTS=()
+AFFECTED_INGRESSES=""
 
-mark_affected() {
-    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
-}
 
 AVAILABLE_CLASSES=$(jq -r '.items[].metadata.name' "$INGRESSCLASSES_FILE" 2>/dev/null | tr '\n' ' ')
 AVAILABLE_CLASSES_JSON=$(jq -c '[.items[].metadata.name]' "$INGRESSCLASSES_FILE" 2>/dev/null)
@@ -37,7 +34,7 @@ for INGRESS_NAME in $INGRESSES; do
             FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg cls "$DEFAULT_CLASS" \
                 '{ingress: $ing, ingress_class: $cls, source: "default"}')
         else
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             print_error "Ingress $INGRESS_NAME: No IngressClass specified and no default found"
             print_action "Specify ingressClassName or set a default IngressClass"
             FACT=$(jq -nc --arg ing "$INGRESS_NAME" \
@@ -49,7 +46,7 @@ for INGRESS_NAME in $INGRESSES; do
             FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg cls "$INGRESS_CLASS" --argjson dep "$USED_DEPRECATED" \
                 '{ingress: $ing, ingress_class: $cls, used_deprecated_annotation: $dep, source: "explicit"}')
         else
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             print_error "Ingress $INGRESS_NAME: IngressClass '$INGRESS_CLASS' not found"
             if [[ -n "$AVAILABLE_CLASSES" ]]; then
                 print_warning "  Available classes: $AVAILABLE_CLASSES"
@@ -61,11 +58,11 @@ for INGRESS_NAME in $INGRESSES; do
                 '{ingress: $ing, ingress_class: $cls, issue: "ingress_class_not_found", available_classes: $available, used_deprecated_annotation: $dep}')
         fi
     fi
-    CLASS_FACTS=$(echo "$CLASS_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+    add_fact CLASS_FACTS "$FACT"
 done
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All $INGRESS_COUNT ingress(es) have valid IngressClass configuration"
@@ -73,19 +70,19 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "All $INGRESS_COUNT ingress(es) have valid IngressClass configuration" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$CLASS_FACTS" --argjson count "$INGRESS_COUNT" --arg default "$DEFAULT_CLASS" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array CLASS_FACTS)" --argjson count "$INGRESS_COUNT" --arg default "$DEFAULT_CLASS" \
             '{ingress_count: $count, default_class: $default, ingresses: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have IngressClass issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$CLASS_FACTS" \
+        --argjson facts "$(facts_to_json_array CLASS_FACTS)" \
         --argjson available "$AVAILABLE_CLASSES_JSON" \
         --arg default "$DEFAULT_CLASS" \
         --argjson count "$INGRESS_COUNT" \
         '{ingress_count: $count, available_classes: $available, default_class: $default, ingresses: $facts}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
         '["Specify ingressClassName or set a default IngressClass"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

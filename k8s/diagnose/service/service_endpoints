@@ -6,26 +6,23 @@ require_services || return 0
 
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ENDPOINT_FACTS="[]"
-AFFECTED_SERVICES="[]"
+ENDPOINT_FACTS=()
+AFFECTED_SERVICES=""
 NO_ENDPOINTS_RESOURCE=0
 NO_READY_COUNT=0
 
-mark_affected() {
-    AFFECTED_SERVICES=$(echo "$AFFECTED_SERVICES" | jq --arg s "$1" 'if any(. == $s) then . else . + [$s] end')
-}
 
 for SERVICE_NAME in $SERVICES; do
     ENDPOINTS_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
 
     if [[ -z "$ENDPOINTS_INFO" ]]; then
-        mark_affected "$SERVICE_NAME"
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
         NO_ENDPOINTS_RESOURCE=$((NO_ENDPOINTS_RESOURCE + 1))
         print_error "Service $SERVICE_NAME: No endpoints resource found"
 
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" \
             '{service: $svc, issue: "no_endpoints_resource", ready_count: 0, not_ready_count: 0}')
-        ENDPOINT_FACTS=$(echo "$ENDPOINT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact ENDPOINT_FACTS "$FACT"
         continue
     fi
 
@@ -41,7 +38,7 @@ for SERVICE_NAME in $SERVICES; do
     NOT_READY_LIST=$(echo "$ENDPOINTS_INFO" | jq -c '[.subsets[]?.notReadyAddresses[]? | {pod: (.targetRef.name // "unknown"), ip: .ip}]' 2>/dev/null)
 
     if [[ $READY_COUNT -eq 0 ]]; then
-        mark_affected "$SERVICE_NAME"
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
         NO_READY_COUNT=$((NO_READY_COUNT + 1))
         print_error "Service $SERVICE_NAME: No ready endpoints available"
 
@@ -64,7 +61,7 @@ for SERVICE_NAME in $SERVICES; do
             --argjson ready_count "$READY_COUNT" --argjson not_ready_count "$NOT_READY_COUNT" \
             --argjson not_ready "$NOT_READY_LIST" \
             '{service: $svc, issue: "no_ready_endpoints", ready_count: $ready_count, not_ready_count: $not_ready_count, not_ready_endpoints: $not_ready}')
-        ENDPOINT_FACTS=$(echo "$ENDPOINT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact ENDPOINT_FACTS "$FACT"
     else
         print_success "Service $SERVICE_NAME: $READY_COUNT ready endpoint(s)"
         echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.addresses[]? | "  - \(.targetRef.name // "unknown") -> \(.ip)"' | while IFS= read -r line; do
@@ -84,25 +81,25 @@ for SERVICE_NAME in $SERVICES; do
             --argjson ready_count "$READY_COUNT" --argjson not_ready_count "$NOT_READY_COUNT" \
             --argjson ready "$READY_LIST" --argjson not_ready "$NOT_READY_LIST" \
             '{service: $svc, ready_count: $ready_count, not_ready_count: $not_ready_count, ready_endpoints: $ready, not_ready_endpoints: $not_ready}')
-        ENDPOINT_FACTS=$(echo "$ENDPOINT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact ENDPOINT_FACTS "$FACT"
     fi
 done
 
 SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     EVIDENCE=$(evidence_json \
         "All $SERVICE_COUNT service(s) have ready endpoints" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$ENDPOINT_FACTS" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array ENDPOINT_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) without ready endpoints"
     DETAILS=$(jq -nc \
-        --argjson facts "$ENDPOINT_FACTS" \
+        --argjson facts "$(facts_to_json_array ENDPOINT_FACTS)" \
         --argjson count "$SERVICE_COUNT" \
         --argjson no_resource "$NO_ENDPOINTS_RESOURCE" \
         --argjson no_ready "$NO_READY_COUNT" \
@@ -113,7 +110,7 @@ else
             no_ready_endpoints_count: $no_ready,
             services: $facts
         }')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_SERVICES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
         '["Check pod readiness probes and verify service selector matches pod labels"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

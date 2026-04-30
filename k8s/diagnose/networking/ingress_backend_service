@@ -6,19 +6,16 @@ require_ingresses || return 0
 
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ISSUE_FACTS="[]"
-INGRESS_FACTS="[]"
-AFFECTED_INGRESSES="[]"
+ISSUE_FACTS=()
+INGRESS_FACTS=()
+AFFECTED_INGRESSES=""
 
-mark_affected() {
-    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
-}
 
 for INGRESS_NAME in $INGRESSES; do
     INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
     print_info "Checking backends for ingress: $INGRESS_NAME"
 
-    INGRESS_BACKEND_FACTS="[]"
+    INGRESS_BACKEND_FACTS=()
     INGRESS_HAS_ISSUE=0
 
     DEFAULT_BACKEND=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.name // empty')
@@ -36,26 +33,26 @@ for INGRESS_NAME in $INGRESSES; do
                 BFACT=$(jq -nc --arg svc "$DEFAULT_BACKEND" --arg port "$DEFAULT_PORT" \
                     '{kind: "default", service: $svc, port: $port, status: "ok"}')
             else
-                mark_affected "$INGRESS_NAME"
+                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                 INGRESS_HAS_ISSUE=1
                 print_error "  Default backend: $DEFAULT_BACKEND:$DEFAULT_PORT (no endpoints)"
                 BFACT=$(jq -nc --arg svc "$DEFAULT_BACKEND" --arg port "$DEFAULT_PORT" \
                     '{kind: "default", service: $svc, port: $port, status: "no_endpoints"}')
                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$DEFAULT_BACKEND" \
                     '{ingress: $ing, backend: $svc, issue: "default_backend_no_endpoints"}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
             fi
         else
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  Default backend: Service '$DEFAULT_BACKEND' not found"
             BFACT=$(jq -nc --arg svc "$DEFAULT_BACKEND" \
                 '{kind: "default", service: $svc, status: "service_not_found"}')
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$DEFAULT_BACKEND" \
                 '{ingress: $ing, backend: $svc, issue: "default_backend_not_found"}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
-        INGRESS_BACKEND_FACTS=$(echo "$INGRESS_BACKEND_FACTS" | jq --argjson b "$BFACT" '. + [$b]')
+        add_fact INGRESS_BACKEND_FACTS "$BFACT"
     fi
 
     BACKENDS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].http.paths[] | "\(.backend.service.name):\(.backend.service.port.number // .backend.service.port.name)"' 2>/dev/null)
@@ -64,7 +61,7 @@ for INGRESS_NAME in $INGRESSES; do
         print_warning "  No path rules defined"
         FACT=$(jq -nc --arg ing "$INGRESS_NAME" --argjson backends "$INGRESS_BACKEND_FACTS" \
             '{ingress: $ing, backends: $backends}')
-        INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$FACT" '. + [$i]')
+        add_fact INGRESS_FACTS "$FACT"
         continue
     fi
 
@@ -96,7 +93,7 @@ for INGRESS_NAME in $INGRESSES; do
                 BFACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" --argjson ready "$READY_COUNT" --argjson nr "$NOT_READY_COUNT" \
                     '{kind: "rule", service: $svc, port: $port, ready_count: $ready, not_ready_count: $nr, status: "ok"}')
             else
-                mark_affected "$INGRESS_NAME"
+                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                 INGRESS_HAS_ISSUE=1
                 print_error "  Backend: $SERVICE_NAME:$SERVICE_PORT (no ready endpoints)"
 
@@ -137,12 +134,12 @@ for INGRESS_NAME in $INGRESSES; do
                     '{kind: "rule", service: $svc, port: $port, ready_count: 0, not_ready_count: $nr, selector: $selector, status: $issue}')
                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$SERVICE_NAME" --arg issue "$SUB_ISSUE" \
                     '{ingress: $ing, backend: $svc, issue: $issue}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
             fi
 
             SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[].port' 2>/dev/null | tr '\n' ' ')
             if ! echo "$SERVICE_PORTS" | grep -qw "$SERVICE_PORT"; then
-                mark_affected "$INGRESS_NAME"
+                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                 INGRESS_HAS_ISSUE=1
                 print_error "  Backend: Port $SERVICE_PORT not found in service $SERVICE_NAME"
                 print_warning "    Available ports: $SERVICE_PORTS"
@@ -150,29 +147,29 @@ for INGRESS_NAME in $INGRESSES; do
                     '. + {port_status: "port_not_in_service", available_ports: ($ports | split(" ") | map(select(length > 0)))}')
                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" \
                     '{ingress: $ing, backend: $svc, port: $port, issue: "port_not_in_service"}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
             fi
         else
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  Backend: Service '$SERVICE_NAME' not found in namespace"
             BFACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg port "$SERVICE_PORT" \
                 '{kind: "rule", service: $svc, port: $port, status: "service_not_found"}')
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg svc "$SERVICE_NAME" \
                 '{ingress: $ing, backend: $svc, issue: "service_not_found"}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
 
-        INGRESS_BACKEND_FACTS=$(echo "$INGRESS_BACKEND_FACTS" | jq --argjson b "$BFACT" '. + [$b]')
+        add_fact INGRESS_BACKEND_FACTS "$BFACT"
     done < <(echo "$BACKENDS" | sort -u)
 
     FACT=$(jq -nc --arg ing "$INGRESS_NAME" --argjson backends "$INGRESS_BACKEND_FACTS" \
         '{ingress: $ing, backends: $backends}')
-    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$FACT" '. + [$i]')
+    add_fact INGRESS_FACTS "$FACT"
 done
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All backend services healthy for $INGRESS_COUNT ingress(es)"
@@ -180,17 +177,17 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "All backend services healthy for $INGRESS_COUNT ingress(es)" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array INGRESS_FACTS)" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have backend issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$INGRESS_FACTS" \
-        --argjson issues "$ISSUE_FACTS" \
+        --argjson facts "$(facts_to_json_array INGRESS_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
         --argjson count "$INGRESS_COUNT" \
         '{ingress_count: $count, issue_count: ($issues | length), ingresses: $facts, issues: $issues}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
         '["Verify backend services exist and have ready endpoints, and that ports match"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

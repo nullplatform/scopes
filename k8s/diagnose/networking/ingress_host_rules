@@ -6,13 +6,10 @@ require_ingresses || return 0
 
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ISSUE_FACTS="[]"
-INGRESS_FACTS="[]"
-AFFECTED_INGRESSES="[]"
+ISSUE_FACTS=()
+INGRESS_FACTS=()
+AFFECTED_INGRESSES=""
 
-mark_affected() {
-    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
-}
 
 for INGRESS_NAME in $INGRESSES; do
     INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
@@ -30,20 +27,20 @@ for INGRESS_NAME in $INGRESSES; do
     RULE_COUNT=$(echo "$INGRESS_INFO" | jq '.spec.rules | length' 2>/dev/null)
     DEFAULT_BACKEND=$(echo "$INGRESS_INFO" | jq -r '.spec.defaultBackend.service.name // empty')
 
-    INGRESS_RULE_FACTS="[]"
+    INGRESS_RULE_FACTS=()
     INGRESS_HAS_ISSUE=0
 
     if [[ "$RULE_COUNT" -eq 0 ]]; then
         if [[ -n "$DEFAULT_BACKEND" ]]; then
             print_success "  Catch-all rule using default backend: $DEFAULT_BACKEND"
         else
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  No rules and no default backend configured"
             print_action "Add at least one rule or configure default backend"
 
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" '{ingress: $ing, issue: "no_rules_no_default_backend"}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
     else
         RULES=$(echo "$INGRESS_INFO" | jq -c '.spec.rules[]' 2>/dev/null)
@@ -58,20 +55,20 @@ for INGRESS_NAME in $INGRESSES; do
             fi
 
             PATHS=$(echo "$RULE" | jq -c '.http.paths[]' 2>/dev/null)
-            HOST_PATH_FACTS="[]"
+            HOST_PATH_FACTS=()
 
             if [[ -z "$PATHS" ]]; then
-                mark_affected "$INGRESS_NAME"
+                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                 INGRESS_HAS_ISSUE=1
                 print_error "    No paths defined for host $HOST"
                 print_action "Define at least one path for this host"
 
                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg host "$HOST" \
                     '{ingress: $ing, host: $host, issue: "no_paths_for_host"}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
 
                 RULE_FACT=$(jq -nc --arg host "$HOST" '{host: $host, paths: []}')
-                INGRESS_RULE_FACTS=$(echo "$INGRESS_RULE_FACTS" | jq --argjson r "$RULE_FACT" '. + [$r]')
+                add_fact INGRESS_RULE_FACTS "$RULE_FACT"
                 continue
             fi
 
@@ -85,7 +82,7 @@ for INGRESS_NAME in $INGRESSES; do
 
                 PATH_VALID=true
                 if [[ "$PATH_TYPE" != "Exact" && "$PATH_TYPE" != "Prefix" && "$PATH_TYPE" != "ImplementationSpecific" ]]; then
-                    mark_affected "$INGRESS_NAME"
+                    mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                     INGRESS_HAS_ISSUE=1
                     PATH_VALID=false
                     print_error "      Invalid pathType: $PATH_TYPE (must be Exact, Prefix, or ImplementationSpecific)"
@@ -93,18 +90,18 @@ for INGRESS_NAME in $INGRESSES; do
 
                     ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg host "$HOST" --arg path "$PATH_VALUE" --arg pt "$PATH_TYPE" \
                         '{ingress: $ing, host: $host, path: $path, path_type: $pt, issue: "invalid_path_type"}')
-                    ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                    add_fact ISSUE_FACTS "$ISSUE"
                 fi
 
                 PATH_FACT=$(jq -nc --arg path "$PATH_VALUE" --arg pt "$PATH_TYPE" \
                     --arg svc "$BACKEND_SERVICE" --arg port "$BACKEND_PORT" --argjson valid "$PATH_VALID" \
                     '{path: $path, path_type: $pt, backend_service: $svc, backend_port: $port, valid: $valid}')
-                HOST_PATH_FACTS=$(echo "$HOST_PATH_FACTS" | jq --argjson p "$PATH_FACT" '. + [$p]')
+                add_fact HOST_PATH_FACTS "$PATH_FACT"
             done < <(echo "$PATHS")
 
             RULE_FACT=$(jq -nc --arg host "$HOST" --argjson paths "$HOST_PATH_FACTS" \
                 '{host: $host, paths: $paths}')
-            INGRESS_RULE_FACTS=$(echo "$INGRESS_RULE_FACTS" | jq --argjson r "$RULE_FACT" '. + [$r]')
+            add_fact INGRESS_RULE_FACTS "$RULE_FACT"
         done < <(echo "$RULES")
 
         HOSTS=$(echo "$INGRESS_INFO" | jq -r '.spec.rules[].host' 2>/dev/null | sort)
@@ -119,11 +116,11 @@ for INGRESS_NAME in $INGRESSES; do
     INGRESS_FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg addr "$INGRESS_ADDRESS" --arg backend "$DEFAULT_BACKEND" \
         --argjson rules "$INGRESS_RULE_FACTS" \
         '{ingress: $ing, address: $addr, default_backend: (if $backend == "" then null else $backend end), rules: $rules}')
-    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$INGRESS_FACT" '. + [$i]')
+    add_fact INGRESS_FACTS "$INGRESS_FACT"
 done
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "Host and path rules valid for all $INGRESS_COUNT ingress(es)"
@@ -131,17 +128,17 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "Host and path rules valid for all $INGRESS_COUNT ingress(es)" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array INGRESS_FACTS)" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have host/path rule issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$INGRESS_FACTS" \
-        --argjson issues "$ISSUE_FACTS" \
+        --argjson facts "$(facts_to_json_array INGRESS_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
         --argjson count "$INGRESS_COUNT" \
         '{ingress_count: $count, issue_count: ($issues | length), ingresses: $facts, issues: $issues}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
         '["Add at least one rule or configure default backend; use valid pathType values"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

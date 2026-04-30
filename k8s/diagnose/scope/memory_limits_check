@@ -6,12 +6,9 @@ require_pods || return 0
 
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-OOM_FACTS="[]"
-AFFECTED_PODS="[]"
+OOM_FACTS=()
+AFFECTED_PODS=""
 
-mark_affected() {
-    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
-}
 
 for POD_NAME in $PODS; do
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
@@ -19,7 +16,7 @@ for POD_NAME in $PODS; do
     OOM_KILLED=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.lastState.terminated.reason == "OOMKilled") | .name')
 
     if [[ -n "$OOM_KILLED" ]]; then
-        mark_affected "$POD_NAME"
+        mark_affected AFFECTED_PODS "$POD_NAME"
         print_error "Pod $POD_NAME: OOMKilled in container(s): $OOM_KILLED"
 
         for CONTAINER in $OOM_KILLED; do
@@ -49,7 +46,7 @@ for POD_NAME in $PODS; do
                     memory_request: $memory_request,
                     previous_logs: $previous_logs
                 }')
-            OOM_FACTS=$(echo "$OOM_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+            add_fact OOM_FACTS "$FACT"
         done
     fi
 done
@@ -67,13 +64,13 @@ if [[ $OOM_COUNT -eq 0 ]]; then
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | wc -w | tr -d ' ')
     SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) had OOMKilled containers"
     DETAILS=$(jq -nc \
-        --argjson oom "$OOM_FACTS" \
+        --argjson oom "$(facts_to_json_array OOM_FACTS)" \
         --argjson pod_count "$POD_COUNT" \
         '{pod_count: $pod_count, oom_killed_count: ($oom | length), oom_killed: $oom}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_PODS)" "$DETAILS" \
         '["Increase memory limits or optimize application memory usage"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

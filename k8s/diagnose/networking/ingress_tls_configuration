@@ -6,13 +6,10 @@ require_ingresses || return 0
 
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ISSUE_FACTS="[]"
-TLS_FACTS="[]"
-AFFECTED_INGRESSES="[]"
+ISSUE_FACTS=()
+TLS_FACTS=()
+AFFECTED_INGRESSES=""
 
-mark_affected() {
-    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
-}
 
 for INGRESS_NAME in $INGRESSES; do
     INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
@@ -22,7 +19,7 @@ for INGRESS_NAME in $INGRESSES; do
     if [[ -z "$TLS_HOSTS" ]]; then
         print_info "Ingress $INGRESS_NAME: No TLS configuration (HTTP only)"
         FACT=$(jq -nc --arg ing "$INGRESS_NAME" '{ingress: $ing, tls_configured: false}')
-        TLS_FACTS=$(echo "$TLS_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact TLS_FACTS "$FACT"
         continue
     fi
 
@@ -60,12 +57,12 @@ for INGRESS_NAME in $INGRESSES; do
                                 '{expires: $expiry, days_remaining: $days}')
 
                             if [[ $DAYS_UNTIL_EXPIRY -lt 0 ]]; then
-                                mark_affected "$INGRESS_NAME"
+                                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                                 INGRESS_HAS_ISSUE=1
                                 print_error "    Certificate has EXPIRED"
                                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg secret "$SECRET_NAME" \
                                     '{ingress: $ing, secret: $secret, issue: "certificate_expired"}')
-                                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                                add_fact ISSUE_FACTS "$ISSUE"
                             elif [[ $DAYS_UNTIL_EXPIRY -lt 30 ]]; then
                                 print_warning "    Certificate expires in $DAYS_UNTIL_EXPIRY days"
                             fi
@@ -77,17 +74,17 @@ for INGRESS_NAME in $INGRESSES; do
                     --argjson expiry "$EXPIRY_INFO" \
                     '{secret: $secret, hosts: ($hosts | split(",")), type: $type, valid: true, certificate: $expiry}')
             else
-                mark_affected "$INGRESS_NAME"
+                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                 INGRESS_HAS_ISSUE=1
                 print_error "  TLS Secret: $SECRET_NAME has wrong type '$SECRET_TYPE' (expected kubernetes.io/tls)"
                 SECRET_FACT=$(jq -nc --arg secret "$SECRET_NAME" --arg type "$SECRET_TYPE" \
                     '{secret: $secret, type: $type, valid: false, issue: "wrong_secret_type"}')
                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg secret "$SECRET_NAME" --arg type "$SECRET_TYPE" \
                     '{ingress: $ing, secret: $secret, secret_type: $type, issue: "wrong_secret_type"}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
             fi
         else
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  TLS Secret: '$SECRET_NAME' not found in namespace"
             print_action "Create TLS secret or update ingress configuration"
@@ -95,18 +92,18 @@ for INGRESS_NAME in $INGRESSES; do
                 '{secret: $secret, valid: false, issue: "secret_not_found"}')
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg secret "$SECRET_NAME" \
                 '{ingress: $ing, secret: $secret, issue: "secret_not_found"}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
-        SECRETS_INFO=$(echo "$SECRETS_INFO" | jq --argjson s "$SECRET_FACT" '. + [$s]')
+        add_fact SECRETS_INFO "$SECRET_FACT"
     done < <(echo "$TLS_SECRETS")
 
     FACT=$(jq -nc --arg ing "$INGRESS_NAME" --argjson secrets "$SECRETS_INFO" \
         '{ingress: $ing, tls_configured: true, secrets: $secrets}')
-    TLS_FACTS=$(echo "$TLS_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+    add_fact TLS_FACTS "$FACT"
 done
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "TLS configuration valid for all $INGRESS_COUNT ingress(es)"
@@ -114,17 +111,17 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "TLS configuration valid for all $INGRESS_COUNT ingress(es)" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$TLS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array TLS_FACTS)" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have TLS issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$TLS_FACTS" \
-        --argjson issues "$ISSUE_FACTS" \
+        --argjson facts "$(facts_to_json_array TLS_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
         --argjson count "$INGRESS_COUNT" \
         '{ingress_count: $count, issue_count: ($issues | length), ingresses: $facts, issues: $issues}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
         '["Create or fix TLS secrets and ensure they are of type kubernetes.io/tls"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

@@ -6,13 +6,10 @@ require_ingresses || return 0
 
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ISSUE_FACTS="[]"
-INGRESS_FACTS="[]"
-AFFECTED_INGRESSES="[]"
+ISSUE_FACTS=()
+INGRESS_FACTS=()
+AFFECTED_INGRESSES=""
 
-mark_affected() {
-    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
-}
 
 ALB_CONTROLLER_PODS=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
@@ -67,7 +64,7 @@ for INGRESS_NAME in $INGRESSES; do
             ')
 
             if [[ -n "$ERROR_EVENTS" ]]; then
-                mark_affected "$INGRESS_NAME"
+                mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                 INGRESS_HAS_ISSUE=1
                 print_error "  Found error/warning events:"
                 echo "$ERROR_EVENTS" | sed 's/^/    /'
@@ -89,7 +86,7 @@ for INGRESS_NAME in $INGRESSES; do
 
                 ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson problems "$DETECTED_PROBLEMS" --argjson events "$LATEST_ERROR_EVENTS" \
                     '{ingress: $ing, issue: "sync_errors", detected_problems: $problems, recent_events: $events}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                add_fact ISSUE_FACTS "$ISSUE"
             else
                 print_info "  Last event: $EVENT_REASON at $EVENT_TIMESTAMP"
             fi
@@ -114,7 +111,7 @@ for INGRESS_NAME in $INGRESSES; do
                         head -n 5 || true)
 
                     if [[ -n "$ERROR_LOGS" ]]; then
-                        mark_affected "$INGRESS_NAME"
+                        mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                         INGRESS_HAS_ISSUE=1
                         print_error "  Found errors in ALB controller logs:"
                         if ! echo "$ERROR_LOGS" | head -n 3 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/    /' 2>/dev/null; then
@@ -128,7 +125,7 @@ for INGRESS_NAME in $INGRESSES; do
 
                         ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg pod "$POD" --argjson lines "$TRUNC_LOGS" \
                             '{ingress: $ing, issue: "controller_log_errors", controller_pod: $pod, log_lines: $lines}')
-                        ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                        add_fact ISSUE_FACTS "$ISSUE"
                     else
                         print_success "  No errors in ALB controller logs for this ingress"
                     fi
@@ -144,12 +141,12 @@ for INGRESS_NAME in $INGRESSES; do
     INGRESS_ADDRESS=$(jq -r --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name) | .status.loadBalancer.ingress[0].hostname // empty' "$INGRESSES_FILE" 2>/dev/null)
 
     if [[ -z "$INGRESS_ADDRESS" ]]; then
-        mark_affected "$INGRESS_NAME"
+        mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
         INGRESS_HAS_ISSUE=1
         print_error "  ALB address not assigned yet (sync may be in progress or failing)"
         print_action "Check ingress controller logs and verify backend services are healthy"
         ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" '{ingress: $ing, issue: "alb_address_not_assigned"}')
-        ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+        add_fact ISSUE_FACTS "$ISSUE"
     else
         print_success "  ALB address assigned: $INGRESS_ADDRESS"
     fi
@@ -158,11 +155,11 @@ for INGRESS_NAME in $INGRESSES; do
         --argjson event "$EVENT_SUMMARY" --argjson detected "$DETECTED_PROBLEMS" \
         --argjson controller_errors "$CONTROLLER_LOG_ERRORS" --argjson recent "$LATEST_ERROR_EVENTS" \
         '{ingress: $ing, address: (if $addr == "" then null else $addr end), latest_event: $event, detected_problems: $detected, controller_log_errors: $controller_errors, recent_error_events: $recent}')
-    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$INGRESS_FACT" '. + [$i]')
+    add_fact INGRESS_FACTS "$INGRESS_FACT"
 done
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All $INGRESS_COUNT ingress(es) synchronized successfully with controller"
@@ -170,17 +167,17 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "All $INGRESS_COUNT ingress(es) synchronized successfully" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array INGRESS_FACTS)" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have controller sync issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$INGRESS_FACTS" \
-        --argjson issues "$ISSUE_FACTS" \
+        --argjson facts "$(facts_to_json_array INGRESS_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
         --argjson count "$INGRESS_COUNT" \
         '{ingress_count: $count, issue_count: ($issues | length), ingresses: $facts, issues: $issues}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
         '["Check ingress controller logs and verify backend services are healthy"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

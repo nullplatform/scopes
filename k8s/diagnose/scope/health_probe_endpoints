@@ -11,14 +11,11 @@ HAS_PROBE_WARNINGS=0
 CONTAINERS_TESTED=0
 CONTAINERS_SKIPPED=0
 
-PROBE_FACTS="[]"
-ISSUE_FACTS="[]"
-POD_FACTS="[]"
-AFFECTED_PODS="[]"
+PROBE_FACTS=()
+ISSUE_FACTS=()
+POD_FACTS=()
+AFFECTED_PODS=""
 
-mark_affected() {
-    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
-}
 
 # Probe a single HTTP endpoint and emit a JSON fact + classification
 # Args: pod, container, probe_type (Readiness/Liveness/Startup), path, port, scheme
@@ -57,7 +54,7 @@ test_http_probe() {
         PROBE_FACT=$(jq -nc --arg pod "$pod" --arg c "$container" --arg pt "$probe_type" \
             --arg path "$path" --arg port "$port" --arg scheme "$scheme" \
             '{pod: $pod, container: $c, probe_type: $pt, kind: "httpGet", path: $path, port: $port, scheme: $scheme, status: "untestable"}')
-        PROBE_FACTS=$(echo "$PROBE_FACTS" | jq --argjson f "$PROBE_FACT" '. + [$f]')
+        add_fact PROBE_FACTS "$PROBE_FACT"
         return 2
     fi
 
@@ -95,7 +92,7 @@ test_http_probe() {
         --arg path "$path" --arg port "$port" --arg scheme "$scheme" \
         --arg http_response "$response" --arg status "$result_status" \
         '{pod: $pod, container: $c, probe_type: $pt, kind: "httpGet", path: $path, port: $port, scheme: $scheme, http_response: $http_response, status: $status}')
-    PROBE_FACTS=$(echo "$PROBE_FACTS" | jq --argjson f "$PROBE_FACT" '. + [$f]')
+    add_fact PROBE_FACTS "$PROBE_FACT"
 
     if [[ "$classification" != "success" ]]; then
         ISSUE=$(jq -nc --arg pod "$pod" --arg c "$container" --arg pt "$probe_type" \
@@ -103,7 +100,7 @@ test_http_probe() {
             --arg classification "$classification" \
             --argjson logs "$container_logs" \
             '{pod: $pod, container: $c, probe_type: $pt, path: $path, port: $port, http_response: $http_response, issue: $classification, container_logs: $logs}')
-        ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+        add_fact ISSUE_FACTS "$ISSUE"
         return 1
     fi
     return 0
@@ -116,7 +113,7 @@ for POD_NAME in $PODS; do
     if [[ "$POD_PHASE" != "Running" ]]; then
         print_warning "Pod $POD_NAME: Not running (phase: $POD_PHASE), skipping probe checks"
         FACT=$(jq -nc --arg p "$POD_NAME" --arg phase "$POD_PHASE" '{pod: $p, status: "skipped", reason: "not_running", phase: $phase}')
-        POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact POD_FACTS "$FACT"
         continue
     fi
 
@@ -124,7 +121,7 @@ for POD_NAME in $PODS; do
     if [[ -z "$POD_IP" || "$POD_IP" == "null" ]]; then
         print_warning "Pod $POD_NAME: No IP assigned, skipping probe checks"
         FACT=$(jq -nc --arg p "$POD_NAME" '{pod: $p, status: "skipped", reason: "no_ip"}')
-        POD_FACTS=$(echo "$POD_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact POD_FACTS "$FACT"
         continue
     fi
 
@@ -229,20 +226,20 @@ for POD_NAME in $PODS; do
                 test_http_probe "$POD_NAME" "$CONTAINER_NAME" "$PROBE_LABEL" "$PROBE_PATH" "$PROBE_PORT" "$PROBE_SCHEME"
                 rc=$?
                 if [[ $rc -eq 1 ]]; then
-                    mark_affected "$POD_NAME"
+                    mark_affected AFFECTED_PODS "$POD_NAME"
                 fi
             elif [[ "$PROBE_TYPE" == "tcpSocket" ]]; then
                 PROBE_PORT=$(echo "$CONTAINER_DATA" | jq -r --arg p "$PROBE_KIND" '.[$p].tcpSocket.port')
                 print_info "    $PROBE_LABEL Probe: TCP Socket on port $PROBE_PORT (tested in port health check)"
                 PROBE_FACT=$(jq -nc --arg pod "$POD_NAME" --arg c "$CONTAINER_NAME" --arg pt "$PROBE_LABEL" --arg port "$PROBE_PORT" \
                     '{pod: $pod, container: $c, probe_type: $pt, kind: "tcpSocket", port: $port, status: "not_tested_here"}')
-                PROBE_FACTS=$(echo "$PROBE_FACTS" | jq --argjson f "$PROBE_FACT" '. + [$f]')
+                add_fact PROBE_FACTS "$PROBE_FACT"
             elif [[ "$PROBE_TYPE" == "exec" ]]; then
                 PROBE_COMMAND=$(echo "$CONTAINER_DATA" | jq -r --arg p "$PROBE_KIND" '.[$p].exec.command | join(" ")')
                 print_info "    $PROBE_LABEL Probe: Exec [$PROBE_COMMAND] (cannot test directly)"
                 PROBE_FACT=$(jq -nc --arg pod "$POD_NAME" --arg c "$CONTAINER_NAME" --arg pt "$PROBE_LABEL" --arg cmd "$PROBE_COMMAND" \
                     '{pod: $pod, container: $c, probe_type: $pt, kind: "exec", command: $cmd, status: "untestable"}')
-                PROBE_FACTS=$(echo "$PROBE_FACTS" | jq --argjson f "$PROBE_FACT" '. + [$f]')
+                add_fact PROBE_FACTS "$PROBE_FACT"
             fi
         done
     done
@@ -253,8 +250,8 @@ echo ""
 DETAILS=$(jq -nc \
     --argjson tested "$CONTAINERS_TESTED" \
     --argjson skipped "$CONTAINERS_SKIPPED" \
-    --argjson probes "$PROBE_FACTS" \
-    --argjson issues "$ISSUE_FACTS" \
+    --argjson probes "$(facts_to_json_array PROBE_FACTS)" \
+    --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
     '{
         containers_tested: $tested,
         containers_skipped: $skipped,
@@ -276,18 +273,18 @@ elif [[ $HAS_PROBE_ISSUES -gt 0 ]]; then
     if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
         print_warning "Probe issues found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
     fi
-    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | wc -w | tr -d ' ')
     SUMMARY="Probe failures detected in $AFFECTED_COUNT pod(s)"
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_PODS)" "$DETAILS" \
         '["Update probe path or implement health endpoint in application", "Verify port is listening and accessible"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 elif [[ $HAS_PROBE_WARNINGS -gt 0 ]]; then
     if [[ $CONTAINERS_SKIPPED -gt 0 ]]; then
         print_info "Probe warnings found ($CONTAINERS_TESTED tested, $CONTAINERS_SKIPPED skipped)"
     fi
-    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | wc -w | tr -d ' ')
     SUMMARY="Probe warnings in $AFFECTED_COUNT pod(s) — application or connectivity issues"
-    EVIDENCE=$(evidence_json "$SUMMARY" "warning" "$AFFECTED_PODS" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "warning" "$(set_to_json_array AFFECTED_PODS)" "$DETAILS" \
         '["Check application logs for internal errors", "Verify port is listening and accessible"]')
     update_check_result --status "warning" --evidence "$EVIDENCE"
 else

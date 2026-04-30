@@ -117,7 +117,63 @@ read_log_tail() {
         return 0
     fi
 
-    tail -n "$lines" "$log_file" | jq -R -s 'split("\n") | map(select(length > 0))'
+    tail -n "$lines" "$log_file" | lines_to_json_array
+}
+
+# Convert newline-delimited stdin into a JSON array of non-empty strings.
+# Used by read_log_tail and update_check_result to share one canonical
+# tail-text-to-JSON pipeline.
+lines_to_json_array() {
+    jq -R -s 'split("\n") | map(select(length > 0))'
+}
+
+# Append a JSON object to a bash indexed array (passed by name). Avoids the
+# O(N²) jq round-trip of `arr=$(echo "$arr" | jq --argjson f "$x" '. + [$f]')`.
+# Convert with `facts_to_json_array <name>` once at end of accumulation.
+# Uses eval so it works on bash 3.2 (macOS dev) — declare -n requires 4.3+.
+add_fact() {
+    local arr_name="$1"
+    local value="$2"
+    eval "${arr_name}+=(\"\$value\")"
+}
+
+# Convert a bash indexed array of compact JSON strings into a single JSON
+# array. Empty arrays correctly become "[]".
+facts_to_json_array() {
+    local arr_name="$1"
+    local count
+    eval "count=\${#${arr_name}[@]}"
+    if [[ "$count" -eq 0 ]]; then
+        echo "[]"
+    else
+        eval "printf '%s\n' \"\${${arr_name}[@]}\"" | jq -s '.'
+    fi
+}
+
+# Mark a resource as affected by an issue. Stores names in a bash variable
+# (passed by name) as a space-separated set, deduplicating on add. Replaces
+# the per-call jq dedup that was duplicated in every check.
+mark_affected() {
+    local set_name="$1"
+    local value="$2"
+    local current
+    eval "current=\"\${$set_name}\""
+    case " $current " in
+        *" $value "*) ;;
+        *) eval "$set_name=\"\${current:+\$current }\$value\"" ;;
+    esac
+}
+
+# Convert a space-separated set (built by mark_affected) into a JSON array.
+set_to_json_array() {
+    local set_name="$1"
+    local values
+    eval "values=\"\${$set_name}\""
+    if [[ -z "$values" ]]; then
+        echo "[]"
+    else
+        printf '%s\n' $values | jq -R . | jq -s .
+    fi
 }
 
 print_success() {
@@ -216,11 +272,10 @@ update_check_result() {
         return 1
     fi
 
-    # Check if log file exists and read it into an array
+    # Read script log tail (last 20 non-blank lines) into a JSON array
     local log_array="[]"
     if [[ -n "$SCRIPT_LOG_FILE" && -f "$SCRIPT_LOG_FILE" ]]; then
-        # Read log file, remove empty lines, take last 20 lines, and convert to JSON array
-        log_array=$(grep -v '^[[:space:]]*$' "$SCRIPT_LOG_FILE" | tail -n 20 | jq -R -s 'split("\n") | map(select(length > 0))')
+        log_array=$(grep -v '^[[:space:]]*$' "$SCRIPT_LOG_FILE" | tail -n 20 | lines_to_json_array)
         if [[ $? -ne 0 ]]; then
             echo "Error: Failed to read log file: $SCRIPT_LOG_FILE" >&2
             return 1

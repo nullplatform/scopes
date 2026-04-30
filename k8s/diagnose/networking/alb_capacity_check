@@ -6,15 +6,12 @@ require_ingresses || return 0
 
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ISSUE_FACTS="[]"
-INGRESS_FACTS="[]"
-AFFECTED_INGRESSES="[]"
+ISSUE_FACTS=()
+INGRESS_FACTS=()
+AFFECTED_INGRESSES=""
 HAS_IP_EXHAUSTION=0
 IP_EXHAUSTION_LOGS="[]"
 
-mark_affected() {
-    AFFECTED_INGRESSES=$(echo "$AFFECTED_INGRESSES" | jq --arg i "$1" 'if any(. == $i) then . else . + [$i] end')
-}
 
 ALB_CONTROLLER_PODS=$(jq -r '.items[].metadata.name' "$ALB_CONTROLLER_PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
@@ -53,9 +50,9 @@ fi
 [[ $HAS_IP_EXHAUSTION -eq 1 ]] && {
     ISSUE=$(jq -nc --argjson logs "$IP_EXHAUSTION_LOGS" \
         '{issue: "subnet_ip_exhaustion", evidence_logs: $logs}')
-    ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+    add_fact ISSUE_FACTS "$ISSUE"
     # mark all ingresses as affected (cluster-wide issue)
-    for INGRESS_NAME in $INGRESSES; do mark_affected "$INGRESS_NAME"; done
+    for INGRESS_NAME in $INGRESSES; do mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"; done
 }
 
 for INGRESS_NAME in $INGRESSES; do
@@ -88,7 +85,7 @@ for INGRESS_NAME in $INGRESSES; do
                             grep -iE "certificate.*(not found|invalid|failed|error)" 2>/dev/null || true)
 
                         if [[ -n "$CERT_ERRORS" ]]; then
-                            mark_affected "$INGRESS_NAME"
+                            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                             INGRESS_HAS_ISSUE=1
                             print_error "    Certificate validation errors found:"
                             if ! echo "$CERT_ERRORS" | tail -n 2 2>/dev/null | cut -c1-200 2>/dev/null | sed 's/^/      /' 2>/dev/null; then
@@ -101,7 +98,7 @@ for INGRESS_NAME in $INGRESSES; do
                                 '. + [{controller_pod: $pod, lines: $lines}]')
                             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson lines "$TRUNC" \
                                 '{ingress: $ing, issue: "certificate_validation_errors", log_lines: $lines}')
-                            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                            add_fact ISSUE_FACTS "$ISSUE"
                         fi
                     fi
                 done
@@ -111,14 +108,14 @@ for INGRESS_NAME in $INGRESSES; do
         if [[ -n "$TLS_HOSTS" && -n "$INGRESS_HOSTS" ]]; then
             for HOST in $INGRESS_HOSTS; do
                 if ! echo "$TLS_HOSTS" | grep -qw "$HOST"; then
-                    mark_affected "$INGRESS_NAME"
+                    mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
                     INGRESS_HAS_ISSUE=1
                     print_error "    Host '$HOST' in rules but not in TLS configuration"
                     print_action "Add host to spec.tls or ensure certificate covers this domain"
                     HOST_TLS_MISMATCHES=$(echo "$HOST_TLS_MISMATCHES" | jq --arg h "$HOST" '. + [$h]')
                     ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --arg host "$HOST" \
                         '{ingress: $ing, host: $host, issue: "host_in_rules_not_in_tls"}')
-                    ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+                    add_fact ISSUE_FACTS "$ISSUE"
                 fi
             done
         fi
@@ -149,38 +146,38 @@ for INGRESS_NAME in $INGRESSES; do
 
         SUBNET_ERRORS_HUMAN=$(echo "$ERROR_EVENTS" | jq -r '.[] | select(.message | test("subnet|availability zone"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
         if [[ -n "$SUBNET_ERRORS_HUMAN" ]]; then
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  Subnet configuration issues"
             echo "$SUBNET_ERRORS_HUMAN" | head -n 2 | sed 's/^/    /'
             SUBNET_ERROR_LINES=$(echo "$ERROR_EVENTS" | jq -c '[.[] | select(.message | test("subnet|availability zone"; "i")) | {timestamp: .lastTimestamp, type: .type, reason: .reason, message: .message}] | .[:2]')
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson events "$SUBNET_ERROR_LINES" \
                 '{ingress: $ing, issue: "subnet_misconfiguration", events: $events}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
 
         SG_ERRORS_HUMAN=$(echo "$ERROR_EVENTS" | jq -r '.[] | select(.message | test("security.?group"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
         if [[ -n "$SG_ERRORS_HUMAN" ]]; then
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  Security group issues"
             echo "$SG_ERRORS_HUMAN" | head -n 2 | sed 's/^/    /'
             SG_ERROR_LINES=$(echo "$ERROR_EVENTS" | jq -c '[.[] | select(.message | test("security.?group"; "i")) | {timestamp: .lastTimestamp, type: .type, reason: .reason, message: .message}] | .[:2]')
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson events "$SG_ERROR_LINES" \
                 '{ingress: $ing, issue: "security_group", events: $events}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
 
         TG_ERRORS_HUMAN=$(echo "$ERROR_EVENTS" | jq -r '.[] | select(.message | test("target.?group"; "i")) | "\(.lastTimestamp) [\(.type)] \(.reason): \(.message)"' 2>/dev/null || true)
         if [[ -n "$TG_ERRORS_HUMAN" ]]; then
-            mark_affected "$INGRESS_NAME"
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             INGRESS_HAS_ISSUE=1
             print_error "  Target group registration issues"
             echo "$TG_ERRORS_HUMAN" | head -n 2 | sed 's/^/    /'
             TG_ERROR_LINES=$(echo "$ERROR_EVENTS" | jq -c '[.[] | select(.message | test("target.?group"; "i")) | {timestamp: .lastTimestamp, type: .type, reason: .reason, message: .message}] | .[:2]')
             ISSUE=$(jq -nc --arg ing "$INGRESS_NAME" --argjson events "$TG_ERROR_LINES" \
                 '{ingress: $ing, issue: "target_group", events: $events}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$ISSUE" '. + [$f]')
+            add_fact ISSUE_FACTS "$ISSUE"
         fi
     fi
 
@@ -212,11 +209,11 @@ for INGRESS_NAME in $INGRESSES; do
             security_group_errors: $sg_errors,
             target_group_errors: $tg_errors
         }')
-    INGRESS_FACTS=$(echo "$INGRESS_FACTS" | jq --argjson i "$INGRESS_FACT" '. + [$i]')
+    add_fact INGRESS_FACTS "$INGRESS_FACT"
 done
 
 INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "No critical ALB capacity or configuration issues detected"
@@ -224,7 +221,7 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "No critical ALB capacity or configuration issues detected" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$INGRESS_FACTS" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array INGRESS_FACTS)" --argjson count "$INGRESS_COUNT" '{ingress_count: $count, ingresses: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
@@ -232,8 +229,8 @@ else
     [[ $HAS_IP_EXHAUSTION -eq 1 ]] && SUMMARY="$SUMMARY — subnet IP exhaustion detected"
 
     DETAILS=$(jq -nc \
-        --argjson facts "$INGRESS_FACTS" \
-        --argjson issues "$ISSUE_FACTS" \
+        --argjson facts "$(facts_to_json_array INGRESS_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
         --argjson count "$INGRESS_COUNT" \
         --argjson ip_logs "$IP_EXHAUSTION_LOGS" \
         --argjson ip_exhaustion "$HAS_IP_EXHAUSTION" \
@@ -245,7 +242,7 @@ else
             ingresses: $facts,
             issues: $issues
         }')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_INGRESSES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
         '["Check subnet capacity and certificate/security group configuration"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

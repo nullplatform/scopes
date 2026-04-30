@@ -6,12 +6,9 @@ require_services || return 0
 
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-PORT_FACTS="[]"
-AFFECTED_SERVICES="[]"
+PORT_FACTS=()
+AFFECTED_SERVICES=""
 
-mark_affected() {
-    AFFECTED_SERVICES=$(echo "$AFFECTED_SERVICES" | jq --arg s "$1" 'if any(. == $s) then . else . + [$s] end')
-}
 
 for SERVICE_NAME in $SERVICES; do
     SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
@@ -19,10 +16,10 @@ for SERVICE_NAME in $SERVICES; do
     SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.targetPort):\(.name // "unnamed")"')
 
     if [[ -z "$SERVICE_PORTS" ]]; then
-        mark_affected "$SERVICE_NAME"
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
         print_error "Service $SERVICE_NAME: No ports defined"
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_ports_defined", ports: []}')
-        PORT_FACTS=$(echo "$PORT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact PORT_FACTS "$FACT"
         continue
     fi
 
@@ -31,7 +28,7 @@ for SERVICE_NAME in $SERVICES; do
     if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
         print_warning "Service $SERVICE_NAME: No selector, skipping port validation"
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_selector_skipped"}')
-        PORT_FACTS=$(echo "$PORT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact PORT_FACTS "$FACT"
         continue
     fi
 
@@ -49,7 +46,7 @@ for SERVICE_NAME in $SERVICES; do
     if [[ -z "$PODS" ]]; then
         print_warning "Service $SERVICE_NAME: No pods found to validate ports"
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_pods_for_validation"}')
-        PORT_FACTS=$(echo "$PORT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact PORT_FACTS "$FACT"
         continue
     fi
 
@@ -58,7 +55,7 @@ for SERVICE_NAME in $SERVICES; do
 
     print_info "Service $SERVICE_NAME port configuration:"
 
-    PORT_RESULTS="[]"
+    PORT_RESULTS=()
     SERVICE_HAS_ISSUE=0
 
     while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
@@ -87,7 +84,7 @@ for SERVICE_NAME in $SERVICES; do
                 PORT_RESULT=$(jq -nc --arg svc_port "$SERVICE_PORT" --arg target "$TARGET_PORT" --arg name "$PORT_NAME" \
                     --argjson available "$AVAILABLE_PORTS" \
                     '{service_port: $svc_port, target_port: $target, port_name: $name, status: "container_port_not_found", available_ports_by_container: $available}')
-                PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson r "$PORT_RESULT" '. + [$r]')
+                add_fact PORT_RESULTS "$PORT_RESULT"
                 continue
             fi
         else
@@ -109,7 +106,7 @@ for SERVICE_NAME in $SERVICES; do
                 print_action "Define named port in container spec or use numeric targetPort"
                 PORT_RESULT=$(jq -nc --arg svc_port "$SERVICE_PORT" --arg target "$TARGET_PORT" --arg name "$PORT_NAME" \
                     '{service_port: $svc_port, target_port: $target, port_name: $name, status: "named_port_not_found"}')
-                PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson r "$PORT_RESULT" '. + [$r]')
+                add_fact PORT_RESULTS "$PORT_RESULT"
                 continue
             fi
         fi
@@ -130,34 +127,34 @@ for SERVICE_NAME in $SERVICES; do
             PORT_RESULT=$(echo "$PORT_RESULT" | jq '. + {connectivity: "refused", status: "not_listening"}')
         fi
 
-        PORT_RESULTS=$(echo "$PORT_RESULTS" | jq --argjson r "$PORT_RESULT" '. + [$r]')
+        add_fact PORT_RESULTS "$PORT_RESULT"
     done < <(echo "$SERVICE_PORTS")
 
-    [[ $SERVICE_HAS_ISSUE -eq 1 ]] && mark_affected "$SERVICE_NAME"
+    [[ $SERVICE_HAS_ISSUE -eq 1 ]] && mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
 
-    FACT=$(jq -nc --arg svc "$SERVICE_NAME" --argjson ports "$PORT_RESULTS" \
+    FACT=$(jq -nc --arg svc "$SERVICE_NAME" --argjson ports "$(facts_to_json_array PORT_RESULTS)" \
         '{service: $svc, ports: $ports}')
-    PORT_FACTS=$(echo "$PORT_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+    add_fact PORT_FACTS "$FACT"
 done
 
 SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     EVIDENCE=$(evidence_json \
         "All $SERVICE_COUNT service(s) have valid port configuration" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$PORT_FACTS" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array PORT_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) have port configuration issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$PORT_FACTS" \
+        --argjson facts "$(facts_to_json_array PORT_FACTS)" \
         --argjson count "$SERVICE_COUNT" \
         '{service_count: $count, issue_count: ($facts | map(select(.ports[]? | .status != "ok")) | length), services: $facts}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_SERVICES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
         '["Verify container is listening on targetPort and that ports/protocols match"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

@@ -6,12 +6,9 @@ require_services || return 0
 
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-SELECTOR_FACTS="[]"
-AFFECTED_SERVICES="[]"
+SELECTOR_FACTS=()
+AFFECTED_SERVICES=""
 
-mark_affected() {
-    AFFECTED_SERVICES=$(echo "$AFFECTED_SERVICES" | jq --arg s "$1" 'if any(. == $s) then . else . + [$s] end')
-}
 
 for SERVICE_NAME in $SERVICES; do
     SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
@@ -20,11 +17,11 @@ for SERVICE_NAME in $SERVICES; do
     SELECTOR_OBJECT=$(echo "$SERVICE_INFO" | jq -c '.spec.selector')
 
     if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
-        mark_affected "$SERVICE_NAME"
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
         print_error "Service $SERVICE_NAME: No selector defined"
 
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_selector"}')
-        SELECTOR_FACTS=$(echo "$SELECTOR_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact SELECTOR_FACTS "$FACT"
         continue
     fi
 
@@ -40,11 +37,12 @@ for SERVICE_NAME in $SERVICES; do
     ' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
     if [[ -z "$MATCHING_PODS" ]]; then
-        mark_affected "$SERVICE_NAME"
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
         print_error "Service $SERVICE_NAME: No pods match selector ($SERVICE_SELECTORS)"
 
         EXISTING_PODS=$(jq -r --arg dep_id "$DEPLOYMENT_ID" '.items[] | select(.metadata.labels.deployment_id == $dep_id) | .metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
-        MISMATCH_FACTS="[]"
+        MISMATCH_FACTS=()
+        MISMATCH_FACTS_JSON="[]"
 
         if [[ -n "$EXISTING_PODS" ]]; then
             print_warning "  Existing pods with deployment_id: $EXISTING_PODS"
@@ -61,11 +59,11 @@ for SERVICE_NAME in $SERVICES; do
                 if [[ "$POD_VALUE" == "MISSING" ]]; then
                     MM=$(jq -nc --arg key "$key" --arg expected "$value" --arg actual "MISSING" \
                         '{key: $key, selector_value: $expected, pod_value: $actual, kind: "missing"}')
-                    MISMATCH_FACTS=$(echo "$MISMATCH_FACTS" | jq --argjson m "$MM" '. + [$m]')
+                    add_fact MISMATCH_FACTS "$MM"
                 elif [[ "$POD_VALUE" != "$value" ]]; then
                     MM=$(jq -nc --arg key "$key" --arg expected "$value" --arg actual "$POD_VALUE" \
                         '{key: $key, selector_value: $expected, pod_value: $actual, kind: "mismatch"}')
-                    MISMATCH_FACTS=$(echo "$MISMATCH_FACTS" | jq --argjson m "$MM" '. + [$m]')
+                    add_fact MISMATCH_FACTS "$MM"
                 else
                     MATCH_COUNT=$((MATCH_COUNT + 1))
                 fi
@@ -73,10 +71,10 @@ for SERVICE_NAME in $SERVICES; do
 
             print_info "  Selector check: $MATCH_COUNT/$SELECTOR_COUNT labels match"
 
-            MISMATCH_LEN=$(echo "$MISMATCH_FACTS" | jq 'length')
-            if [[ $MISMATCH_LEN -gt 0 ]]; then
+            MISMATCH_FACTS_JSON=$(facts_to_json_array MISMATCH_FACTS)
+            if [[ ${#MISMATCH_FACTS[@]} -gt 0 ]]; then
                 print_warning "  Selector mismatches:"
-                echo "$MISMATCH_FACTS" | jq -r '.[] | "    ✗ " + .key + ": selector=" + .selector_value + ", pod=" + .pod_value' | while IFS= read -r line; do
+                echo "$MISMATCH_FACTS_JSON" | jq -r '.[] | "    ✗ " + .key + ": selector=" + .selector_value + ", pod=" + .pod_value' | while IFS= read -r line; do
                     print_warning "$line"
                 done
             fi
@@ -85,38 +83,38 @@ for SERVICE_NAME in $SERVICES; do
         fi
 
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" --argjson sel "$SELECTOR_OBJECT" \
-            --argjson mismatches "$MISMATCH_FACTS" \
+            --argjson mismatches "$MISMATCH_FACTS_JSON" \
             --arg existing_pods "$EXISTING_PODS" \
             '{service: $svc, issue: "no_matching_pods", selector: $sel, existing_pods_with_deployment_id: ($existing_pods | split(" ") | map(select(length > 0))), label_mismatches: $mismatches}')
-        SELECTOR_FACTS=$(echo "$SELECTOR_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact SELECTOR_FACTS "$FACT"
     else
         POD_COUNT=$(echo "$MATCHING_PODS" | wc -w | tr -d ' ')
         print_success "Service $SERVICE_NAME: Selector matches $POD_COUNT pod(s)"
         FACT=$(jq -nc --arg svc "$SERVICE_NAME" --argjson sel "$SELECTOR_OBJECT" \
             --argjson matched "$POD_COUNT" \
             '{service: $svc, selector: $sel, matched_pod_count: $matched}')
-        SELECTOR_FACTS=$(echo "$SELECTOR_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+        add_fact SELECTOR_FACTS "$FACT"
     fi
 done
 
 SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
-ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | jq 'length')
+ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | wc -w | tr -d ' ')
 
 if [[ $ISSUE_COUNT -eq 0 ]]; then
     EVIDENCE=$(evidence_json \
         "All $SERVICE_COUNT service(s) match at least one pod" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson facts "$SELECTOR_FACTS" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array SELECTOR_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) have selector issues"
     DETAILS=$(jq -nc \
-        --argjson facts "$SELECTOR_FACTS" \
+        --argjson facts "$(facts_to_json_array SELECTOR_FACTS)" \
         --argjson count "$SERVICE_COUNT" \
         '{service_count: $count, issue_count: ($facts | map(select(.issue != null)) | length), services: $facts}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_SERVICES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
         '["Verify pod labels match service selector"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

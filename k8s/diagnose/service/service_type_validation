@@ -6,13 +6,10 @@ require_services || return 0
 
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-ISSUE_FACTS="[]"
-SERVICE_FACTS="[]"
-AFFECTED_SERVICES="[]"
+ISSUE_FACTS=()
+SERVICE_FACTS=()
+AFFECTED_SERVICES=""
 
-mark_affected() {
-    AFFECTED_SERVICES=$(echo "$AFFECTED_SERVICES" | jq --arg s "$1" 'if any(. == $s) then . else . + [$s] end')
-}
 
 for SERVICE_NAME in $SERVICES; do
     SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
@@ -49,7 +46,7 @@ for SERVICE_NAME in $SERVICES; do
             EXTERNAL_IP=$(echo "$SERVICE_INFO" | jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // "Pending"')
 
             if [[ "$EXTERNAL_IP" == "Pending" || "$EXTERNAL_IP" == "null" ]]; then
-                mark_affected "$SERVICE_NAME"
+                mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
                 print_warning "  LoadBalancer IP/Hostname is Pending"
                 print_info "    This may take a few minutes to provision"
 
@@ -62,7 +59,7 @@ for SERVICE_NAME in $SERVICES; do
 
                 FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" \
                     '{service: $svc, type: $type, issue: "loadbalancer_pending"}')
-                ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+                add_fact ISSUE_FACTS "$FACT"
                 SVC_FACT="$FACT"
             else
                 print_success "  LoadBalancer available at: $EXTERNAL_IP"
@@ -79,16 +76,16 @@ for SERVICE_NAME in $SERVICES; do
             ;;
 
         *)
-            mark_affected "$SERVICE_NAME"
+            mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
             print_error "  Unknown service type: $SERVICE_TYPE"
             print_action "Use valid service type (ClusterIP, NodePort, LoadBalancer, or ExternalName)"
             FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "${SERVICE_TYPE:-null}" \
                 '{service: $svc, type: $type, issue: "unknown_service_type"}')
-            ISSUE_FACTS=$(echo "$ISSUE_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+            add_fact ISSUE_FACTS "$FACT"
             SVC_FACT="$FACT"
             ;;
     esac
-    SERVICE_FACTS=$(echo "$SERVICE_FACTS" | jq --argjson f "$SVC_FACT" '. + [$f]')
+    add_fact SERVICE_FACTS "$SVC_FACT"
 done
 
 ISSUE_COUNT=$(echo "$ISSUE_FACTS" | jq 'length')
@@ -99,17 +96,17 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "All $SERVICE_COUNT service(s) have valid types" \
         "info" \
         "[]" \
-        "$(jq -nc --argjson services "$SERVICE_FACTS" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $services}')" \
+        "$(jq -nc --argjson services "$(facts_to_json_array SERVICE_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $services}')" \
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
     SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) have type issues"
     DETAILS=$(jq -nc \
-        --argjson services "$SERVICE_FACTS" \
-        --argjson issues "$ISSUE_FACTS" \
+        --argjson services "$(facts_to_json_array SERVICE_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
         --argjson count "$SERVICE_COUNT" \
         '{service_count: $count, issue_count: ($issues | length), services: $services, issues: $issues}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "warning" "$AFFECTED_SERVICES" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "warning" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
         '["Wait for provisioning or check cloud provider logs for errors"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

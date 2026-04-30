@@ -6,12 +6,9 @@ require_pods || return 0
 
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-PVC_FACTS="[]"
-AFFECTED_PODS="[]"
+PVC_FACTS=()
+AFFECTED_PODS=""
 
-mark_affected() {
-    AFFECTED_PODS=$(echo "$AFFECTED_PODS" | jq --arg p "$1" 'if any(. == $p) then . else . + [$p] end')
-}
 
 for POD_NAME in $PODS; do
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
@@ -23,7 +20,7 @@ for POD_NAME in $PODS; do
             PVC_STATUS=$(kubectl get pvc "$PVC" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
 
             if [[ "$PVC_STATUS" == "Pending" ]]; then
-                mark_affected "$POD_NAME"
+                mark_affected AFFECTED_PODS "$POD_NAME"
                 print_error "Pod $POD_NAME: PVC $PVC is in Pending state"
 
                 PVC_INFO=$(kubectl get pvc "$PVC" -n "$NAMESPACE" -o json 2>/dev/null)
@@ -41,18 +38,18 @@ for POD_NAME in $PODS; do
                     --arg storage_class "$STORAGE_CLASS" \
                     --arg requested_size "$REQUESTED_SIZE" \
                     '{pod: $pod, pvc: $pvc, status: $status, storage_class: $storage_class, requested_size: $requested_size}')
-                PVC_FACTS=$(echo "$PVC_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+                add_fact PVC_FACTS "$FACT"
             elif [[ "$PVC_STATUS" == "Bound" ]]; then
                 print_success "Pod $POD_NAME: PVC $PVC is Bound"
             else
                 print_warning "Pod $POD_NAME: PVC $PVC status is $PVC_STATUS"
-                mark_affected "$POD_NAME"
+                mark_affected AFFECTED_PODS "$POD_NAME"
                 FACT=$(jq -nc \
                     --arg pod "$POD_NAME" \
                     --arg pvc "$PVC" \
                     --arg status "${PVC_STATUS:-Unknown}" \
                     '{pod: $pod, pvc: $pvc, status: $status}')
-                PVC_FACTS=$(echo "$PVC_FACTS" | jq --argjson f "$FACT" '. + [$f]')
+                add_fact PVC_FACTS "$FACT"
             fi
         done
     fi
@@ -78,13 +75,13 @@ if [[ $ISSUE_COUNT -eq 0 ]]; then
         "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | jq 'length')
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | wc -w | tr -d ' ')
     SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) have storage issues"
     DETAILS=$(jq -nc \
-        --argjson pvcs "$PVC_FACTS" \
+        --argjson pvcs "$(facts_to_json_array PVC_FACTS)" \
         --argjson pod_count "$POD_COUNT" \
         '{pod_count: $pod_count, pvc_issue_count: ($pvcs | length), pvc_issues: $pvcs}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$AFFECTED_PODS" "$DETAILS" \
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_PODS)" "$DETAILS" \
         '["Check if StorageClass exists and has available capacity"]')
     update_check_result --status "failed" --evidence "$EVIDENCE"
 fi
