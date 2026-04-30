@@ -8,12 +8,30 @@ if [ "$ACTION" = "CREATE" ]; then
 
     GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
       -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+    RECORD_TYPE="A"
 
     if [ -z "$GATEWAY_IP" ]; then
-      log warn "⚠️  Gateway IP not found, trying service fallback..."
+      log warn "⚠️  Gateway IP not found, trying hostname..."
+
+      GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null)
+      RECORD_TYPE="CNAME"
+    fi
+
+    if [ -z "$GATEWAY_IP" ]; then
+      log warn "⚠️  Gateway hostname not found, trying service fallback..."
 
       GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+      RECORD_TYPE="A"
+    fi
+
+    if [ -z "$GATEWAY_IP" ]; then
+      log warn "⚠️  Gateway service IP not found, trying service hostname fallback..."
+
+      GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      RECORD_TYPE="CNAME"
     fi
 
     if [ -z "$GATEWAY_IP" ]; then
@@ -21,7 +39,7 @@ if [ "$ACTION" = "CREATE" ]; then
       exit 0
     fi
 
-    log info "✅ Gateway IP: $GATEWAY_IP"
+    log info "✅ Gateway address: $GATEWAY_IP (recordType: $RECORD_TYPE)"
 
     DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
 
@@ -29,7 +47,8 @@ if [ "$ACTION" = "CREATE" ]; then
       DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
       CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
 
-      echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
+      echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" --arg record_type "$RECORD_TYPE" \
+        '. + {gateway_ip: $gateway_ip, record_type: $record_type}' > "$CONTEXT_PATH"
 
       log debug "📝 Building DNSEndpoint from template: $DNS_ENDPOINT_TEMPLATE"
 
