@@ -35,16 +35,22 @@ case "$DNS_TYPE" in
         DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
         log debug "📋 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
 
-        OBSERVED_GEN=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" \
-            -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo "")
+        DNS_STATUS=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || echo "not found")
 
-        if [ -n "$OBSERVED_GEN" ] && [ "$OBSERVED_GEN" -ge 1 ] 2>/dev/null; then
-            log info "   ✅ DNSEndpoint $DNS_ENDPOINT_NAME processed by external-dns (observedGeneration=$OBSERVED_GEN)"
-            log info "   ✅ DNS record for $SCOPE_DOMAIN has been created in Route53"
+        if [ "$DNS_STATUS" != "not found" ] && [ -n "$DNS_STATUS" ]; then
+            log debug "📋 DNSEndpoint status: $DNS_STATUS"
+        fi
+
+        if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
+            log info "   ✅ DNS record for $SCOPE_DOMAIN is now resolvable"
+
+            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
+            log info "   ✅ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
+
             break
         fi
 
-        log debug "📋 DNSEndpoint not yet processed by external-dns (observedGeneration=${OBSERVED_GEN:-unset}), waiting 10s..."
+        log debug "📋 DNS record not yet available, waiting 10s..."
         sleep 10
     done
 
