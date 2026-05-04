@@ -13,6 +13,7 @@ metadata:
     application_id: "{{ .application.id }}"
     scope: {{ .scope.slug }}
     scope_id: "{{ .scope.id }}"
+    dns/zone-type: {{ .dns_zone_type | default "public" }}
 spec:
   endpoints:
   - dnsName: {{ .scope.domain }}
