@@ -6,52 +6,49 @@ if [ "$ACTION" = "CREATE" ]; then
     log debug "🔍 Building DNSEndpoint manifest for ExternalDNS..."
     log debug "📡 Getting IP for gateway: $GATEWAY_NAME"
 
-    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-      -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
-    RECORD_TYPE="A"
+    # Try ALB Ingress first (AWS-specific: gateway-alb-public / gateway-alb-private)
+    GATEWAY_SUFFIX="${GATEWAY_NAME#gateway-}"
+    GATEWAY_IP=$(kubectl get ingress "gateway-alb-${GATEWAY_SUFFIX}" -n gateways \
+      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+    RECORD_TYPE="CNAME"
 
-    if [ -z "$GATEWAY_IP" ]; then
-      log warn "⚠️  Gateway IP not found, trying hostname..."
+    if [ -n "$GATEWAY_IP" ]; then
+      log debug "📡 ALB hostname resolved via Ingress: $GATEWAY_IP"
+    else
+      log debug "📡 ALB Ingress not found, resolving gateway address directly..."
 
       GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-        -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null)
-      RECORD_TYPE="CNAME"
-    fi
-
-    if [ -z "$GATEWAY_IP" ]; then
-      log warn "⚠️  Gateway hostname not found, trying service fallback..."
-
-      GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
-        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+        -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
       RECORD_TYPE="A"
-    fi
 
-    if [ -z "$GATEWAY_IP" ]; then
-      log warn "⚠️  Gateway service IP not found, trying service hostname fallback..."
+      if [ -z "$GATEWAY_IP" ]; then
+        log warn "⚠️  Gateway IP not found, trying hostname..."
 
-      GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
-      RECORD_TYPE="CNAME"
+        GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null)
+        RECORD_TYPE="CNAME"
+      fi
+
+      if [ -z "$GATEWAY_IP" ]; then
+        log warn "⚠️  Gateway hostname not found, trying service fallback..."
+
+        GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+        RECORD_TYPE="A"
+      fi
+
+      if [ -z "$GATEWAY_IP" ]; then
+        log warn "⚠️  Gateway service IP not found, trying service hostname fallback..."
+
+        GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+        RECORD_TYPE="CNAME"
+      fi
     fi
 
     if [ -z "$GATEWAY_IP" ]; then
       log warn "⚠️  Could not determine gateway IP address yet, DNSEndpoint will be created later"
       exit 0
-    fi
-
-    # If the resolved address is a cluster-internal service name, look for the ALB via Ingress
-    if echo "$GATEWAY_IP" | grep -q "\.svc\.cluster\.local"; then
-      log warn "⚠️  Gateway address is cluster-internal ($GATEWAY_IP), trying ALB Ingress fallback..."
-      GATEWAY_SUFFIX="${GATEWAY_NAME#gateway-}"
-      ALB_HOSTNAME=$(kubectl get ingress "gateway-alb-${GATEWAY_SUFFIX}" -n gateways \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
-      if [ -n "$ALB_HOSTNAME" ]; then
-        GATEWAY_IP="$ALB_HOSTNAME"
-        RECORD_TYPE="CNAME"
-        log info "✅ ALB hostname resolved via Ingress: $GATEWAY_IP"
-      else
-        log warn "⚠️  ALB Ingress hostname not found, keeping cluster-internal address"
-      fi
     fi
 
     log info "✅ Gateway address: $GATEWAY_IP (recordType: $RECORD_TYPE)"
