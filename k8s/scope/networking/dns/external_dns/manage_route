@@ -59,8 +59,15 @@ if [ "$ACTION" = "CREATE" ]; then
       DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
       CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
 
+      if [ "${SCOPE_VISIBILITY:-}" = "public" ]; then
+        DNS_ZONE_TYPE="public"
+      else
+        DNS_ZONE_TYPE="private"
+      fi
+
       echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" --arg record_type "$RECORD_TYPE" \
-        '. + {gateway_ip: $gateway_ip, record_type: $record_type}' > "$CONTEXT_PATH"
+        --arg dns_zone_type "$DNS_ZONE_TYPE" \
+        '. + {gateway_ip: $gateway_ip, record_type: $record_type, dns_zone_type: $dns_zone_type}' > "$CONTEXT_PATH"
 
       log debug "📝 Building DNSEndpoint from template: $DNS_ENDPOINT_TEMPLATE"
 
