@@ -39,6 +39,21 @@ if [ "$ACTION" = "CREATE" ]; then
       exit 0
     fi
 
+    # If the resolved address is a cluster-internal service name, look for the ALB via Ingress
+    if echo "$GATEWAY_IP" | grep -q "\.svc\.cluster\.local"; then
+      log warn "⚠️  Gateway address is cluster-internal ($GATEWAY_IP), trying ALB Ingress fallback..."
+      GATEWAY_SUFFIX="${GATEWAY_NAME#gateway-}"
+      ALB_HOSTNAME=$(kubectl get ingress "gateway-alb-${GATEWAY_SUFFIX}" -n gateways \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      if [ -n "$ALB_HOSTNAME" ]; then
+        GATEWAY_IP="$ALB_HOSTNAME"
+        RECORD_TYPE="CNAME"
+        log info "✅ ALB hostname resolved via Ingress: $GATEWAY_IP"
+      else
+        log warn "⚠️  ALB Ingress hostname not found, keeping cluster-internal address"
+      fi
+    fi
+
     log info "✅ Gateway address: $GATEWAY_IP (recordType: $RECORD_TYPE)"
 
     DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
