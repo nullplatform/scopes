@@ -57,7 +57,7 @@ metadata:
 spec:
   ports:
     - protocol: TCP
-      port: 8080
+      port: {{ .main_http_port }}
       targetPort: 80
   selector:
     nullplatform: "true"

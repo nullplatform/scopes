@@ -800,3 +800,31 @@ SCRIPT
   assert_equal "$grpc_exists" "true"
   assert_equal "$http_exists" "false"
 }
+
+# =============================================================================
+# main_http_port extraction tests (CLIEN-739)
+# =============================================================================
+
+@test "main_http_port: defaults to 8080 when capability missing" {
+  CONTEXT='{"scope":{"capabilities":{}}}'
+  result=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
+  assert_equal "$result" "8080"
+}
+
+@test "main_http_port: defaults to 8080 when capability is null" {
+  CONTEXT='{"scope":{"capabilities":{"main_http_port":null}}}'
+  result=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
+  assert_equal "$result" "8080"
+}
+
+@test "main_http_port: respects explicit value when set" {
+  CONTEXT='{"scope":{"capabilities":{"main_http_port":9090}}}'
+  result=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
+  assert_equal "$result" "9090"
+}
+
+@test "main_http_port: jq cast to number preserves integer type for templates" {
+  MAIN_HTTP_PORT="9090"
+  result=$(echo '{}' | jq --arg main_http_port "$MAIN_HTTP_PORT" '. + {main_http_port: ($main_http_port | tonumber)} | .main_http_port')
+  assert_equal "$result" "9090"
+}
