@@ -58,7 +58,7 @@ spec:
         - group: ""
           kind: Service
           name: d-{{ .scope.id }}-{{ .deployment.id }}
-          port: 8080
+          port: {{ .main_http_port }}
           weight: 1
       matches:
         - path:

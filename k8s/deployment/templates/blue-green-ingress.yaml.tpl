@@ -30,8 +30,8 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/actions.bg-deployment: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
-        {"serviceName":"d-{{ .scope.id }}-{{ .blue_deployment_id }}","servicePort":8080,"weight":{{ sub 100 .deployment.strategy_data.desired_switched_traffic }}},
-        {"serviceName":"d-{{ .scope.id }}-{{ .deployment.id }}","servicePort":8080,"weight":{{ .deployment.strategy_data.desired_switched_traffic }}}
+        {"serviceName":"d-{{ .scope.id }}-{{ .blue_deployment_id }}","servicePort":{{ .main_http_port }},"weight":{{ sub 100 .deployment.strategy_data.desired_switched_traffic }}},
+        {"serviceName":"d-{{ .scope.id }}-{{ .deployment.id }}","servicePort":{{ .main_http_port }},"weight":{{ .deployment.strategy_data.desired_switched_traffic }}}
       ]}}
     alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
     alb.ingress.kubernetes.io/group.name: {{ .alb_name }}

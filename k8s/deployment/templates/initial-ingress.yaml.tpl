@@ -62,7 +62,7 @@ spec:
               service:
                 name: d-{{ .scope.id }}-{{ .deployment.id }}
                 port:
-                  number: 8080
+                  number: {{ .main_http_port }}
 {{- range .scope.domains }}
     - host: {{ .name }}
       http:
@@ -73,7 +73,7 @@ spec:
               service:
                 name: d-{{ $.scope.id }}-{{ $.deployment.id }}
                 port:
-                  number: 8080
+                  number: {{ $.main_http_port }}
 {{- end }}
 {{ if .scope.capabilities.additional_ports }}
 {{ range .scope.capabilities.additional_ports }}

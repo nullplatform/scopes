@@ -245,6 +245,10 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
+# Main HTTP port — defaults to 8080 if not set on the scope (CLIEN-739)
+MAIN_HTTP_PORT=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
+log debug "🔍 main_http_port resolved to ${MAIN_HTTP_PORT}"
+
 # Check if blue deployment has K8s services for additional ports
 BLUE_ADDITIONAL_PORT_SERVICES="{}"
 if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
@@ -280,6 +284,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg container_memory_in_memory "$CONTAINER_MEMORY_IN_MEMORY" \
           --arg container_cpu_in_millicores "$CONTAINER_CPU_IN_MILLICORES" \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
+          --arg main_http_port "$MAIN_HTTP_PORT" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -292,7 +297,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 traffic_manager_config_map: $traffic_manager_config_map,
                 container_memory_in_memory: $container_memory_in_memory,
                 container_cpu_in_millicores: $container_cpu_in_millicores,
-                blue_additional_port_services: $blue_additional_port_services
+                blue_additional_port_services: $blue_additional_port_services,
+                main_http_port: ($main_http_port | tonumber)
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
