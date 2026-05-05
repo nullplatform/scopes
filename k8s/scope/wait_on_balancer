@@ -15,76 +15,35 @@ case "$DNS_TYPE" in
 
     log debug "📋 Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
 
-    # Private scopes use the internal hosted zone — not resolvable via public DNS.
-    # For those, wait for observedGeneration instead of DNS resolution.
-    if [ "${SCOPE_VISIBILITY:-}" != "public" ]; then
-        log debug "📋 Private scope — waiting for DNSEndpoint observedGeneration (not resolvable via public DNS)"
+    while true; do
+        iteration=$((iteration + 1))
+        if [ $iteration -gt $MAX_ITERATIONS ]; then
+            log error ""
+            log error "   ❌ DNSEndpoint processing timeout after $((MAX_ITERATIONS * 10))s"
+            log error ""
+            log error "💡 Possible causes:"
+            log error "   ExternalDNS may still be processing the DNSEndpoint resource"
+            log error ""
+            log error "🔧 How to fix:"
+            log error "   • Check DNSEndpoint resources: kubectl get dnsendpoint -A"
+            log error "   • Check ExternalDNS logs: kubectl logs -n external-dns -l app=external-dns --tail=50"
+            log error ""
+            exit 1
+        fi
 
-        while true; do
-            iteration=$((iteration + 1))
-            if [ $iteration -gt $MAX_ITERATIONS ]; then
-                log error ""
-                log error "   ❌ DNSEndpoint processing timeout after $((MAX_ITERATIONS * 10))s"
-                log error ""
-                log error "💡 Possible causes:"
-                log error "   ExternalDNS may still be processing the DNSEndpoint resource"
-                log error ""
-                log error "🔧 How to fix:"
-                log error "   • Check DNSEndpoint resources: kubectl get dnsendpoint -A"
-                log error "   • Check ExternalDNS logs: kubectl logs -n external-dns -l app=external-dns --tail=50"
-                log error ""
-                exit 1
-            fi
+        log debug "🔍 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME (attempt $iteration/$MAX_ITERATIONS)"
 
-            log debug "🔍 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME (attempt $iteration/$MAX_ITERATIONS)"
+        OBSERVED_GEN=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" \
+            -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo "")
 
-            OBSERVED_GEN=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" \
-                -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo "")
+        if [ "${OBSERVED_GEN:-0}" -ge 1 ] 2>/dev/null; then
+            log info "   ✅ DNSEndpoint $DNS_ENDPOINT_NAME processed by ExternalDNS (observedGeneration=$OBSERVED_GEN)"
+            break
+        fi
 
-            if [ "${OBSERVED_GEN:-0}" -ge 1 ] 2>/dev/null; then
-                log info "   ✅ DNSEndpoint $DNS_ENDPOINT_NAME processed by ExternalDNS (observedGeneration=$OBSERVED_GEN)"
-                break
-            fi
-
-            log debug "📋 DNSEndpoint not yet processed, waiting 10s..."
-            sleep 10
-        done
-    else
-        while true; do
-            iteration=$((iteration + 1))
-            if [ $iteration -gt $MAX_ITERATIONS ]; then
-                log error ""
-                log error "   ❌ DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
-                log error ""
-                log error "💡 Possible causes:"
-                log error "   ExternalDNS may still be processing the DNSEndpoint resource"
-                log error ""
-                log error "🔧 How to fix:"
-                log error "   • Check DNSEndpoint resources: kubectl get dnsendpoint -A"
-                log error "   • Check ExternalDNS logs: kubectl logs -n external-dns -l app=external-dns --tail=50"
-                log error ""
-                exit 1
-            fi
-
-            log debug "🔍 Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
-            log debug "📋 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
-
-            DNS_STATUS=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || echo "not found")
-            if [ "$DNS_STATUS" != "not found" ] && [ -n "$DNS_STATUS" ]; then
-                log debug "📋 DNSEndpoint status: $DNS_STATUS"
-            fi
-
-            if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
-                log info "   ✅ DNS record for $SCOPE_DOMAIN is now resolvable"
-                RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 2>/dev/null | awk '/^Address/ && !/8\.8\.8\.8/ {print $2; exit}' || echo "unknown")
-                log info "   ✅ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
-                break
-            fi
-
-            log debug "📋 DNS record not yet available, waiting 10s..."
-            sleep 10
-        done
-    fi
+        log debug "📋 DNSEndpoint not yet processed, waiting 10s..."
+        sleep 10
+    done
 
     log info ""
     log info "✨ ExternalDNS setup completed successfully"
