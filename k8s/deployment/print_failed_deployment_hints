@@ -1,6 +1,11 @@
 #!/bin/bash
 
 
+# Skip the generic checklist when the caller already pinpointed a specific reason.
+if [[ -n "$SUGGESTED_FIX" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r .scope.capabilities.health_check.path)
 REQUESTED_MEMORY=$(echo "$CONTEXT" | jq -r .scope.capabilities.ram_memory)
 SCOPE_NAME=$(echo "$CONTEXT" | jq -r .scope.name)
