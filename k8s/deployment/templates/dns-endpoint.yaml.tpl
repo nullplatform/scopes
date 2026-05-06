@@ -1,7 +1,7 @@
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
-  name: k-8-s-{{ .scope.slug }}-{{ .scope.id }}-dns
+  name: k8s-{{ .application.slug | strings.Trunc 20 | strings.TrimSuffix "-" }}-{{ .scope.slug | strings.Trunc 20 | strings.TrimSuffix "-" }}-{{ .scope.id }}-dns
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"
