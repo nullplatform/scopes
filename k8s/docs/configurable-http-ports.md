@@ -32,20 +32,25 @@ The port your application binds to inside the container. When set, the following
 - `port`: integer 1024–65535
 - `type`: `"GRPC"` or `"HTTP"`
 
-For `HTTP` ports, the deployment generates:
+For both `HTTP` and `GRPC` additional ports, the deployment generates:
 
-- A `containerPort: {port}` declaration on the application container — **the application is expected to bind this port directly**. No sidecar is involved.
-- A `Service` named `d-{scope_id}-{deployment_id}-http-{port}` with `targetPort: {port}` that routes external traffic to the application's port.
-- An `Ingress` for the additional HTTP listener.
+- A traffic-manager sidecar that binds the additional port externally and proxies traffic to the application on its `main_http_port`. The container is named `http-{port}` for HTTP and `grpc-{port}` for GRPC.
+- A `Service` named `d-{scope_id}-{deployment_id}-{http|grpc}-{port}` with `targetPort: {port}` that routes external traffic to the sidecar.
+- An `Ingress` for the additional listener.
 
-For `GRPC` ports, the existing gRPC sidecar pattern is unchanged: a `grpc-{port}` traffic-manager sidecar terminates gRPC on `{port}` and proxies HTTP to the application's `main_http_port`. The application does NOT bind gRPC additional ports — the sidecar does — which is why the protocol distinction matters.
+**Important contract:** the application **must NOT bind additional ports** itself. The application binds only `main_http_port`. The sidecar at `{port}` proxies all traffic to `localhost:main_http_port`, where the application serves requests. This is identical to the existing gRPC pattern, just extended to HTTP.
+
+The sidecar is not a no-op pass-through — it provides nginx-level metrics, graceful-shutdown handling, body-size limits, and protocol translation (for gRPC). Removing it would lose those features.
 
 | | HTTP additional port | GRPC additional port |
 |---|---|---|
-| App binds the port | yes | no (sidecar binds it) |
-| Sidecar created | no | yes (`grpc-{port}` traffic-manager) |
-| Service `targetPort` | `{port}` (the app) | `{port}` (the sidecar) |
-| Protocol translation | none | gRPC → HTTP to app on `main_http_port` |
+| App binds the port | no (sidecar binds it) | no (sidecar binds it) |
+| Sidecar created | yes (`http-{port}` traffic-manager) | yes (`grpc-{port}` traffic-manager) |
+| Service `targetPort` | `{port}` (the sidecar) | `{port}` (the sidecar) |
+| Sidecar `UPSTREAM_PORT` | `main_http_port` | `main_http_port` (default in image) |
+| Protocol translation | none (HTTP→HTTP) | gRPC → HTTP |
+
+If your application code currently binds an additional port directly (e.g., `app.listen(9090)`), remove that listener — nullplatform's sidecar handles the external binding. Your app will receive requests for the additional port on its `main_http_port` listener.
 
 ## Backward Compatibility
 

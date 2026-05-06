@@ -231,6 +231,63 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+        {{ else if eq .type "HTTP" }}
+        - name: http-{{ .port }}
+          securityContext:
+            runAsUser: 0
+          image: {{ $.traffic_image }}
+          ports:
+            - containerPort: {{ .port }}
+              protocol: TCP
+          env:
+            - name: UPSTREAM_PORT
+              value: '{{ $.main_http_port }}'
+            - name: HEALTH_CHECK_TYPE
+              value: http
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: http
+            - name: LISTENER_PORT
+              value: '{{ .port }}'
+            - name: HEALTH_CHECK_PATH
+              value: {{ $.scope.capabilities.health_check.path }}
+          resources:
+            limits:
+              cpu: {{ $.container_cpu_in_millicores }}m
+              memory: {{ $.container_memory_in_memory }}Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
         {{ end }}
         {{ end }}
         {{ end }}
@@ -245,14 +302,6 @@ spec:
           ports:
             - containerPort: {{ .main_http_port }}
               protocol: TCP
-            {{ if .scope.capabilities.additional_ports }}
-            {{ range .scope.capabilities.additional_ports }}
-            {{ if eq .type "HTTP" }}
-            - containerPort: {{ .port }}
-              protocol: TCP
-            {{ end }}
-            {{ end }}
-            {{ end }}
           resources:
             limits:
               cpu: {{ .scope.capabilities.cpu_millicores }}m
