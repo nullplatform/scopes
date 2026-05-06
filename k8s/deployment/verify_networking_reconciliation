@@ -8,21 +8,6 @@ case "$DNS_TYPE" in
     source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
     ;;
   external_dns)
-    if [ "${SCOPE_VISIBILITY:-}" = "internal" ]; then
-      GATEWAY_NAME="${PRIVATE_GATEWAY_NAME:-gateway-private}"
-    else
-      GATEWAY_NAME="${PUBLIC_GATEWAY_NAME:-gateway-public}"
-    fi
-
-    export ACTION="CREATE" GATEWAY_NAME="$GATEWAY_NAME"
-    source "$SERVICE_PATH/scope/networking/dns/external_dns/manage_route"
-
-    DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
-    if [ -f "$DNS_ENDPOINT_FILE" ]; then
-      kubectl apply -f "$DNS_ENDPOINT_FILE"
-      log info "✅ DNSEndpoint applied to cluster"
-    fi
-
     source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
     ;;
   *)

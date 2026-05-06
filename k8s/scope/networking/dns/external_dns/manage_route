@@ -95,7 +95,10 @@ elif [ "$ACTION" = "DELETE" ]; then
     log debug "🔍 Deleting DNSEndpoint for external_dns..."
 
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
-    DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
+    APP_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
+    APP_SLUG_SHORT="${APP_SLUG:0:20}"; APP_SLUG_SHORT="${APP_SLUG_SHORT%-}"
+    SCOPE_SLUG_SHORT="${SCOPE_SLUG:0:20}"; SCOPE_SLUG_SHORT="${SCOPE_SLUG_SHORT%-}"
+    DNS_ENDPOINT_NAME="k8s-${APP_SLUG_SHORT}-${SCOPE_SLUG_SHORT}-${SCOPE_ID}-dns"
     log debug "📝 Deleting DNSEndpoint: $DNS_ENDPOINT_NAME in namespace $K8S_NAMESPACE"
     kubectl delete dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" || {
       log warn "⚠️  DNSEndpoint '$DNS_ENDPOINT_NAME' may already be deleted"
