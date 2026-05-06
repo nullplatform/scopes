@@ -34,11 +34,18 @@ The port your application binds to inside the container. When set, the following
 
 For `HTTP` ports, the deployment generates:
 
-- A traffic-manager sidecar named `http-{port}` listening on `{port}` and proxying to the application on the same `{port}`.
-- A `Service` named `d-{scope_id}-{deployment_id}-http-{port}` exposing `{port}`.
+- A `containerPort: {port}` declaration on the application container — **the application is expected to bind this port directly**. No sidecar is involved.
+- A `Service` named `d-{scope_id}-{deployment_id}-http-{port}` with `targetPort: {port}` that routes external traffic to the application's port.
 - An `Ingress` for the additional HTTP listener.
 
-For `GRPC` ports, the existing gRPC sidecar pattern is unchanged.
+For `GRPC` ports, the existing gRPC sidecar pattern is unchanged: a `grpc-{port}` traffic-manager sidecar terminates gRPC on `{port}` and proxies HTTP to the application's `main_http_port`. The application does NOT bind gRPC additional ports — the sidecar does — which is why the protocol distinction matters.
+
+| | HTTP additional port | GRPC additional port |
+|---|---|---|
+| App binds the port | yes | no (sidecar binds it) |
+| Sidecar created | no | yes (`grpc-{port}` traffic-manager) |
+| Service `targetPort` | `{port}` (the app) | `{port}` (the sidecar) |
+| Protocol translation | none | gRPC → HTTP to app on `main_http_port` |
 
 ## Backward Compatibility
 
