@@ -574,7 +574,7 @@
                      ],
                      "type":"string",
                      "title":"Port Type",
-                     "default": "GRPC",
+                     "default": "HTTP",
                      "description":"The protocol type for this port"
                   }
                }
