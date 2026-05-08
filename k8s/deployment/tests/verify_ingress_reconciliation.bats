@@ -244,7 +244,7 @@ teardown() {
   assert_contains "$output" "📋 ALB validation enabled: k8s-test-alb for domain app.example.com"
   assert_contains "$output" "📝 Checking domain: app.example.com"
   assert_contains "$output" "✅ Found rule for domain: app.example.com"
-  assert_contains "$output" "❌ Weights mismatch on listener port 443: expected=50/50 actual=20/80"
+  assert_contains "$output" "❌ Weights mismatch on listener port 443: expected=50 actual=20/80"
 }
 
 @test "verify_ingress_reconciliation: skips weight check on additional port listener when blue has no service" {
@@ -289,6 +289,82 @@ teardown() {
   assert_contains "$output" "Skipping weight check on listener port 50051"
   assert_contains "$output" "✅ Weights match on listener port 443"
   assert_contains "$output" "✅ ALB configuration validated successfully"
+}
+
+@test "verify_ingress_reconciliation: passes when multiple rules on same listener share expected weights (CLIEN-739)" {
+  # Scenario: scope has main + additional HTTP port ingresses sharing the ALB listener.
+  # Both rules match the same host-header and each carries blue/green target groups with
+  # the same blue-green split (90/10). The pre-dedupe extractor returned "10/10/90/90"
+  # and falsely failed against expected "10/90". Dedupe makes the comparison correct.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]},{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' VERIFY_WEIGHTS='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Weights match on listener port 443"
+  assert_contains "$output" "✅ ALB configuration validated successfully"
+}
+
+@test "verify_ingress_reconciliation: detects mismatch when one rule diverges from expected (CLIEN-739)" {
+  # Scenario: main rule has correct 90/10 split, additional port rule has wrong 50/50 split.
+  # After dedupe the unique values become 10/50/90, which does not match expected 10/90.
+  # Confirms that dedupe still surfaces real misconfigurations across multiple rules.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]},{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":50},{\"Weight\":50}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' VERIFY_WEIGHTS='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Weights mismatch on listener port 443: expected=10/90 actual=10/50/90"
 }
 
 @test "verify_ingress_reconciliation: detects domain not found in ALB rules" {
