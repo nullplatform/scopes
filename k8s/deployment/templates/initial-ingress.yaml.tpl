@@ -110,7 +110,7 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/group.name: {{ $.alb_name }}
     {{ if eq .type "HTTP" }}
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     {{ else if eq .type "GRPC" }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC

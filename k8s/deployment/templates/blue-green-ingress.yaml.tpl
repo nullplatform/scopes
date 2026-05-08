@@ -145,8 +145,7 @@ metadata:
     alb.ingress.kubernetes.io/target-node-labels: account={{ $.account.slug }},namespace={{ $.namespace.slug }},application={{ $.application.slug }},account_id={{ $.account.id }},namespace_id={{ $.namespace.id }},application_id={{ $.application.id }},scope={{ $.scope.slug }},scope_id={{ $.scope.id }},nullplatform=true
     alb.ingress.kubernetes.io/target-type: ip
     {{ if eq .type "HTTP" }}
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     {{ else if eq .type "GRPC" }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{{ .port }}}]'
     alb.ingress.kubernetes.io/backend-protocol-version: GRPC
