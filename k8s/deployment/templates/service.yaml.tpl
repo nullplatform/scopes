@@ -142,7 +142,7 @@ spec:
   ports:
     - protocol: TCP
       port: {{ .port }}
-      targetPort: {{ .port }}
+      targetPort: {{ add .port 10000 }}
   selector:
     nullplatform: "true"
     account: {{ $.account.slug }}

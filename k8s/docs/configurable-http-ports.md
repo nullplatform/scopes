@@ -32,25 +32,48 @@ The port your application binds to inside the container. When set, the following
 - `port`: integer 1024–65535
 - `type`: `"GRPC"` or `"HTTP"`
 
-For both `HTTP` and `GRPC` additional ports, the deployment generates:
+For each additional port (HTTP or GRPC), the deployment generates a traffic-manager sidecar that handles external traffic. The sidecar is **always** in the request path: it adds nginx-level metrics, graceful-shutdown handling, and body-size limits.
 
-- A traffic-manager sidecar that binds the additional port externally and proxies traffic to the application on its `main_http_port`. The container is named `http-{port}` for HTTP and `grpc-{port}` for GRPC.
-- A `Service` named `d-{scope_id}-{deployment_id}-{http|grpc}-{port}` with `targetPort: {port}` that routes external traffic to the sidecar.
-- An `Ingress` for the additional listener.
+The architecture differs slightly between HTTP and GRPC because of how the application is expected to bind ports:
 
-**Important contract:** the application **must NOT bind additional ports** itself. The application binds only `main_http_port`. The sidecar at `{port}` proxies all traffic to `localhost:main_http_port`, where the application serves requests. This is identical to the existing gRPC pattern, just extended to HTTP.
+### HTTP additional port — same model as `main_http_port`
 
-The sidecar is not a no-op pass-through — it provides nginx-level metrics, graceful-shutdown handling, body-size limits, and protocol translation (for gRPC). Removing it would lose those features.
+The application **binds the additional port directly** (e.g., `app.listen(9090)`), exactly the way it binds `main_http_port`. The sidecar bindes a different *internal* port, `port + 10000`, to avoid colliding with the application. K8s `Service` exposes `port` externally and routes to the sidecar's internal port; the sidecar then proxies to the application on `port`.
+
+For example, with `main_http_port=8081` and `additional_port: {port: 9090, type: HTTP}`:
+
+```
+External client
+    │ http://service:9090
+    ▼
+K8s Service "d-{scope}-{deploy}-http-9090"   port: 9090, targetPort: 19090
+    │
+    ▼
+Sidecar container "http-9090"   listens on 19090  →  proxies to localhost:9090
+    │
+    ▼
+Application container   binds 9090 (and also 8081 for the main listener)
+```
+
+The application sees two real listeners: `8081` (main) and `9090` (additional). External traffic to either flows through its respective sidecar (the main `http` sidecar for `8081`, the `http-9090` sidecar for `9090`).
+
+**Constraint:** because the sidecar uses `port + 10000`, the additional port must be `≤ 55535` for HTTP. Above that the offset overflows the 65535 max TCP port.
+
+### GRPC additional port — sidecar terminates protocol
+
+The application does **NOT** bind GRPC additional ports. The `grpc-{port}` sidecar binds `{port}` directly and translates gRPC into HTTP, proxying to `localhost:main_http_port`. The application speaks only HTTP on `main_http_port` and serves both main HTTP traffic and any incoming gRPC requests (received already translated to HTTP).
+
+### Summary
 
 | | HTTP additional port | GRPC additional port |
 |---|---|---|
-| App binds the port | no (sidecar binds it) | no (sidecar binds it) |
-| Sidecar created | yes (`http-{port}` traffic-manager) | yes (`grpc-{port}` traffic-manager) |
-| Service `targetPort` | `{port}` (the sidecar) | `{port}` (the sidecar) |
-| Sidecar `UPSTREAM_PORT` | `main_http_port` | `main_http_port` (default in image) |
-| Protocol translation | none (HTTP→HTTP) | gRPC → HTTP |
-
-If your application code currently binds an additional port directly (e.g., `app.listen(9090)`), remove that listener — nullplatform's sidecar handles the external binding. Your app will receive requests for the additional port on its `main_http_port` listener.
+| App binds the port | yes, directly | no (sidecar binds it) |
+| Sidecar internal port | `port + 10000` | `port` |
+| Service `port` (external) | `port` | `port` |
+| Service `targetPort` | `port + 10000` (sidecar) | `port` (sidecar) |
+| Sidecar `UPSTREAM_PORT` | `port` (the app's same port) | `main_http_port` (default in image) |
+| Protocol translation | none | gRPC → HTTP |
+| Max valid `port` | 55535 | 65535 |
 
 ## Backward Compatibility
 
