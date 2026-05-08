@@ -72,7 +72,7 @@ is_blocked() {
 involves_secrets() {
   local arg lower token res
   for arg in "$@"; do
-    lower="${arg,,}"
+    lower=$(echo "$arg" | tr '[:upper:]' '[:lower:]')
     local IFS=,
     for token in $lower; do
       res="${token%%/*}"
