@@ -245,9 +245,21 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
-# Main HTTP port — defaults to 8080 if not set on the scope (CLIEN-739)
 MAIN_HTTP_PORT=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
 log debug "🔍 main_http_port resolved to ${MAIN_HTTP_PORT}"
+
+# Enrich each additional_ports entry with traffic_manager_port = port + 10000.
+# Convention: the traffic-manager sidecar that fronts an additional port binds
+# <port>+10000 inside the pod so the application can bind <port> directly. The
+# fixed +10000 offset makes it trivial to identify which sidecar belongs to
+# which application port at a glance (e.g. app 8081 -> sidecar 18081). Keeping
+# the math here (instead of in every template) means consumers just read
+# .traffic_manager_port and never re-derive it.
+CONTEXT=$(echo "$CONTEXT" | jq '
+  if (.scope.capabilities.additional_ports | type) == "array" then
+    .scope.capabilities.additional_ports |= map(. + {traffic_manager_port: (.port + 10000)})
+  else . end
+')
 
 # Check if blue deployment has K8s services for additional ports
 BLUE_ADDITIONAL_PORT_SERVICES="{}"
