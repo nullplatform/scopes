@@ -75,6 +75,44 @@ The application does **NOT** bind GRPC additional ports. The `grpc-{port}` sidec
 | Protocol translation | none | gRPC → HTTP |
 | Max valid `port` | 55535 | 65535 |
 
+## ALB capacity and listener lifecycle
+
+### Each additional port opens its own ALB listener
+
+The Ingress generated for each additional port (HTTP or GRPC) declares `alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":{port}}]'`. This means **every additional port translates into a dedicated listener on the shared ALB** (`spec.ports[].port == {scope additional port}`). The main scope ingress keeps its standard `[{"HTTP":80},{"HTTPS":443}]` listener pair.
+
+Concrete example for an ALB shared by three scopes, each with `main_http_port=8081` plus one HTTP additional port `9090`, `9091`, and `9092` respectively:
+
+| ALB listener | Source ingress | Backend |
+|---|---|---|
+| `:80` | All scopes (main) | Main sidecar `http` |
+| `:443` | All scopes (main) | Main sidecar `http` |
+| `:9090` | scope A `http-9090` ingress | Sidecar `http-9090` of scope A |
+| `:9091` | scope B `http-9091` ingress | Sidecar `http-9091` of scope B |
+| `:9092` | scope C `http-9092` ingress | Sidecar `http-9092` of scope C |
+
+The main listeners (80/443) are shared across all scopes via the IngressGroup; one listener serves many ingress rules (one per scope host). Additional ports are NOT shared by default — each port is a separate listener.
+
+### AWS limit: 50 listeners per ALB
+
+This is an AWS hard quota. With many scopes using additional ports on the same ALB, the listener count climbs quickly: each scope adds 1 listener per HTTP/GRPC additional port. A pre-flight check in `k8s/deployment/validate_alb_target_group_capacity` rejects deployments when the ALB would exceed `ALB_MAX_LISTENERS` (default `48`, leaves 2 slots of headroom before the AWS limit). The threshold is configurable in `values.yaml` or via the `scope-configurations`/`container-orchestration` provider.
+
+If a deployment fails with `❌ ALB 'NAME' has reached listener capacity: X/48`, the operator options are:
+- Reduce `additional_ports` across the scopes sharing the ALB
+- Increase `ALB_MAX_LISTENERS` (only safe up to 49 — at 50 the next deploy will hit the AWS quota itself)
+- Request an AWS service-quota increase for listeners per ALB (the limit is technically adjustable, although AWS tends to deny large increases)
+- Move some scopes to a separate ALB (the recommended path)
+
+### Listeners are cleaned up automatically
+
+Operators do not need to manage ALB listeners by hand. The AWS Load Balancer Controller owns listener lifecycle through the IngressGroup mechanism:
+
+- When the **first** Ingress with `alb.ingress.kubernetes.io/listen-ports` referencing a given port is created, the controller adds that listener to the shared ALB.
+- When the **last** Ingress referencing that port is deleted, the controller removes the listener.
+- In between, multiple Ingresses on the same port coexist as different rules on a single listener; the controller never duplicates the listener itself.
+
+This means deleting a deployment (which deletes its Ingresses) is sufficient to reclaim listener capacity — no manual cleanup of the ALB is required. If a scope is the only consumer of a particular additional port across the ALB, deleting that scope returns the listener to the pool and frees an `ALB_MAX_LISTENERS` slot for the next deployment.
+
 ## Backward Compatibility
 
 - Existing scopes that do not set `main_http_port` get `8080` automatically via the JSON Schema default and the `// 8080` jq fallback in `build_context`. No migration is required.
@@ -92,3 +130,6 @@ The application does **NOT** bind GRPC additional ports. The `grpc-{port}` sidec
 ## Tests
 
 - `k8s/deployment/tests/build_context.bats` covers `main_http_port` extraction with present, absent, and `null` cases, and verifies the `tonumber` cast.
+- `k8s/deployment/tests/ingress_template_shape.bats` verifies the per-port HTTPS listener annotation on each ingress branch and pins the absence of `ssl-redirect` on additional-port ingresses.
+- `k8s/deployment/tests/verify_ingress_reconciliation.bats` covers the weight-dedupe behavior introduced because a shared ALB listener used to surface multiple matching rules (the multi-rule scenario is no longer reachable now that each additional port has its own listener, but the dedupe is kept defensively).
+- `k8s/deployment/tests/validate_alb_target_group_capacity.bats` covers both target-group capacity and the listener-capacity validation (`ALB_MAX_LISTENERS`).
