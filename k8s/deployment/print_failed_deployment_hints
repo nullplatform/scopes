@@ -1,28 +1,174 @@
 #!/bin/bash
 
 
-# Skip the generic checklist when the caller already pinpointed a specific reason.
-if [[ -n "$SUGGESTED_FIX" ]]; then
-    return 0 2>/dev/null || exit 0
+ALL_EVENTS="${ALL_EVENTS:-{\"items\":[]\}}"
+
+FAILURE_REASON=""
+FAILURE_MESSAGE=""
+FAILURE_CONTAINER=""
+FAILURE_EXIT_CODE=""
+TOP_EVENT_REASONS=""
+HUMAN_MESSAGE=""
+SUGGESTED_FIX=""
+
+diagnose_failure() {
+    local pods_json=""
+    if [[ -n "${K8S_NAMESPACE:-}" && -n "${DEPLOYMENT_ID:-}" ]] && command -v kubectl >/dev/null 2>&1; then
+        pods_json=$(kubectl get pods -n "$K8S_NAMESPACE" -l "deployment_id=${DEPLOYMENT_ID}" -o json 2>/dev/null)
+    fi
+
+    if [[ -n "$pods_json" ]] && echo "$pods_json" | jq -e . >/dev/null 2>&1; then
+        FAILURE_REASON=$(echo "$pods_json" | jq -r '
+            [.items[].status.containerStatuses[]?
+                | (.state.waiting.reason // .lastState.terminated.reason // empty)
+            ] | map(select(. != "" and . != "Completed")) |
+            group_by(.) | max_by(length) | .[0] // empty' 2>/dev/null)
+
+        if [[ -n "$FAILURE_REASON" ]]; then
+            FAILURE_MESSAGE=$(echo "$pods_json" | jq -r --arg r "$FAILURE_REASON" '
+                [.items[].status.containerStatuses[]?
+                    | select(.state.waiting.reason == $r or .lastState.terminated.reason == $r)
+                    | (.state.waiting.message // .lastState.terminated.message // empty)
+                ] | map(select(. != "")) | .[0] // empty' 2>/dev/null)
+
+            FAILURE_CONTAINER=$(echo "$pods_json" | jq -r --arg r "$FAILURE_REASON" '
+                [.items[].status.containerStatuses[]?
+                    | select(.state.waiting.reason == $r or .lastState.terminated.reason == $r)
+                    | .name
+                ] | .[0] // empty' 2>/dev/null)
+
+            FAILURE_EXIT_CODE=$(echo "$pods_json" | jq -r --arg r "$FAILURE_REASON" '
+                [.items[].status.containerStatuses[]?
+                    | select(.lastState.terminated.reason == $r)
+                    | .lastState.terminated.exitCode
+                ] | map(select(. != null)) | .[0] // empty' 2>/dev/null)
+        fi
+    fi
+
+    TOP_EVENT_REASONS=$(echo "$ALL_EVENTS" | jq -r '
+        .items | map(select(.type == "Warning")) |
+        group_by(.reason) |
+        map({reason: .[0].reason, count: length}) |
+        sort_by(-.count) | .[0:3][] |
+        "  • \(.reason) (×\(.count))"' 2>/dev/null)
+
+    if [[ -z "$FAILURE_REASON" ]]; then
+        FAILURE_REASON=$(echo "$ALL_EVENTS" | jq -r '
+            .items | map(select(.type == "Warning")) |
+            group_by(.reason) | max_by(length) | .[0].reason // empty' 2>/dev/null)
+    fi
+
+    local req_memory scope_name health_check_path
+    req_memory=$(echo "${CONTEXT:-{\}}" | jq -r '.scope.capabilities.ram_memory // empty' 2>/dev/null)
+    scope_name=$(echo "${CONTEXT:-{\}}" | jq -r '.scope.name // empty' 2>/dev/null)
+    health_check_path=$(echo "${CONTEXT:-{\}}" | jq -r '.scope.capabilities.health_check.path // "/"' 2>/dev/null)
+
+    case "$FAILURE_REASON" in
+        ImagePullBackOff|ErrImagePull)
+            HUMAN_MESSAGE="The container image could not be pulled."
+            SUGGESTED_FIX="Verify the image name, tag, and registry credentials are correct." ;;
+        CrashLoopBackOff|BackOff)
+            HUMAN_MESSAGE="The container started and crashed repeatedly."
+            SUGGESTED_FIX="Review application logs for startup errors (failed dependencies, bad config, panics)." ;;
+        OOMKilled)
+            HUMAN_MESSAGE="The container exceeded its memory limit (${req_memory}Mi) and was terminated."
+            SUGGESTED_FIX="Increase ram_memory for scope '$scope_name' or reduce application memory usage." ;;
+        CreateContainerConfigError)
+            HUMAN_MESSAGE="The container configuration is invalid."
+            SUGGESTED_FIX="Check for missing secrets or configmaps referenced by the deployment." ;;
+        CreateContainerError)
+            HUMAN_MESSAGE="Kubernetes could not create the container."
+            SUGGESTED_FIX="Check volumes, permissions, and the pod spec for errors." ;;
+        RunContainerError)
+            HUMAN_MESSAGE="The container failed to run its entrypoint."
+            SUGGESTED_FIX="Verify the start command and that required binaries exist in the image." ;;
+        ContainerCannotRun)
+            HUMAN_MESSAGE="The startup binary is missing or not executable inside the image."
+            SUGGESTED_FIX="Rebuild the image ensuring the entrypoint exists and has execute permissions." ;;
+        FailedScheduling)
+            HUMAN_MESSAGE="No node has enough resources or matches the pod's scheduling constraints."
+            SUGGESTED_FIX="Reduce requested resources, free cluster capacity, or review nodeSelector/affinity rules." ;;
+        FailedMount|FailedAttachVolume)
+            HUMAN_MESSAGE="A volume could not be mounted onto the pod."
+            SUGGESTED_FIX="Check that the referenced PVC, secret, or configmap exists and is accessible." ;;
+        Unhealthy)
+            HUMAN_MESSAGE="The application did not pass its health check at $health_check_path."
+            SUGGESTED_FIX="Ensure the app listens on port 8080 and returns 2xx on $health_check_path within the readiness window." ;;
+        FailedCreate|FailedCreatePodSandBox)
+            HUMAN_MESSAGE="Kubernetes could not create the pod sandbox."
+            SUGGESTED_FIX="Check node health, CNI configuration, and pod security policies." ;;
+        "")
+            HUMAN_MESSAGE=""
+            SUGGESTED_FIX="" ;;
+        *)
+            HUMAN_MESSAGE="Pods are failing with reason: $FAILURE_REASON"
+            SUGGESTED_FIX="" ;;
+    esac
+}
+
+print_specific_diagnostics() {
+    if [[ -n "$HUMAN_MESSAGE" ]]; then
+        log error ""
+        log error "📋 Reason: $HUMAN_MESSAGE"
+    fi
+
+    if [[ -n "$FAILURE_REASON" && -n "$FAILURE_CONTAINER" ]]; then
+        local detail="📋 Detected: $FAILURE_REASON on container $FAILURE_CONTAINER"
+        if [[ -n "$FAILURE_EXIT_CODE" ]]; then
+            detail="$detail (exit $FAILURE_EXIT_CODE)"
+        fi
+        log error "$detail"
+    elif [[ -n "$FAILURE_REASON" ]]; then
+        log error "📋 Detected: $FAILURE_REASON"
+    fi
+
+    if [[ -n "$FAILURE_MESSAGE" ]]; then
+        log error "📋 Details: $FAILURE_MESSAGE"
+    fi
+
+    if [[ -n "${desired:-}" ]]; then
+        log error "📊 Progress at failure: ${ready:-0}/${desired} ready, ${current:-0}/${desired} available"
+    fi
+
+    if [[ -n "$TOP_EVENT_REASONS" ]]; then
+        log error "📋 Recent warnings:"
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && log error "$line"
+        done <<< "$TOP_EVENT_REASONS"
+    fi
+
+    if [[ -n "$SUGGESTED_FIX" ]]; then
+        log error "💡 Suggested fix: $SUGGESTED_FIX"
+    fi
+}
+
+print_generic_hints() {
+    local health_check_path requested_memory scope_name scope_dimensions
+    health_check_path=$(echo "$CONTEXT" | jq -r .scope.capabilities.health_check.path)
+    requested_memory=$(echo "$CONTEXT" | jq -r .scope.capabilities.ram_memory)
+    scope_name=$(echo "$CONTEXT" | jq -r .scope.name)
+    scope_dimensions=$(echo "$CONTEXT" | jq -r .scope.dimensions)
+
+    log error ""
+    log error "⚠️  Application Startup Issue Detected"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   Your application was unable to start within the expected timeframe"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   1. Port Configuration: Ensure your application listens on port 8080"
+    log error "   2. Health Check Endpoint: Verify your app responds to: $health_check_path"
+    log error "   3. Application Logs: Review logs for startup errors (database connections,"
+    log error "      missing dependencies, or initialization errors)"
+    log error "   4. Memory Allocation: Current allocation is ${requested_memory}Mi - increase if needed"
+    log error "   5. Environment Variables: Verify all required variables are configured in"
+    log error "      parameters for scope '$scope_name' or dimensions: $scope_dimensions"
+    log error ""
+}
+
+diagnose_failure
+print_specific_diagnostics
+
+if [[ -z "$SUGGESTED_FIX" ]]; then
+    print_generic_hints
 fi
-
-HEALTH_CHECK_PATH=$(echo "$CONTEXT" | jq -r .scope.capabilities.health_check.path)
-REQUESTED_MEMORY=$(echo "$CONTEXT" | jq -r .scope.capabilities.ram_memory)
-SCOPE_NAME=$(echo "$CONTEXT" | jq -r .scope.name)
-SCOPE_DIMENSIONS=$(echo "$CONTEXT" | jq -r .scope.dimensions)
-
-log error ""
-log error "⚠️  Application Startup Issue Detected"
-log error ""
-log error "💡 Possible causes:"
-log error "   Your application was unable to start within the expected timeframe"
-log error ""
-log error "🔧 How to fix:"
-log error "   1. Port Configuration: Ensure your application listens on port 8080"
-log error "   2. Health Check Endpoint: Verify your app responds to: $HEALTH_CHECK_PATH"
-log error "   3. Application Logs: Review logs for startup errors (database connections,"
-log error "      missing dependencies, or initialization errors)"
-log error "   4. Memory Allocation: Current allocation is ${REQUESTED_MEMORY}Mi - increase if needed"
-log error "   5. Environment Variables: Verify all required variables are configured in"
-log error "      parameters for scope '$SCOPE_NAME' or dimensions: $SCOPE_DIMENSIONS"
-log error ""
