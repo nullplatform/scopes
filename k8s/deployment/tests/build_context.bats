@@ -828,3 +828,121 @@ SCRIPT
   result=$(echo '{}' | jq --arg main_http_port "$MAIN_HTTP_PORT" '. + {main_http_port: ($main_http_port | tonumber)} | .main_http_port')
   assert_equal "$result" "9090"
 }
+
+# =============================================================================
+# additional_ports enrichment: traffic_manager_port = port + 10000
+# These tests source the real deployment/build_context and assert on the
+# resulting CONTEXT, so the entire pipeline (scope/build_context -> deployment
+# enrichment) is exercised.
+# =============================================================================
+
+# Stages the full environment needed to source deployment/build_context:
+# external commands (kubectl, aws) mocked, required env vars set, and CONTEXT
+# pre-populated with a deployment that satisfies validate_status. The caller
+# patches CONTEXT.scope.capabilities.additional_ports for the case under test.
+setup_full_build_context() {
+  export SERVICE_PATH="$PROJECT_ROOT/k8s"
+  export SCRIPT="$PROJECT_ROOT/k8s/deployment/build_context"
+  export NP_OUTPUT_DIR="$(mktemp -d)"
+  export SERVICE_ACTION="start-initial"
+  # Skip the route53 / additional-balancer code paths that would call `aws`.
+  export DNS_TYPE="external_dns"
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace") return 0 ;;
+      "get service")   return 1 ;;  # no blue services -> empty map, harmless
+      *)               return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  export CONTEXT='{
+    "scope": {
+      "id": "test-scope-123",
+      "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
+      "domain": "test.nullapps.io",
+      "capabilities": {
+        "visibility": "public",
+        "scaling_type": "fixed",
+        "fixed_instances": 2,
+        "protocol": "http"
+      }
+    },
+    "namespace": {"slug": "test-namespace"},
+    "application": {"slug": "test-app"},
+    "deployment": {"id": "deploy-123", "status": "creating"},
+    "providers": {
+      "cloud-providers": {"account": {"region": "us-east-1"}},
+      "container-orchestration": {
+        "cluster": {"namespace": "default-namespace"},
+        "gateway": {"public_name": "gw-pub", "private_name": "gw-priv"},
+        "balancer": {"public_name": "alb-pub", "private_name": "alb-priv"}
+      }
+    }
+  }'
+}
+
+# Patches CONTEXT.scope.capabilities.additional_ports with the given JSON
+# fragment (raw jq value, e.g. '[{"port":8081,"type":"HTTP"}]' or 'null').
+set_additional_ports() {
+  CONTEXT=$(echo "$CONTEXT" | jq --argjson v "$1" '.scope.capabilities.additional_ports = $v')
+}
+
+@test "traffic_manager_port: derived as port + 10000 for every additional_ports entry" {
+  setup_full_build_context
+  set_additional_ports '[{"port":8081,"type":"HTTP"},{"port":9014,"type":"GRPC"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].traffic_manager_port')" "18081"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[1].traffic_manager_port')" "19014"
+}
+
+@test "traffic_manager_port: preserves original port and type fields" {
+  setup_full_build_context
+  set_additional_ports '[{"port":8081,"type":"HTTP"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].port')" "8081"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].type')" "HTTP"
+}
+
+@test "traffic_manager_port: emitted as JSON number (not string) for Go template consumption" {
+  setup_full_build_context
+  set_additional_ports '[{"port":8081,"type":"HTTP"}]'
+
+  source "$SCRIPT"
+
+  local jq_type
+  jq_type=$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].traffic_manager_port | type')
+  assert_equal "$jq_type" "number"
+}
+
+@test "traffic_manager_port: noop when additional_ports is absent" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq 'del(.scope.capabilities.additional_ports)')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports')" "null"
+}
+
+@test "traffic_manager_port: noop when additional_ports is null" {
+  setup_full_build_context
+  set_additional_ports 'null'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports')" "null"
+}
+
+@test "traffic_manager_port: noop when additional_ports is empty array" {
+  setup_full_build_context
+  set_additional_ports '[]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports')" "[]"
+}

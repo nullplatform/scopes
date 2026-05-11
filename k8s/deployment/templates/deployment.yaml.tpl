@@ -237,7 +237,7 @@ spec:
             runAsUser: 0
           image: {{ $.traffic_image }}
           ports:
-            - containerPort: {{ add .port 10000 }}
+            - containerPort: {{ .traffic_manager_port }}
               protocol: TCP
           env:
             - name: UPSTREAM_PORT
@@ -249,7 +249,7 @@ spec:
             - name: LISTENER_PROTOCOL
               value: http
             - name: LISTENER_PORT
-              value: '{{ add .port 10000 }}'
+              value: '{{ .traffic_manager_port }}'
             - name: HEALTH_CHECK_PATH
               value: {{ $.scope.capabilities.health_check.path }}
           resources:
@@ -261,7 +261,7 @@ spec:
           livenessProbe:
             httpGet:
               path: {{ $.scope.capabilities.health_check.path }}
-              port: {{ add .port 10000 }}
+              port: {{ .traffic_manager_port }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -270,7 +270,7 @@ spec:
           readinessProbe:
             httpGet:
               path: {{ $.scope.capabilities.health_check.path }}
-              port: {{ add .port 10000 }}
+              port: {{ .traffic_manager_port }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -279,7 +279,7 @@ spec:
           startupProbe:
             httpGet:
               path: {{ $.scope.capabilities.health_check.path }}
-              port: {{ add .port 10000 }}
+              port: {{ .traffic_manager_port }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
