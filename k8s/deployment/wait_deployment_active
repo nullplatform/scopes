@@ -6,7 +6,6 @@ K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0
 LATEST_TIMESTAMP=""
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
-ALL_EVENTS='{"items":[]}'
 
 log debug "🔍 Waiting for deployment '$K8S_DEPLOYMENT_NAME' to become active..."
 log debug "📋 Namespace: $K8S_NAMESPACE"
