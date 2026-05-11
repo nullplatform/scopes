@@ -6,10 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.11.1] - 2026-05-08
-- Fix external-dns DNSEndpoint creation when `DNS_TYPE=external_dns`
-- Add `dns/zone-type` label to DNSEndpoints to prevent cross-zone record creation
-- Fix ALB hostname resolution for external-dns on AWS
-- Fix DNS propagation detection using `observedGeneration` for external-dns scopes
+- Use DNSEndpoint CRD for DNS management when `DNS_TYPE=external_dns`, with zone-type label filtering to isolate public/private Route53 records
 
 ## [1.11.0] - 2026-04-16
 - Add unit testing support
