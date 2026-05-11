@@ -6,14 +6,44 @@ if [ "$ACTION" = "CREATE" ]; then
     log debug "🔍 Building DNSEndpoint manifest for ExternalDNS..."
     log debug "📡 Getting IP for gateway: $GATEWAY_NAME"
 
-    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-      -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+    # Try ALB Ingress first (AWS-specific: gateway-alb-public / gateway-alb-private)
+    GATEWAY_SUFFIX="${GATEWAY_NAME#gateway-}"
+    GATEWAY_IP=$(kubectl get ingress "gateway-alb-${GATEWAY_SUFFIX}" -n gateways \
+      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+    RECORD_TYPE="CNAME"
 
-    if [ -z "$GATEWAY_IP" ]; then
-      log warn "⚠️  Gateway IP not found, trying service fallback..."
+    if [ -n "$GATEWAY_IP" ]; then
+      log debug "📡 ALB hostname resolved via Ingress: $GATEWAY_IP"
+    else
+      log debug "📡 ALB Ingress not found, resolving gateway address directly..."
 
-      GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
-        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+      GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+        -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+      RECORD_TYPE="A"
+
+      if [ -z "$GATEWAY_IP" ]; then
+        log warn "⚠️  Gateway IP not found, trying hostname..."
+
+        GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null)
+        RECORD_TYPE="CNAME"
+      fi
+
+      if [ -z "$GATEWAY_IP" ]; then
+        log warn "⚠️  Gateway hostname not found, trying service fallback..."
+
+        GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+        RECORD_TYPE="A"
+      fi
+
+      if [ -z "$GATEWAY_IP" ]; then
+        log warn "⚠️  Gateway service IP not found, trying service hostname fallback..."
+
+        GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+        RECORD_TYPE="CNAME"
+      fi
     fi
 
     if [ -z "$GATEWAY_IP" ]; then
@@ -21,7 +51,7 @@ if [ "$ACTION" = "CREATE" ]; then
       exit 0
     fi
 
-    log info "✅ Gateway IP: $GATEWAY_IP"
+    log info "✅ Gateway address: $GATEWAY_IP (recordType: $RECORD_TYPE)"
 
     DNS_ENDPOINT_TEMPLATE="${DNS_ENDPOINT_TEMPLATE:-$SERVICE_PATH/deployment/templates/dns-endpoint.yaml.tpl}"
 
@@ -29,7 +59,15 @@ if [ "$ACTION" = "CREATE" ]; then
       DNS_ENDPOINT_FILE="$OUTPUT_DIR/dns-endpoint-$SCOPE_ID.yaml"
       CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID-dns.json"
 
-      echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" '. + {gateway_ip: $gateway_ip}' > "$CONTEXT_PATH"
+      if [ "${SCOPE_VISIBILITY:-}" = "public" ]; then
+        DNS_ZONE_TYPE="public"
+      else
+        DNS_ZONE_TYPE="private"
+      fi
+
+      echo "$CONTEXT" | jq --arg gateway_ip "$GATEWAY_IP" --arg record_type "$RECORD_TYPE" \
+        --arg dns_zone_type "$DNS_ZONE_TYPE" \
+        '. + {gateway_ip: $gateway_ip, record_type: $record_type, dns_zone_type: $dns_zone_type}' > "$CONTEXT_PATH"
 
       log debug "📝 Building DNSEndpoint from template: $DNS_ENDPOINT_TEMPLATE"
 
@@ -57,7 +95,10 @@ elif [ "$ACTION" = "DELETE" ]; then
     log debug "🔍 Deleting DNSEndpoint for external_dns..."
 
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
-    DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
+    APP_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
+    APP_SLUG_SHORT="${APP_SLUG:0:20}"; APP_SLUG_SHORT="${APP_SLUG_SHORT%-}"
+    SCOPE_SLUG_SHORT="${SCOPE_SLUG:0:20}"; SCOPE_SLUG_SHORT="${SCOPE_SLUG_SHORT%-}"
+    DNS_ENDPOINT_NAME="k8s-${APP_SLUG_SHORT}-${SCOPE_SLUG_SHORT}-${SCOPE_ID}-dns"
     log debug "📝 Deleting DNSEndpoint: $DNS_ENDPOINT_NAME in namespace $K8S_NAMESPACE"
     kubectl delete dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" || {
       log warn "⚠️  DNSEndpoint '$DNS_ENDPOINT_NAME' may already be deleted"
