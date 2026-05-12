@@ -135,6 +135,8 @@ spec:
             - containerPort: 80
               protocol: TCP
           env:
+            - name: UPSTREAM_PORT
+              value: '{{ .main_http_port }}'
             - name: HEALTH_CHECK_TYPE
               value: http
             - name: GRACE_PERIOD
@@ -151,7 +153,7 @@ spec:
               cpu: 31m
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
             {{- else }}
             {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
             {{- end }}
@@ -159,7 +161,7 @@ spec:
             failureThreshold: 9
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
             {{- else }}
             {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
             {{- end }}
@@ -167,7 +169,7 @@ spec:
             failureThreshold: 3
           startupProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
             {{- else }}
             {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
             {{- end }}
@@ -229,6 +231,63 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+        {{ else if eq .type "HTTP" }}
+        - name: http-{{ .port }}
+          securityContext:
+            runAsUser: 0
+          image: {{ $.traffic_image }}
+          ports:
+            - containerPort: {{ .traffic_manager_port }}
+              protocol: TCP
+          env:
+            - name: UPSTREAM_PORT
+              value: '{{ .port }}'
+            - name: HEALTH_CHECK_TYPE
+              value: http
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: http
+            - name: LISTENER_PORT
+              value: '{{ .traffic_manager_port }}'
+            - name: HEALTH_CHECK_PATH
+              value: {{ $.scope.capabilities.health_check.path }}
+          resources:
+            limits:
+              cpu: {{ $.container_cpu_in_millicores }}m
+              memory: {{ $.container_memory_in_memory }}Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .traffic_manager_port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .traffic_manager_port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .traffic_manager_port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
         {{ end }}
         {{ end }}
         {{ end }}
@@ -241,12 +300,14 @@ spec:
           securityContext:
             runAsUser: 0
           ports:
-            - containerPort: 8080
+            - containerPort: {{ .main_http_port }}
               protocol: TCP
             {{ if .scope.capabilities.additional_ports }}
             {{ range .scope.capabilities.additional_ports }}
+            {{ if eq .type "HTTP" }}
             - containerPort: {{ .port }}
               protocol: TCP
+            {{ end }}
             {{ end }}
             {{ end }}
           resources:
@@ -258,25 +319,25 @@ spec:
               memory: {{ .scope.capabilities.ram_memory }}Mi
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.app_tcp" dict "port" 8080 }}
+            {{- template "probe.app_tcp" dict "port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_http_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 6
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.app_tcp" dict "port" 8080 }}
+            {{- template "probe.app_tcp" dict "port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_http_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-           {{- template "probe.app_tcp" dict "port" 8080 }}
+           {{- template "probe.app_tcp" dict "port" .main_http_port }}
            {{- else }}
-           {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+           {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_http_port }}
            {{- end }}
            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90

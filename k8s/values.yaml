@@ -11,7 +11,12 @@ configuration:
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
   ALB_RECONCILIATION_ENABLED: false
   ALB_MAX_CAPACITY: 75
+  # 100 is the max target groups for ALB. Keeps 2 free for emergencies
+  # Ref: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-limits.html
   ALB_MAX_TARGET_GROUPS: 98
+  # 50 is the max listeners for ALB. Keeps 2 free for emergencies
+  # Ref: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-limits.html
+  ALB_MAX_LISTENERS: 48
   ALB_METRICS_PUBLISH_ENABLED: false
 # ALB_METRICS_PUBLISH_TARGET: cloudwatch # Available values: cloudwatch | datadog
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600

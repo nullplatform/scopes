@@ -245,6 +245,22 @@ if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     log info "✨ ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' validation successful"
 fi
 
+MAIN_HTTP_PORT=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
+log debug "🔍 main_http_port resolved to ${MAIN_HTTP_PORT}"
+
+# Enrich each additional_ports entry with traffic_manager_port = port + 10000.
+# Convention: the traffic-manager sidecar that fronts an additional port binds
+# <port>+10000 inside the pod so the application can bind <port> directly. The
+# fixed +10000 offset makes it trivial to identify which sidecar belongs to
+# which application port at a glance (e.g. app 8081 -> sidecar 18081). Keeping
+# the math here (instead of in every template) means consumers just read
+# .traffic_manager_port and never re-derive it.
+CONTEXT=$(echo "$CONTEXT" | jq '
+  if (.scope.capabilities.additional_ports | type) == "array" then
+    .scope.capabilities.additional_ports |= map(. + {traffic_manager_port: (.port + 10000)})
+  else . end
+')
+
 # Check if blue deployment has K8s services for additional ports
 BLUE_ADDITIONAL_PORT_SERVICES="{}"
 if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
@@ -280,6 +296,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg container_memory_in_memory "$CONTAINER_MEMORY_IN_MEMORY" \
           --arg container_cpu_in_millicores "$CONTAINER_CPU_IN_MILLICORES" \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
+          --arg main_http_port "$MAIN_HTTP_PORT" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -292,7 +309,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 traffic_manager_config_map: $traffic_manager_config_map,
                 container_memory_in_memory: $container_memory_in_memory,
                 container_cpu_in_millicores: $container_cpu_in_millicores,
-                blue_additional_port_services: $blue_additional_port_services
+                blue_additional_port_services: $blue_additional_port_services,
+                main_http_port: ($main_http_port | tonumber)
           }')
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')

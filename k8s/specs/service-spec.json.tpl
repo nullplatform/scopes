@@ -13,6 +13,7 @@
          "fixed_instances",
          "scheduled_stop",
          "additional_ports",
+         "main_http_port",
          "protocol",
          "continuous_delivery"
       ],
@@ -125,8 +126,13 @@
                   },
                   {
                      "type":"Category",
-                     "label":"Additional Ports",
+                     "label":"Exposed Ports",
                      "elements":[
+                        {
+                           "type":"Control",
+                           "label":"Main HTTP Port",
+                           "scope":"#/properties/main_http_port"
+                        },
                         {
                            "type":"Control",
                            "scope":"#/properties/additional_ports",
@@ -537,6 +543,14 @@
             "minimum":1,
             "description":"Fixed number of instances to run"
          },
+         "main_http_port":{
+            "type":"integer",
+            "title":"Main HTTP Port",
+            "default":8080,
+            "minimum":1024,
+            "maximum":65535,
+            "description":"Port where your application's main HTTP listener binds. Default 8080."
+         },
          "additional_ports":{
             "type":"array",
             "items":{
@@ -555,11 +569,12 @@
                   },
                   "type":{
                      "enum":[
-                        "GRPC"
+                        "GRPC",
+                        "HTTP"
                      ],
                      "type":"string",
                      "title":"Port Type",
-                     "default": "GRPC",
+                     "default": "HTTP",
                      "description":"The protocol type for this port"
                   }
                }
