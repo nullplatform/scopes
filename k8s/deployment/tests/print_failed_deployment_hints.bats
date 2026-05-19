@@ -110,6 +110,110 @@ assert_not_contains() {
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
+@test "print_failed_deployment_hints: identifies CrashLoopBackOff and skips generic hints" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"worker","state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 5m0s restarting failed container"}},"lastState":{"terminated":{"exitCode":1}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The container started and crashed repeatedly."
+  assert_contains "$output" "📋 Detected: CrashLoopBackOff on container worker"
+  assert_contains "$output" "💡 Suggested fix: Review application logs for startup errors"
+  assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "print_failed_deployment_hints: identifies CreateContainerConfigError and points to secrets/configmaps" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"CreateContainerConfigError","message":"secret \"db-creds\" not found"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The container configuration is invalid."
+  assert_contains "$output" "💡 Suggested fix: Check for missing secrets or configmaps"
+  assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "print_failed_deployment_hints: identifies RunContainerError as entrypoint failure" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"RunContainerError"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The container failed to run its entrypoint."
+  assert_contains "$output" "💡 Suggested fix: Verify the start command"
+  assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "print_failed_deployment_hints: identifies ContainerCannotRun as missing binary" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"running":{}},"lastState":{"terminated":{"reason":"ContainerCannotRun","exitCode":127,"message":"exec: \"/app\": no such file"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The startup binary is missing or not executable"
+  assert_contains "$output" "📋 Detected: ContainerCannotRun on container app (exit 127)"
+  assert_contains "$output" "💡 Suggested fix: Rebuild the image"
+  assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "print_failed_deployment_hints: identifies FailedMount from ALL_EVENTS" {
+  export ALL_EVENTS='{"items":[{"type":"Warning","reason":"FailedMount","message":"MountVolume.SetUp failed"}]}'
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: A volume could not be mounted onto the pod."
+  assert_contains "$output" "💡 Suggested fix: Check that the referenced PVC, secret, or configmap exists"
+  assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "print_failed_deployment_hints: identifies FailedCreatePodSandBox from ALL_EVENTS" {
+  export ALL_EVENTS='{"items":[{"type":"Warning","reason":"FailedCreatePodSandBox","message":"failed to create pod sandbox"}]}'
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: Kubernetes could not create the pod sandbox."
+  assert_contains "$output" "💡 Suggested fix: Check node health, CNI configuration"
+  assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
 @test "print_failed_deployment_hints: identifies Unhealthy and references the configured health check path" {
   export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
 
@@ -128,6 +232,56 @@ assert_not_contains() {
   assert_contains "$output" "did not pass its health check at /health"
   assert_contains "$output" "💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+# =============================================================================
+# CONTEXT fallback handling
+# =============================================================================
+@test "print_failed_deployment_hints: OOMKilled without ram_memory does not leave dangling (Mi)" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  # CONTEXT present but no ram_memory capability — plausible if the scope did not define memory.
+  export CONTEXT='{"scope":{"name":"my-app","dimensions":"prod","capabilities":{"health_check":{"path":"/health"}}}}'
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "exceeded its memory limit"
+  # The (Mi) parenthetical must not appear empty when ram_memory is missing.
+  assert_not_contains "$output" "(Mi)"
+}
+
+@test "print_failed_deployment_hints: applies CONTEXT defaults gracefully when CONTEXT is unset" {
+  # Drop the bats-provided CONTEXT so we exercise the ${CONTEXT:-{}} fallback.
+  unset CONTEXT
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"Unhealthy"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  # health_check_path default "/" must apply when CONTEXT is unset.
+  assert_contains "$output" "health check at /."
+  assert_contains "$output" "returns 2xx on /"
+  # Guard against the previous escape bug: a literal backslash in the message
+  # would indicate jq received {\} instead of {} and silently failed.
+  assert_not_contains "$output" "{\\"
 }
 
 # =============================================================================

@@ -114,6 +114,42 @@ teardown() {
   assert_contains "$output" "📋 Timeout: 5s (max 0 iterations)"
   assert_contains "$output" "❌ Timeout waiting for deployment"
   assert_contains "$output" "📋 Maximum iterations (0) reached"
+  # Timeout path must source print_failed_deployment_hints; with no pod info
+  # and no events, it falls through to the generic checklist.
+  assert_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "wait_deployment_active: surfaces specific failure reason on timeout when pod info is available" {
+  export TIMEOUT=5
+
+  kubectl() {
+    case "$*" in
+      "get deployment d-scope-123-deploy-456 -n test-namespace -o json")
+        echo '{"spec":{"replicas":3},"status":{"availableReplicas":0,"updatedReplicas":0,"readyReplicas":0}}'
+        ;;
+      "get pods -n test-namespace -l deployment_id=deploy-456 -o json")
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"running":{}},"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137,"message":"out of memory"}}}]}}]}'
+        ;;
+      "get pods"*)
+        echo ""
+        ;;
+      "get events"*)
+        echo '{"items":[]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  export CONTEXT='{"scope":{"name":"my-app","dimensions":"prod","capabilities":{"health_check":{"path":"/health"},"ram_memory":512}}}'
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Timeout waiting for deployment"
+  # The hint script must read pod state and surface the user-friendly reason
+  assert_contains "$output" "📋 Reason: The container exceeded its memory limit"
+  assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
+  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
 }
 
 # =============================================================================
@@ -159,6 +195,8 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ Deployment is no longer running (status: failed)"
+  # Non-running status path must also source print_failed_deployment_hints
+  assert_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
 # =============================================================================

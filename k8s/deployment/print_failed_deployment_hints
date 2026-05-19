@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-ALL_EVENTS="${ALL_EVENTS:-{\"items\":[]\}}"
+ALL_EVENTS="${ALL_EVENTS:-{\"items\":[]}}"
 
 FAILURE_REASON=""
 FAILURE_MESSAGE=""
@@ -59,9 +59,9 @@ diagnose_failure() {
     fi
 
     local req_memory scope_name health_check_path
-    req_memory=$(echo "${CONTEXT:-{\}}" | jq -r '.scope.capabilities.ram_memory // empty' 2>/dev/null)
-    scope_name=$(echo "${CONTEXT:-{\}}" | jq -r '.scope.name // empty' 2>/dev/null)
-    health_check_path=$(echo "${CONTEXT:-{\}}" | jq -r '.scope.capabilities.health_check.path // "/"' 2>/dev/null)
+    req_memory=$(echo "${CONTEXT:-{}}" | jq -r '.scope.capabilities.ram_memory // empty' 2>/dev/null)
+    scope_name=$(echo "${CONTEXT:-{}}" | jq -r '.scope.name // empty' 2>/dev/null)
+    health_check_path=$(echo "${CONTEXT:-{}}" | jq -r '.scope.capabilities.health_check.path // "/"' 2>/dev/null)
 
     case "$FAILURE_REASON" in
         ImagePullBackOff|ErrImagePull)
@@ -71,7 +71,11 @@ diagnose_failure() {
             HUMAN_MESSAGE="The container started and crashed repeatedly."
             SUGGESTED_FIX="Review application logs for startup errors (failed dependencies, bad config, panics)." ;;
         OOMKilled)
-            HUMAN_MESSAGE="The container exceeded its memory limit (${req_memory}Mi) and was terminated."
+            if [[ -n "$req_memory" ]]; then
+                HUMAN_MESSAGE="The container exceeded its memory limit (${req_memory}Mi) and was terminated."
+            else
+                HUMAN_MESSAGE="The container exceeded its memory limit and was terminated."
+            fi
             SUGGESTED_FIX="Increase ram_memory for scope '$scope_name' or reduce application memory usage." ;;
         CreateContainerConfigError)
             HUMAN_MESSAGE="The container configuration is invalid."
