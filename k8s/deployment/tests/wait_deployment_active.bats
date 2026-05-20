@@ -517,6 +517,110 @@ teardown() {
   fi
 }
 
+@test "wait_deployment_active: consolidates multiple Unhealthy events for same pod into a single line" {
+  # The kubelet often emits two Unhealthy events per probe round (connection refused
+  # + HTTP 502 from a sidecar). The polling loop must merge them into one log line
+  # with both failure modes combined, using the short pod name.
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc-hhshq'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: Get \\\"http://10.0.0.1:8080/health\\\": dial tcp: connect: connection refused\"},
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: HTTP probe failed with statuscode: 502\"}
+          ]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # One consolidated line with both modes joined by ', ' for natural reading
+  assert_contains "$output" "Startup probe failing on /health — not yet listening, responded HTTP 502 (expected 2xx)"
+  # Pod name must be the short form with '...' prefix marking truncation
+  assert_contains "$output" "Pod/...abc-hhshq"
+  # The long prefix must NOT appear in any logged event line
+  if [[ "$output" == *"Pod/d-scope-123-deploy-456-abc-hhshq"* ]]; then
+    echo "Expected output to use short pod name, not the full prefix"
+    echo "Actual: $output"
+    return 1
+  fi
+  # And we must see only ONE consolidated line, not one per mode.
+  local lines
+  lines=$(printf '%s\n' "$output" | grep -c "Startup probe failing" || true)
+  if [ "$lines" -ne 1 ]; then
+    echo "Expected exactly 1 consolidated 'Startup probe failing' line, got $lines"
+    echo "Actual: $output"
+    return 1
+  fi
+}
+
+@test "wait_deployment_active: falls back to raw messages when parse_probe_message cannot translate" {
+  # Two Unhealthy events whose messages do NOT match any known probe pattern.
+  # Consolidation must fail and the raw text must be preserved for the operator.
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc-hhshq'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"some brand-new K8s probe format we cannot parse 1\"},
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"another unknown probe format 2\"}
+          ]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # Both original messages must appear verbatim
+  assert_contains "$output" "some brand-new K8s probe format we cannot parse 1"
+  assert_contains "$output" "another unknown probe format 2"
+  # The consolidated header must NOT appear because parsing failed
+  if [[ "$output" == *"probe failing"* ]]; then
+    echo "Expected fallback path to NOT emit the 'probe failing' header"
+    echo "Actual: $output"
+    return 1
+  fi
+}
+
 @test "wait_deployment_active: translates Unhealthy HTTP statuscode into human line during polling" {
   run bash -c "
     sleep() { :; }

@@ -109,9 +109,14 @@ diagnose_failure() {
         Unhealthy)
             HUMAN_MESSAGE="The application did not pass its health check at $health_check_path."
             if [[ -n "$UNHEALTHY_MESSAGE" ]]; then
-                local translated
-                translated=$(translate_probe_message "$UNHEALTHY_MESSAGE")
-                [[ -n "$translated" ]] && HUMAN_MESSAGE="$HUMAN_MESSAGE Detected: $translated."
+                local translated=""
+                translated=$(translate_probe_message "$UNHEALTHY_MESSAGE" 2>/dev/null) || translated=""
+                if [[ -n "$translated" ]]; then
+                    HUMAN_MESSAGE="$HUMAN_MESSAGE Detected: $translated."
+                else
+                    # Fallback: surface the raw K8s message so context is not lost
+                    HUMAN_MESSAGE="$HUMAN_MESSAGE Detected: $UNHEALTHY_MESSAGE"
+                fi
             fi
             if [[ "$UNHEALTHY_MESSAGE" == *"connection refused"* ]]; then
                 SUGGESTED_FIX="The container is not listening on port 8080 — verify the start command runs, the process binds to 0.0.0.0:8080, and nothing is crashing before it accepts connections."

@@ -86,3 +86,55 @@ setup() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "Startup probe"
 }
+
+# -----------------------------------------------------------------------------
+# parse_probe_message — structured output for consolidation
+# -----------------------------------------------------------------------------
+@test "parse_probe_message: emits pipe-separated kind, path, mode for connection refused" {
+  run parse_probe_message 'Startup probe failed: Get "http://10.0.0.1:8080/health": dial tcp: connect: connection refused'
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "Startup|/health|not yet listening" ]
+}
+
+@test "parse_probe_message: emits 'responded HTTP <code>' mode with empty path field preserved" {
+  run parse_probe_message 'Startup probe failed: HTTP probe failed with statuscode: 502'
+
+  [ "$status" -eq 0 ]
+  # Empty path between two pipes must be preserved so callers can read 3 fields.
+  # Mode reads as a verb so it composes inline with other modes in one sentence.
+  [ "$output" = "Startup||responded HTTP 502 (expected 2xx)" ]
+}
+
+@test "parse_probe_message: returns non-zero for non-probe input" {
+  run parse_probe_message 'Failed to pull image'
+  [ "$status" -ne 0 ]
+}
+
+# -----------------------------------------------------------------------------
+# short_pod_name — strip K8S_DEPLOYMENT_NAME prefix
+# -----------------------------------------------------------------------------
+@test "short_pod_name: strips deployment prefix and marks truncation with '...'" {
+  K8S_DEPLOYMENT_NAME="d-326230662-1916903584"
+  run short_pod_name "d-326230662-1916903584-8578df9b4c-hhshq"
+
+  [ "$status" -eq 0 ]
+  # Leading '...' tells the operator the name was shortened
+  [ "$output" = "...8578df9b4c-hhshq" ]
+}
+
+@test "short_pod_name: returns full name when prefix env is unset" {
+  unset K8S_DEPLOYMENT_NAME
+  run short_pod_name "some-pod-name-abc"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "some-pod-name-abc" ]
+}
+
+@test "short_pod_name: returns full name when pod does not match the prefix" {
+  K8S_DEPLOYMENT_NAME="d-1-2"
+  run short_pod_name "unrelated-pod-xyz"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "unrelated-pod-xyz" ]
+}

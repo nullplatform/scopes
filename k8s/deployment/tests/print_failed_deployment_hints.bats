@@ -305,6 +305,30 @@ assert_not_contains() {
   assert_contains "$output" "initialDelaySeconds"
 }
 
+@test "print_failed_deployment_hints: falls back to raw Unhealthy message when translation is impossible" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  # Message does not match any known probe pattern → translate_probe_message returns non-zero.
+  # The raw text must still be surfaced in the hint instead of being silently dropped.
+  export ALL_EVENTS='{"items":[{"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:13:42Z","message":"completely unknown probe failure format from a future K8s"}]}'
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"Unhealthy"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  # Raw message appears verbatim in the reason line
+  assert_contains "$output" "completely unknown probe failure format from a future K8s"
+  # Base sentence is still there
+  assert_contains "$output" "did not pass its health check at /health"
+}
+
 @test "print_failed_deployment_hints: Unhealthy picks the latest event when multiple are present" {
   export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
   # Two Warnings: an older 502 and a newer connection-refused. The fix must reflect the newer one.

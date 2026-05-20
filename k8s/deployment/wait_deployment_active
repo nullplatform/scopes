@@ -3,6 +3,50 @@
 
 source "$SERVICE_PATH/deployment/translate_probe_message"
 
+# Try to print one consolidated line for a pod's grouped Unhealthy events.
+# Returns non-zero if any message cannot be parsed or if no probe kind was
+# detected — callers fall back to log_unhealthy_raw to preserve the original
+# text instead of silently dropping events.
+log_unhealthy_group() {
+    local ts="$1" pod_name="$2" messages_concat="$3"
+    local kind="" path="" modes=""
+    local msg parsed k p m short path_suffix
+
+    while IFS= read -r msg; do
+        [ -z "$msg" ] && continue
+        parsed=$(parse_probe_message "$msg" 2>/dev/null) || return 1
+        [ -z "$parsed" ] && return 1
+        IFS='|' read -r k p m <<< "$parsed"
+        [ -n "$k" ] && kind="$k"
+        [ -n "$p" ] && path="$p"
+        if [[ "$modes" != *"$m"* ]]; then
+            if [ -z "$modes" ]; then
+                modes="$m"
+            else
+                modes="$modes, $m"
+            fi
+        fi
+    done < <(printf '%s\n' "$messages_concat" | tr '\001' '\n')
+
+    [ -z "$kind" ] && return 1
+
+    short=$(short_pod_name "$pod_name" 2>/dev/null) || short="$pod_name"
+    path_suffix=""
+    [ -n "$path" ] && path_suffix=" on $path"
+    log warn "$ts [Warning] Pod/$short ${kind} probe failing${path_suffix} — ${modes}"
+    return 0
+}
+
+# Fallback: emit one raw warning line per original message in the group.
+log_unhealthy_raw() {
+    local ts="$1" pod_name="$2" messages_concat="$3"
+    local msg
+    while IFS= read -r msg; do
+        [ -z "$msg" ] && continue
+        log warn "$ts [Warning] Pod/$pod_name: Unhealthy - $msg"
+    done < <(printf '%s\n' "$messages_concat" | tr '\001' '\n')
+}
+
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
 K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0
@@ -100,34 +144,50 @@ while true; do
     # Find the newest timestamp in all events
     NEWEST_TIMESTAMP=$(echo "$PROCESSED_EVENTS" | jq -r '.items | map(.effectiveTimestamp) | max // empty')
 
-    # Process events with jq, showing only events newer than what we've seen.
-    # Output 6 TAB-separated columns; gsub strips tabs/newlines from message so
-    # the row stays parseable in the bash read loop below.
-    NEW_EVENTS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
+    # Non-Unhealthy events: emit one line each (current behavior).
+    OTHER_EVENTS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
         .items |
         sort_by(.effectiveTimestamp) |
         .[] |
         select($timestamp == "" or (.effectiveTimestamp > $timestamp)) |
+        select(.reason != "Unhealthy") |
         "\(.type)\t\(.effectiveTimestamp)\t\(.involvedObject.kind)\t\(.involvedObject.name)\t\(.reason)\t\((.message // "") | gsub("[\t\n]"; " "))"
     ')
 
-    # If we have new events, show them and update the timestamp
-    if [ ! -z "$NEW_EVENTS" ]; then
+    if [ -n "$OTHER_EVENTS" ]; then
         while IFS=$'\t' read -r event_type ts kind name reason message; do
-            event_line="$ts [$event_type] $kind/$name: $reason - $message"
-            if [ "$reason" = "Unhealthy" ]; then
-                translated=$(translate_probe_message "$message")
-                if [ -n "$translated" ]; then
-                    event_line="$ts [$event_type] $kind/$name: $translated"
-                fi
-            fi
+            short=$(short_pod_name "$name")
+            event_line="$ts [$event_type] $kind/$short: $reason - $message"
             if [ "$event_type" = "Warning" ]; then
                 log warn "$event_line"
             else
                 log debug "$event_line"
             fi
-        done <<< "$NEW_EVENTS"
-        # Store the newest timestamp for next iteration
+        done <<< "$OTHER_EVENTS"
+    fi
+
+    # Unhealthy events: group by pod and consolidate every failure mode for that
+    # pod into a single line. Messages within a group are joined by U+0001 (SOH),
+    # a byte that cannot appear in K8s event text.
+    UNHEALTHY_GROUPS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
+        [.items[]
+         | select($timestamp == "" or (.effectiveTimestamp > $timestamp))
+         | select(.reason == "Unhealthy")]
+        | group_by(.involvedObject.name)
+        | .[]
+        | "\((max_by(.effectiveTimestamp)).effectiveTimestamp)\t\(.[0].involvedObject.name)\t\([.[].message] | map(gsub("[\t\n\u0001]"; " ")) | join("\u0001"))"
+    ')
+
+    if [ -n "$UNHEALTHY_GROUPS" ]; then
+        while IFS=$'\t' read -r ts pod_name messages_concat; do
+            [ -z "$pod_name" ] && continue
+            log_unhealthy_group "$ts" "$pod_name" "$messages_concat" \
+                || log_unhealthy_raw "$ts" "$pod_name" "$messages_concat"
+        done <<< "$UNHEALTHY_GROUPS"
+    fi
+
+    # Advance cursor if any new events were processed in this iteration.
+    if [ -n "$OTHER_EVENTS" ] || [ -n "$UNHEALTHY_GROUPS" ]; then
         LATEST_TIMESTAMP="$NEWEST_TIMESTAMP"
         log debug "Updated timestamp to: $LATEST_TIMESTAMP"
     fi
