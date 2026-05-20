@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Translates a Kubernetes probe failure message into a single user-friendly line.
+# Echoes the translation on stdout; returns non-zero if the input is not a probe
+# message so callers can fall back to the raw text.
+translate_probe_message() {
+    local msg="$1"
+    [[ -z "$msg" ]] && return 1
+
+    local probe_kind=""
+    if [[ "$msg" == *"Startup probe failed"* ]]; then
+        probe_kind="Startup"
+    elif [[ "$msg" == *"Liveness probe failed"* ]]; then
+        probe_kind="Liveness"
+    elif [[ "$msg" == *"Readiness probe failed"* ]]; then
+        probe_kind="Readiness"
+    else
+        return 1
+    fi
+
+    local probe_path=""
+    if [[ "$msg" =~ http://[0-9.]+:[0-9]+([^\"[:space:]]+) ]]; then
+        probe_path="${BASH_REMATCH[1]}"
+    fi
+    local path_suffix=""
+    [[ -n "$probe_path" ]] && path_suffix=" on $probe_path"
+
+    if [[ "$msg" == *"connection refused"* ]]; then
+        echo "${probe_kind} probe — app is not yet listening${path_suffix}"
+    elif [[ "$msg" =~ statuscode:[[:space:]]*([0-9]+) ]]; then
+        echo "${probe_kind} probe — app responded with HTTP ${BASH_REMATCH[1]}${path_suffix} (expected 2xx)"
+    elif [[ "$msg" == *"context deadline exceeded"* || "$msg" == *"Client.Timeout"* || "$msg" == *"i/o timeout"* ]]; then
+        echo "${probe_kind} probe — request timed out${path_suffix}"
+    else
+        echo "${probe_kind} probe failed${path_suffix}"
+    fi
+}

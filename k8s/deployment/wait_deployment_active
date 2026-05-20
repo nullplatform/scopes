@@ -1,11 +1,16 @@
 #!/bin/bash
 
 
+source "$SERVICE_PATH/deployment/translate_probe_message"
+
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
 K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0
-LATEST_TIMESTAMP=""
+LATEST_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
+
+HEARTBEAT_INTERVAL=$(( MAX_ITERATIONS / 10 ))
+[ "$HEARTBEAT_INTERVAL" -lt 1 ] && HEARTBEAT_INTERVAL=1
 
 log debug "🔍 Waiting for deployment '$K8S_DEPLOYMENT_NAME' to become active..."
 log debug "📋 Namespace: $K8S_NAMESPACE"
@@ -61,6 +66,11 @@ while true; do
         break
     fi
 
+    if [ "$iteration" -eq 1 ] || [ $(( iteration % HEARTBEAT_INTERVAL )) -eq 0 ]; then
+        elapsed_s=$(( iteration * 10 ))
+        log info "⏳ Still waiting — Ready: $ready/$desired, Available: $current/$desired (attempt $iteration/$MAX_ITERATIONS, ${elapsed_s}s elapsed)"
+    fi
+
     POD_SELECTOR="deployment_id=${DEPLOYMENT_ID}"
     POD_NAMES=$(kubectl get pods -n $K8S_NAMESPACE -l $POD_SELECTOR -o jsonpath='{.items[*].metadata.name}')
     # Get events for the deployment first
@@ -90,19 +100,27 @@ while true; do
     # Find the newest timestamp in all events
     NEWEST_TIMESTAMP=$(echo "$PROCESSED_EVENTS" | jq -r '.items | map(.effectiveTimestamp) | max // empty')
 
-    # Process events with jq, showing only events newer than what we've seen
-    # Output format: TYPE<TAB>message — so we can route Warning events to log warn
+    # Process events with jq, showing only events newer than what we've seen.
+    # Output 6 TAB-separated columns; gsub strips tabs/newlines from message so
+    # the row stays parseable in the bash read loop below.
     NEW_EVENTS=$(echo "$PROCESSED_EVENTS" | jq -r --arg timestamp "$LATEST_TIMESTAMP" '
         .items |
         sort_by(.effectiveTimestamp) |
         .[] |
         select($timestamp == "" or (.effectiveTimestamp > $timestamp)) |
-        "\(.type)\t\(.effectiveTimestamp) [\(.type)] \(.involvedObject.kind)/\(.involvedObject.name): \(.reason) - \(.message)"
+        "\(.type)\t\(.effectiveTimestamp)\t\(.involvedObject.kind)\t\(.involvedObject.name)\t\(.reason)\t\((.message // "") | gsub("[\t\n]"; " "))"
     ')
 
     # If we have new events, show them and update the timestamp
     if [ ! -z "$NEW_EVENTS" ]; then
-        while IFS=$'\t' read -r event_type event_line; do
+        while IFS=$'\t' read -r event_type ts kind name reason message; do
+            event_line="$ts [$event_type] $kind/$name: $reason - $message"
+            if [ "$reason" = "Unhealthy" ]; then
+                translated=$(translate_probe_message "$message")
+                if [ -n "$translated" ]; then
+                    event_line="$ts [$event_type] $kind/$name: $translated"
+                fi
+            fi
             if [ "$event_type" = "Warning" ]; then
                 log warn "$event_line"
             else

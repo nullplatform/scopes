@@ -1,6 +1,9 @@
 #!/bin/bash
 
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/translate_probe_message"
+
 ALL_EVENTS="${ALL_EVENTS:-{\"items\":[]}}"
 
 FAILURE_REASON=""
@@ -8,6 +11,7 @@ FAILURE_MESSAGE=""
 FAILURE_CONTAINER=""
 FAILURE_EXIT_CODE=""
 TOP_EVENT_REASONS=""
+UNHEALTHY_MESSAGE=""
 HUMAN_MESSAGE=""
 SUGGESTED_FIX=""
 
@@ -51,6 +55,13 @@ diagnose_failure() {
         map({reason: .[0].reason, count: length}) |
         sort_by(-.count) | .[0:3][] |
         "  • \(.reason) (×\(.count))"' 2>/dev/null)
+
+    UNHEALTHY_MESSAGE=$(echo "$ALL_EVENTS" | jq -r '
+        .items
+        | map(select(.type == "Warning" and .reason == "Unhealthy"))
+        | sort_by(.eventTime // .lastTimestamp // .firstTimestamp // .metadata.creationTimestamp // "")
+        | last
+        | .message // empty' 2>/dev/null)
 
     if [[ -z "$FAILURE_REASON" ]]; then
         FAILURE_REASON=$(echo "$ALL_EVENTS" | jq -r '
@@ -97,7 +108,20 @@ diagnose_failure() {
             SUGGESTED_FIX="Check that the referenced PVC, secret, or configmap exists and is accessible." ;;
         Unhealthy)
             HUMAN_MESSAGE="The application did not pass its health check at $health_check_path."
-            SUGGESTED_FIX="Ensure the app listens on port 8080 and returns 2xx on $health_check_path within the readiness window." ;;
+            if [[ -n "$UNHEALTHY_MESSAGE" ]]; then
+                local translated
+                translated=$(translate_probe_message "$UNHEALTHY_MESSAGE")
+                [[ -n "$translated" ]] && HUMAN_MESSAGE="$HUMAN_MESSAGE Detected: $translated."
+            fi
+            if [[ "$UNHEALTHY_MESSAGE" == *"connection refused"* ]]; then
+                SUGGESTED_FIX="The container is not listening on port 8080 — verify the start command runs, the process binds to 0.0.0.0:8080, and nothing is crashing before it accepts connections."
+            elif [[ "$UNHEALTHY_MESSAGE" =~ statuscode:[[:space:]]*([0-9]+) ]]; then
+                SUGGESTED_FIX="The app responded with HTTP ${BASH_REMATCH[1]} on $health_check_path — inspect application logs for startup errors; the process is running but $health_check_path is not returning 2xx."
+            elif [[ "$UNHEALTHY_MESSAGE" == *"context deadline exceeded"* || "$UNHEALTHY_MESSAGE" == *"Client.Timeout"* || "$UNHEALTHY_MESSAGE" == *"i/o timeout"* ]]; then
+                SUGGESTED_FIX="The probe timed out — the app may be slow to start or $health_check_path is blocking. Consider increasing startup probe initialDelaySeconds/timeoutSeconds, or making $health_check_path lighter."
+            else
+                SUGGESTED_FIX="Ensure the app listens on port 8080 and returns 2xx on $health_check_path within the readiness window."
+            fi ;;
         FailedCreate|FailedCreatePodSandBox)
             HUMAN_MESSAGE="Kubernetes could not create the pod sandbox."
             SUGGESTED_FIX="Check node health, CNI configuration, and pod security policies." ;;

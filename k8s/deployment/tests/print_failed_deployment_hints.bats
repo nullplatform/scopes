@@ -234,6 +234,102 @@ assert_not_contains() {
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
+@test "print_failed_deployment_hints: enriches Unhealthy with connection-refused detail and targeted fix" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  export ALL_EVENTS='{"items":[{"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:13:42Z","message":"Startup probe failed: Get \"http://10.0.0.1:8080/health\": dial tcp 10.0.0.1:8080: connect: connection refused"}]}'
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"Unhealthy"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  # HUMAN_MESSAGE retains the base sentence and appends the translated probe failure
+  assert_contains "$output" "did not pass its health check at /health"
+  assert_contains "$output" "Detected: Startup probe"
+  assert_contains "$output" "not yet listening"
+  # SUGGESTED_FIX is targeted: tells the user the app is not binding the port
+  assert_contains "$output" "not listening on port 8080"
+  # Generic fallback fix must NOT appear
+  assert_not_contains "$output" "returns 2xx on /health within the readiness window"
+}
+
+@test "print_failed_deployment_hints: enriches Unhealthy with HTTP statuscode detail and targeted fix" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  export ALL_EVENTS='{"items":[{"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:13:42Z","message":"Startup probe failed: HTTP probe failed with statuscode: 502"}]}'
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"Unhealthy"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Detected: Startup probe"
+  assert_contains "$output" "HTTP 502"
+  # SUGGESTED_FIX cites the status code and points to app logs
+  assert_contains "$output" "responded with HTTP 502"
+  assert_contains "$output" "inspect application logs"
+}
+
+@test "print_failed_deployment_hints: enriches Unhealthy with timeout detail and targeted fix" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  export ALL_EVENTS='{"items":[{"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:13:42Z","message":"Startup probe failed: Get \"http://10.0.0.1:8080/health\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"}]}'
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"Unhealthy"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Detected: Startup probe"
+  assert_contains "$output" "timed out"
+  # SUGGESTED_FIX mentions timing knobs
+  assert_contains "$output" "initialDelaySeconds"
+}
+
+@test "print_failed_deployment_hints: Unhealthy picks the latest event when multiple are present" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  # Two Warnings: an older 502 and a newer connection-refused. The fix must reflect the newer one.
+  export ALL_EVENTS='{"items":[
+    {"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:10:00Z","message":"Startup probe failed: HTTP probe failed with statuscode: 502"},
+    {"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:13:42Z","message":"Startup probe failed: Get \"http://10.0.0.1:8080/health\": dial tcp: connect: connection refused"}
+  ]}'
+
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"api","state":{"waiting":{"reason":"Unhealthy"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  # Latest event wins → connection-refused remediation, not the older HTTP 502 one
+  assert_contains "$output" "not listening on port 8080"
+  assert_not_contains "$output" "responded with HTTP 502"
+}
+
 # =============================================================================
 # CONTEXT fallback handling
 # =============================================================================
