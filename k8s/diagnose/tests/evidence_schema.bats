@@ -131,6 +131,17 @@ NETWORKING_CHECKS_REQUIRE_INGRESSES=(
   done
 }
 
+@test "schema: logs/application_log_evidence emits valid skipped evidence when no snapshot" {
+  reset_output
+  # PROBLEMATIC_PODS_FILE intentionally not set — the check must degrade gracefully.
+  unset PROBLEMATIC_PODS_FILE
+  source "$BATS_TEST_DIRNAME/../logs/application_log_evidence" || true
+  assert_evidence_schema "logs/application_log_evidence (skipped)"
+
+  status=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
+  [[ "$status" == "skipped" ]] || { echo "expected skipped, got $status"; return 1; }
+}
+
 # =============================================================================
 # Schema validation: failed path for "no resources" existence checks
 # (these don't use require_*; they emit failed evidence directly)
