@@ -1,7 +1,9 @@
 #!/bin/bash
 
 
-source "$SERVICE_PATH/deployment/translate_probe_message"
+# Load probe helpers without firing the diagnostic main of the hints script.
+PRINT_HINTS_LIB_ONLY=true source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
+unset PRINT_HINTS_LIB_ONLY
 
 # Try to print one consolidated line for a pod's grouped Unhealthy events.
 # Returns non-zero if any message cannot be parsed or if no probe kind was

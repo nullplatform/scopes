@@ -6,7 +6,9 @@
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
-  source "$BATS_TEST_DIRNAME/../translate_probe_message"
+  # Load helpers only (skip the diagnostic main inside the hints script)
+  PRINT_HINTS_LIB_ONLY=true source "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+  unset PRINT_HINTS_LIB_ONLY
 }
 
 # -----------------------------------------------------------------------------
