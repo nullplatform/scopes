@@ -114,6 +114,42 @@ teardown() {
   assert_contains "$output" "📋 Timeout: 5s (max 0 iterations)"
   assert_contains "$output" "❌ Timeout waiting for deployment"
   assert_contains "$output" "📋 Maximum iterations (0) reached"
+  # Timeout path must source print_failed_deployment_hints; with no pod info
+  # and no events, it falls through to the generic checklist.
+  assert_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "wait_deployment_active: surfaces specific failure reason on timeout when pod info is available" {
+  export TIMEOUT=5
+
+  kubectl() {
+    case "$*" in
+      "get deployment d-scope-123-deploy-456 -n test-namespace -o json")
+        echo '{"spec":{"replicas":3},"status":{"availableReplicas":0,"updatedReplicas":0,"readyReplicas":0}}'
+        ;;
+      "get pods -n test-namespace -l deployment_id=deploy-456 -o json")
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"running":{}},"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137,"message":"out of memory"}}}]}}]}'
+        ;;
+      "get pods"*)
+        echo ""
+        ;;
+      "get events"*)
+        echo '{"items":[]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  export CONTEXT='{"scope":{"name":"my-app","dimensions":"prod","capabilities":{"health_check":{"path":"/health"},"ram_memory":512}}}'
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Timeout waiting for deployment"
+  # The hint script must read pod state and surface the user-friendly reason
+  assert_contains "$output" "📋 Reason: The container exceeded its memory limit"
+  assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
+  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
 }
 
 # =============================================================================
@@ -159,6 +195,8 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ Deployment is no longer running (status: failed)"
+  # Non-running status path must also source print_failed_deployment_hints
+  assert_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
 # =============================================================================
@@ -221,6 +259,7 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "Deployment status - Available: 3/5, Updated: 4/5, Ready: 3/5"
+  assert_contains "$output" "⏳ Still waiting — Ready: 3/5, Available: 3/5 (attempt 1/1, 10s elapsed)"
   assert_contains "$output" "❌ Timeout waiting for deployment"
 }
 
@@ -344,4 +383,323 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_equal "$output" "6"
+}
+
+# =============================================================================
+# Heartbeat Tests
+# =============================================================================
+@test "wait_deployment_active: logs heartbeat every 10% of timeout with progress info" {
+  # TIMEOUT=100 -> MAX_ITERATIONS=10 -> HEARTBEAT_INTERVAL=1 (every iteration)
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":2},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods\"*) echo '' ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=100 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # First heartbeat always at iteration 1
+  assert_contains "$output" "⏳ Still waiting — Ready: 0/2, Available: 0/2 (attempt 1/10, 10s elapsed)"
+  # Mid-progress
+  assert_contains "$output" "(attempt 5/10, 50s elapsed)"
+  # Last iteration before timeout
+  assert_contains "$output" "(attempt 10/10, 100s elapsed)"
+}
+
+@test "wait_deployment_active: heartbeat interval clamps to >=1 for short timeouts" {
+  # TIMEOUT=30 -> MAX_ITERATIONS=3 -> HEARTBEAT_INTERVAL would be 0, must clamp to 1
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods\"*) echo '' ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=30 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # All three iterations should emit a heartbeat (interval clamped to 1)
+  assert_contains "$output" "(attempt 1/3, 10s elapsed)"
+  assert_contains "$output" "(attempt 2/3, 20s elapsed)"
+  assert_contains "$output" "(attempt 3/3, 30s elapsed)"
+}
+
+@test "wait_deployment_active: heartbeat is suppressed when deployment is ready on iteration 1" {
+  # Default mocks: deployment is ready immediately, so heartbeat should NOT fire.
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
+  # No heartbeat emitted because the ready-check breaks before it
+  if [[ "$output" == *"Still waiting"* ]]; then
+    echo "Expected output to NOT contain 'Still waiting' on success path"
+    echo "Actual: $output"
+    return 1
+  fi
+}
+
+# =============================================================================
+# Unhealthy Translation Tests
+# =============================================================================
+@test "wait_deployment_active: translates Unhealthy connection-refused into human line during polling" {
+  # Use a far-future timestamp so the event is not filtered out by the now() initialization.
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[{\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: Get \\\"http://10.0.0.1:8080/health\\\": dial tcp 10.0.0.1:8080: connect: connection refused\"}]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # Translated form must appear
+  assert_contains "$output" "Startup probe"
+  assert_contains "$output" "not yet listening"
+  assert_contains "$output" "/health"
+  # Raw connection-refused text must NOT leak through
+  if [[ "$output" == *"connection refused"* ]]; then
+    echo "Expected output to NOT contain raw 'connection refused' (should be translated)"
+    echo "Actual: $output"
+    return 1
+  fi
+}
+
+@test "wait_deployment_active: consolidates multiple Unhealthy events for same pod into a single line" {
+  # The kubelet often emits two Unhealthy events per probe round (connection refused
+  # + HTTP 502 from a sidecar). The polling loop must merge them into one log line
+  # with both failure modes combined, using the short pod name.
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc-hhshq'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: Get \\\"http://10.0.0.1:8080/health\\\": dial tcp: connect: connection refused\"},
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: HTTP probe failed with statuscode: 502\"}
+          ]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # One consolidated line with both modes joined by ', ' for natural reading
+  assert_contains "$output" "Startup probe failing on /health — not yet listening, responded HTTP 502 (expected 2xx)"
+  # Pod name must be the short form with '...' prefix marking truncation
+  assert_contains "$output" "Pod/...abc-hhshq"
+  # The long prefix must NOT appear in any logged event line
+  if [[ "$output" == *"Pod/d-scope-123-deploy-456-abc-hhshq"* ]]; then
+    echo "Expected output to use short pod name, not the full prefix"
+    echo "Actual: $output"
+    return 1
+  fi
+  # And we must see only ONE consolidated line, not one per mode.
+  local lines
+  lines=$(printf '%s\n' "$output" | grep -c "Startup probe failing" || true)
+  if [ "$lines" -ne 1 ]; then
+    echo "Expected exactly 1 consolidated 'Startup probe failing' line, got $lines"
+    echo "Actual: $output"
+    return 1
+  fi
+}
+
+@test "wait_deployment_active: falls back to raw messages when parse_probe_message cannot translate" {
+  # Two Unhealthy events whose messages do NOT match any known probe pattern.
+  # Consolidation must fail and the raw text must be preserved for the operator.
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc-hhshq'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"some brand-new K8s probe format we cannot parse 1\"},
+            {\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc-hhshq\"},\"reason\":\"Unhealthy\",\"message\":\"another unknown probe format 2\"}
+          ]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # Both original messages must appear verbatim
+  assert_contains "$output" "some brand-new K8s probe format we cannot parse 1"
+  assert_contains "$output" "another unknown probe format 2"
+  # The consolidated header must NOT appear because parsing failed
+  if [[ "$output" == *"probe failing"* ]]; then
+    echo "Expected fallback path to NOT emit the 'probe failing' header"
+    echo "Actual: $output"
+    return 1
+  fi
+}
+
+@test "wait_deployment_active: translates Unhealthy HTTP statuscode into human line during polling" {
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[{\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: HTTP probe failed with statuscode: 502\"}]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Startup probe"
+  assert_contains "$output" "HTTP 502"
+}
+
+# =============================================================================
+# Latest Timestamp Initialization
+# =============================================================================
+@test "wait_deployment_active: skips K8s events older than script start time" {
+  # An event from 2020 must be filtered out because LATEST_TIMESTAMP is initialized
+  # to now() — prevents stale events from previous workflow retries leaking through.
+  kubectl() {
+    case "$*" in
+      "get deployment"*"-o json"*)
+        echo '{
+          "spec": {"replicas": 3},
+          "status": {
+            "availableReplicas": 3,
+            "updatedReplicas": 3,
+            "readyReplicas": 3
+          }
+        }'
+        ;;
+      "get pods"*)
+        echo ""
+        ;;
+      "get events"*"Deployment"*)
+        # A very old event that should be suppressed
+        echo '{"items":[{"effectiveTimestamp":"2020-01-01T00:00:00Z","type":"Warning","involvedObject":{"kind":"Pod","name":"d-scope-123-deploy-456-abc"},"reason":"Unhealthy","message":"old stale warning"}]}'
+        ;;
+      "get events"*)
+        echo '{"items":[]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 0 ]
+  # The 2020 event must not appear in output
+  if [[ "$output" == *"old stale warning"* ]]; then
+    echo "Expected output to NOT contain stale 2020 warning"
+    echo "Actual: $output"
+    return 1
+  fi
+  if [[ "$output" == *"2020-01-01T00:00:00Z"* ]]; then
+    echo "Expected output to NOT contain stale 2020 timestamp"
+    echo "Actual: $output"
+    return 1
+  fi
 }
