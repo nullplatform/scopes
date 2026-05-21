@@ -5,11 +5,13 @@
       "type":"object",
       "required":[
          "ram_memory",
+         "ram_memory_limit",
          "visibility",
          "autoscaling",
          "health_check",
          "scaling_type",
          "cpu_millicores",
+         "cpu_millicores_limit",
          "fixed_instances",
          "scheduled_stop",
          "additional_ports",

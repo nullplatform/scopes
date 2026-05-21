@@ -88,7 +88,7 @@ Asymmetry between RAM and CPU is intentional: RAM request stays in the main form
 }
 ```
 
-Neither property is added to the `required` array of `attributes.schema` — both are optional.
+Both properties are added to the `required` array of `attributes.schema`. This is the nullplatform UI's contract: the frontend only renders properties that appear in `required` (established during CLIEN-739). Defaults of `null` keep this non-breaking — existing scopes materialize the default, and `normalize_capability_limits` collapses `null` back to the request value before the deployment template renders.
 
 ### uiSchema changes
 
