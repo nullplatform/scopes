@@ -63,9 +63,17 @@ Asymmetry between RAM and CPU is intentional: RAM request stays in the main form
   "type": ["integer", "null"],
   "title": "CPU Millicores Limit",
   "default": null,
-  "maximum": 4000,
+  "oneOf": [
+    { "const": null, "title": "Same as request" },
+    { "const": 100,  "title": "100 m" },
+    { "const": 250,  "title": "250 m" },
+    { "const": 500,  "title": "500 m" },
+    { "const": 1000, "title": "1000 m" },
+    { "const": 2000, "title": "2000 m" },
+    { "const": 4000, "title": "4000 m" }
+  ],
   "minimum": { "$data": "1/cpu_millicores" },
-  "description": "Maximum CPU the container can use. Leave empty to use the same value as the request."
+  "description": "Maximum CPU the container can use (in millicores). Pick 'Same as request' to leave it equal to the request value."
 },
 "ram_memory_limit": {
   "type": ["integer", "null"],
