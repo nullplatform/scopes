@@ -312,8 +312,8 @@ spec:
             {{ end }}
           resources:
             limits:
-              cpu: {{ .scope.capabilities.cpu_millicores }}m
-              memory: {{ .scope.capabilities.ram_memory }}Mi
+              cpu: {{ .scope.capabilities.cpu_millicores_limit }}m
+              memory: {{ .scope.capabilities.ram_memory_limit }}Mi
             requests:
               cpu: {{ .scope.capabilities.cpu_millicores }}m
               memory: {{ .scope.capabilities.ram_memory }}Mi
