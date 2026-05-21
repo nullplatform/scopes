@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public and private scopes now register DNS records in their correct Route53 hosted zone when using `DNS_TYPE=external_dns`, preventing cross-zone record leakage
 - Add configurable main HTTP port for k8s scopes (default 8080) and HTTP support for additional ports
 - Improve **wait deployment active** failure logging: consolidate repeated `Unhealthy` probe events per pod into a single human-readable line, emit a progress heartbeat every 10% of timeout, and surface a targeted suggested fix based on the probe failure mode (port not open / HTTP non-2xx / probe timeout)
+- Improve **k8s/diagnose** for AI post-mortem: every check now emits structured evidence following a documented schema (`summary`, `severity`, `affected`, `details`, `suggested_actions`), failure findings embed the relevant pod log slice (current or previous depending on the failure mode), and a new **Application Logs** category surfaces the user-owned `application` container's log tail directly in the UI
 
 ## [1.11.0] - 2026-04-16
 - Add unit testing support
