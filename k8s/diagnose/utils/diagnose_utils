@@ -243,7 +243,14 @@ update_check_result() {
     # Usage:
     #   update_check_result "new-status" '{"new":"evidence"}'
     # or:
-    #   update_check_result --status "new-status" --evidence '{"new":"evidence"}'
+    #   update_check_result --status "new-status" --evidence '{"new":"evidence"}' [--log-tail-lines N]
+    #
+    # --log-tail-lines overrides the default 20-line cap on the captured stdout
+    # tail. Checks that publish application output (e.g. logs/application_log_evidence)
+    # need a higher cap to fit the log payload alongside their own diagnostic
+    # prints.
+
+    local log_tail_lines=20
 
     # Argument parsing
     if [[ "$1" == --* ]]; then
@@ -251,6 +258,7 @@ update_check_result() {
             case $1 in
                 --status) status="$2"; shift 2 ;;
                 --evidence) evidence="$2"; shift 2 ;;
+                --log-tail-lines) log_tail_lines="$2"; shift 2 ;;
                 *) echo "Unknown parameter: $1" >&2; return 1 ;;
             esac
         done
@@ -272,10 +280,10 @@ update_check_result() {
         return 1
     fi
 
-    # Read script log tail (last 20 non-blank lines) into a JSON array
+    # Read script log tail (non-blank lines, capped at $log_tail_lines) into a JSON array
     local log_array="[]"
     if [[ -n "$SCRIPT_LOG_FILE" && -f "$SCRIPT_LOG_FILE" ]]; then
-        log_array=$(grep -v '^[[:space:]]*$' "$SCRIPT_LOG_FILE" | tail -n 20 | lines_to_json_array)
+        log_array=$(grep -v '^[[:space:]]*$' "$SCRIPT_LOG_FILE" | tail -n "$log_tail_lines" | lines_to_json_array)
         if [[ $? -ne 0 ]]; then
             echo "Error: Failed to read log file: $SCRIPT_LOG_FILE" >&2
             return 1

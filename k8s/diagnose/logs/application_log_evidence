@@ -41,7 +41,7 @@ if [[ -z "$PROBLEMATIC_PODS" ]]; then
     SUMMARY="No problematic pods detected, no application logs to collect"
     DETAILS=$(jq -nc '{pods_with_logs: 0, problematic_pod_count: 0}')
     EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" "$DETAILS" "[]")
-    update_check_result --status "success" --evidence "$EVIDENCE"
+    update_check_result --status "success" --evidence "$EVIDENCE" --log-tail-lines 200
     return 0
 fi
 
@@ -84,9 +84,10 @@ for POD_NAME in $PROBLEMATIC_PODS; do
     mark_affected AFFECTED_PODS "$POD_NAME"
     PODS_WITH_LOGS=$((PODS_WITH_LOGS + 1))
 
-    # Echo the log tail to stdout so it surfaces in the UI's check.logs view
-    # (update_check_result captures the last 20 non-empty stdout lines). This
-    # is the only place the log text lives — evidence.details stores only
+    # Echo the log tail to stdout so it surfaces in the UI's check.logs view.
+    # update_check_result is called below with --log-tail-lines 200 so the cap
+    # accommodates the application log payload (default cap is 20). This is
+    # the only place the log text lives — evidence.details stores only
     # counters, so there is no duplication between evidence and logs[].
     print_info "─── application log tail from $POD_NAME ───"
     echo "$MERGED_LOGS" | jq -r '.[] | "  | \(.)"'
@@ -100,7 +101,7 @@ if [[ $PODS_WITH_LOGS -eq 0 ]]; then
         --argjson problematic "$TOTAL_PROBLEMATIC" \
         '{pods_with_logs: 0, problematic_pod_count: $problematic}')
     EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" "$DETAILS" "[]")
-    update_check_result --status "success" --evidence "$EVIDENCE"
+    update_check_result --status "success" --evidence "$EVIDENCE" --log-tail-lines 200
 else
     SUMMARY="Collected application logs from $PODS_WITH_LOGS of $TOTAL_PROBLEMATIC problematic pod(s)"
     DETAILS=$(jq -nc \
@@ -108,6 +109,6 @@ else
         --argjson problematic "$TOTAL_PROBLEMATIC" \
         '{pods_with_logs: $with_logs, problematic_pod_count: $problematic}')
     EVIDENCE=$(evidence_json "$SUMMARY" "info" "$AFFECTED_PODS_JSON" "$DETAILS" "[]")
-    update_check_result --status "success" --evidence "$EVIDENCE"
+    update_check_result --status "success" --evidence "$EVIDENCE" --log-tail-lines 200
     print_success "$SUMMARY"
 fi

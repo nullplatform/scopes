@@ -350,7 +350,7 @@ strip_ansi() {
 # =============================================================================
 # update_check_result - Log Limits
 # =============================================================================
-@test "update_check_result: limits logs to 20 lines" {
+@test "update_check_result: limits logs to 20 lines by default" {
   for i in {1..30}; do
     echo "log line $i" >> "$SCRIPT_LOG_FILE"
   done
@@ -359,6 +359,33 @@ strip_ansi() {
 
   logs_count=$(jq -r '.logs | length' "$SCRIPT_OUTPUT_FILE")
   [ "$logs_count" -le 20 ]
+}
+
+@test "update_check_result: --log-tail-lines overrides the default cap" {
+  for i in {1..100}; do
+    echo "log line $i" >> "$SCRIPT_LOG_FILE"
+  done
+
+  update_check_result --status "success" --evidence "{}" --log-tail-lines 80
+
+  logs_count=$(jq -r '.logs | length' "$SCRIPT_OUTPUT_FILE")
+  [ "$logs_count" = "80" ]
+  # Last entry should be the most recent line (line 100), oldest in window is line 21
+  [ "$(jq -r '.logs[-1]' "$SCRIPT_OUTPUT_FILE")" = "log line 100" ]
+  [ "$(jq -r '.logs[0]' "$SCRIPT_OUTPUT_FILE")" = "log line 21" ]
+}
+
+@test "update_check_result: --log-tail-lines below total preserves the most recent N lines" {
+  for i in {1..10}; do
+    echo "log line $i" >> "$SCRIPT_LOG_FILE"
+  done
+
+  update_check_result --status "success" --evidence "{}" --log-tail-lines 5
+
+  logs_count=$(jq -r '.logs | length' "$SCRIPT_OUTPUT_FILE")
+  [ "$logs_count" = "5" ]
+  [ "$(jq -r '.logs[0]' "$SCRIPT_OUTPUT_FILE")" = "log line 6" ]
+  [ "$(jq -r '.logs[-1]' "$SCRIPT_OUTPUT_FILE")" = "log line 10" ]
 }
 
 # =============================================================================
