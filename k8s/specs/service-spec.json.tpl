@@ -44,12 +44,22 @@
                "elements":[
                   {
                      "type":"Category",
-                     "label":"Processor",
+                     "label":"Resources",
                      "elements":[
                         {
                            "type":"Control",
                            "label":"CPU Millicores",
                            "scope":"#/properties/cpu_millicores"
+                        },
+                        {
+                           "type":"Control",
+                           "label":"CPU Millicores Limit",
+                           "scope":"#/properties/cpu_millicores_limit"
+                        },
+                        {
+                           "type":"Control",
+                           "label":"RAM Memory Limit",
+                           "scope":"#/properties/ram_memory_limit"
                         }
                      ]
                   },
