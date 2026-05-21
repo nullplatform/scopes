@@ -26,10 +26,10 @@ DEPLOYMENT_STATUS=$(echo "$CONTEXT" | jq -r ".deployment.status")
 # Fill in *_limit capability fields with the corresponding request value when
 # the limit is missing or explicitly null. Idempotent. CLIEN-781.
 normalize_capability_limits() {
-    echo "$1" | jq '
-      .scope.capabilities.cpu_millicores_limit = (.scope.capabilities.cpu_millicores_limit // .scope.capabilities.cpu_millicores)
-      | .scope.capabilities.ram_memory_limit  = (.scope.capabilities.ram_memory_limit  // .scope.capabilities.ram_memory)
-    '
+  echo "$1" | jq '
+    .scope.capabilities.cpu_millicores_limit //= .scope.capabilities.cpu_millicores
+    | .scope.capabilities.ram_memory_limit //= .scope.capabilities.ram_memory
+  '
 }
 
 validate_status() {
