@@ -946,3 +946,56 @@ set_additional_ports() {
 
   assert_equal "$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports')" "[]"
 }
+
+# =============================================================================
+# normalize_capability_limits Function Tests (CLIEN-781)
+# Fills in *_limit with the corresponding request value when null or missing,
+# leaves explicit values untouched.
+# =============================================================================
+
+setup_normalize_limits_fn() {
+  eval "$(sed -n '/^normalize_capability_limits()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+}
+
+@test "normalize_capability_limits: fills CPU limit from request when limit is absent" {
+  setup_normalize_limits_fn
+  local in='{"scope":{"capabilities":{"cpu_millicores":500,"ram_memory":1024,"ram_memory_limit":2048}}}'
+  local out
+  out=$(normalize_capability_limits "$in")
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+}
+
+@test "normalize_capability_limits: fills RAM limit from request when limit is absent" {
+  setup_normalize_limits_fn
+  local in='{"scope":{"capabilities":{"cpu_millicores":500,"cpu_millicores_limit":700,"ram_memory":1024}}}'
+  local out
+  out=$(normalize_capability_limits "$in")
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "normalize_capability_limits: fills both limits when both are absent" {
+  setup_normalize_limits_fn
+  local in='{"scope":{"capabilities":{"cpu_millicores":500,"ram_memory":1024}}}'
+  local out
+  out=$(normalize_capability_limits "$in")
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "normalize_capability_limits: fills both limits when both are explicit null" {
+  setup_normalize_limits_fn
+  local in='{"scope":{"capabilities":{"cpu_millicores":500,"cpu_millicores_limit":null,"ram_memory":1024,"ram_memory_limit":null}}}'
+  local out
+  out=$(normalize_capability_limits "$in")
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "normalize_capability_limits: preserves explicit non-null limits" {
+  setup_normalize_limits_fn
+  local in='{"scope":{"capabilities":{"cpu_millicores":500,"cpu_millicores_limit":2000,"ram_memory":1024,"ram_memory_limit":4096}}}'
+  local out
+  out=$(normalize_capability_limits "$in")
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.cpu_millicores_limit')" "2000"
+  assert_equal "$(echo "$out" | jq -r '.scope.capabilities.ram_memory_limit')" "4096"
+}
