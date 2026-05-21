@@ -1,29 +1,33 @@
 #!/bin/bash
 # Check: Application Log Evidence
 #
-# Purpose: surface the application's own log output, contextualized with the
-# pod/container state at fail-time, as structured evidence for the AI
-# post-mortem summarizer. Unlike the scope/ checks that detect specific
-# failure modes and embed logs as secondary evidence, this check is log-first:
-# its only job is to publish "here are the logs, here is the context, look at
-# this" in a single, self-contained category.
+# Purpose: capture the logs of the user-owned "application" container from
+# each problematic pod so the AI post-mortem summarizer has a focused,
+# self-contained source for application output to analyze.
 #
-# Reads from the pre-collected snapshot taken by build_context (data/pod_logs/
-# and data/problematic_pods.txt). Never calls kubectl directly — the snapshot
-# was point-in-time at fail-time, before any rollback churned the cluster.
+# Scope is intentionally narrow:
+#   - Only the container literally named "application" (the user code; see
+#     k8s/deployment/templates/deployment.yaml.tpl). Sidecars (e.g. "http"
+#     nginx) and init containers are out of scope here — the scope/ checks
+#     already report their findings without us duplicating logs across
+#     containers and probe rounds.
+#   - Evidence payload is just the logs (current + previous) plus the pod
+#     name. Pod/container state is already published by the scope/ checks;
+#     re-emitting it would inflate the payload without adding information.
 #
-# Severity is always "info". The check never fails because absence of logs is
-# itself meaningful information (the AI can flag "image never started, no logs
-# to inspect, look at scope/image_pull_status").
+# Reads from the build_context snapshot (data/pod_logs/), never calls kubectl.
+# Severity is always "info"; this check publishes evidence, it does not detect
+# failure modes.
 
-# No problematic pods snapshot: build_context did not run or this is a test.
+APPLICATION_CONTAINER_NAME="application"
+
 if [[ ! -f "$PROBLEMATIC_PODS_FILE" ]]; then
     print_warning "No problematic pods snapshot available, log evidence skipped"
     SKIP_EVIDENCE=$(evidence_json \
         "Snapshot unavailable, log collection skipped" \
         "info" \
         "[]" \
-        "$(jq -nc '{pods_with_logs: 0, containers_with_logs: 0, logs: []}')" \
+        '{"pods": []}' \
         "[]")
     update_check_result --status "skipped" --evidence "$SKIP_EVIDENCE"
     return 0
@@ -32,202 +36,74 @@ fi
 PROBLEMATIC_PODS=$(grep -v '^[[:space:]]*$' "$PROBLEMATIC_PODS_FILE" 2>/dev/null)
 
 if [[ -z "$PROBLEMATIC_PODS" ]]; then
-    print_success "No problematic pods detected — no logs to collect"
+    print_success "No problematic pods detected — no application logs to collect"
     SUMMARY="No problematic pods detected, no application logs to collect"
-    DETAILS=$(jq -nc '{pods_with_logs: 0, containers_with_logs: 0, logs: []}')
-    EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" "$DETAILS" "[]")
+    EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" '{"pods": []}' "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
     return 0
 fi
 
-LOG_FACTS=()
+POD_FACTS=()
 AFFECTED_PODS=""
-TOTAL_CONTAINERS=0
-TOTAL_PODS_WITH_LOGS=0
-PROBLEMATIC_POD_COUNT=$(echo "$PROBLEMATIC_PODS" | wc -w | tr -d ' ')
-
-# Extract pod-level context (phase + reason) in a single jq call.
-# Echoes a compact JSON object: {pod_phase, pod_reason}. pod_reason may be null.
-extract_pod_context() {
-    local pod="$1"
-    jq -c --arg pod "$pod" '
-        .items[]
-        | select(.metadata.name == $pod)
-        | {
-            pod_phase: (.status.phase // "Unknown"),
-            pod_reason: (
-                ((.status.conditions // [])
-                    | map(select(.type == "Ready" and .status != "True"))
-                    | .[0].reason)
-                // .status.reason
-                // null
-            )
-          }
-    ' "$PODS_FILE" 2>/dev/null
-}
-
-# Extract container-level context (state, restarts, last termination) for one
-# container, considering whether it lives under containerStatuses (regular) or
-# initContainerStatuses (init). Echoes a compact JSON object.
-extract_container_context() {
-    local pod="$1"
-    local container="$2"
-    local is_init="$3"  # "true" or "false"
-    local statuses_field
-    if [[ "$is_init" == "true" ]]; then
-        statuses_field="initContainerStatuses"
-    else
-        statuses_field="containerStatuses"
-    fi
-    jq -c --arg pod "$pod" --arg cn "$container" --arg sf "$statuses_field" '
-        .items[]
-        | select(.metadata.name == $pod)
-        | ((.status[$sf] // []) | map(select(.name == $cn)) | .[0] // {}) as $cs
-        | {
-            container_state: (
-                if $cs.state.waiting then "waiting"
-                elif $cs.state.terminated then "terminated"
-                elif $cs.state.running then "running"
-                else "unknown"
-                end
-            ),
-            restart_count: ($cs.restartCount // 0),
-            current_state_reason: ($cs.state.waiting.reason // $cs.state.terminated.reason // null),
-            last_termination_reason: ($cs.lastState.terminated.reason // null),
-            last_exit_code: ($cs.lastState.terminated.exitCode // null)
-          }
-    ' "$PODS_FILE" 2>/dev/null
-}
-
-# Inner helper: read current + previous logs for one container plus its
-# context, build a fact JSON, and bump the counters. Returns 0 if a fact was
-# added, 1 if the container produced no logs at all (skipped).
-collect_container_logs() {
-    local pod="$1"
-    local container="$2"
-    local is_init="$3"
-    local pod_phase="$4"
-    local pod_reason="$5"
-    local current_logs previous_logs current_count previous_count
-
-    current_logs=$(read_log_tail "$pod" "$container" "current")
-    previous_logs=$(read_log_tail "$pod" "$container" "previous")
-    current_count=$(echo "$current_logs" | jq 'length')
-    previous_count=$(echo "$previous_logs" | jq 'length')
-
-    if [[ "$current_count" -eq 0 && "$previous_count" -eq 0 ]]; then
-        return 1
-    fi
-
-    local container_ctx last_exit_code last_exit_meaning
-    container_ctx=$(extract_container_context "$pod" "$container" "$is_init")
-    last_exit_code=$(echo "$container_ctx" | jq -r '.last_exit_code // empty')
-    if [[ -n "$last_exit_code" ]]; then
-        last_exit_meaning=$(exit_code_meaning "$last_exit_code")
-    else
-        last_exit_meaning=""
-    fi
-
-    local fact
-    fact=$(jq -nc \
-        --arg pod "$pod" \
-        --arg pod_phase "$pod_phase" \
-        --arg pod_reason "$pod_reason" \
-        --arg container "$container" \
-        --argjson is_init "$is_init" \
-        --argjson container_ctx "$container_ctx" \
-        --arg last_exit_meaning "$last_exit_meaning" \
-        --argjson current_logs "$current_logs" \
-        --argjson previous_logs "$previous_logs" \
-        '{
-            pod: $pod,
-            pod_phase: $pod_phase,
-            pod_reason: (if ($pod_reason | length) == 0 then null else $pod_reason end),
-            container: $container,
-            init_container: $is_init,
-            container_state: $container_ctx.container_state,
-            restart_count: $container_ctx.restart_count,
-            current_state_reason: $container_ctx.current_state_reason,
-            last_termination_reason: $container_ctx.last_termination_reason,
-            last_exit_code: $container_ctx.last_exit_code,
-            last_exit_code_meaning: (if ($last_exit_meaning | length) == 0 then null else $last_exit_meaning end),
-            current_logs: $current_logs,
-            previous_logs: $previous_logs
-        }')
-    add_fact LOG_FACTS "$fact"
-    TOTAL_CONTAINERS=$((TOTAL_CONTAINERS + 1))
-    return 0
-}
+PODS_WITH_LOGS=0
+TOTAL_PROBLEMATIC=$(echo "$PROBLEMATIC_PODS" | wc -w | tr -d ' ')
 
 for POD_NAME in $PROBLEMATIC_PODS; do
-    POD_HAS_LOGS=0
-
-    POD_CTX=$(extract_pod_context "$POD_NAME")
-    POD_PHASE=$(echo "$POD_CTX" | jq -r '.pod_phase')
-    POD_REASON=$(echo "$POD_CTX" | jq -r '.pod_reason // empty')
-
-    INIT_CONTAINERS=$(jq -r --arg name "$POD_NAME" '
-        .items[]
-        | select(.metadata.name == $name)
-        | (.spec.initContainers // [])
-        | .[].name
-    ' "$PODS_FILE" 2>/dev/null)
-
-    REGULAR_CONTAINERS=$(jq -r --arg name "$POD_NAME" '
+    HAS_APP_CONTAINER=$(jq -r --arg name "$POD_NAME" --arg cn "$APPLICATION_CONTAINER_NAME" '
         .items[]
         | select(.metadata.name == $name)
         | (.spec.containers // [])
-        | .[].name
+        | map(.name)
+        | index($cn) != null
     ' "$PODS_FILE" 2>/dev/null)
 
-    for CONTAINER in $INIT_CONTAINERS; do
-        if collect_container_logs "$POD_NAME" "$CONTAINER" "true" "$POD_PHASE" "$POD_REASON"; then
-            POD_HAS_LOGS=1
-        fi
-    done
-    for CONTAINER in $REGULAR_CONTAINERS; do
-        if collect_container_logs "$POD_NAME" "$CONTAINER" "false" "$POD_PHASE" "$POD_REASON"; then
-            POD_HAS_LOGS=1
-        fi
-    done
-
-    if [[ $POD_HAS_LOGS -eq 1 ]]; then
-        mark_affected AFFECTED_PODS "$POD_NAME"
-        TOTAL_PODS_WITH_LOGS=$((TOTAL_PODS_WITH_LOGS + 1))
-        print_info "Collected logs from pod $POD_NAME ($POD_PHASE)"
-    else
-        print_warning "Pod $POD_NAME ($POD_PHASE) is problematic but produced no logs (image never started?)"
+    if [[ "$HAS_APP_CONTAINER" != "true" ]]; then
+        print_warning "Pod $POD_NAME has no '$APPLICATION_CONTAINER_NAME' container — skipped"
+        continue
     fi
+
+    CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$APPLICATION_CONTAINER_NAME" "current")
+    PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$APPLICATION_CONTAINER_NAME" "previous")
+
+    # Merge previous + current in chronological order, then keep only the last
+    # N lines (defaults to 50). One flat array; the AI does not need to know
+    # which container instance produced which line.
+    TAIL_LINES="${EVIDENCE_LOG_TAIL_LINES:-50}"
+    MERGED_LOGS=$(jq -nc \
+        --argjson prev "$PREVIOUS_LOGS" \
+        --argjson curr "$CURRENT_LOGS" \
+        --argjson n "$TAIL_LINES" \
+        '($prev + $curr) | .[-$n:]')
+
+    if [[ "$(echo "$MERGED_LOGS" | jq 'length')" -eq 0 ]]; then
+        print_warning "Pod $POD_NAME application container produced no logs"
+        continue
+    fi
+
+    FACT=$(jq -nc \
+        --arg pod "$POD_NAME" \
+        --argjson logs "$MERGED_LOGS" \
+        '{
+            pod: $pod,
+            logs: $logs
+        }')
+    add_fact POD_FACTS "$FACT"
+    mark_affected AFFECTED_PODS "$POD_NAME"
+    PODS_WITH_LOGS=$((PODS_WITH_LOGS + 1))
+    print_info "Collected application logs from pod $POD_NAME"
 done
 
-LOG_FACTS_JSON=$(facts_to_json_array LOG_FACTS)
+POD_FACTS_JSON=$(facts_to_json_array POD_FACTS)
 AFFECTED_PODS_JSON=$(set_to_json_array AFFECTED_PODS)
 
-if [[ $TOTAL_CONTAINERS -eq 0 ]]; then
-    SUMMARY="No application logs available across $PROBLEMATIC_POD_COUNT problematic pod(s) — image may never have started"
-    DETAILS=$(jq -nc \
-        --argjson problematic "$PROBLEMATIC_POD_COUNT" \
-        '{
-            pods_with_logs: 0,
-            containers_with_logs: 0,
-            problematic_pod_count: $problematic,
-            logs: []
-        }')
+if [[ $PODS_WITH_LOGS -eq 0 ]]; then
+    SUMMARY="No application logs available across $TOTAL_PROBLEMATIC problematic pod(s) — image may never have started"
+    DETAILS=$(jq -nc '{pods: []}')
     EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" "$DETAILS" "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    SUMMARY="Collected logs from $TOTAL_CONTAINERS container(s) across $TOTAL_PODS_WITH_LOGS of $PROBLEMATIC_POD_COUNT problematic pod(s)"
-    DETAILS=$(jq -nc \
-        --argjson pods_with_logs "$TOTAL_PODS_WITH_LOGS" \
-        --argjson containers_with_logs "$TOTAL_CONTAINERS" \
-        --argjson problematic "$PROBLEMATIC_POD_COUNT" \
-        --argjson logs "$LOG_FACTS_JSON" \
-        '{
-            pods_with_logs: $pods_with_logs,
-            containers_with_logs: $containers_with_logs,
-            problematic_pod_count: $problematic,
-            logs: $logs
-        }')
+    SUMMARY="Collected application logs from $PODS_WITH_LOGS of $TOTAL_PROBLEMATIC problematic pod(s)"
+    DETAILS=$(jq -nc --argjson pods "$POD_FACTS_JSON" '{pods: $pods}')
     EVIDENCE=$(evidence_json "$SUMMARY" "info" "$AFFECTED_PODS_JSON" "$DETAILS" "[]")
     update_check_result --status "success" --evidence "$EVIDENCE"
     print_success "$SUMMARY"
