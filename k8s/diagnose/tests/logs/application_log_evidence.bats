@@ -43,13 +43,13 @@ evidence() {
   [ "$status" -eq 0 ]
   [ "$(evidence '.status')" = "skipped" ]
   [ "$(evidence '.evidence.severity')" = "info" ]
-  [ "$(evidence '.evidence.details.pods | length')" = "0" ]
+  [ "$(evidence '.evidence.details.pods_with_logs')" = "0" ]
 }
 
 # =============================================================================
 # No problematic pods
 # =============================================================================
-@test "logs/application_log_evidence: success with empty payload when no problematic pods" {
+@test "logs/application_log_evidence: success with zero counters when no problematic pods" {
   : > "$PROBLEMATIC_PODS_FILE"
   echo '{"items":[]}' > "$PODS_FILE"
 
@@ -57,14 +57,15 @@ evidence() {
 
   [ "$status" -eq 0 ]
   [ "$(evidence '.status')" = "success" ]
-  [ "$(evidence '.evidence.details.pods | length')" = "0" ]
+  [ "$(evidence '.evidence.details.pods_with_logs')" = "0" ]
+  [ "$(evidence '.evidence.details.problematic_pod_count')" = "0" ]
   assert_contains "$(evidence '.evidence.summary')" "No problematic pods"
 }
 
 # =============================================================================
-# Focuses on the application container only
+# Focuses on the application container only — sidecars are not echoed
 # =============================================================================
-@test "logs/application_log_evidence: collects only application container logs (ignores sidecars)" {
+@test "logs/application_log_evidence: echoes only application logs (ignores sidecars)" {
   echo "pod-1" > "$PROBLEMATIC_PODS_FILE"
   cat > "$PODS_FILE" <<'EOF'
 {"items":[{
@@ -78,28 +79,51 @@ EOF
   run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
 
   [ "$status" -eq 0 ]
-  [ "$(evidence '.evidence.details.pods | length')" = "1" ]
-  [ "$(evidence '.evidence.details.pods[0].pod')" = "pod-1" ]
-  [ "$(evidence '.evidence.details.pods[0].logs | length')" = "2" ]
-  # Application log must appear, sidecar log must NOT
-  assert_contains "$(evidence '.evidence.details.pods[0].logs | join("\n")')" "missing DATABASE_URL"
-  if [[ "$(evidence '.evidence.details | tostring')" == *"nginx sidecar noise"* ]]; then
-    echo "Sidecar log leaked into evidence"
+  # Header + lines prefixed with "| " appear in stdout (captured by UI logs[])
+  assert_contains "$output" "application log tail from pod-1"
+  assert_contains "$output" "| starting..."
+  assert_contains "$output" "| ERROR: missing DATABASE_URL"
+  # Sidecar must NOT leak
+  if [[ "$output" == *"nginx sidecar noise"* ]]; then
+    echo "Sidecar log leaked into stdout"
     return 1
   fi
-  # No leftover metadata fields from the previous shape (no current/previous split either)
-  for field in pod_phase pod_reason container init_container container_state restart_count last_exit_code current_logs previous_logs; do
-    if [[ "$(evidence ".evidence.details.pods[0].$field")" != "null" ]]; then
-      echo "Unexpected leftover field: $field"
-      return 1
-    fi
-  done
+  # Affected lists the pod, counters reflect success
+  [ "$(evidence '.evidence.affected[0]')" = "pod-1" ]
+  [ "$(evidence '.evidence.details.pods_with_logs')" = "1" ]
+  [ "$(evidence '.evidence.details.problematic_pod_count')" = "1" ]
 }
 
 # =============================================================================
-# Previous + current are merged into a single chronological logs array
+# Evidence has NO log text — only counters
 # =============================================================================
-@test "logs/application_log_evidence: merges previous and current logs in chronological order" {
+@test "logs/application_log_evidence: evidence.details exposes only counters, never log text" {
+  echo "pod-1" > "$PROBLEMATIC_PODS_FILE"
+  cat > "$PODS_FILE" <<'EOF'
+{"items":[{"metadata":{"name":"pod-1"},"spec":{"containers":[{"name":"application"}]}}]}
+EOF
+  echo "secret log line that must not appear in evidence" > "$POD_LOGS_DIR/pod-1.application.log"
+
+  run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
+
+  [ "$status" -eq 0 ]
+  # details has only the two counters, no pods array, no logs field
+  local keys
+  keys=$(jq -r '.evidence.details | keys | sort | join(",")' "$SCRIPT_OUTPUT_FILE")
+  [ "$keys" = "pods_with_logs,problematic_pod_count" ]
+  # The log text must not appear anywhere in the evidence object
+  if [[ "$(jq -c '.evidence' "$SCRIPT_OUTPUT_FILE")" == *"secret log line"* ]]; then
+    echo "Log text leaked into evidence"
+    return 1
+  fi
+  # But it MUST appear in stdout
+  assert_contains "$output" "| secret log line"
+}
+
+# =============================================================================
+# Previous + current are merged into a single chronological stream on stdout
+# =============================================================================
+@test "logs/application_log_evidence: stdout shows previous logs first, then current" {
   echo "pod-1" > "$PROBLEMATIC_PODS_FILE"
   cat > "$PODS_FILE" <<'EOF'
 {"items":[{"metadata":{"name":"pod-1"},"spec":{"containers":[{"name":"application"}]}}]}
@@ -110,18 +134,24 @@ EOF
   run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
 
   [ "$status" -eq 0 ]
-  # Single flat logs array, previous first (older) then current (newer)
-  [ "$(evidence '.evidence.details.pods[0].logs | length')" = "2" ]
-  [ "$(evidence '.evidence.details.pods[0].logs[0]')" = "previous crash output" ]
-  [ "$(evidence '.evidence.details.pods[0].logs[1]')" = "current run" ]
+  # Both lines must appear in stdout
+  assert_contains "$output" "| previous crash output"
+  assert_contains "$output" "| current run"
+  # And previous must come before current
+  local prev_line current_line
+  prev_line=$(printf '%s\n' "$output" | grep -n "previous crash output" | head -1 | cut -d: -f1)
+  current_line=$(printf '%s\n' "$output" | grep -n "current run" | head -1 | cut -d: -f1)
+  [ "$prev_line" -lt "$current_line" ] || { echo "Expected previous to print before current"; return 1; }
 }
 
-@test "logs/application_log_evidence: caps logs to the last 50 lines (EVIDENCE_LOG_TAIL_LINES default)" {
+# =============================================================================
+# Caps logs to last 50 lines (EVIDENCE_LOG_TAIL_LINES default)
+# =============================================================================
+@test "logs/application_log_evidence: caps echoed logs to the last 50 lines" {
   echo "pod-1" > "$PROBLEMATIC_PODS_FILE"
   cat > "$PODS_FILE" <<'EOF'
 {"items":[{"metadata":{"name":"pod-1"},"spec":{"containers":[{"name":"application"}]}}]}
 EOF
-  # 30 previous + 30 current = 60 lines combined; only last 50 must survive
   for i in $(seq 1 30); do echo "prev-$i" >> "$POD_LOGS_DIR/pod-1.application.previous.log"; done
   for i in $(seq 1 30); do echo "curr-$i" >> "$POD_LOGS_DIR/pod-1.application.log"; done
 
@@ -130,10 +160,19 @@ EOF
   run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
 
   [ "$status" -eq 0 ]
-  [ "$(evidence '.evidence.details.pods[0].logs | length')" = "50" ]
-  # Should keep the latest 50 — the first 10 previous lines drop off
-  [ "$(evidence '.evidence.details.pods[0].logs[0]')" = "prev-11" ]
-  [ "$(evidence '.evidence.details.pods[0].logs[-1]')" = "curr-30" ]
+  # 60 input lines, capped at 50 → the first 10 previous lines must drop off
+  if [[ "$output" == *"| prev-1"$'\n'* || "$output" == *"| prev-1 "* ]]; then
+    : # 'prev-1' is a prefix of 'prev-10', need stricter match
+  fi
+  # Stricter check: 'prev-10' should not appear because only prev-11..30 + curr-1..30 fit
+  if printf '%s\n' "$output" | grep -qE '\| prev-10$'; then
+    echo "Expected prev-10 to be dropped (out of tail-50 window)"
+    return 1
+  fi
+  # But prev-11 should be there (first survivor)
+  printf '%s\n' "$output" | grep -qE '\| prev-11$' || { echo "Expected prev-11 to survive"; return 1; }
+  # And the latest current line is the last visible
+  printf '%s\n' "$output" | grep -qE '\| curr-30$' || { echo "Expected curr-30 to survive"; return 1; }
 }
 
 # =============================================================================
@@ -149,7 +188,8 @@ EOF
   run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
 
   [ "$status" -eq 0 ]
-  [ "$(evidence '.evidence.details.pods | length')" = "0" ]
+  [ "$(evidence '.evidence.details.pods_with_logs')" = "0" ]
+  [ "$(evidence '.evidence.details.problematic_pod_count')" = "1" ]
   assert_contains "$(evidence '.evidence.summary')" "No application logs available"
 }
 
@@ -161,56 +201,42 @@ EOF
   cat > "$PODS_FILE" <<'EOF'
 {"items":[{"metadata":{"name":"pod-1"},"spec":{"containers":[{"name":"application"}]}}]}
 EOF
-  # No log files (e.g. ImagePullBackOff)
+  # No log files
 
   run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
 
   [ "$status" -eq 0 ]
-  [ "$(evidence '.evidence.details.pods | length')" = "0" ]
+  [ "$(evidence '.evidence.details.pods_with_logs')" = "0" ]
   assert_contains "$(evidence '.evidence.summary')" "image may never have started"
 }
 
 # =============================================================================
 # Multiple pods aggregated
 # =============================================================================
-@test "logs/application_log_evidence: aggregates application logs across multiple pods" {
+@test "logs/application_log_evidence: aggregates affected across multiple pods" {
   printf 'pod-a\npod-b\npod-c\n' > "$PROBLEMATIC_PODS_FILE"
   cat > "$PODS_FILE" <<'EOF'
 {
   "items":[
-    {"metadata":{"name":"pod-a"},"spec":{"containers":[{"name":"http"},{"name":"application"}]}},
-    {"metadata":{"name":"pod-b"},"spec":{"containers":[{"name":"http"},{"name":"application"}]}},
-    {"metadata":{"name":"pod-c"},"spec":{"containers":[{"name":"http"},{"name":"application"}]}}
+    {"metadata":{"name":"pod-a"},"spec":{"containers":[{"name":"application"}]}},
+    {"metadata":{"name":"pod-b"},"spec":{"containers":[{"name":"application"}]}},
+    {"metadata":{"name":"pod-c"},"spec":{"containers":[{"name":"application"}]}}
   ]
 }
 EOF
   echo "log of A" > "$POD_LOGS_DIR/pod-a.application.log"
   echo "log of C" > "$POD_LOGS_DIR/pod-c.application.log"
-  # pod-b has no application log file → dropped silently
+  # pod-b has no log file
 
   run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
 
   [ "$status" -eq 0 ]
-  [ "$(evidence '.evidence.details.pods | length')" = "2" ]
+  [ "$(evidence '.evidence.details.pods_with_logs')" = "2" ]
+  [ "$(evidence '.evidence.details.problematic_pod_count')" = "3" ]
   local affected
   affected=$(evidence '.evidence.affected | sort | join(",")')
   [ "$affected" = "pod-a,pod-c" ]
-}
-
-# =============================================================================
-# Schema sanity: only the documented top-level fields are present
-# =============================================================================
-@test "logs/application_log_evidence: pod entry exposes exactly {pod, logs}" {
-  echo "pod-1" > "$PROBLEMATIC_PODS_FILE"
-  cat > "$PODS_FILE" <<'EOF'
-{"items":[{"metadata":{"name":"pod-1"},"spec":{"containers":[{"name":"application"}]}}]}
-EOF
-  echo "a line" > "$POD_LOGS_DIR/pod-1.application.log"
-
-  run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../logs/application_log_evidence'"
-
-  [ "$status" -eq 0 ]
-  local keys
-  keys=$(jq -r '.evidence.details.pods[0] | keys | sort | join(",")' "$SCRIPT_OUTPUT_FILE")
-  [ "$keys" = "logs,pod" ]
+  # Both visible in stdout, pod-b absent
+  assert_contains "$output" "| log of A"
+  assert_contains "$output" "| log of C"
 }
