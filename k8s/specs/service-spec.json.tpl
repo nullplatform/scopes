@@ -356,6 +356,27 @@
             "default":128,
             "description":"Amount of RAM memory to allocate to the container (in MB)"
          },
+         "ram_memory_limit":{
+            "type":["integer","null"],
+            "oneOf":[
+               {"const":null,  "title":"Same as request"},
+               {"const":64,    "title":"64 MB"},
+               {"const":128,   "title":"128 MB"},
+               {"const":256,   "title":"256 MB"},
+               {"const":512,   "title":"512 MB"},
+               {"const":1024,  "title":"1 GB"},
+               {"const":2048,  "title":"2 GB"},
+               {"const":4096,  "title":"4 GB"},
+               {"const":8192,  "title":"8 GB"},
+               {"const":16384, "title":"16 GB"}
+            ],
+            "title":"RAM Memory Limit",
+            "default":null,
+            "minimum":{
+               "$data":"1/ram_memory"
+            },
+            "description":"Maximum memory the container can use (in MB). Setting this higher than the request increases the chance the scheduler kills the pod under pressure."
+         },
          "visibility":{
             "type":"string",
             "oneOf":[
@@ -489,6 +510,16 @@
             "maximum":4000,
             "minimum":100,
             "description":"Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)"
+         },
+         "cpu_millicores_limit":{
+            "type":["integer","null"],
+            "title":"CPU Millicores Limit",
+            "default":null,
+            "maximum":4000,
+            "minimum":{
+               "$data":"1/cpu_millicores"
+            },
+            "description":"Maximum CPU the container can use (in millicores). Leave empty to use the same value as the request."
          },
          "scheduled_stop":{
             "type":"object",
