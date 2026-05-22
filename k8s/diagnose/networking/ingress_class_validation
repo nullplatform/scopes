@@ -2,63 +2,87 @@
 # Check: Ingress Class Validation
 # Validates ingress class is correctly configured
 
-# Validate ingresses exist
 require_ingresses || return 0
 
-# Read ingresses from pre-collected data
 INGRESSES=$(jq -r '.items[].metadata.name' "$INGRESSES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+CLASS_FACTS=()
+AFFECTED_INGRESSES=""
 
-# Get available ingress classes from pre-collected data
+
 AVAILABLE_CLASSES=$(jq -r '.items[].metadata.name' "$INGRESSCLASSES_FILE" 2>/dev/null | tr '\n' ' ')
+AVAILABLE_CLASSES_JSON=$(jq -c '[.items[].metadata.name]' "$INGRESSCLASSES_FILE" 2>/dev/null)
 DEFAULT_CLASS=$(jq -r '.items[] | select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true") | .metadata.name' "$INGRESSCLASSES_FILE" 2>/dev/null)
 
 for INGRESS_NAME in $INGRESSES; do
-    # Get ingress info from pre-collected data
     INGRESS_INFO=$(jq --arg name "$INGRESS_NAME" '.items[] | select(.metadata.name == $name)' "$INGRESSES_FILE" 2>/dev/null)
 
-    # Check spec.ingressClassName (new way)
     INGRESS_CLASS=$(echo "$INGRESS_INFO" | jq -r '.spec.ingressClassName // empty')
+    USED_DEPRECATED=false
 
-    # Check annotation (old way)
     if [[ -z "$INGRESS_CLASS" ]]; then
         INGRESS_CLASS=$(echo "$INGRESS_INFO" | jq -r '.metadata.annotations["kubernetes.io/ingress.class"] // empty')
-
         if [[ -n "$INGRESS_CLASS" ]]; then
             print_info "Ingress $INGRESS_NAME: Using deprecated annotation (kubernetes.io/ingress.class)"
+            USED_DEPRECATED=true
         fi
     fi
 
     if [[ -z "$INGRESS_CLASS" ]]; then
         if [[ -n "$DEFAULT_CLASS" ]]; then
             print_success "Ingress $INGRESS_NAME: Using default IngressClass ($DEFAULT_CLASS)"
+            FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg cls "$DEFAULT_CLASS" \
+                '{ingress: $ing, ingress_class: $cls, source: "default"}')
         else
-            HAS_ISSUES=1
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             print_error "Ingress $INGRESS_NAME: No IngressClass specified and no default found"
             print_action "Specify ingressClassName or set a default IngressClass"
+            FACT=$(jq -nc --arg ing "$INGRESS_NAME" \
+                '{ingress: $ing, issue: "no_ingress_class_no_default"}')
         fi
     else
-        # Verify the class exists
         if echo "$AVAILABLE_CLASSES" | grep -qw "$INGRESS_CLASS"; then
             print_success "Ingress $INGRESS_NAME: IngressClass '$INGRESS_CLASS' is valid"
+            FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg cls "$INGRESS_CLASS" --argjson dep "$USED_DEPRECATED" \
+                '{ingress: $ing, ingress_class: $cls, used_deprecated_annotation: $dep, source: "explicit"}')
         else
-            HAS_ISSUES=1
+            mark_affected AFFECTED_INGRESSES "$INGRESS_NAME"
             print_error "Ingress $INGRESS_NAME: IngressClass '$INGRESS_CLASS' not found"
-
             if [[ -n "$AVAILABLE_CLASSES" ]]; then
                 print_warning "  Available classes: $AVAILABLE_CLASSES"
             else
                 print_warning "  No IngressClasses found in cluster"
             fi
+            FACT=$(jq -nc --arg ing "$INGRESS_NAME" --arg cls "$INGRESS_CLASS" \
+                --argjson available "$AVAILABLE_CLASSES_JSON" --argjson dep "$USED_DEPRECATED" \
+                '{ingress: $ing, ingress_class: $cls, issue: "ingress_class_not_found", available_classes: $available, used_deprecated_annotation: $dep}')
         fi
     fi
+    add_fact CLASS_FACTS "$FACT"
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
-    INGRESS_COUNT=$(echo "$INGRESSES" | wc -w)
+INGRESS_COUNT=$(echo "$INGRESSES" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$AFFECTED_INGRESSES" | wc -w | tr -d ' ')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
     print_success "All $INGRESS_COUNT ingress(es) have valid IngressClass configuration"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "All $INGRESS_COUNT ingress(es) have valid IngressClass configuration" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array CLASS_FACTS)" --argjson count "$INGRESS_COUNT" --arg default "$DEFAULT_CLASS" \
+            '{ingress_count: $count, default_class: $default, ingresses: $facts}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $INGRESS_COUNT ingress(es) have IngressClass issues"
+    DETAILS=$(jq -nc \
+        --argjson facts "$(facts_to_json_array CLASS_FACTS)" \
+        --argjson available "$AVAILABLE_CLASSES_JSON" \
+        --arg default "$DEFAULT_CLASS" \
+        --argjson count "$INGRESS_COUNT" \
+        '{ingress_count: $count, available_classes: $available, default_class: $default, ingresses: $facts}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_INGRESSES)" "$DETAILS" \
+        '["Specify ingressClassName or set a default IngressClass"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

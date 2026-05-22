@@ -7,10 +7,26 @@ SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n'
 if [[ -z "$SERVICES" ]]; then
     print_error "No services found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
     print_action "Create service resource or verify label selectors"
-    update_check_result --status "failed" --evidence "{}"
+
+    EVIDENCE=$(evidence_json \
+        "No services found in namespace $NAMESPACE" \
+        "critical" \
+        "[]" \
+        "$(jq -nc --arg ls "$LABEL_SELECTOR" --arg ns "$NAMESPACE" '{label_selector: $ls, namespace: $ns}')" \
+        '["Create service resource or verify label selectors"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
     return 1
 fi
 
-SERVICE_COUNT=$(echo "$SERVICES" | wc -w)
+SERVICE_NAMES_JSON=$(jq -c '[.items[].metadata.name]' "$SERVICES_FILE" 2>/dev/null)
+SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
 print_success "Found $SERVICE_COUNT service(s): $SERVICES"
-update_check_result --status "success" --evidence "{}"
+
+EVIDENCE=$(evidence_json \
+    "Found $SERVICE_COUNT service(s) in namespace $NAMESPACE" \
+    "info" \
+    "[]" \
+    "$(jq -nc --argjson count "$SERVICE_COUNT" --argjson names "$SERVICE_NAMES_JSON" --arg ns "$NAMESPACE" \
+        '{service_count: $count, service_names: $names, namespace: $ns}')" \
+    "[]")
+update_check_result --status "success" --evidence "$EVIDENCE"

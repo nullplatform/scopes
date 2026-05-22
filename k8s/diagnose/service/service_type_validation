@@ -2,75 +2,111 @@
 # Check: Service Type Validation
 # Verifies service type is correctly configured
 
-# Validate services exist
 require_services || return 0
 
-# Read services from pre-collected data
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+ISSUE_FACTS=()
+SERVICE_FACTS=()
+AFFECTED_SERVICES=""
+
 
 for SERVICE_NAME in $SERVICES; do
-    # Get service info from pre-collected data
     SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
-
     SERVICE_TYPE=$(echo "$SERVICE_INFO" | jq -r '.spec.type')
 
     print_info "Service $SERVICE_NAME: Type=$SERVICE_TYPE"
 
+    # Per-service fact (regardless of issue)
     case "$SERVICE_TYPE" in
         ClusterIP)
             CLUSTER_IP=$(echo "$SERVICE_INFO" | jq -r '.spec.clusterIP')
             if [[ "$CLUSTER_IP" == "None" ]]; then
                 print_success "  Headless service (ClusterIP: None)"
+                SVC_FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" \
+                    '{service: $svc, type: $type, cluster_ip: "None", headless: true}')
             else
                 print_success "  Internal service with ClusterIP: $CLUSTER_IP"
+                SVC_FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" --arg ip "$CLUSTER_IP" \
+                    '{service: $svc, type: $type, cluster_ip: $ip, headless: false}')
             fi
             ;;
 
         NodePort)
-            NODE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.nodePort)"')
+            NODE_PORTS_LIST=$(echo "$SERVICE_INFO" | jq -c '[.spec.ports[] | {port: .port, node_port: .nodePort}]')
             print_success "  NodePort service exposed on:"
-            echo "$NODE_PORTS" | while IFS=':' read -r PORT NODE_PORT; do
-                print_info "    Port $PORT -> NodePort $NODE_PORT"
+            echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "    Port \(.port) -> NodePort \(.nodePort)"' | while IFS= read -r line; do
+                print_info "$line"
             done
+            SVC_FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" --argjson ports "$NODE_PORTS_LIST" \
+                '{service: $svc, type: $type, node_ports: $ports}')
             ;;
 
         LoadBalancer)
             EXTERNAL_IP=$(echo "$SERVICE_INFO" | jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // "Pending"')
 
             if [[ "$EXTERNAL_IP" == "Pending" || "$EXTERNAL_IP" == "null" ]]; then
-                HAS_ISSUES=1
+                mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
                 print_warning "  LoadBalancer IP/Hostname is Pending"
                 print_info "    This may take a few minutes to provision"
 
-                # Check for events related to LoadBalancer from pre-collected data
                 LB_EVENTS=$(jq -r --arg name "$SERVICE_NAME" '.items[] | select(.involvedObject.name == $name and (.message | test("loadbalancer|external"; "i"))) | "\(.lastTimestamp) \(.message)"' "$EVENTS_FILE" 2>/dev/null | tail -n 3)
                 if [[ -n "$LB_EVENTS" ]]; then
                     print_info "    Recent events:"
                     echo "$LB_EVENTS" | sed 's/^/      /'
                 fi
                 print_action "Wait for provisioning or check cloud provider logs for errors"
+
+                FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" \
+                    '{service: $svc, type: $type, issue: "loadbalancer_pending"}')
+                add_fact ISSUE_FACTS "$FACT"
+                SVC_FACT="$FACT"
             else
                 print_success "  LoadBalancer available at: $EXTERNAL_IP"
+                SVC_FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" --arg addr "$EXTERNAL_IP" \
+                    '{service: $svc, type: $type, external_address: $addr}')
             fi
             ;;
 
         ExternalName)
             EXTERNAL_NAME=$(echo "$SERVICE_INFO" | jq -r '.spec.externalName')
             print_success "  ExternalName service pointing to: $EXTERNAL_NAME"
+            SVC_FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "$SERVICE_TYPE" --arg ext "$EXTERNAL_NAME" \
+                '{service: $svc, type: $type, external_name: $ext}')
             ;;
 
         *)
-            HAS_ISSUES=1
+            mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
             print_error "  Unknown service type: $SERVICE_TYPE"
             print_action "Use valid service type (ClusterIP, NodePort, LoadBalancer, or ExternalName)"
+            FACT=$(jq -nc --arg svc "$SERVICE_NAME" --arg type "${SERVICE_TYPE:-null}" \
+                '{service: $svc, type: $type, issue: "unknown_service_type"}')
+            add_fact ISSUE_FACTS "$FACT"
+            SVC_FACT="$FACT"
             ;;
     esac
+    add_fact SERVICE_FACTS "$SVC_FACT"
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
+ISSUE_COUNT=$(echo "$ISSUE_FACTS" | jq 'length')
+SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
+    EVIDENCE=$(evidence_json \
+        "All $SERVICE_COUNT service(s) have valid types" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson services "$(facts_to_json_array SERVICE_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $services}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) have type issues"
+    DETAILS=$(jq -nc \
+        --argjson services "$(facts_to_json_array SERVICE_FACTS)" \
+        --argjson issues "$(facts_to_json_array ISSUE_FACTS)" \
+        --argjson count "$SERVICE_COUNT" \
+        '{service_count: $count, issue_count: ($issues | length), services: $services, issues: $issues}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "warning" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
+        '["Wait for provisioning or check cloud provider logs for errors"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi
