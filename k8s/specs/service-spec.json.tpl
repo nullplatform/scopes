@@ -387,7 +387,7 @@
             "minimum":{
                "$data":"1/ram_memory"
             },
-            "description":"Maximum memory the container can use (in MB). Setting this higher than the request increases the chance the scheduler kills the pod under pressure."
+            "description":"Maximum memory the container can use (in MB). Pick 'Same as request' to leave it equal to the request value."
          },
          "visibility":{
             "type":"string",
