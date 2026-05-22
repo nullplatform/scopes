@@ -24,13 +24,16 @@ MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : i
 DEPLOYMENT_STATUS=$(echo "$CONTEXT" | jq -r ".deployment.status")
 
 # Fill in *_limit capability fields with the corresponding request value when
-# the limit is missing or explicitly null, so downstream templates can render
-# resources.limits unconditionally and stay back-compat for scopes that never
-# had these fields.
+# the limit is missing or explicitly null, then clamp any limit below its
+# request up to the request value. The schema rejects limit < request at save
+# time; this is defense-in-depth so the script can never produce an invalid
+# resources block, regardless of how the context was built.
 normalize_capability_limits() {
   echo "$1" | jq '
     .scope.capabilities.cpu_millicores_limit //= .scope.capabilities.cpu_millicores
     | .scope.capabilities.ram_memory_limit //= .scope.capabilities.ram_memory
+    | .scope.capabilities.cpu_millicores_limit = ([.scope.capabilities.cpu_millicores, .scope.capabilities.cpu_millicores_limit] | max)
+    | .scope.capabilities.ram_memory_limit = ([.scope.capabilities.ram_memory, .scope.capabilities.ram_memory_limit] | max)
   '
 }
 
