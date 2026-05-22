@@ -24,7 +24,9 @@ MIN_REPLICAS=$(echo "$MIN_REPLICAS" | awk '{printf "%d", ($1 == int($1) ? $1 : i
 DEPLOYMENT_STATUS=$(echo "$CONTEXT" | jq -r ".deployment.status")
 
 # Fill in *_limit capability fields with the corresponding request value when
-# the limit is missing or explicitly null. Idempotent. CLIEN-781.
+# the limit is missing or explicitly null, so downstream templates can render
+# resources.limits unconditionally and stay back-compat for scopes that never
+# had these fields.
 normalize_capability_limits() {
   echo "$1" | jq '
     .scope.capabilities.cpu_millicores_limit //= .scope.capabilities.cpu_millicores
