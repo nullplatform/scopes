@@ -1,0 +1,114 @@
+#!/bin/bash
+# Check: Application Log Evidence
+#
+# Purpose: surface the logs of the user-owned "application" container from
+# each problematic pod so they are visible in the diagnose UI's check.logs[]
+# view (the last 20 stdout lines of the check).
+#
+# Scope is intentionally narrow:
+#   - Only the container literally named "application" (the user code; see
+#     k8s/deployment/templates/deployment.yaml.tpl). Sidecars (e.g. "http"
+#     nginx) and init containers are out of scope here — the scope/ checks
+#     already report their findings without us duplicating logs across
+#     containers and probe rounds.
+#   - Logs are echoed to stdout only; the evidence payload carries only
+#     counters and the list of pods (in evidence.affected). Re-emitting the
+#     log text inside evidence.details would duplicate what already lives in
+#     the check's logs[] tail.
+#
+# Reads from the build_context snapshot (data/pod_logs/), never calls kubectl.
+# Severity is always "info"; this check publishes context, it does not detect
+# failure modes.
+
+APPLICATION_CONTAINER_NAME="application"
+
+if [[ ! -f "$PROBLEMATIC_PODS_FILE" ]]; then
+    print_warning "No problematic pods snapshot available, log evidence skipped"
+    SKIP_EVIDENCE=$(evidence_json \
+        "Snapshot unavailable, log collection skipped" \
+        "info" \
+        "[]" \
+        "$(jq -nc '{pods_with_logs: 0, problematic_pod_count: 0}')" \
+        "[]")
+    update_check_result --status "skipped" --evidence "$SKIP_EVIDENCE"
+    return 0
+fi
+
+PROBLEMATIC_PODS=$(grep -v '^[[:space:]]*$' "$PROBLEMATIC_PODS_FILE" 2>/dev/null)
+
+if [[ -z "$PROBLEMATIC_PODS" ]]; then
+    print_success "No problematic pods detected — no application logs to collect"
+    SUMMARY="No problematic pods detected, no application logs to collect"
+    DETAILS=$(jq -nc '{pods_with_logs: 0, problematic_pod_count: 0}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" "$DETAILS" "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE" --log-tail-lines 200
+    return 0
+fi
+
+AFFECTED_PODS=""
+PODS_WITH_LOGS=0
+TOTAL_PROBLEMATIC=$(echo "$PROBLEMATIC_PODS" | wc -w | tr -d ' ')
+
+for POD_NAME in $PROBLEMATIC_PODS; do
+    HAS_APP_CONTAINER=$(jq -r --arg name "$POD_NAME" --arg cn "$APPLICATION_CONTAINER_NAME" '
+        .items[]
+        | select(.metadata.name == $name)
+        | (.spec.containers // [])
+        | map(.name)
+        | index($cn) != null
+    ' "$PODS_FILE" 2>/dev/null)
+
+    if [[ "$HAS_APP_CONTAINER" != "true" ]]; then
+        print_warning "Pod $POD_NAME has no '$APPLICATION_CONTAINER_NAME' container — skipped"
+        continue
+    fi
+
+    CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$APPLICATION_CONTAINER_NAME" "current")
+    PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$APPLICATION_CONTAINER_NAME" "previous")
+
+    # Merge previous + current in chronological order, then keep only the last
+    # N lines (defaults to 50). One flat array; the AI does not need to know
+    # which container instance produced which line.
+    TAIL_LINES="${EVIDENCE_LOG_TAIL_LINES:-50}"
+    MERGED_LOGS=$(jq -nc \
+        --argjson prev "$PREVIOUS_LOGS" \
+        --argjson curr "$CURRENT_LOGS" \
+        --argjson n "$TAIL_LINES" \
+        '($prev + $curr) | .[-$n:]')
+
+    if [[ "$(echo "$MERGED_LOGS" | jq 'length')" -eq 0 ]]; then
+        print_warning "Pod $POD_NAME application container produced no logs"
+        continue
+    fi
+
+    mark_affected AFFECTED_PODS "$POD_NAME"
+    PODS_WITH_LOGS=$((PODS_WITH_LOGS + 1))
+
+    # Echo the log tail to stdout so it surfaces in the UI's check.logs view.
+    # update_check_result is called below with --log-tail-lines 200 so the cap
+    # accommodates the application log payload (default cap is 20). This is
+    # the only place the log text lives — evidence.details stores only
+    # counters, so there is no duplication between evidence and logs[].
+    print_info "─── application log tail from $POD_NAME ───"
+    echo "$MERGED_LOGS" | jq -r '.[] | "  | \(.)"'
+done
+
+AFFECTED_PODS_JSON=$(set_to_json_array AFFECTED_PODS)
+
+if [[ $PODS_WITH_LOGS -eq 0 ]]; then
+    SUMMARY="No application logs available across $TOTAL_PROBLEMATIC problematic pod(s) — image may never have started"
+    DETAILS=$(jq -nc \
+        --argjson problematic "$TOTAL_PROBLEMATIC" \
+        '{pods_with_logs: 0, problematic_pod_count: $problematic}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "info" "[]" "$DETAILS" "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE" --log-tail-lines 200
+else
+    SUMMARY="Collected application logs from $PODS_WITH_LOGS of $TOTAL_PROBLEMATIC problematic pod(s)"
+    DETAILS=$(jq -nc \
+        --argjson with_logs "$PODS_WITH_LOGS" \
+        --argjson problematic "$TOTAL_PROBLEMATIC" \
+        '{pods_with_logs: $with_logs, problematic_pod_count: $problematic}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "info" "$AFFECTED_PODS_JSON" "$DETAILS" "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE" --log-tail-lines 200
+    print_success "$SUMMARY"
+fi

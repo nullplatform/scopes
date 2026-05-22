@@ -268,3 +268,103 @@ EOF
   result=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$result" "failed"
 }
+
+# =============================================================================
+# Evidence Schema Tests
+# =============================================================================
+@test "scope/container_crash_detection: success evidence follows schema" {
+  cat > "$PODS_FILE" << 'EOF'
+{
+  "items": [{
+    "metadata": {"name": "healthy-pod"},
+    "status": {"containerStatuses": [{"name": "app", "ready": true, "restartCount": 0, "state": {"running": {}}}]}
+  }]
+}
+EOF
+
+  source "$BATS_TEST_DIRNAME/../../scope/container_crash_detection"
+
+  severity=$(jq -r '.evidence.severity' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$severity" "info"
+
+  summary=$(jq -r '.evidence.summary' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$summary" "running without crashes"
+
+  affected=$(jq -c '.evidence.affected' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$affected" "[]"
+
+  pods_checked=$(jq -r '.evidence.details.pods_checked' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$pods_checked" "1"
+}
+
+@test "scope/container_crash_detection: failed evidence includes affected pods and crash details" {
+  cat > "$PODS_FILE" << 'EOF'
+{
+  "items": [
+    {
+      "metadata": {"name": "crash-1"},
+      "status": {"containerStatuses": [{"name": "app", "restartCount": 5, "state": {"waiting": {"reason": "CrashLoopBackOff"}}, "lastState": {"terminated": {"exitCode": 137, "reason": "OOMKilled"}}}]}
+    },
+    {
+      "metadata": {"name": "healthy"},
+      "status": {"containerStatuses": [{"name": "app", "ready": true, "restartCount": 0, "state": {"running": {}}}]}
+    }
+  ]
+}
+EOF
+
+  source "$BATS_TEST_DIRNAME/../../scope/container_crash_detection"
+
+  severity=$(jq -r '.evidence.severity' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$severity" "critical"
+
+  affected=$(jq -c '.evidence.affected' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$affected" "crash-1"
+
+  oom_count=$(jq -r '.evidence.details.counts.oom_killed' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$oom_count" "1"
+
+  crash_pod=$(jq -r '.evidence.details.crash_loop_back_off[0].pod' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$crash_pod" "crash-1"
+
+  exit_code=$(jq -r '.evidence.details.crash_loop_back_off[0].exit_code' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$exit_code" "137"
+
+  exit_meaning=$(jq -r '.evidence.details.crash_loop_back_off[0].exit_code_meaning' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$exit_meaning" "OOMKilled"
+
+  # Suggested actions should not be empty
+  actions_count=$(jq -r '.evidence.suggested_actions | length' "$SCRIPT_OUTPUT_FILE")
+  [ "$actions_count" -gt 0 ]
+}
+
+@test "scope/container_crash_detection: summary highlights OOM count when present" {
+  cat > "$PODS_FILE" << 'EOF'
+{
+  "items": [{
+    "metadata": {"name": "oom-pod"},
+    "status": {"containerStatuses": [{"name": "app", "restartCount": 1, "state": {"waiting": {"reason": "CrashLoopBackOff"}}, "lastState": {"terminated": {"exitCode": 137, "reason": "OOMKilled"}}}]}
+  }]
+}
+EOF
+
+  source "$BATS_TEST_DIRNAME/../../scope/container_crash_detection"
+
+  summary=$(jq -r '.evidence.summary' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$summary" "OOMKilled"
+}
+
+@test "scope/container_crash_detection: skipped evidence follows schema with info severity" {
+  echo '{"items":[]}' > "$PODS_FILE"
+
+  source "$BATS_TEST_DIRNAME/../../scope/container_crash_detection"
+
+  status=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$status" "skipped"
+
+  severity=$(jq -r '.evidence.severity' "$SCRIPT_OUTPUT_FILE")
+  assert_equal "$severity" "info"
+
+  summary=$(jq -r '.evidence.summary' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$summary" "skipped"
+}

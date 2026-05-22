@@ -187,7 +187,7 @@ EOF
   result=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$result" "failed"
 
-  tested=$(jq -r '.evidence.tested' "$SCRIPT_OUTPUT_FILE")
+  tested=$(jq -r '.evidence.details.containers_tested' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$tested" "1"
 }
 
@@ -429,7 +429,7 @@ EOF
   result=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$result" "skipped"
 
-  skipped=$(jq -r '.evidence.skipped' "$SCRIPT_OUTPUT_FILE")
+  skipped=$(jq -r '.evidence.details.containers_skipped' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$skipped" "1"
 }
 
@@ -498,7 +498,7 @@ EOF
   result=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$result" "success"
 
-  tested=$(jq -r '.evidence.tested' "$SCRIPT_OUTPUT_FILE")
+  tested=$(jq -r '.evidence.details.containers_tested' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$tested" "1"
 
   unset -f nc timeout

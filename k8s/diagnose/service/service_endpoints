@@ -2,50 +2,53 @@
 # Check: Service Endpoints
 # Checks if service has healthy endpoints
 
-# Validate services exist
 require_services || return 0
 
-# Read services from pre-collected data
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_ISSUES=0
+ENDPOINT_FACTS=()
+AFFECTED_SERVICES=""
+NO_ENDPOINTS_RESOURCE=0
+NO_READY_COUNT=0
+
 
 for SERVICE_NAME in $SERVICES; do
-    # Get endpoints from pre-collected data
     ENDPOINTS_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$ENDPOINTS_FILE" 2>/dev/null)
 
     if [[ -z "$ENDPOINTS_INFO" ]]; then
-        HAS_ISSUES=1
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
+        NO_ENDPOINTS_RESOURCE=$((NO_ENDPOINTS_RESOURCE + 1))
         print_error "Service $SERVICE_NAME: No endpoints resource found"
+
+        FACT=$(jq -nc --arg svc "$SERVICE_NAME" \
+            '{service: $svc, issue: "no_endpoints_resource", ready_count: 0, not_ready_count: 0}')
+        add_fact ENDPOINT_FACTS "$FACT"
         continue
     fi
 
-    # Check if endpoints has any addresses with detailed info
-    # Get ports for this subset
     PORTS=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[0]?.ports[]? | "\(.port):\(.name // "unnamed")"' 2>/dev/null | head -1)
     PORT_NUMBER=$(echo "$PORTS" | cut -d':' -f1)
-    PORT_NAME=$(echo "$PORTS" | cut -d':' -f2)
 
-    READY_ENDPOINTS=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.addresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
-    NOT_READY_ENDPOINTS=$(echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.notReadyAddresses[]? | "\(.targetRef.name // "unknown"):\(.ip)"' 2>/dev/null)
+    READY_COUNT=$(echo "$ENDPOINTS_INFO" | jq -r '[.subsets[]?.addresses[]?] | length' 2>/dev/null)
+    NOT_READY_COUNT=$(echo "$ENDPOINTS_INFO" | jq -r '[.subsets[]?.notReadyAddresses[]?] | length' 2>/dev/null)
+    READY_COUNT=${READY_COUNT:-0}
+    NOT_READY_COUNT=${NOT_READY_COUNT:-0}
 
-    READY_COUNT=$(echo "$READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
-    NOT_READY_COUNT=$(echo "$NOT_READY_ENDPOINTS" | grep -c '^' 2>/dev/null || echo 0)
+    READY_LIST=$(echo "$ENDPOINTS_INFO" | jq -c '[.subsets[]?.addresses[]? | {pod: (.targetRef.name // "unknown"), ip: .ip}]' 2>/dev/null)
+    NOT_READY_LIST=$(echo "$ENDPOINTS_INFO" | jq -c '[.subsets[]?.notReadyAddresses[]? | {pod: (.targetRef.name // "unknown"), ip: .ip}]' 2>/dev/null)
 
     if [[ $READY_COUNT -eq 0 ]]; then
-        HAS_ISSUES=1
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
+        NO_READY_COUNT=$((NO_READY_COUNT + 1))
         print_error "Service $SERVICE_NAME: No ready endpoints available"
 
         if [[ $NOT_READY_COUNT -gt 0 ]]; then
-            print_warning "  Not ready endpoints: $NOT_READY_COUNT"
-            # Show details of not ready endpoints
-            echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
-                if [[ -n "$IP" ]]; then
-                    if [[ -n "$PORT_NUMBER" ]]; then
-                        print_warning "    - $POD_NAME -> $IP:$PORT_NUMBER"
-                    else
-                        print_warning "    - $POD_NAME -> $IP"
-                    fi
+            print_warning "  $NOT_READY_COUNT not ready endpoint(s):"
+            echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.notReadyAddresses[]? | "    - \(.targetRef.name // "unknown") -> \(.ip)"' | while IFS= read -r line; do
+                if [[ -n "$PORT_NUMBER" ]]; then
+                    print_warning "${line}:${PORT_NUMBER}"
+                else
+                    print_warning "$line"
                 fi
             done
             print_action "Check pod readiness probes and pod status"
@@ -53,39 +56,61 @@ for SERVICE_NAME in $SERVICES; do
             print_warning "  No endpoints at all"
             print_action "Verify service selector matches pod labels"
         fi
+
+        FACT=$(jq -nc --arg svc "$SERVICE_NAME" \
+            --argjson ready_count "$READY_COUNT" --argjson not_ready_count "$NOT_READY_COUNT" \
+            --argjson not_ready "$NOT_READY_LIST" \
+            '{service: $svc, issue: "no_ready_endpoints", ready_count: $ready_count, not_ready_count: $not_ready_count, not_ready_endpoints: $not_ready}')
+        add_fact ENDPOINT_FACTS "$FACT"
     else
         print_success "Service $SERVICE_NAME: $READY_COUNT ready endpoint(s)"
-
-        # Show details of ready endpoints
-        echo "$READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
-            if [[ -n "$IP" ]]; then
-                if [[ -n "$PORT_NUMBER" ]]; then
-                    print_success "  - $POD_NAME -> $IP:$PORT_NUMBER"
-                else
-                    print_success "  - $POD_NAME -> $IP"
-                fi
+        echo "$ENDPOINTS_INFO" | jq -r '.subsets[]?.addresses[]? | "  - \(.targetRef.name // "unknown") -> \(.ip)"' | while IFS= read -r line; do
+            if [[ -n "$PORT_NUMBER" ]]; then
+                print_success "${line}:${PORT_NUMBER}"
+            else
+                print_success "$line"
             fi
         done
 
         if [[ $NOT_READY_COUNT -gt 0 ]]; then
             print_warning "  Also has $NOT_READY_COUNT not ready endpoint(s)"
-            # Show details of not ready endpoints
-            echo "$NOT_READY_ENDPOINTS" | while IFS=':' read -r POD_NAME IP; do
-                if [[ -n "$IP" ]]; then
-                    if [[ -n "$PORT_NUMBER" ]]; then
-                        print_warning "    - $POD_NAME -> $IP:$PORT_NUMBER"
-                    else
-                        print_warning "    - $POD_NAME -> $IP"
-                    fi
-                fi
-            done
             print_action "Check pod readiness probes and pod status"
         fi
+
+        FACT=$(jq -nc --arg svc "$SERVICE_NAME" \
+            --argjson ready_count "$READY_COUNT" --argjson not_ready_count "$NOT_READY_COUNT" \
+            --argjson ready "$READY_LIST" --argjson not_ready "$NOT_READY_LIST" \
+            '{service: $svc, ready_count: $ready_count, not_ready_count: $not_ready_count, ready_endpoints: $ready, not_ready_endpoints: $not_ready}')
+        add_fact ENDPOINT_FACTS "$FACT"
     fi
 done
 
-if [[ $HAS_ISSUES -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
+SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | wc -w | tr -d ' ')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
+    EVIDENCE=$(evidence_json \
+        "All $SERVICE_COUNT service(s) have ready endpoints" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array ENDPOINT_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) without ready endpoints"
+    DETAILS=$(jq -nc \
+        --argjson facts "$(facts_to_json_array ENDPOINT_FACTS)" \
+        --argjson count "$SERVICE_COUNT" \
+        --argjson no_resource "$NO_ENDPOINTS_RESOURCE" \
+        --argjson no_ready "$NO_READY_COUNT" \
+        '{
+            service_count: $count,
+            issue_count: ($facts | map(select(.issue != null)) | length),
+            no_endpoints_resource_count: $no_resource,
+            no_ready_endpoints_count: $no_ready,
+            services: $facts
+        }')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
+        '["Check pod readiness probes and verify service selector matches pod labels"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi
