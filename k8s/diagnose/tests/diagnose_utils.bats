@@ -78,6 +78,66 @@ strip_ansi() {
 }
 
 # =============================================================================
+# evidence_json
+# =============================================================================
+@test "evidence_json: builds full schema from all arguments" {
+  result=$(evidence_json "Test summary" "critical" '["pod-1","pod-2"]' '{"k":"v"}' '["fix it"]')
+
+  summary=$(echo "$result" | jq -r '.summary')
+  assert_equal "$summary" "Test summary"
+
+  severity=$(echo "$result" | jq -r '.severity')
+  assert_equal "$severity" "critical"
+
+  affected=$(echo "$result" | jq -c '.affected')
+  assert_equal "$affected" '["pod-1","pod-2"]'
+
+  details_k=$(echo "$result" | jq -r '.details.k')
+  assert_equal "$details_k" "v"
+
+  action_0=$(echo "$result" | jq -r '.suggested_actions[0]')
+  assert_equal "$action_0" "fix it"
+}
+
+@test "evidence_json: applies sane defaults for empty optional fields" {
+  result=$(evidence_json "Quick check" "info" "" "" "")
+
+  affected=$(echo "$result" | jq -c '.affected')
+  assert_equal "$affected" "[]"
+
+  details=$(echo "$result" | jq -c '.details')
+  assert_equal "$details" "{}"
+
+  actions=$(echo "$result" | jq -c '.suggested_actions')
+  assert_equal "$actions" "[]"
+}
+
+@test "evidence_json: emits valid JSON consumable by update_check_result" {
+  result=$(evidence_json "S" "warning" '["x"]' '{"a":1}' '["b"]')
+
+  # Should be parseable by jq without errors
+  parsed=$(echo "$result" | jq -c .)
+  assert_equal "$parsed" '{"summary":"S","severity":"warning","affected":["x"],"details":{"a":1},"suggested_actions":["b"]}'
+}
+
+# =============================================================================
+# exit_code_meaning
+# =============================================================================
+@test "exit_code_meaning: maps known codes" {
+  assert_equal "$(exit_code_meaning 0)"   "Clean exit (container finished successfully)"
+  assert_equal "$(exit_code_meaning 1)"   "Application error"
+  assert_equal "$(exit_code_meaning 137)" "OOMKilled (out of memory)"
+  assert_equal "$(exit_code_meaning 139)" "SIGSEGV (segmentation fault)"
+  assert_equal "$(exit_code_meaning 143)" "SIGTERM (graceful termination)"
+}
+
+@test "exit_code_meaning: returns Unknown for unmapped codes" {
+  assert_equal "$(exit_code_meaning 42)"    "Unknown"
+  assert_equal "$(exit_code_meaning N/A)"   "Unknown"
+  assert_equal "$(exit_code_meaning '')"    "Unknown"
+}
+
+# =============================================================================
 # require_resources
 # =============================================================================
 @test "require_resources: returns 0 when resources exist" {
@@ -95,6 +155,41 @@ strip_ansi() {
   [ "$status" -eq 1 ]
   local clean=$(strip_ansi "$output")
   assert_contains "$clean" "⚠ No pods found with labels app=test in namespace default, check was skipped."
+}
+
+@test "require_resources: emits skipped evidence following the schema" {
+  # Capture the evidence passed to update_check_result
+  local captured_evidence_file="$(mktemp)"
+  update_check_result() {
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --evidence) echo "$2" > "$captured_evidence_file"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    return 0
+  }
+  export -f update_check_result
+
+  require_resources "pods" "" "scope_id=999" "production" || true
+
+  # Validate the schema of the captured evidence
+  local evidence
+  evidence=$(cat "$captured_evidence_file")
+
+  severity=$(echo "$evidence" | jq -r '.severity')
+  assert_equal "$severity" "info"
+
+  summary=$(echo "$evidence" | jq -r '.summary')
+  assert_contains "$summary" "skipped"
+
+  resource_type=$(echo "$evidence" | jq -r '.details.resource_type')
+  assert_equal "$resource_type" "pods"
+
+  label_selector=$(echo "$evidence" | jq -r '.details.label_selector')
+  assert_equal "$label_selector" "scope_id=999"
+
+  rm -f "$captured_evidence_file"
 }
 
 # =============================================================================
@@ -255,7 +350,7 @@ strip_ansi() {
 # =============================================================================
 # update_check_result - Log Limits
 # =============================================================================
-@test "update_check_result: limits logs to 20 lines" {
+@test "update_check_result: limits logs to 20 lines by default" {
   for i in {1..30}; do
     echo "log line $i" >> "$SCRIPT_LOG_FILE"
   done
@@ -264,6 +359,33 @@ strip_ansi() {
 
   logs_count=$(jq -r '.logs | length' "$SCRIPT_OUTPUT_FILE")
   [ "$logs_count" -le 20 ]
+}
+
+@test "update_check_result: --log-tail-lines overrides the default cap" {
+  for i in {1..100}; do
+    echo "log line $i" >> "$SCRIPT_LOG_FILE"
+  done
+
+  update_check_result --status "success" --evidence "{}" --log-tail-lines 80
+
+  logs_count=$(jq -r '.logs | length' "$SCRIPT_OUTPUT_FILE")
+  [ "$logs_count" = "80" ]
+  # Last entry should be the most recent line (line 100), oldest in window is line 21
+  [ "$(jq -r '.logs[-1]' "$SCRIPT_OUTPUT_FILE")" = "log line 100" ]
+  [ "$(jq -r '.logs[0]' "$SCRIPT_OUTPUT_FILE")" = "log line 21" ]
+}
+
+@test "update_check_result: --log-tail-lines below total preserves the most recent N lines" {
+  for i in {1..10}; do
+    echo "log line $i" >> "$SCRIPT_LOG_FILE"
+  done
+
+  update_check_result --status "success" --evidence "{}" --log-tail-lines 5
+
+  logs_count=$(jq -r '.logs | length' "$SCRIPT_OUTPUT_FILE")
+  [ "$logs_count" = "5" ]
+  [ "$(jq -r '.logs[0]' "$SCRIPT_OUTPUT_FILE")" = "log line 6" ]
+  [ "$(jq -r '.logs[-1]' "$SCRIPT_OUTPUT_FILE")" = "log line 10" ]
 }
 
 # =============================================================================

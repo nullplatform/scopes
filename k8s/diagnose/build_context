@@ -29,6 +29,16 @@ PODS_FILE="$DATA_DIR/pods.json"
 kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o json 2>/dev/null > "$PODS_FILE" || echo '{"items":[]}' > "$PODS_FILE"
 export PODS_FILE
 
+# Deployments
+DEPLOYMENTS_FILE="$DATA_DIR/deployments.json"
+kubectl get deployment -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o json 2>/dev/null > "$DEPLOYMENTS_FILE" || echo '{"items":[]}' > "$DEPLOYMENTS_FILE"
+export DEPLOYMENTS_FILE
+
+# ReplicaSets
+REPLICASETS_FILE="$DATA_DIR/replicasets.json"
+kubectl get rs -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o json 2>/dev/null > "$REPLICASETS_FILE" || echo '{"items":[]}' > "$REPLICASETS_FILE"
+export REPLICASETS_FILE
+
 # Services
 SERVICES_FILE="$DATA_DIR/services.json"
 kubectl get services -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o json 2>/dev/null > "$SERVICES_FILE" || echo '{"items":[]}' > "$SERVICES_FILE"
@@ -83,3 +93,78 @@ if [[ -n "$ALB_POD_NAMES" ]]; then
         kubectl logs "$POD_NAME" -n "$ALB_CONTROLLER_NAMESPACE" --tail=200 2>/dev/null > "$ALB_CONTROLLER_LOGS_DIR/${POD_NAME}.log" || echo "" > "$ALB_CONTROLLER_LOGS_DIR/${POD_NAME}.log"
     done
 fi
+
+# Identify problematic pods and capture their logs + describe
+# A pod is "problematic" if any of:
+#   - phase is not Running and not Succeeded
+#   - it is being deleted (deletionTimestamp present)
+#   - Ready condition is not True
+#   - any container (init or regular) has crashed, restarted, terminated, or is in a known error waiting state
+PROBLEMATIC_PODS_FILE="$DATA_DIR/problematic_pods.txt"
+POD_LOGS_DIR="$DATA_DIR/pod_logs"
+POD_DESCRIBE_DIR="$DATA_DIR/pod_describe"
+mkdir -p "$POD_LOGS_DIR" "$POD_DESCRIBE_DIR"
+
+POD_LOG_TAIL_LINES="${POD_LOG_TAIL_LINES:-500}"
+
+PROBLEMATIC_POD_NAMES=$(jq -r '
+  def is_error_waiting(reason):
+    reason | IN("CrashLoopBackOff","ImagePullBackOff","ErrImagePull","CreateContainerError","RunContainerError","CreateContainerConfigError");
+
+  def container_unhealthy(c):
+    (c.restartCount // 0) > 0
+    or (c.state.terminated // null) != null
+    or (c.lastState.terminated // null) != null
+    or (c.state.waiting // null) != null and is_error_waiting(c.state.waiting.reason // "");
+
+  .items[]
+  | select(
+      (.status.phase != "Running" and .status.phase != "Succeeded")
+      or (.metadata.deletionTimestamp // null) != null
+      or ((.status.conditions // []) | any(.type == "Ready" and .status != "True"))
+      or ((.status.containerStatuses // []) | any(container_unhealthy(.)))
+      or ((.status.initContainerStatuses // []) | any(container_unhealthy(.)))
+    )
+  | .metadata.name
+' "$PODS_FILE" 2>/dev/null)
+
+echo "$PROBLEMATIC_POD_NAMES" > "$PROBLEMATIC_PODS_FILE"
+export PROBLEMATIC_PODS_FILE
+export POD_LOGS_DIR
+export POD_DESCRIBE_DIR
+export POD_LOG_TAIL_LINES
+
+if [[ -n "$PROBLEMATIC_POD_NAMES" ]]; then
+    for POD_NAME in $PROBLEMATIC_POD_NAMES; do
+        # Describe (full output, includes spec + status + events correlated)
+        kubectl describe pod "$POD_NAME" -n "$NAMESPACE" > "$POD_DESCRIBE_DIR/${POD_NAME}.txt" 2>/dev/null || echo "" > "$POD_DESCRIBE_DIR/${POD_NAME}.txt"
+
+        # Capture logs for every container (init + regular), current and previous
+        ALL_CONTAINERS=$(jq -r --arg name "$POD_NAME" '
+            .items[]
+            | select(.metadata.name == $name)
+            | ((.spec.initContainers // []) + (.spec.containers // []))
+            | .[].name
+        ' "$PODS_FILE" 2>/dev/null)
+
+        for CONTAINER_NAME in $ALL_CONTAINERS; do
+            CURRENT_LOG="$POD_LOGS_DIR/${POD_NAME}.${CONTAINER_NAME}.log"
+            PREVIOUS_LOG="$POD_LOGS_DIR/${POD_NAME}.${CONTAINER_NAME}.previous.log"
+
+            # Current container logs (always kept, even if empty: "container produced no output yet" is meaningful)
+            kubectl logs "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" --tail="$POD_LOG_TAIL_LINES" \
+                > "$CURRENT_LOG" 2>/dev/null || echo "" > "$CURRENT_LOG"
+
+            # Previous container logs (kubectl exits 1 when there is no previous instance — expected, ignore)
+            kubectl logs "$POD_NAME" -n "$NAMESPACE" -c "$CONTAINER_NAME" --tail="$POD_LOG_TAIL_LINES" --previous \
+                > "$PREVIOUS_LOG" 2>/dev/null || true
+            if [[ ! -s "$PREVIOUS_LOG" ]]; then
+                rm -f "$PREVIOUS_LOG"
+            fi
+        done
+    done
+fi
+
+# Always end with success: build_context is sourced, and a trailing non-zero status
+# from any conditional above would propagate to the caller.
+:

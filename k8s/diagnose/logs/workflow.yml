@@ -1,0 +1,6 @@
+steps:
+  - name: Application Log Evidence
+    description: Collects pod logs from the diagnose snapshot for AI post-mortem analysis
+    category: Application Logs
+    type: script
+    file: "$SERVICE_PATH/diagnose/logs/application_log_evidence"

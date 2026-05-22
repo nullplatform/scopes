@@ -2,36 +2,36 @@
 # Check: Service Port Configuration
 # Validates service and container port alignment
 
-# Validate services exist
 require_services || return 0
 
-# Read services from pre-collected data
 SERVICES=$(jq -r '.items[].metadata.name' "$SERVICES_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_PORT_ISSUES=0
+PORT_FACTS=()
+AFFECTED_SERVICES=""
+
 
 for SERVICE_NAME in $SERVICES; do
-    # Get service info from pre-collected data
     SERVICE_INFO=$(jq --arg name "$SERVICE_NAME" '.items[] | select(.metadata.name == $name)' "$SERVICES_FILE" 2>/dev/null)
 
-    # Get service ports and targetPorts
     SERVICE_PORTS=$(echo "$SERVICE_INFO" | jq -r '.spec.ports[] | "\(.port):\(.targetPort):\(.name // "unnamed")"')
 
     if [[ -z "$SERVICE_PORTS" ]]; then
-        HAS_PORT_ISSUES=1
+        mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
         print_error "Service $SERVICE_NAME: No ports defined"
+        FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_ports_defined", ports: []}')
+        add_fact PORT_FACTS "$FACT"
         continue
     fi
 
-    # Get service selector to find pods
     SERVICE_SELECTORS=$(echo "$SERVICE_INFO" | jq -c '.spec.selector')
 
     if [[ -z "$SERVICE_SELECTORS" || "$SERVICE_SELECTORS" == "null" ]]; then
         print_warning "Service $SERVICE_NAME: No selector, skipping port validation"
+        FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_selector_skipped"}')
+        add_fact PORT_FACTS "$FACT"
         continue
     fi
 
-    # Find pods from pre-collected data that match service selectors
     PODS=$(jq -r --argjson selectors "$SERVICE_SELECTORS" '
                .items[] |
                . as $pod |
@@ -45,24 +45,24 @@ for SERVICE_NAME in $SERVICES; do
 
     if [[ -z "$PODS" ]]; then
         print_warning "Service $SERVICE_NAME: No pods found to validate ports"
+        FACT=$(jq -nc --arg svc "$SERVICE_NAME" '{service: $svc, issue: "no_pods_for_validation"}')
+        add_fact PORT_FACTS "$FACT"
         continue
     fi
 
-    # Check first pod for port validation
     FIRST_POD=$(echo "$PODS" | awk '{print $1}')
     POD_INFO=$(jq --arg name "$FIRST_POD" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
     print_info "Service $SERVICE_NAME port configuration:"
 
-    # Validate configuration and test connectivity
-    # Use process substitution to avoid subshell and preserve HAS_PORT_ISSUES updates
+    PORT_RESULTS=()
+    SERVICE_HAS_ISSUE=0
+
     while IFS=':' read -r SERVICE_PORT TARGET_PORT PORT_NAME; do
         ACTUAL_TARGET_PORT="$TARGET_PORT"
         CONTAINER_NAME=""
 
-        # Check if targetPort is numeric or named
         if [[ "$TARGET_PORT" =~ ^[0-9]+$ ]]; then
-            # Numeric targetPort - find which container has this port
             CONTAINER_INFO=$(echo "$POD_INFO" | jq -r --arg port "$TARGET_PORT" '
                 .spec.containers[] |
                 select(.ports[]?.containerPort == ($port | tonumber)) |
@@ -72,17 +72,22 @@ for SERVICE_NAME in $SERVICES; do
             if [[ -n "$CONTAINER_INFO" ]]; then
                 CONTAINER_NAME=$(echo "$CONTAINER_INFO" | cut -d':' -f1)
                 print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Configuration OK [container: $CONTAINER_NAME]"
+                PORT_RESULT=$(jq -nc --arg svc_port "$SERVICE_PORT" --arg target "$TARGET_PORT" --arg name "$PORT_NAME" --arg cont "$CONTAINER_NAME" \
+                    '{service_port: $svc_port, target_port: $target, port_name: $name, container: $cont, status: "ok"}')
             else
-                HAS_PORT_ISSUES=1
-                # Show available ports per container
-                AVAILABLE_PORTS=$(echo "$POD_INFO" | jq -r '.spec.containers[] | "\(.name): \([.ports[]?.containerPort] | join(","))"' | tr '\n' '; ')
+                SERVICE_HAS_ISSUE=1
+                AVAILABLE_PORTS=$(echo "$POD_INFO" | jq -c '[.spec.containers[] | {container: .name, ports: [.ports[]?.containerPort]}]')
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Container port $TARGET_PORT not found"
-                print_warning "    Available ports by container: $AVAILABLE_PORTS"
+                AVAILABLE_HUMAN=$(echo "$POD_INFO" | jq -r '.spec.containers[] | "\(.name): \([.ports[]?.containerPort] | join(","))"' | tr '\n' '; ')
+                print_warning "    Available ports by container: $AVAILABLE_HUMAN"
                 print_action "Update service targetPort to match container port or fix container port"
+                PORT_RESULT=$(jq -nc --arg svc_port "$SERVICE_PORT" --arg target "$TARGET_PORT" --arg name "$PORT_NAME" \
+                    --argjson available "$AVAILABLE_PORTS" \
+                    '{service_port: $svc_port, target_port: $target, port_name: $name, status: "container_port_not_found", available_ports_by_container: $available}')
+                add_fact PORT_RESULTS "$PORT_RESULT"
                 continue
             fi
         else
-            # Named port - find which container has this named port
             CONTAINER_INFO=$(echo "$POD_INFO" | jq -r --arg portname "$TARGET_PORT" '
                 .spec.containers[] |
                 select(.ports[]? | select(.name == $portname)) |
@@ -93,34 +98,63 @@ for SERVICE_NAME in $SERVICES; do
                 CONTAINER_NAME=$(echo "$CONTAINER_INFO" | cut -d':' -f1)
                 ACTUAL_TARGET_PORT=$(echo "$CONTAINER_INFO" | cut -d':' -f2)
                 print_success "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Resolves to $ACTUAL_TARGET_PORT [container: $CONTAINER_NAME]"
+                PORT_RESULT=$(jq -nc --arg svc_port "$SERVICE_PORT" --arg target "$TARGET_PORT" --arg name "$PORT_NAME" --arg cont "$CONTAINER_NAME" --arg actual "$ACTUAL_TARGET_PORT" \
+                    '{service_port: $svc_port, target_port: $target, port_name: $name, container: $cont, resolved_port: $actual, status: "ok"}')
             else
-                HAS_PORT_ISSUES=1
+                SERVICE_HAS_ISSUE=1
                 print_error "  Port $SERVICE_PORT -> $TARGET_PORT ($PORT_NAME): Named port not found in containers"
                 print_action "Define named port in container spec or use numeric targetPort"
+                PORT_RESULT=$(jq -nc --arg svc_port "$SERVICE_PORT" --arg target "$TARGET_PORT" --arg name "$PORT_NAME" \
+                    '{service_port: $svc_port, target_port: $target, port_name: $name, status: "named_port_not_found"}')
+                add_fact PORT_RESULTS "$PORT_RESULT"
                 continue
             fi
         fi
 
-        # Active connectivity check - verify application is listening on the port
+        # Active connectivity check
         print_info "    Testing connectivity to port $ACTUAL_TARGET_PORT in container '$CONTAINER_NAME'..."
-
-        # Try to connect to the port from inside the specific container
-        CONNECTIVITY_TEST=$(kubectl exec "$FIRST_POD" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $ACTUAL_TARGET_PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1)
+        kubectl exec "$FIRST_POD" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $ACTUAL_TARGET_PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1 >/dev/null
         CONNECTIVITY_EXIT_CODE=$?
 
         if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then
             print_success "    ✓ Port $ACTUAL_TARGET_PORT is accepting connections"
+            PORT_RESULT=$(echo "$PORT_RESULT" | jq '. + {connectivity: "ok"}')
         else
-            HAS_PORT_ISSUES=1
+            SERVICE_HAS_ISSUE=1
             print_error "    ✗ Port $ACTUAL_TARGET_PORT is NOT accepting connections"
             print_warning "    Configuration is correct but application may not be listening on port $ACTUAL_TARGET_PORT"
             print_info "    Check logs: kubectl logs $FIRST_POD -n $NAMESPACE -c $CONTAINER_NAME"
+            PORT_RESULT=$(echo "$PORT_RESULT" | jq '. + {connectivity: "refused", status: "not_listening"}')
         fi
+
+        add_fact PORT_RESULTS "$PORT_RESULT"
     done < <(echo "$SERVICE_PORTS")
+
+    [[ $SERVICE_HAS_ISSUE -eq 1 ]] && mark_affected AFFECTED_SERVICES "$SERVICE_NAME"
+
+    FACT=$(jq -nc --arg svc "$SERVICE_NAME" --argjson ports "$(facts_to_json_array PORT_RESULTS)" \
+        '{service: $svc, ports: $ports}')
+    add_fact PORT_FACTS "$FACT"
 done
 
-if [[ $HAS_PORT_ISSUES -eq 0 ]]; then
-    update_check_result --status "success" --evidence "{}"
+SERVICE_COUNT=$(echo "$SERVICES" | wc -w | tr -d ' ')
+ISSUE_COUNT=$(echo "$AFFECTED_SERVICES" | wc -w | tr -d ' ')
+
+if [[ $ISSUE_COUNT -eq 0 ]]; then
+    EVIDENCE=$(evidence_json \
+        "All $SERVICE_COUNT service(s) have valid port configuration" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson facts "$(facts_to_json_array PORT_FACTS)" --argjson count "$SERVICE_COUNT" '{service_count: $count, services: $facts}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    SUMMARY="$ISSUE_COUNT of $SERVICE_COUNT service(s) have port configuration issues"
+    DETAILS=$(jq -nc \
+        --argjson facts "$(facts_to_json_array PORT_FACTS)" \
+        --argjson count "$SERVICE_COUNT" \
+        '{service_count: $count, issue_count: ($facts | map(select(.ports[]? | .status != "ok")) | length), services: $facts}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_SERVICES)" "$DETAILS" \
+        '["Verify container is listening on targetPort and that ports/protocols match"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi

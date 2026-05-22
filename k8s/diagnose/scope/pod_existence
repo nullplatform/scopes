@@ -7,10 +7,26 @@ PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 if [[ -z "$PODS" ]]; then
     print_error "No pods found with labels $LABEL_SELECTOR in namespace $NAMESPACE"
     print_action "Check deployment status and verify label selectors match"
-    update_check_result --status "failed" --evidence "{}"
+
+    EVIDENCE=$(evidence_json \
+        "No pods found in namespace $NAMESPACE" \
+        "critical" \
+        "[]" \
+        "$(jq -nc --arg ls "$LABEL_SELECTOR" --arg ns "$NAMESPACE" '{label_selector: $ls, namespace: $ns}')" \
+        '["Check deployment status and verify label selectors match"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
     return 1
 fi
 
-PODS_COUNT=$(echo "$PODS" | wc -w)
+POD_NAMES_JSON=$(jq -c '[.items[].metadata.name]' "$PODS_FILE" 2>/dev/null)
+PODS_COUNT=$(echo "$PODS" | wc -w | tr -d ' ')
 print_success "Found $PODS_COUNT pod(s): $PODS"
-update_check_result --status "success" --evidence "{}"
+
+EVIDENCE=$(evidence_json \
+    "Found $PODS_COUNT pod(s) in namespace $NAMESPACE" \
+    "info" \
+    "[]" \
+    "$(jq -nc --argjson count "$PODS_COUNT" --argjson names "$POD_NAMES_JSON" --arg ns "$NAMESPACE" \
+        '{pod_count: $count, pod_names: $names, namespace: $ns}')" \
+    "[]")
+update_check_result --status "success" --evidence "$EVIDENCE"

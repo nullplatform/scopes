@@ -35,3 +35,4 @@ steps:
       - "$SERVICE_PATH/diagnose/service"
       - "$SERVICE_PATH/diagnose/scope"
       - "$SERVICE_PATH/diagnose/networking"
+      - "$SERVICE_PATH/diagnose/logs"

@@ -2,22 +2,21 @@
 # Check: Memory Limits
 # Checks for out-of-memory container terminations
 
-# Validate pods exist
 require_pods || return 0
 
-# Read pods from pre-collected data
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
-HAS_OOM=0
+OOM_FACTS=()
+AFFECTED_PODS=""
+
 
 for POD_NAME in $PODS; do
-    # Get pod info from pre-collected data
     POD_INFO=$(jq --arg name "$POD_NAME" '.items[] | select(.metadata.name == $name)' "$PODS_FILE" 2>/dev/null)
 
     OOM_KILLED=$(echo "$POD_INFO" | jq -r '.status.containerStatuses[]? | select(.lastState.terminated.reason == "OOMKilled") | .name')
 
     if [[ -n "$OOM_KILLED" ]]; then
-        HAS_OOM=1
+        mark_affected AFFECTED_PODS "$POD_NAME"
         print_error "Pod $POD_NAME: OOMKilled in container(s): $OOM_KILLED"
 
         for CONTAINER in $OOM_KILLED; do
@@ -28,14 +27,50 @@ for POD_NAME in $PODS; do
             print_warning "  Memory Limit: $MEMORY_LIMIT"
             print_warning "  Memory Request: $MEMORY_REQUEST"
             print_action "Increase memory limits or optimize application memory usage"
+
+            # When OOM kills a container, the previous-instance logs are where
+            # the last application output lives — the current instance was
+            # restarted by the kubelet after the kill.
+            PREVIOUS_LOGS=$(read_log_tail "$POD_NAME" "$CONTAINER" "previous")
+
+            FACT=$(jq -nc \
+                --arg pod "$POD_NAME" \
+                --arg container "$CONTAINER" \
+                --arg memory_limit "$MEMORY_LIMIT" \
+                --arg memory_request "$MEMORY_REQUEST" \
+                --argjson previous_logs "$PREVIOUS_LOGS" \
+                '{
+                    pod: $pod,
+                    container: $container,
+                    memory_limit: $memory_limit,
+                    memory_request: $memory_request,
+                    previous_logs: $previous_logs
+                }')
+            add_fact OOM_FACTS "$FACT"
         done
     fi
 done
 
-if [[ $HAS_OOM -eq 0 ]]; then
-    POD_COUNT=$(echo "$PODS" | wc -w)
+POD_COUNT=$(echo "$PODS" | wc -w | tr -d ' ')
+OOM_COUNT=$(echo "$OOM_FACTS" | jq 'length')
+
+if [[ $OOM_COUNT -eq 0 ]]; then
     print_success "No OOMKilled containers detected in $POD_COUNT pod(s)"
-    update_check_result --status "success" --evidence "{}"
+    EVIDENCE=$(evidence_json \
+        "No OOMKilled containers detected in $POD_COUNT pod(s)" \
+        "info" \
+        "[]" \
+        "$(jq -nc --argjson count "$POD_COUNT" '{pods_checked: $count}')" \
+        "[]")
+    update_check_result --status "success" --evidence "$EVIDENCE"
 else
-    update_check_result --status "failed" --evidence "{}"
+    AFFECTED_COUNT=$(echo "$AFFECTED_PODS" | wc -w | tr -d ' ')
+    SUMMARY="$AFFECTED_COUNT of $POD_COUNT pod(s) had OOMKilled containers"
+    DETAILS=$(jq -nc \
+        --argjson oom "$(facts_to_json_array OOM_FACTS)" \
+        --argjson pod_count "$POD_COUNT" \
+        '{pod_count: $pod_count, oom_killed_count: ($oom | length), oom_killed: $oom}')
+    EVIDENCE=$(evidence_json "$SUMMARY" "critical" "$(set_to_json_array AFFECTED_PODS)" "$DETAILS" \
+        '["Increase memory limits or optimize application memory usage"]')
+    update_check_result --status "failed" --evidence "$EVIDENCE"
 fi
