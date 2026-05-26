@@ -946,3 +946,95 @@ set_additional_ports() {
 
   assert_equal "$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports')" "[]"
 }
+
+# =============================================================================
+# Capability limits normalization
+# These tests source the real deployment/build_context and assert on the
+# resulting CONTEXT, exercising the full pipeline. Limits default to their
+# corresponding request value when missing or explicitly null; explicit values
+# pass through.
+# =============================================================================
+
+# Patches CONTEXT.scope.capabilities with the given JSON fragment (merged into
+# the existing capabilities object).
+set_capabilities() {
+  CONTEXT=$(echo "$CONTEXT" | jq --argjson v "$1" '.scope.capabilities = (.scope.capabilities + $v)')
+}
+
+@test "capability limits: cpu limit defaults to cpu_millicores when absent" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"ram_memory":1024,"ram_memory_limit":2048}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+}
+
+@test "capability limits: ram limit defaults to ram_memory when absent" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"cpu_millicores_limit":1000,"ram_memory":1024}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "capability limits: both limits default to their requests when both absent" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"ram_memory":1024}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "capability limits: explicit null limits fall back to their requests" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"cpu_millicores_limit":null,"ram_memory":1024,"ram_memory_limit":null}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "capability limits: explicit non-null limits pass through unchanged" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"cpu_millicores_limit":2000,"ram_memory":1024,"ram_memory_limit":4096}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "2000"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "4096"
+}
+
+@test "capability limits: cpu limit below request is clamped up to request" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"cpu_millicores_limit":100,"ram_memory":1024,"ram_memory_limit":2048}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "2048"
+}
+
+@test "capability limits: ram limit below request is clamped up to request" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"cpu_millicores_limit":1000,"ram_memory":1024,"ram_memory_limit":64}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "1000"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+@test "capability limits: both limits below their requests are clamped up" {
+  setup_full_build_context
+  set_capabilities '{"cpu_millicores":500,"cpu_millicores_limit":100,"ram_memory":1024,"ram_memory_limit":64}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
