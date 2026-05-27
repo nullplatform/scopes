@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- Fix deployment failure for `file`-type parameters with binary content (e.g., P12 certificates): the env var injected from the deployment Secret now carries the file's destination path instead of the raw content, avoiding `invalid environment variable ... contains nul byte` errors. The file is still mounted at `destination_path` as before.
+- Fix: do not inject file parameter as env vars
 - Public and private scopes now register DNS records in their correct Route53 hosted zone when using `DNS_TYPE=external_dns`, preventing cross-zone record leakage
 - Add configurable main HTTP port for k8s scopes (default 8080) and HTTP support for additional ports
 - Improve **wait deployment active** failure logging: consolidate repeated `Unhealthy` probe events per pod into a single human-readable line, emit a progress heartbeat every 10% of timeout, and surface a targeted suggested fix based on the probe failure mode (port not open / HTTP non-2xx / probe timeout)
