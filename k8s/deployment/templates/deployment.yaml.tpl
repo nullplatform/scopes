@@ -377,7 +377,7 @@ spec:
         secret:
           secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
           items:
-          - key: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+          - key: {{ printf "app-file-%s" (filepath.Base .destination_path) }}
             path: {{ filepath.Base .destination_path }}
       {{- end }}
     {{- end }}
