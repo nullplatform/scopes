@@ -124,6 +124,32 @@ get_alb_from_route53() {
   echo "$alb_name"
 }
 
+# Lists ALB names tagged as autocreated for the given visibility. Used to keep
+# previously-autocreated ALBs in the candidate pool without requiring them to
+# be declared in the provider configuration.
+# Returns space-separated names on stdout (may be empty), non-zero on AWS failure.
+get_autocreated_albs() {
+  local visibility="$1"
+
+  local arns
+  arns=$(aws resourcegroupstaggingapi get-resources \
+    --region "$REGION" \
+    --resource-type-filters "elasticloadbalancing:loadbalancer" \
+    --tag-filters \
+      "Key=nullplatform:managed-by,Values=autocreate" \
+      "Key=nullplatform:visibility,Values=$visibility" \
+    --query 'ResourceTagMappingList[].ResourceARN' \
+    --output text 2>/dev/null) || return 1
+
+  if [ -z "$arns" ] || [ "$arns" = "None" ]; then
+    return 0
+  fi
+
+  # ALB ARN format: arn:aws:elasticloadbalancing:<region>:<acct>:loadbalancer/app/<name>/<id>
+  # Skip non-application LBs (would have loadbalancer/net/... or loadbalancer/gwy/...).
+  echo "$arns" | tr '\t' '\n' | awk -F/ '$2 == "app" { print $3 }'
+}
+
 # =============================================================================
 # Main logic
 # =============================================================================
@@ -174,10 +200,26 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
       )
     fi
 
-    if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
-      log debug "🔍 Additional balancers configured, resolving least-loaded ALB..."
+    # Discovered ALBs: autocreated by previous scope creations and tagged so we
+    # can include them in the pool without provider config changes.
+    AUTOCREATED_BALANCERS=$(get_autocreated_albs "$INGRESS_VISIBILITY" 2>/dev/null) || AUTOCREATED_BALANCERS=""
 
-      CANDIDATES=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
+    HAS_ADDITIONAL=0
+    if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
+      HAS_ADDITIONAL=1
+    fi
+
+    if [ "$HAS_ADDITIONAL" -eq 1 ] || [ -n "$AUTOCREATED_BALANCERS" ]; then
+      log debug "🔍 Resolving least-loaded ALB across declared and autocreated candidates..."
+
+      if [ "$HAS_ADDITIONAL" -eq 1 ]; then
+        DECLARED_LIST=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
+      else
+        DECLARED_LIST="$ALB_NAME"
+      fi
+
+      # Merge declared + autocreated, deduplicate, drop blanks.
+      CANDIDATES=$(printf '%s\n%s\n' "$DECLARED_LIST" "$AUTOCREATED_BALANCERS" | tr ' ' '\n' | awk 'NF && !seen[$0]++')
 
       log debug "📋 Candidate balancers: $(echo "$CANDIDATES" | paste -sd ',' - | sed 's/,/, /g')"
 
@@ -203,6 +245,34 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
       fi
 
       ALB_NAME="$BEST_ALB"
+
+      # Autocreate fallback: every candidate is at or above the threshold and
+      # autocreate is enabled. Delegate to autocreate_alb to provision a new
+      # ALB and replace ALB_NAME with it.
+      AUTOCREATE_ENABLED=$(get_config_value \
+        --env ALB_AUTOCREATE_ENABLED \
+        --provider '.providers["container-orchestration"].balancer.autocreate_enabled' \
+        --default "false"
+      )
+
+      MAX_CAPACITY=$(get_config_value \
+        --env ALB_MAX_CAPACITY \
+        --provider '.providers["scope-configurations"].networking.alb_max_capacity' \
+        --provider '.providers["container-orchestration"].balancer.alb_capacity_threshold' \
+        --default "75"
+      )
+
+      if [ "$AUTOCREATE_ENABLED" = "true" ] && [ "$MIN_RULES" -ge 0 ] && [ "$MIN_RULES" -ge "$MAX_CAPACITY" ]; then
+        log info "🔧 All candidate ALBs are at or above capacity ($MIN_RULES/$MAX_CAPACITY); triggering autocreate"
+        source "$_RESOLVE_BALANCER_DIR/autocreate_alb" || {
+          log error "❌ Autocreate failed; ALB '$ALB_NAME' will be used and validate_alb_capacity will reject the deployment"
+          return 1
+        }
+        if [ -n "${AUTOCREATED_ALB_NAME:-}" ]; then
+          ALB_NAME="$AUTOCREATED_ALB_NAME"
+          log info "📝 Using autocreated ALB '$ALB_NAME'"
+        fi
+      fi
     fi
   fi
 else

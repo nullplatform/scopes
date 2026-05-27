@@ -1,0 +1,213 @@
+#!/bin/bash
+
+# Creates a new ALB on demand when the existing pool is exhausted.
+#
+# The script applies a dummy Ingress that the AWS Load Balancer Controller
+# uses as the trigger to provision a new ALB. It then polls AWS until the
+# ALB reaches the `active` state before returning the new ALB name to the
+# caller via the AUTOCREATED_ALB_NAME output variable.
+#
+# Inputs (env vars):
+#   CONTEXT                          - Scope CONTEXT JSON (with .scope, .k8s_namespace, etc.)
+#   INGRESS_VISIBILITY               - "internet-facing" or "internal"
+#   REGION                           - AWS region
+#   ALB_AUTOCREATE_NAME_PREFIX       - Prefix for the new ALB (default: nullplatform-auto-)
+#   ALB_AUTOCREATE_TIMEOUT_SECONDS   - Max seconds to wait for ALB active (default: 300)
+#   K8S_NAMESPACE                    - Namespace to place the dummy Ingress in
+#
+# Outputs (env vars):
+#   AUTOCREATED_ALB_NAME             - Name of the ALB that was created
+
+_AUTOCREATE_ALB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! type -t log >/dev/null 2>&1; then
+	source "$_AUTOCREATE_ALB_DIR/../../logging"
+fi
+
+if ! type -t get_config_value >/dev/null 2>&1; then
+	source "$_AUTOCREATE_ALB_DIR/../../utils/get_config_value"
+fi
+
+# Generates a unique-enough ALB name for autocreation.
+# Format: <prefix><visibility-short>-<6-hex>
+# Visibility short: "public" for internet-facing, "private" for internal.
+# Total length kept under 32 chars (AWS ALB name limit).
+generate_alb_name() {
+	local prefix="$1"
+	local visibility="$2"
+
+	local vis_short
+	if [ "$visibility" = "internet-facing" ]; then
+		vis_short="public"
+	else
+		vis_short="private"
+	fi
+
+	local suffix
+	suffix=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 6) || {
+		suffix=$(printf '%06x' $((RANDOM * RANDOM % 0xFFFFFF)))
+	}
+
+	echo "${prefix}${vis_short}-${suffix}"
+}
+
+# Renders the dummy Ingress template and applies it to the cluster.
+# Returns 0 on success, non-zero on failure (template render or kubectl apply).
+apply_dummy_ingress() {
+	local alb_name="$1"
+	local visibility="$2"
+	local namespace="$3"
+
+	local tmp_context
+	tmp_context=$(mktemp) || return 1
+	local tmp_yaml
+	tmp_yaml=$(mktemp --suffix=.yaml 2>/dev/null) || tmp_yaml="$(mktemp).yaml"
+
+	echo "$CONTEXT" | jq \
+		--arg alb_name "$alb_name" \
+		--arg ingress_visibility "$visibility" \
+		--arg k8s_namespace "$namespace" \
+		'. + {alb_name: $alb_name, ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace}' \
+		> "$tmp_context"
+
+	local template_path="${INGRESS_DUMMY_TEMPLATE:-$SERVICE_PATH/scope/templates/ingress-dummy.yaml.tpl}"
+
+	if ! gomplate -c .="$tmp_context" --file "$template_path" --out "$tmp_yaml" 2>/dev/null; then
+		log error "❌ Failed to render ingress-dummy template"
+		log error "📋 Template: $template_path"
+		rm -f "$tmp_context" "$tmp_yaml"
+		return 1
+	fi
+
+	if ! kubectl apply -f "$tmp_yaml" >/dev/null 2>&1; then
+		log error "❌ Failed to apply ingress-dummy for ALB '$alb_name'"
+		log error ""
+		log error "💡 Possible causes:"
+		log error "   The agent may lack permissions on Ingress resources or the namespace may not exist"
+		log error ""
+		log error "🔧 How to fix:"
+		log error "   • kubectl apply -f $tmp_yaml"
+		log error "   • Verify namespace '$namespace' exists"
+		rm -f "$tmp_context" "$tmp_yaml"
+		return 1
+	fi
+
+	rm -f "$tmp_context" "$tmp_yaml"
+	return 0
+}
+
+# Polls AWS until the ALB reaches the 'active' state, applying the autocreate
+# tags once it is reachable. Returns 0 if active within timeout, 1 otherwise.
+wait_for_alb_active() {
+	local alb_name="$1"
+	local timeout_seconds="$2"
+	local scope_id="$3"
+	local visibility="$4"
+
+	local deadline=$(($(date +%s) + timeout_seconds))
+	local poll_interval=10
+	local state=""
+	local alb_arn=""
+
+	log info "⏳ Waiting up to ${timeout_seconds}s for ALB '$alb_name' to become active..."
+
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		alb_arn=$(aws elbv2 describe-load-balancers \
+			--names "$alb_name" \
+			--region "$REGION" \
+			--query 'LoadBalancers[0].LoadBalancerArn' \
+			--output text 2>/dev/null) || alb_arn=""
+
+		if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ]; then
+			state=$(aws elbv2 describe-load-balancers \
+				--names "$alb_name" \
+				--region "$REGION" \
+				--query 'LoadBalancers[0].State.Code' \
+				--output text 2>/dev/null) || state=""
+
+			log debug "📋 ALB '$alb_name' state: ${state:-pending}"
+
+			if [ "$state" = "active" ]; then
+				log info "✅ ALB '$alb_name' is active"
+				tag_alb "$alb_arn" "$scope_id" "$visibility" || true
+				return 0
+			fi
+
+			if [ "$state" = "failed" ]; then
+				log error "❌ ALB '$alb_name' reached state 'failed'"
+				return 1
+			fi
+		fi
+
+		sleep "$poll_interval"
+	done
+
+	log error "❌ Timed out after ${timeout_seconds}s waiting for ALB '$alb_name' to become active"
+	log error ""
+	log error "💡 Possible causes:"
+	log error "   The AWS Load Balancer Controller may be slow, mis-configured, or the AWS account may be hitting an ALB quota"
+	log error ""
+	log error "🔧 How to fix:"
+	log error "   • Check controller logs: kubectl -n kube-system logs deploy/aws-load-balancer-controller"
+	log error "   • Verify ALB quota: aws service-quotas get-service-quota --service-code elasticloadbalancing --quota-code L-53DA6B97"
+	log error "   • Inspect the dummy Ingress: kubectl get ingress -A -l alb_name=$alb_name"
+	return 1
+}
+
+# Tags the ALB so resolve_balancer can discover it in subsequent scope creations.
+tag_alb() {
+	local alb_arn="$1"
+	local scope_id="$2"
+	local visibility="$3"
+
+	aws elbv2 add-tags \
+		--resource-arns "$alb_arn" \
+		--region "$REGION" \
+		--tags \
+			"Key=nullplatform:managed-by,Value=autocreate" \
+			"Key=nullplatform:visibility,Value=$visibility" \
+			"Key=nullplatform:created-by-scope-id,Value=$scope_id" \
+		>/dev/null 2>&1 || {
+		log warn "⚠️  Could not tag ALB; subsequent discovery may not find it"
+		return 1
+	}
+
+	log debug "📋 Tagged ALB with nullplatform:managed-by=autocreate"
+	return 0
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+NAME_PREFIX=$(get_config_value \
+	--env ALB_AUTOCREATE_NAME_PREFIX \
+	--provider '.providers["container-orchestration"].balancer.autocreate_name_prefix' \
+	--default "nullplatform-auto-"
+)
+
+TIMEOUT_SECONDS=$(get_config_value \
+	--env ALB_AUTOCREATE_TIMEOUT_SECONDS \
+	--provider '.providers["container-orchestration"].balancer.autocreate_timeout_seconds' \
+	--default "300"
+)
+
+if ! [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+	log error "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: '$TIMEOUT_SECONDS'"
+	return 1
+fi
+
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id // "unknown"')
+
+NEW_ALB_NAME=$(generate_alb_name "$NAME_PREFIX" "$INGRESS_VISIBILITY")
+log info "🔧 Autocreating ALB '$NEW_ALB_NAME' (visibility=$INGRESS_VISIBILITY)"
+
+if ! apply_dummy_ingress "$NEW_ALB_NAME" "$INGRESS_VISIBILITY" "$K8S_NAMESPACE"; then
+	return 1
+fi
+
+if ! wait_for_alb_active "$NEW_ALB_NAME" "$TIMEOUT_SECONDS" "$SCOPE_ID" "$INGRESS_VISIBILITY"; then
+	return 1
+fi
+
+export AUTOCREATED_ALB_NAME="$NEW_ALB_NAME"
