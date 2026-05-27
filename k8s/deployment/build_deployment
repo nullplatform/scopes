@@ -3,6 +3,7 @@
 
 DEPLOYMENT_PATH="$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SECRET_PATH="$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+SECRET_FILES_PATH="$OUTPUT_DIR/secret-files-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SCALING_PATH="$OUTPUT_DIR/scaling-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SERVICE_TEMPLATE_PATH="$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 PDB_PATH="$OUTPUT_DIR/pdb-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
@@ -37,6 +38,18 @@ if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
     exit 1
 fi
 log info "   ✅ Secret template: $SECRET_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$SECRET_FILES_TEMPLATE" \
+  --out "$SECRET_FILES_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    log error "   ❌ Failed to build secret-files template"
+    exit 1
+fi
+log info "   ✅ Secret-files template: $SECRET_FILES_PATH"
 
 gomplate -c .="$CONTEXT_PATH" \
   --file "$SCALING_TEMPLATE" \
