@@ -243,7 +243,7 @@ _render_context() {
   "parameters": {
     "results": [
       {"type": "environment", "variable": "MY_VAR", "values": [{"value": "hello"}]},
-      {"type": "file", "destination_path": "/etc/certs/test.p12", "values": [{"value": "data:application/x-pkcs12;base64,QUFBQkJC"}]}
+      {"type": "file", "name": "API P12 Cert!", "destination_path": "/etc/certs/test.p12", "values": [{"value": "data:application/x-pkcs12;base64,QUFBQkJC"}]}
     ]
   }
 }
@@ -268,24 +268,25 @@ JSON
 
   # The env-var Secret MUST NOT contain anything that pulls in binary content
   # via envFrom. Both app-data-* and app-file-* keys are forbidden here.
-  ! grep -E 'app-(data|file)-test\.p12' "$secret_file"
+  ! grep -E 'app-(data|file)-' "$secret_file"
 
-  # The files Secret carries only the binary content, named so the volume mount
-  # can reference it. The Secret is in a separate object so `envFrom` on the
-  # env-var Secret cannot reach these bytes.
+  # Param name "API P12 Cert!" sanitizes to api-p12-cert (lowercase, runs of
+  # non-alphanumeric collapse to '-', leading/trailing '-' trimmed). The same
+  # token is reused as env name suffix, Secret data key, and volume name.
   assert_contains "$(cat "$secret_files_file")" "name: s-scope-123-d-deploy-456-files"
-  assert_contains "$(cat "$secret_files_file")" "app-file-test.p12: QUFBQkJC"
-  ! grep -E 'app-data-test\.p12' "$secret_files_file"
+  assert_contains "$(cat "$secret_files_file")" "app-file-api-p12-cert: QUFBQkJC"
+  ! grep -E 'app-data-' "$secret_files_file"
 
   # The deployment exposes the destination path to the app via a plain `env:`
-  # entry on the application container (not via any Secret) — no NUL bytes.
-  assert_contains "$(cat "$deploy_file")" "- name: app-data-test.p12"
+  # entry on the application container (not via any Secret) — no NUL bytes,
+  # and the env var name is derived from the parameter's display name.
+  assert_contains "$(cat "$deploy_file")" "- name: app-data-api-p12-cert"
   assert_contains "$(cat "$deploy_file")" 'value: "/etc/certs/test.p12"'
 
   # The volume mount reads bytes from the files Secret, with key matching the
   # one produced by secret-files.yaml.tpl.
   assert_contains "$(cat "$deploy_file")" "secretName: s-scope-123-d-deploy-456-files"
-  assert_contains "$(cat "$deploy_file")" "key: app-file-test.p12"
+  assert_contains "$(cat "$deploy_file")" "key: app-file-api-p12-cert"
 }
 
 @test "build_deployment: secret-files renders empty when no file params" {
