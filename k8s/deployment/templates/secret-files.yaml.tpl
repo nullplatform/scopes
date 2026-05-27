@@ -41,7 +41,8 @@ metadata:
 data:
 {{- range .parameters.results }}
   {{- if and (eq .type "file") (gt (len .values) 0) }}
-  {{ printf "app-file-%s" (filepath.Base .destination_path) }}: {{ index .values 0 "value" | regexp.Replace "^data:[^;]+;base64," "" }}
+    {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+  {{ printf "app-file-%s" $key }}: {{ index .values 0 "value" | regexp.Replace "^data:[^;]+;base64," "" }}
   {{- end }}
 {{- end }}
 type: Opaque

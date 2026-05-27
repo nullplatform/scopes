@@ -299,7 +299,8 @@ spec:
           env:
       {{- range .parameters.results }}
         {{- if and (eq .type "file") (gt (len .values) 0) }}
-            - name: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+          {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+            - name: {{ printf "app-data-%s" $key }}
               value: {{ .destination_path | quote }}
         {{- end }}
       {{- end }}
@@ -364,7 +365,8 @@ spec:
       {{- range .parameters.results }}
         {{- if and (eq .type "file") }}
           {{- if gt (len .values) 0 }}
-            - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
+            {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+            - name: {{ printf "file-%s" $key }}
               mountPath: {{ .destination_path }}
               subPath: {{ filepath.Base .destination_path }}
               readOnly: true
@@ -382,11 +384,12 @@ spec:
   {{- range .parameters.results }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-      - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
+        {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+      - name: {{ printf "file-%s" $key }}
         secret:
           secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
           items:
-          - key: {{ printf "app-file-%s" (filepath.Base .destination_path) }}
+          - key: {{ printf "app-file-%s" $key }}
             path: {{ filepath.Base .destination_path }}
       {{- end }}
     {{- end }}
