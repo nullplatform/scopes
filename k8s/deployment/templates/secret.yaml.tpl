@@ -39,7 +39,8 @@ data:
     {{- end }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-  {{ printf "app-data-%s" (filepath.Base .destination_path) }}: {{ index .values 0 "value" | regexp.Replace "^data:[^;]+;base64," "" }}
+  {{ printf "app-data-%s" (filepath.Base .destination_path) }}: {{ .destination_path | base64.Encode }}
+  {{ printf "app-file-%s" (filepath.Base .destination_path) }}: {{ index .values 0 "value" | regexp.Replace "^data:[^;]+;base64," "" }}
       {{- end }}
     {{- end }}
   {{- end }}
