@@ -165,8 +165,8 @@ spec:
               {{- if gt (len .values) 0 }}
                 {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
                 - name: {{ printf "file-%s" $key }}
-                  mountPath: {{ .destination_path }}
-                  subPath: {{ filepath.Base .destination_path }}
+                  mountPath: {{ .destination_path | quote }}
+                  subPath: {{ filepath.Base .destination_path | quote }}
                   readOnly: true
               {{- end }}
             {{- end }}
@@ -183,7 +183,7 @@ spec:
                 secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
                 items:
                 - key: {{ printf "app-file-%s" $key }}
-                  path: {{ filepath.Base .destination_path }}
+                  path: {{ filepath.Base .destination_path | quote }}
             {{- end }}
           {{- end }}
         {{- end }}
