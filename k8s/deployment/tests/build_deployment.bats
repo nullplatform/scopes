@@ -18,6 +18,7 @@ setup() {
   # Template paths
   export DEPLOYMENT_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/deployment.yaml.tpl"
   export SECRET_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/secret.yaml.tpl"
+  export SECRET_FILES_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/secret-files.yaml.tpl"
   export SCALING_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/scaling.yaml.tpl"
   export SERVICE_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/service.yaml.tpl"
   export PDB_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/pdb.yaml.tpl"
@@ -143,6 +144,13 @@ teardown() {
   assert_file_exists "$OUTPUT_DIR/secret-scope-123-deploy-456.yaml"
 }
 
+@test "build_deployment: creates secret-files file with correct name" {
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+
+  [ "$status" -eq 0 ]
+  assert_file_exists "$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
+}
+
 @test "build_deployment: creates scaling file with correct name" {
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
 
@@ -178,13 +186,14 @@ teardown() {
 # verify the rendered Secret + Deployment YAML have the right shape.
 #
 # Regression guard for the file-type parameter bug: binary file content used
-# to be stored under Secret key `app-data-<filename>` and then leaked into the
-# container env block via `envFrom`, which runc rejects with
-# `invalid environment variable ... contains nul byte`. The fix splits the
-# Secret key into:
-#   - app-data-<filename>  -> destination_path (string, env-safe)
-#   - app-file-<filename>  -> raw binary (volume-mount-only)
-# and updates the volume mount to read from the new key.
+# to be stored under Secret key `app-data-<filename>` in the env-var Secret,
+# which then leaked into the container env block via `envFrom`, which runc
+# rejects with `invalid environment variable ... contains nul byte`. The fix
+# splits the storage into two Secrets:
+#   - s-<scope>-d-<deploy>        env-only, consumed via envFrom (safe)
+#   - s-<scope>-d-<deploy>-files  binary-only, consumed only by the volume mount
+# Plus a plain `env:` entry on the application container that carries the
+# file's destination path under name `app-data-<filename>`.
 
 # Minimal context that satisfies all five templates' required fields.
 # Includes both an `environment` and a `file` parameter so we can assert on
@@ -241,7 +250,7 @@ _render_context() {
 JSON
 }
 
-@test "build_deployment: file-type parameter renders path env var and separate binary key" {
+@test "build_deployment: file-type parameter splits binary into a separate Secret" {
   unset -f gomplate  # use the real gomplate binary, not the setup mock
 
   export CONTEXT="$(_render_context)"
@@ -250,29 +259,48 @@ JSON
   [ "$status" -eq 0 ]
 
   local secret_file="$OUTPUT_DIR/secret-scope-123-deploy-456.yaml"
+  local secret_files_file="$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
   local deploy_file="$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
 
   assert_file_exists "$secret_file"
+  assert_file_exists "$secret_files_file"
   assert_file_exists "$deploy_file"
 
-  # Secret: app-data-<filename> holds the base64-encoded destination path,
-  # so envFrom injects a NUL-byte-free env var.
-  local expected_path_b64
-  expected_path_b64=$(printf '%s' '/etc/certs/test.p12' | base64)
-  assert_contains "$(cat "$secret_file")" "app-data-test.p12: ${expected_path_b64}"
+  # The env-var Secret MUST NOT contain anything that pulls in binary content
+  # via envFrom. Both app-data-* and app-file-* keys are forbidden here.
+  ! grep -E 'app-(data|file)-test\.p12' "$secret_file"
 
-  # Secret: app-file-<filename> holds the raw base64 binary content for the
-  # volume mount.
-  assert_contains "$(cat "$secret_file")" "app-file-test.p12: QUFBQkJC"
+  # The files Secret carries only the binary content, named so the volume mount
+  # can reference it. The Secret is in a separate object so `envFrom` on the
+  # env-var Secret cannot reach these bytes.
+  assert_contains "$(cat "$secret_files_file")" "name: s-scope-123-d-deploy-456-files"
+  assert_contains "$(cat "$secret_files_file")" "app-file-test.p12: QUFBQkJC"
+  ! grep -E 'app-data-test\.p12' "$secret_files_file"
 
-  # Regression guard: the app-data key MUST NEVER carry the raw binary
-  # (that's the original bug — runc rejects NUL bytes in env vars).
-  ! grep -E '^[[:space:]]*app-data-test\.p12:[[:space:]]+QUFBQkJC[[:space:]]*$' "$secret_file"
+  # The deployment exposes the destination path to the app via a plain `env:`
+  # entry on the application container (not via any Secret) — no NUL bytes.
+  assert_contains "$(cat "$deploy_file")" "- name: app-data-test.p12"
+  assert_contains "$(cat "$deploy_file")" 'value: "/etc/certs/test.p12"'
 
-  # Deployment: the volume mount items reference the binary key.
+  # The volume mount reads bytes from the files Secret, with key matching the
+  # one produced by secret-files.yaml.tpl.
+  assert_contains "$(cat "$deploy_file")" "secretName: s-scope-123-d-deploy-456-files"
   assert_contains "$(cat "$deploy_file")" "key: app-file-test.p12"
+}
 
-  # Regression guard: the volume mount must not read from the env-var key,
-  # otherwise the materialized file would contain the path string, not the cert.
-  ! grep -F 'key: app-data-test.p12' "$deploy_file"
+@test "build_deployment: secret-files renders empty when no file params" {
+  unset -f gomplate
+
+  # Same context as _render_context but with the file-type param removed.
+  export CONTEXT="$(_render_context | jq '.parameters.results |= map(select(.type != "file"))')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  # gomplate skips writing the output file when the template renders empty,
+  # which is the signal to apply_templates (which iterates the OUTPUT_DIR and
+  # skips zero-byte/missing files) to not create an empty files-Secret in the
+  # cluster.
+  local secret_files_file="$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
+  [ ! -f "$secret_files_file" ] || [ ! -s "$secret_files_file" ]
 }

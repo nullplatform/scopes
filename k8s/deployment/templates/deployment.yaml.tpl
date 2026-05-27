@@ -295,6 +295,15 @@ spec:
           envFrom:
             - secretRef:
                 name: s-{{ .scope.id }}-d-{{ .deployment.id }}
+    {{- if .parameters.results }}
+          env:
+      {{- range .parameters.results }}
+        {{- if and (eq .type "file") (gt (len .values) 0) }}
+            - name: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
+              value: {{ .destination_path | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
           image: >-
             {{ .asset.url }}
           securityContext:
@@ -375,7 +384,7 @@ spec:
       {{- if gt (len .values) 0 }}
       - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
         secret:
-          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
+          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
           items:
           - key: {{ printf "app-file-%s" (filepath.Base .destination_path) }}
             path: {{ filepath.Base .destination_path }}
