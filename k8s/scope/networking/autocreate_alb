@@ -45,7 +45,7 @@ generate_alb_name() {
 
 	local suffix
 	suffix=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 6) || {
-		suffix=$(printf '%06x' $((RANDOM * RANDOM % 0xFFFFFF)))
+		suffix=$(printf '%06x' $((RANDOM * RANDOM % 16777215)))
 	}
 
 	echo "${prefix}${vis_short}-${suffix}"
@@ -61,7 +61,8 @@ apply_dummy_ingress() {
 	local tmp_context
 	tmp_context=$(mktemp) || return 1
 	local tmp_yaml
-	tmp_yaml=$(mktemp --suffix=.yaml 2>/dev/null) || tmp_yaml="$(mktemp).yaml"
+	tmp_yaml=$(mktemp) || return 1
+	trap 'rm -f "$tmp_context" "$tmp_yaml"' RETURN
 
 	echo "$CONTEXT" | jq \
 		--arg alb_name "$alb_name" \
@@ -75,24 +76,19 @@ apply_dummy_ingress() {
 	if ! gomplate -c .="$tmp_context" --file "$template_path" --out "$tmp_yaml" 2>/dev/null; then
 		log error "❌ Failed to render ingress-dummy template"
 		log error "📋 Template: $template_path"
-		rm -f "$tmp_context" "$tmp_yaml"
 		return 1
 	fi
 
 	if ! kubectl apply -f "$tmp_yaml" >/dev/null 2>&1; then
 		log error "❌ Failed to apply ingress-dummy for ALB '$alb_name'"
-		log error ""
 		log error "💡 Possible causes:"
 		log error "   The agent may lack permissions on Ingress resources or the namespace may not exist"
-		log error ""
 		log error "🔧 How to fix:"
 		log error "   • kubectl apply -f $tmp_yaml"
 		log error "   • Verify namespace '$namespace' exists"
-		rm -f "$tmp_context" "$tmp_yaml"
 		return 1
 	fi
 
-	rm -f "$tmp_context" "$tmp_yaml"
 	return 0
 }
 
@@ -112,19 +108,16 @@ wait_for_alb_active() {
 	log info "⏳ Waiting up to ${timeout_seconds}s for ALB '$alb_name' to become active..."
 
 	while [ "$(date +%s)" -lt "$deadline" ]; do
-		alb_arn=$(aws elbv2 describe-load-balancers \
+		local lb_json
+		lb_json=$(aws elbv2 describe-load-balancers \
 			--names "$alb_name" \
 			--region "$REGION" \
-			--query 'LoadBalancers[0].LoadBalancerArn' \
-			--output text 2>/dev/null) || alb_arn=""
+			--output json 2>/dev/null) || lb_json=""
+
+		alb_arn=$(echo "$lb_json" | jq -r '.LoadBalancers[0].LoadBalancerArn // empty' 2>/dev/null) || alb_arn=""
+		state=$(echo "$lb_json" | jq -r '.LoadBalancers[0].State.Code // empty' 2>/dev/null) || state=""
 
 		if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ]; then
-			state=$(aws elbv2 describe-load-balancers \
-				--names "$alb_name" \
-				--region "$REGION" \
-				--query 'LoadBalancers[0].State.Code' \
-				--output text 2>/dev/null) || state=""
-
 			log debug "📋 ALB '$alb_name' state: ${state:-pending}"
 
 			if [ "$state" = "active" ]; then
@@ -192,8 +185,20 @@ TIMEOUT_SECONDS=$(get_config_value \
 	--default "300"
 )
 
-if ! [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+if ! [[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
 	log error "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: '$TIMEOUT_SECONDS'"
+	return 1
+fi
+
+# Final ALB name is "<prefix><public|private>-<6 hex>", which must satisfy AWS
+# ALB naming rules ([a-zA-Z0-9-], ≤32 chars) and the k8s metadata.name rules
+# used by the dummy Ingress. 14 = length of "private-" + 6 hex chars.
+if ! [[ "$NAME_PREFIX" =~ ^[a-z0-9-]+$ ]]; then
+	log error "❌ ALB_AUTOCREATE_NAME_PREFIX must match ^[a-z0-9-]+$, got: '$NAME_PREFIX'"
+	return 1
+fi
+if [ "${#NAME_PREFIX}" -gt 18 ]; then
+	log error "❌ ALB_AUTOCREATE_NAME_PREFIX must be ≤18 chars (AWS caps ALB names at 32, the visibility+hex suffix uses 14); got ${#NAME_PREFIX}"
 	return 1
 fi
 

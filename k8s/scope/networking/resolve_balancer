@@ -204,15 +204,15 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
     # can include them in the pool without provider config changes.
     AUTOCREATED_BALANCERS=$(get_autocreated_albs "$INGRESS_VISIBILITY" 2>/dev/null) || AUTOCREATED_BALANCERS=""
 
-    HAS_ADDITIONAL=0
+    HAS_ADDITIONAL=false
     if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
-      HAS_ADDITIONAL=1
+      HAS_ADDITIONAL=true
     fi
 
-    if [ "$HAS_ADDITIONAL" -eq 1 ] || [ -n "$AUTOCREATED_BALANCERS" ]; then
+    if [ "$HAS_ADDITIONAL" = "true" ] || [ -n "$AUTOCREATED_BALANCERS" ]; then
       log debug "🔍 Resolving least-loaded ALB across declared and autocreated candidates..."
 
-      if [ "$HAS_ADDITIONAL" -eq 1 ]; then
+      if [ "$HAS_ADDITIONAL" = "true" ]; then
         DECLARED_LIST=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
       else
         DECLARED_LIST="$ALB_NAME"
@@ -262,7 +262,14 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
         --default "75"
       )
 
-      if [ "$AUTOCREATE_ENABLED" = "true" ] && [ "$MIN_RULES" -ge 0 ] && [ "$MIN_RULES" -ge "$MAX_CAPACITY" ]; then
+      # Without this guard a non-numeric MAX_CAPACITY would silently disable the
+      # autocreate trigger (the `-ge` comparison errors out and evaluates false).
+      if ! [[ "$MAX_CAPACITY" =~ ^[0-9]+$ ]]; then
+        log warn "⚠️  ALB_MAX_CAPACITY must be numeric, got: '$MAX_CAPACITY' — skipping autocreate evaluation"
+        MAX_CAPACITY=""
+      fi
+
+      if [ "$AUTOCREATE_ENABLED" = "true" ] && [ -n "$MAX_CAPACITY" ] && [ "$MIN_RULES" -ge 0 ] && [ "$MIN_RULES" -ge "$MAX_CAPACITY" ]; then
         log info "🔧 All candidate ALBs are at or above capacity ($MIN_RULES/$MAX_CAPACITY); triggering autocreate"
         source "$_RESOLVE_BALANCER_DIR/autocreate_alb" || {
           log error "❌ Autocreate failed; ALB '$ALB_NAME' will be used and validate_alb_capacity will reject the deployment"

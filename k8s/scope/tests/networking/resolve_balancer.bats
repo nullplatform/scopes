@@ -84,75 +84,79 @@ mock_route53_alb() {
   export -f aws"
 }
 
+# Handles the three elbv2 describe-* calls used by get_alb_rule_count.
+# Reads rule counts from MOCK_RULES_FILE ("alb_name count" lines).
+# Returns non-zero when an ALB name is not found in MOCK_RULES_FILE.
+_mock_aws_elbv2_rule_count() {
+  case "$*" in
+    *describe-load-balancers*--names*)
+      local name="" prev=""
+      for arg in "$@"; do
+        if [ "$prev" = "--names" ]; then name="$arg"; fi
+        prev="$arg"
+      done
+      if ! grep -q "^${name} " "$MOCK_RULES_FILE" 2>/dev/null; then
+        return 1
+      fi
+      echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc"
+      ;;
+    *describe-listeners*)
+      local lb_arn="" prev=""
+      for arg in "$@"; do
+        if [ "$prev" = "--load-balancer-arn" ]; then lb_arn="$arg"; fi
+        prev="$arg"
+      done
+      local alb_name
+      alb_name=$(echo "$lb_arn" | sed 's|.*/app/||;s|/.*||')
+      echo "arn:aws:elasticloadbalancing:us-east-1:123:listener/app/${alb_name}/abc/def"
+      ;;
+    *describe-rules*)
+      local listener_arn="" prev=""
+      for arg in "$@"; do
+        if [ "$prev" = "--listener-arn" ]; then listener_arn="$arg"; fi
+        prev="$arg"
+      done
+      local alb_name
+      alb_name=$(echo "$listener_arn" | sed 's|.*/app/||;s|/.*||')
+      local count
+      count=$(grep "^${alb_name} " "$MOCK_RULES_FILE" | awk '{print $2}')
+      if [ -z "$count" ]; then
+        return 1
+      fi
+      local rules='{"Rules": [{"IsDefault": true}'
+      local i=0
+      while [ "$i" -lt "$count" ]; do
+        rules="${rules}, {\"IsDefault\": false}"
+        i=$((i + 1))
+      done
+      echo "${rules}]}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+export -f _mock_aws_elbv2_rule_count
+
 # Sets up aws mock with no Route53 record but with rule counts for ALBs.
-# Write rule counts to MOCK_RULES_FILE as "alb_name count" lines.
-# The mock returns the ALB ARN with the name embedded so describe-rules
-# can look up the correct rule count.
+# Write rule counts to MOCK_RULES_FILE as "alb_name count" lines before calling.
+# The mock returns ARNs with the name embedded so describe-rules can look up counts.
 mock_alb_rules() {
   > "$MOCK_RULES_FILE"
   for pair in "$@"; do
     echo "$pair" >> "$MOCK_RULES_FILE"
   done
-  local rules_file="$MOCK_RULES_FILE"
 
-  eval "aws() {
-    case \"\$*\" in
-      *list-resource-record-sets*)
-        echo 'None'
-        return 0
+  aws() {
+    case "$*" in
+      *list-resource-record-sets*) echo "None" ;;
+      *describe-load-balancers*--names* | *describe-listeners* | *describe-rules*)
+        _mock_aws_elbv2_rule_count "$@"
         ;;
-      *describe-load-balancers*--names*)
-        local name=''
-        local prev=''
-        for arg in \"\$@\"; do
-          if [ \"\$prev\" = '--names' ]; then name=\"\$arg\"; fi
-          prev=\"\$arg\"
-        done
-        if ! grep -q \"^\${name} \" '${rules_file}' 2>/dev/null; then
-          return 1
-        fi
-        echo \"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/\${name}/abc\"
-        return 0
-        ;;
-      *describe-listeners*)
-        local lb_arn=''
-        local prev=''
-        for arg in \"\$@\"; do
-          if [ \"\$prev\" = '--load-balancer-arn' ]; then lb_arn=\"\$arg\"; fi
-          prev=\"\$arg\"
-        done
-        local alb_name=\$(echo \"\$lb_arn\" | sed 's|.*/app/||;s|/.*||')
-        echo \"arn:aws:elasticloadbalancing:us-east-1:123:listener/app/\${alb_name}/abc/def\"
-        return 0
-        ;;
-      *describe-rules*)
-        local listener_arn=''
-        local prev=''
-        for arg in \"\$@\"; do
-          if [ \"\$prev\" = '--listener-arn' ]; then listener_arn=\"\$arg\"; fi
-          prev=\"\$arg\"
-        done
-        local alb_name=\$(echo \"\$listener_arn\" | sed 's|.*/app/||;s|/.*||')
-        local count=\$(grep \"^\${alb_name} \" '${rules_file}' | awk '{print \$2}')
-        if [ -z \"\$count\" ]; then
-          return 1
-        fi
-        local rules='{\"Rules\": [{\"IsDefault\": true}'
-        local i=0
-        while [ \$i -lt \$count ]; do
-          rules=\"\${rules}, {\\\"IsDefault\\\": false}\"
-          i=\$((i + 1))
-        done
-        rules=\"\${rules}]}\"
-        echo \"\$rules\"
-        return 0
-        ;;
-      *)
-        return 1
-        ;;
+      *) return 1 ;;
     esac
   }
-  export -f aws"
+  export -f aws
 }
 
 # =============================================================================
@@ -502,16 +506,13 @@ mock_alb_rules() {
 # Discovery of autocreated ALBs via tags
 # =============================================================================
 
-# Extends mock_alb_rules behavior to also serve a resourcegroupstaggingapi
-# response listing autocreated ALBs as candidates. Pass "alb_name count" pairs
-# as positional args; pass the discovered ALB names via the
-# DISCOVERED_AUTOCREATED env var (space-separated).
+# Extends mock_alb_rules to also serve a resourcegroupstaggingapi response
+# listing autocreated ALBs as candidates. Pass "alb_name count" pairs as
+# positional args; set DISCOVERED_AUTOCREATED (space-separated names) before
+# calling to control which ALBs the tag-discovery API returns.
 mock_alb_rules_with_discovery() {
-  > "$MOCK_RULES_FILE"
-  for pair in "$@"; do
-    echo "$pair" >> "$MOCK_RULES_FILE"
-  done
-  local rules_file="$MOCK_RULES_FILE"
+  mock_alb_rules "$@"
+
   local discovered_arns=""
   for name in $DISCOVERED_AUTOCREATED; do
     discovered_arns="${discovered_arns}arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc"$'\t'
@@ -520,56 +521,13 @@ mock_alb_rules_with_discovery() {
 
   eval "aws() {
     case \"\$*\" in
-      *list-resource-record-sets*) echo 'None'; return 0 ;;
       *resourcegroupstaggingapi*get-resources*)
         echo '${discovered_arns}'
         return 0
         ;;
-      *describe-load-balancers*--names*)
-        local name=''
-        local prev=''
-        for arg in \"\$@\"; do
-          if [ \"\$prev\" = '--names' ]; then name=\"\$arg\"; fi
-          prev=\"\$arg\"
-        done
-        if ! grep -q \"^\${name} \" '${rules_file}' 2>/dev/null; then
-          return 1
-        fi
-        echo \"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/\${name}/abc\"
-        return 0
-        ;;
-      *describe-listeners*)
-        local lb_arn=''
-        local prev=''
-        for arg in \"\$@\"; do
-          if [ \"\$prev\" = '--load-balancer-arn' ]; then lb_arn=\"\$arg\"; fi
-          prev=\"\$arg\"
-        done
-        local alb_name=\$(echo \"\$lb_arn\" | sed 's|.*/app/||;s|/.*||')
-        echo \"arn:aws:elasticloadbalancing:us-east-1:123:listener/app/\${alb_name}/abc/def\"
-        return 0
-        ;;
-      *describe-rules*)
-        local listener_arn=''
-        local prev=''
-        for arg in \"\$@\"; do
-          if [ \"\$prev\" = '--listener-arn' ]; then listener_arn=\"\$arg\"; fi
-          prev=\"\$arg\"
-        done
-        local alb_name=\$(echo \"\$listener_arn\" | sed 's|.*/app/||;s|/.*||')
-        local count=\$(grep \"^\${alb_name} \" '${rules_file}' | awk '{print \$2}')
-        if [ -z \"\$count\" ]; then
-          return 1
-        fi
-        local rules='{\"Rules\": [{\"IsDefault\": true}'
-        local i=0
-        while [ \$i -lt \$count ]; do
-          rules=\"\${rules}, {\\\"IsDefault\\\": false}\"
-          i=\$((i + 1))
-        done
-        rules=\"\${rules}]}\"
-        echo \"\$rules\"
-        return 0
+      *list-resource-record-sets*) echo 'None' ;;
+      *describe-load-balancers*--names* | *describe-listeners* | *describe-rules*)
+        _mock_aws_elbv2_rule_count \"\$@\"
         ;;
       *) return 1 ;;
     esac
@@ -638,7 +596,6 @@ mock_alb_rules_with_discovery() {
     case "$*" in
       *list-resource-record-sets*) echo "None"; return 0 ;;
       *resourcegroupstaggingapi*get-resources*) echo ""; return 0 ;;
-      *describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
       *describe-load-balancers*--names*)
         local name=''
         local prev=''
@@ -646,8 +603,12 @@ mock_alb_rules_with_discovery() {
           if [ "$prev" = "--names" ]; then name="$arg"; fi
           prev="$arg"
         done
-        echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc"
-        return 0
+        # Return JSON when called with --output json (autocreate polling),
+        # or a plain ARN when called with --output text (rule count lookup).
+        case "$*" in
+          *--output*json*) echo "{\"LoadBalancers\":[{\"LoadBalancerArn\":\"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc\",\"State\":{\"Code\":\"active\"}}]}"; return 0 ;;
+          *) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc"; return 0 ;;
+        esac
         ;;
       *describe-listeners*)
         local lb_arn=''
@@ -707,4 +668,19 @@ mock_alb_rules_with_discovery() {
   source "$SCRIPT"
 
   assert_equal "$ALB_NAME" "alb-extra-1"
+}
+
+@test "resolve_balancer: warns and skips autocreate when ALB_MAX_CAPACITY is non-numeric" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export ALB_AUTOCREATE_ENABLED="true"
+  export ALB_MAX_CAPACITY="not-a-number"
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["scope-configurations"].networking.additional_public_balancers = ["alb-extra-1"]
+  ')
+  mock_alb_rules "co-balancer-public 60" "alb-extra-1 55"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "ALB_MAX_CAPACITY must be numeric"
 }

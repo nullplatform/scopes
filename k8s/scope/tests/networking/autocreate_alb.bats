@@ -61,8 +61,7 @@ record_call() {
 	# Mock AWS so describe-load-balancers reports active immediately.
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/nullplatform-auto-public-abc123/x"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/nullplatform-auto-public-abc123/x","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*) return 0 ;;
 			*) return 1 ;;
 		esac
@@ -79,8 +78,7 @@ record_call() {
 	export INGRESS_VISIBILITY="internal"
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*) return 0 ;;
 			*) return 1 ;;
 		esac
@@ -96,8 +94,7 @@ record_call() {
 	export ALB_AUTOCREATE_NAME_PREFIX="custom-prefix-"
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*) return 0 ;;
 			*) return 1 ;;
 		esac
@@ -119,8 +116,7 @@ record_call() {
 	export -f kubectl
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*) return 0 ;;
 			*) return 1 ;;
 		esac
@@ -158,11 +154,10 @@ record_call() {
 # Polling for active state
 # =============================================================================
 @test "autocreate_alb: returns success when ALB becomes active within timeout" {
-	# First describe call returns pending arn, then state=active.
+	# describe-load-balancers returns active state immediately.
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*) return 0 ;;
 			*) return 1 ;;
 		esac
@@ -176,11 +171,10 @@ record_call() {
 
 @test "autocreate_alb: exits non-zero when ALB never reaches active state (timeout)" {
 	export ALB_AUTOCREATE_TIMEOUT_SECONDS="1"
-	# Always return pending state, never 'active'.
+	# Always return provisioning state, never 'active'.
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "provisioning"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"provisioning"}}]}'; return 0 ;;
 			*) return 1 ;;
 		esac
 	}
@@ -195,8 +189,7 @@ record_call() {
 @test "autocreate_alb: exits non-zero when ALB reaches 'failed' state" {
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "failed"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"failed"}}]}'; return 0 ;;
 			*) return 1 ;;
 		esac
 	}
@@ -214,8 +207,7 @@ record_call() {
 @test "autocreate_alb: tags the ALB with managed-by, visibility and scope-id" {
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*)
 				record_call "aws $*"
 				return 0
@@ -235,8 +227,7 @@ record_call() {
 @test "autocreate_alb: tagging failure does not fail the script (warn only)" {
 	aws() {
 		case "$*" in
-			*describe-load-balancers*--query*State.Code*) echo "active"; return 0 ;;
-			*describe-load-balancers*) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y"; return 0 ;;
+			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
 			*add-tags*) return 1 ;;
 			*) return 1 ;;
 		esac
@@ -259,4 +250,34 @@ record_call() {
 
 	[ "$status" -ne 0 ]
 	assert_contains "$output" "must be a positive integer"
+}
+
+# =============================================================================
+# Name prefix validation
+# =============================================================================
+@test "autocreate_alb: rejects prefix containing uppercase" {
+	export ALB_AUTOCREATE_NAME_PREFIX="Bad-Prefix-"
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "must match"
+}
+
+@test "autocreate_alb: rejects prefix containing colon (YAML injection vector)" {
+	export ALB_AUTOCREATE_NAME_PREFIX="bad:prefix"
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "must match"
+}
+
+@test "autocreate_alb: rejects prefix longer than 18 chars" {
+	export ALB_AUTOCREATE_NAME_PREFIX="this-prefix-is-way-too-long-"
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "18 chars"
 }
