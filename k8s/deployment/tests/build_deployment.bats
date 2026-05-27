@@ -243,7 +243,7 @@ _render_context() {
   "parameters": {
     "results": [
       {"type": "environment", "variable": "MY_VAR", "values": [{"value": "hello"}]},
-      {"type": "file", "name": "API P12 Cert!", "destination_path": "/etc/certs/test.p12", "values": [{"value": "data:application/x-pkcs12;base64,QUFBQkJC"}]}
+      {"type": "file", "name": "API P12 Cert!", "destination_path": "/app-data/[2026-05-27] cert.p12", "values": [{"value": "data:application/x-pkcs12;base64,QUFBQkJC"}]}
     ]
   }
 }
@@ -281,7 +281,13 @@ JSON
   # entry on the application container (not via any Secret) — no NUL bytes,
   # and the env var name is derived from the parameter's display name.
   assert_contains "$(cat "$deploy_file")" "- name: app-data-api-p12-cert"
-  assert_contains "$(cat "$deploy_file")" 'value: "/etc/certs/test.p12"'
+  # The path starts with `[`, which YAML parses as a flow sequence unless the
+  # value is quoted. mountPath, subPath, path, and the env value must all be
+  # quoted; otherwise the deployment agent fails with `did not find expected key`.
+  assert_contains "$(cat "$deploy_file")" 'value: "/app-data/[2026-05-27] cert.p12"'
+  assert_contains "$(cat "$deploy_file")" 'mountPath: "/app-data/[2026-05-27] cert.p12"'
+  assert_contains "$(cat "$deploy_file")" 'subPath: "[2026-05-27] cert.p12"'
+  assert_contains "$(cat "$deploy_file")" 'path: "[2026-05-27] cert.p12"'
 
   # The volume mount reads bytes from the files Secret, with key matching the
   # one produced by secret-files.yaml.tpl.
