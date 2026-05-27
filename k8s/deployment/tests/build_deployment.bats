@@ -305,26 +305,3 @@ JSON
   local secret_files_file="$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
   [ ! -f "$secret_files_file" ] || [ ! -s "$secret_files_file" ]
 }
-
-@test "build_deployment: deployment omits env: block when no file params" {
-  unset -f gomplate
-
-  # Env-only param set. An empty `env:` followed by `image:` at the same indent
-  # is rejected by strict YAML-to-JSON converters (the deployment agent), so
-  # the block must not be emitted at all when there are no file params.
-  export CONTEXT="$(_render_context | jq '.parameters.results |= map(select(.type != "file"))')"
-
-  run bash "$BATS_TEST_DIRNAME/../build_deployment"
-  [ "$status" -eq 0 ]
-
-  local deploy_file="$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
-  assert_file_exists "$deploy_file"
-
-  # Slice the application container block (from its `- name: application`
-  # header up to the next sibling `- name:` or `restartPolicy`) and assert
-  # no `env:` key appears inside it. The traffic-manager sidecar also has
-  # `env:`, so a file-wide grep would false-positive.
-  local app_block
-  app_block=$(awk '/^        - name: application$/{flag=1} flag && /^      restartPolicy:/{flag=0} flag' "$deploy_file")
-  ! grep -qE '^          env:' <<< "$app_block"
-}

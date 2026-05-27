@@ -139,15 +139,7 @@ spec:
               envFrom:
                 - secretRef:
                     name: s-{{ .scope.id }}-d-{{ .deployment.id }}
-        {{- $hasFile := false }}
         {{- if .parameters.results }}
-          {{- range .parameters.results }}
-            {{- if and (eq .type "file") (gt (len .values) 0) }}
-              {{- $hasFile = true }}
-            {{- end }}
-          {{- end }}
-        {{- end }}
-        {{- if $hasFile }}
               env:
           {{- range .parameters.results }}
             {{- if and (eq .type "file") (gt (len .values) 0) }}
