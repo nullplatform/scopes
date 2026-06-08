@@ -9,6 +9,7 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
   source "$PROJECT_ROOT/k8s/utils/get_config_value"
+  export -f get_config_value
 
   export SCRIPT="$PROJECT_ROOT/k8s/scope/networking/resolve_balancer"
   export REGION="us-east-1"
@@ -372,7 +373,7 @@ mock_alb_rules() {
 
   run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"'
 
-  assert_contains "$output" "🔍 Resolving least-loaded ALB across declared and autocreated candidates..."
+  assert_contains "$output" "🔍 Additional balancers configured, resolving least-loaded ALB..."
   assert_contains "$output" "📋 Candidate balancers: co-balancer-public, alb-extra-1, alb-extra-2"
 }
 
@@ -503,142 +504,79 @@ mock_alb_rules() {
 }
 
 # =============================================================================
-# Discovery of autocreated ALBs via tags
+# LoadBalancerNotFound treated as 0 rules (concurrent autocreate race case)
 # =============================================================================
-
-# Extends mock_alb_rules to also serve a resourcegroupstaggingapi response
-# listing autocreated ALBs as candidates. Pass "alb_name count" pairs as
-# positional args; set DISCOVERED_AUTOCREATED (space-separated names) before
-# calling to control which ALBs the tag-discovery API returns.
-mock_alb_rules_with_discovery() {
-  mock_alb_rules "$@"
-
-  local discovered_arns=""
-  for name in $DISCOVERED_AUTOCREATED; do
-    discovered_arns="${discovered_arns}arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc"$'\t'
-  done
-  discovered_arns="${discovered_arns%$'\t'}"
-
-  eval "aws() {
-    case \"\$*\" in
-      *resourcegroupstaggingapi*get-resources*)
-        echo '${discovered_arns}'
-        return 0
-        ;;
-      *list-resource-record-sets*) echo 'None' ;;
-      *describe-load-balancers*--names* | *describe-listeners* | *describe-rules*)
-        _mock_aws_elbv2_rule_count \"\$@\"
-        ;;
-      *) return 1 ;;
-    esac
-  }
-  export -f aws"
-}
-
-@test "resolve_balancer: discovers autocreated ALBs from tags and includes them as candidates" {
+@test "resolve_balancer: treats LoadBalancerNotFound as 0 rules so in-flight ALB wins" {
   export INGRESS_VISIBILITY="internet-facing"
-  export DISCOVERED_AUTOCREATED="nullplatform-auto-public-aaaaaa"
-  mock_alb_rules_with_discovery "co-balancer-public 50" "nullplatform-auto-public-aaaaaa 5"
-
-  source "$SCRIPT"
-
-  assert_equal "$ALB_NAME" "nullplatform-auto-public-aaaaaa"
-}
-
-@test "resolve_balancer: skips non-application LBs in discovery output" {
-  export INGRESS_VISIBILITY="internet-facing"
-  # Inject a network LB ARN that should be filtered out by the awk in get_autocreated_albs
-  aws() {
-    case "$*" in
-      *list-resource-record-sets*) echo "None"; return 0 ;;
-      *resourcegroupstaggingapi*get-resources*)
-        printf 'arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/net/some-nlb/abc\n'
-        return 0
-        ;;
-      *) return 1 ;;
-    esac
-  }
-  export -f aws
-
-  source "$SCRIPT"
-
-  # No additional candidates → falls back to default
-  assert_equal "$ALB_NAME" "co-balancer-public"
-}
-
-# =============================================================================
-# Autocreate fallback when all candidates are over capacity
-# =============================================================================
-@test "resolve_balancer: triggers autocreate when all candidates over threshold and feature enabled" {
-  export INGRESS_VISIBILITY="internet-facing"
-  export ALB_AUTOCREATE_ENABLED="true"
-  export ALB_MAX_CAPACITY="50"
-  export ALB_AUTOCREATE_TIMEOUT_SECONDS="2"
-  export ALB_AUTOCREATE_NAME_PREFIX="auto-"
-  export K8S_NAMESPACE="test-ns"
-  export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export CONTEXT=$(echo "$CONTEXT" | jq '
-    .providers["scope-configurations"].networking.additional_public_balancers = ["alb-extra-1"] |
-    .scope.slug = "s" |
-    .scope.id = "scope-1" |
-    .namespace.slug = "ns" |
-    .namespace.id = "ns-1" |
-    .application.slug = "app" |
-    .application.id = "app-1" |
-    .account.slug = "acc" |
-    .account.id = "acc-1" |
-    .deployment.id = "dep-1"
+    .providers["scope-configurations"].networking.additional_public_balancers = ["in-flight-alb"]
   ')
 
-  # Both declared ALBs are above threshold; aws describe for autocreate
-  # returns "active" immediately so the new ALB name is exported.
   aws() {
     case "$*" in
       *list-resource-record-sets*) echo "None"; return 0 ;;
-      *resourcegroupstaggingapi*get-resources*) echo ""; return 0 ;;
+      *describe-load-balancers*--names*in-flight-alb*)
+        echo "An error occurred (LoadBalancerNotFound) when calling the DescribeLoadBalancers operation" >&2
+        return 254
+        ;;
       *describe-load-balancers*--names*)
-        local name=''
-        local prev=''
-        for arg in "$@"; do
-          if [ "$prev" = "--names" ]; then name="$arg"; fi
-          prev="$arg"
-        done
-        # Return JSON when called with --output json (autocreate polling),
-        # or a plain ARN when called with --output text (rule count lookup).
-        case "$*" in
-          *--output*json*) echo "{\"LoadBalancers\":[{\"LoadBalancerArn\":\"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc\",\"State\":{\"Code\":\"active\"}}]}"; return 0 ;;
-          *) echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/${name}/abc"; return 0 ;;
-        esac
+        echo "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/co-balancer-public/abc"
+        return 0
         ;;
       *describe-listeners*)
-        local lb_arn=''
-        local prev=''
-        for arg in "$@"; do
-          if [ "$prev" = "--load-balancer-arn" ]; then lb_arn="$arg"; fi
-          prev="$arg"
-        done
-        local alb_name=$(echo "$lb_arn" | sed 's|.*/app/||;s|/.*||')
-        echo "arn:aws:elasticloadbalancing:us-east-1:123:listener/app/${alb_name}/abc/def"
+        echo "arn:aws:elasticloadbalancing:us-east-1:123:listener/app/co-balancer-public/abc/def"
         return 0
         ;;
       *describe-rules*)
-        # Both candidates report 60 rules (above threshold of 50)
-        echo '{"Rules":[{"IsDefault":true},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false},{"IsDefault":false}]}'
+        local rules='{"Rules": [{"IsDefault": true}'
+        local i=0
+        while [ $i -lt 50 ]; do
+          rules="${rules}, {\"IsDefault\": false}"
+          i=$((i + 1))
+        done
+        rules="${rules}]}"
+        echo "$rules"
         return 0
         ;;
-      *add-tags*) return 0 ;;
       *) return 1 ;;
     esac
   }
   export -f aws
-  gomplate() { return 0; }
-  export -f gomplate
-  kubectl() { return 0; }
-  export -f kubectl
 
   source "$SCRIPT"
 
-  [[ "$ALB_NAME" =~ ^auto-public-[a-f0-9]{6}$ ]]
+  assert_equal "$ALB_NAME" "in-flight-alb"
+}
+
+# =============================================================================
+# Autocreate trigger
+# =============================================================================
+@test "resolve_balancer: sources autocreate_alb when all candidates over threshold and feature enabled" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export ALB_AUTOCREATE_ENABLED="true"
+  export ALB_MAX_CAPACITY="50"
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["scope-configurations"].networking.additional_public_balancers = ["alb-extra-1"]
+  ')
+  mock_alb_rules "co-balancer-public 60" "alb-extra-1 55"
+
+  # Stub autocreate_alb: simulate it exporting the new ALB name.
+  cat > "$BATS_TEST_TMPDIR/autocreate_alb_stub" <<'STUB'
+export ALB_NAME="auto-public-stubbed"
+export ALB_AUTOCREATED="true"
+STUB
+  export INGRESS_DUMMY_TEMPLATE="$BATS_TEST_TMPDIR/ignored.tpl"
+  # Replace the real autocreate_alb with the stub by intercepting the source path
+  AUTOCREATE_STUB="$BATS_TEST_TMPDIR/autocreate_alb_stub"
+  # The script does: source "$_RESOLVE_BALANCER_DIR/autocreate_alb"
+  # Override via shadow path: copy resolve_balancer to tmp with patched source line.
+  PATCHED_SCRIPT="$BATS_TEST_TMPDIR/resolve_balancer_patched"
+  sed "s|\\\$_RESOLVE_BALANCER_DIR/autocreate_alb|$AUTOCREATE_STUB|" "$SCRIPT" > "$PATCHED_SCRIPT"
+
+  source "$PATCHED_SCRIPT"
+
+  assert_equal "$ALB_NAME" "auto-public-stubbed"
+  [ "$ALB_AUTOCREATED" = "true" ]
 }
 
 @test "resolve_balancer: does not autocreate when feature disabled even if all candidates full" {

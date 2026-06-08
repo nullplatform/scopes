@@ -17,10 +17,14 @@ setup() {
 	export INGRESS_VISIBILITY="internet-facing"
 	export K8S_NAMESPACE="test-ns"
 	export SERVICE_PATH="$PROJECT_ROOT/k8s"
-	export ALB_AUTOCREATE_TIMEOUT_SECONDS="2"
+	export OUTPUT_DIR="$(mktemp -d)"
 
 	export CONTEXT='{
-		"scope": { "id": "scope-1", "slug": "scope-1" },
+		"scope": {
+			"id": "scope-1",
+			"slug": "scope-1",
+			"nrn": "organization=1:account=2:namespace=3:application=4:scope=5"
+		},
 		"namespace": { "id": "ns-1", "slug": "ns-1" },
 		"application": { "id": "app-1", "slug": "app-1" },
 		"account": { "id": "acc-1", "slug": "acc-1" },
@@ -30,107 +34,208 @@ setup() {
 		}
 	}'
 
-	# Mocks: each test overrides as needed.
-	gomplate() { return 0; }
-	export -f gomplate
-	kubectl() { return 0; }
-	export -f kubectl
-	aws() { return 1; }
-	export -f aws
-
-	# Tracks calls for assertions.
 	export CALL_LOG_FILE="$(mktemp)"
+
+	# Default mocks — each test overrides as needed.
+	gomplate() {
+		local prev=""
+		for arg in "$@"; do
+			if [ "$prev" = "--out" ]; then echo "rendered" > "$arg"; fi
+			prev="$arg"
+		done
+		return 0
+	}
+	export -f gomplate
+	np() {
+		echo "np $*" >> "$CALL_LOG_FILE"
+		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
+			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{}}}]}'
+			return 0
+		fi
+		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then
+			local prev=""
+			for arg in "$@"; do
+				if [ "$prev" = "--body" ]; then echo "$arg" > "$OUTPUT_DIR/_patch_body"; fi
+				prev="$arg"
+			done
+			return 0
+		fi
+		return 1
+	}
+	export -f np
 }
 
 teardown() {
-	unset -f log gomplate kubectl aws get_config_value
-	rm -f "$CALL_LOG_FILE"
-	unset AUTOCREATED_ALB_NAME
-}
-
-# Records each invocation of a mocked binary into CALL_LOG_FILE so tests can
-# assert against the sequence of calls.
-record_call() {
-	echo "$@" >> "$CALL_LOG_FILE"
+	unset -f log gomplate np get_config_value
+	rm -rf "$OUTPUT_DIR" "$CALL_LOG_FILE"
+	unset ALB_NAME ALB_AUTOCREATED
 }
 
 # =============================================================================
 # Name generation
 # =============================================================================
-@test "autocreate_alb: generates ALB name with prefix and visibility short form" {
-	# Mock AWS so describe-load-balancers reports active immediately.
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/nullplatform-auto-public-abc123/x","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*) return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
-
+@test "autocreate_alb: generates name with default prefix and public short form" {
 	source "$SCRIPT"
 
-	# Length and prefix
-	[[ "$AUTOCREATED_ALB_NAME" =~ ^nullplatform-auto-public-[a-f0-9]{6}$ ]]
+	[[ "$ALB_NAME" =~ ^nullplatform-auto-public-[a-f0-9]{6}$ ]]
 }
 
-@test "autocreate_alb: uses private short form for internal visibility" {
+@test "autocreate_alb: generates name with private short form for internal visibility" {
 	export INGRESS_VISIBILITY="internal"
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*) return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
 
 	source "$SCRIPT"
 
-	[[ "$AUTOCREATED_ALB_NAME" =~ ^nullplatform-auto-private-[a-f0-9]{6}$ ]]
+	[[ "$ALB_NAME" =~ ^nullplatform-auto-private-[a-f0-9]{6}$ ]]
 }
 
-@test "autocreate_alb: respects custom name prefix from env" {
-	export ALB_AUTOCREATE_NAME_PREFIX="custom-prefix-"
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*) return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
+@test "autocreate_alb: respects custom name prefix" {
+	export ALB_AUTOCREATE_NAME_PREFIX="custom-"
 
 	source "$SCRIPT"
 
-	[[ "$AUTOCREATED_ALB_NAME" =~ ^custom-prefix-public- ]]
+	[[ "$ALB_NAME" =~ ^custom-public-[a-f0-9]{6}$ ]]
+}
+
+@test "autocreate_alb: exports ALB_AUTOCREATED=true" {
+	source "$SCRIPT"
+
+	[ "$ALB_AUTOCREATED" = "true" ]
 }
 
 # =============================================================================
-# Ingress dummy application
+# Provider patching
 # =============================================================================
-@test "autocreate_alb: renders and applies the dummy ingress before polling" {
-	gomplate() { record_call "gomplate $*"; return 0; }
-	export -f gomplate
-	kubectl() { record_call "kubectl $*"; return 0; }
-	export -f kubectl
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*) return 0 ;;
-			*) return 1 ;;
-		esac
+@test "autocreate_alb: calls np provider list with the scope NRN" {
+	source "$SCRIPT"
+
+	grep -q "provider list" "$CALL_LOG_FILE"
+	grep -q -- "--nrn organization=1:account=2:namespace=3:application=4:scope=5" "$CALL_LOG_FILE"
+}
+
+@test "autocreate_alb: patches additional_public_names for internet-facing visibility" {
+	np() {
+		echo "np $*" >> "$CALL_LOG_FILE"
+		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
+			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{"additional_public_names":["existing-1"]}}}]}'
+			return 0
+		fi
+		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then
+			local prev=""
+			for arg in "$@"; do
+				if [ "$prev" = "--body" ]; then echo "$arg" > "$OUTPUT_DIR/_patch_body"; fi
+				prev="$arg"
+			done
+			return 0
+		fi
+		return 1
 	}
-	export -f aws
+	export -f np
 
 	source "$SCRIPT"
 
-	# Both gomplate and kubectl must have been invoked.
-	grep -q "gomplate" "$CALL_LOG_FILE"
-	grep -q "kubectl apply" "$CALL_LOG_FILE"
+	local body
+	body=$(cat "$OUTPUT_DIR/_patch_body")
+	echo "$body" | jq -e '.attributes.balancer.additional_public_names | length == 2'
+	echo "$body" | jq -e '.attributes.balancer.additional_public_names[0] == "existing-1"'
+	echo "$body" | jq -e ".attributes.balancer.additional_public_names[1] == \"$ALB_NAME\""
 }
 
-@test "autocreate_alb: fails if gomplate render fails" {
+@test "autocreate_alb: patches additional_private_names for internal visibility" {
+	export INGRESS_VISIBILITY="internal"
+
+	source "$SCRIPT"
+
+	cat "$OUTPUT_DIR/_patch_body" | jq -e '.attributes.balancer.additional_private_names | length == 1'
+}
+
+@test "autocreate_alb: deduplicates when name already in list (defense in depth)" {
+	np() {
+		echo "np $*" >> "$CALL_LOG_FILE"
+		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
+			# Inject a duplicate scenario: pretend existing list already contains the same name
+			# (impossible in practice given random suffix, but the jq pipeline must still be safe)
+			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{"additional_public_names":["a","b"]}}}]}'
+			return 0
+		fi
+		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then
+			local prev=""
+			for arg in "$@"; do
+				if [ "$prev" = "--body" ]; then echo "$arg" > "$OUTPUT_DIR/_patch_body"; fi
+				prev="$arg"
+			done
+			return 0
+		fi
+		return 1
+	}
+	export -f np
+
+	source "$SCRIPT"
+
+	cat "$OUTPUT_DIR/_patch_body" | jq -e '.attributes.balancer.additional_public_names | length == 3'
+}
+
+@test "autocreate_alb: exits when provider list returns no results" {
+	np() {
+		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then echo '{"results":[]}'; return 0; fi
+		return 1
+	}
+	export -f np
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "No container-orchestration provider found"
+}
+
+@test "autocreate_alb: exits when np provider list fails" {
+	np() {
+		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then return 2; fi
+		return 1
+	}
+	export -f np
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "Failed to list container-orchestration provider"
+}
+
+@test "autocreate_alb: exits when np provider patch fails" {
+	np() {
+		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
+			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{}}}]}'
+			return 0
+		fi
+		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then return 5; fi
+		return 1
+	}
+	export -f np
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "Failed to patch container-orchestration provider"
+}
+
+@test "autocreate_alb: exits when CONTEXT has no scope.nrn" {
+	export CONTEXT=$(echo "$CONTEXT" | jq 'del(.scope.nrn)')
+
+	run bash -c 'source "$SCRIPT"'
+
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "Could not read scope NRN"
+}
+
+# =============================================================================
+# Dummy ingress rendering
+# =============================================================================
+@test "autocreate_alb: renders the dummy ingress yaml to OUTPUT_DIR" {
+	source "$SCRIPT"
+
+	[ -f "$OUTPUT_DIR/ingress-dummy-${ALB_NAME}.yaml" ]
+}
+
+@test "autocreate_alb: exits when gomplate fails" {
 	gomplate() { return 1; }
 	export -f gomplate
 
@@ -140,144 +245,11 @@ record_call() {
 	assert_contains "$output" "Failed to render ingress-dummy template"
 }
 
-@test "autocreate_alb: fails if kubectl apply fails" {
-	kubectl() { return 1; }
-	export -f kubectl
+@test "autocreate_alb: exits when OUTPUT_DIR is not set" {
+	unset OUTPUT_DIR
 
 	run bash -c 'source "$SCRIPT"'
 
 	[ "$status" -ne 0 ]
-	assert_contains "$output" "Failed to apply ingress-dummy"
-}
-
-# =============================================================================
-# Polling for active state
-# =============================================================================
-@test "autocreate_alb: returns success when ALB becomes active within timeout" {
-	# describe-load-balancers returns active state immediately.
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*) return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
-
-	source "$SCRIPT"
-
-	[ -n "$AUTOCREATED_ALB_NAME" ]
-}
-
-@test "autocreate_alb: exits non-zero when ALB never reaches active state (timeout)" {
-	export ALB_AUTOCREATE_TIMEOUT_SECONDS="1"
-	# Always return provisioning state, never 'active'.
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"provisioning"}}]}'; return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
-
-	run bash -c 'source "$SCRIPT"'
-
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "Timed out"
-}
-
-@test "autocreate_alb: exits non-zero when ALB reaches 'failed' state" {
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"failed"}}]}'; return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
-
-	run bash -c 'source "$SCRIPT"'
-
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "reached state 'failed'"
-}
-
-# =============================================================================
-# Tagging
-# =============================================================================
-@test "autocreate_alb: tags the ALB with managed-by, visibility and scope-id" {
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*)
-				record_call "aws $*"
-				return 0
-				;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
-
-	source "$SCRIPT"
-
-	grep -q "nullplatform:managed-by,Value=autocreate" "$CALL_LOG_FILE"
-	grep -q "nullplatform:visibility,Value=internet-facing" "$CALL_LOG_FILE"
-	grep -q "nullplatform:created-by-scope-id,Value=scope-1" "$CALL_LOG_FILE"
-}
-
-@test "autocreate_alb: tagging failure does not fail the script (warn only)" {
-	aws() {
-		case "$*" in
-			*describe-load-balancers*) echo '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/x/y","State":{"Code":"active"}}]}'; return 0 ;;
-			*add-tags*) return 1 ;;
-			*) return 1 ;;
-		esac
-	}
-	export -f aws
-
-	source "$SCRIPT"
-
-	# Script still exports the new ALB name even though tagging warned.
-	[ -n "$AUTOCREATED_ALB_NAME" ]
-}
-
-# =============================================================================
-# Timeout validation
-# =============================================================================
-@test "autocreate_alb: rejects non-numeric timeout" {
-	export ALB_AUTOCREATE_TIMEOUT_SECONDS="abc"
-
-	run bash -c 'source "$SCRIPT"'
-
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "must be a positive integer"
-}
-
-# =============================================================================
-# Name prefix validation
-# =============================================================================
-@test "autocreate_alb: rejects prefix containing uppercase" {
-	export ALB_AUTOCREATE_NAME_PREFIX="Bad-Prefix-"
-
-	run bash -c 'source "$SCRIPT"'
-
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "must match"
-}
-
-@test "autocreate_alb: rejects prefix containing colon (YAML injection vector)" {
-	export ALB_AUTOCREATE_NAME_PREFIX="bad:prefix"
-
-	run bash -c 'source "$SCRIPT"'
-
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "must match"
-}
-
-@test "autocreate_alb: rejects prefix longer than 18 chars" {
-	export ALB_AUTOCREATE_NAME_PREFIX="this-prefix-is-way-too-long-"
-
-	run bash -c 'source "$SCRIPT"'
-
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "18 chars"
+	assert_contains "$output" "OUTPUT_DIR is not set"
 }

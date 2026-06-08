@@ -8,21 +8,25 @@ metadata:
     nullplatform-autocreate: "true"
     alb_name: {{ .alb_name }}
   annotations:
+    alb.ingress.kubernetes.io/actions.response-404: >-
+      {"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404
+        scope not found or has not been deployed yet"}}
     alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
     alb.ingress.kubernetes.io/scheme: {{ .ingress_visibility }}
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/tags: nullplatform:managed-by=autocreate,nullplatform:visibility={{ .ingress_visibility }},nullplatform:created-by-scope-id={{ .scope.id }}
 spec:
   ingressClassName: alb
   rules:
-    - http:
+    - host: {{ .alb_name }}.{{ .base_domain }}
+      http:
         paths:
-          - path: /__nullplatform_autocreate_placeholder
+          - path: /
             pathType: Prefix
             backend:
               service:
-                name: nullplatform-autocreate-placeholder
+                name: response-404
                 port:
-                  number: 80
+                  name: use-annotation

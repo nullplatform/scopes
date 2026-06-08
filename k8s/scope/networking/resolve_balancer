@@ -23,27 +23,48 @@
 
 _RESOLVE_BALANCER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! type -t log >/dev/null 2>&1; then
-  source "$_RESOLVE_BALANCER_DIR/../../logging"
-fi
-
-if ! type -t get_config_value >/dev/null 2>&1; then
-  source "$_RESOLVE_BALANCER_DIR/../../utils/get_config_value"
-fi
-
 # Queries AWS ELBv2 to count listener rules on an ALB's HTTPS (443) listener.
 # The default rule is excluded since it always exists.
+#
+# Special case for autocreate race: an ALB just registered in the provider by
+# a concurrent scope creation may not yet be visible to AWS APIs while the
+# Load Balancer Controller is still provisioning it. Treat
+# LoadBalancerNotFound as "0 rules", so the in-flight ALB is selected as the
+# least-loaded candidate and no second autocreate is triggered.
+#
 # Usage: get_alb_rule_count <alb_name>
 # Returns: integer rule count on stdout, non-zero exit on failure
 get_alb_rule_count() {
   local alb_name="$1"
 
-  local alb_arn
+  local alb_arn aws_stderr aws_exit
+  aws_stderr=$(aws elbv2 describe-load-balancers \
+    --names "$alb_name" \
+    --region "$REGION" \
+    --query 'LoadBalancers[0].LoadBalancerArn' \
+    --output text 2>&1 >/dev/null)
+  aws_exit=$?
+
+  if [ "$aws_exit" -ne 0 ]; then
+    case "$aws_stderr" in
+      *LoadBalancerNotFound*)
+        # Concurrent autocreate race: the ALB was just registered in the
+        # provider by another scope but is not yet visible to AWS APIs. Treat
+        # as 0 rules so the in-flight ALB wins selection and we don't trigger
+        # another autocreate.
+        log debug "📋 ALB '$alb_name' not yet visible in AWS (likely being provisioned); treating as 0 rules" >&2
+        echo 0
+        return 0
+        ;;
+    esac
+    return 1
+  fi
+
   alb_arn=$(aws elbv2 describe-load-balancers \
     --names "$alb_name" \
     --region "$REGION" \
     --query 'LoadBalancers[0].LoadBalancerArn' \
-    --output text 2>/dev/null) || return 1
+    --output text 2>/dev/null)
 
   if [ -z "$alb_arn" ] || [ "$alb_arn" = "None" ]; then
     return 1
@@ -124,32 +145,6 @@ get_alb_from_route53() {
   echo "$alb_name"
 }
 
-# Lists ALB names tagged as autocreated for the given visibility. Used to keep
-# previously-autocreated ALBs in the candidate pool without requiring them to
-# be declared in the provider configuration.
-# Returns space-separated names on stdout (may be empty), non-zero on AWS failure.
-get_autocreated_albs() {
-  local visibility="$1"
-
-  local arns
-  arns=$(aws resourcegroupstaggingapi get-resources \
-    --region "$REGION" \
-    --resource-type-filters "elasticloadbalancing:loadbalancer" \
-    --tag-filters \
-      "Key=nullplatform:managed-by,Values=autocreate" \
-      "Key=nullplatform:visibility,Values=$visibility" \
-    --query 'ResourceTagMappingList[].ResourceARN' \
-    --output text 2>/dev/null) || return 1
-
-  if [ -z "$arns" ] || [ "$arns" = "None" ]; then
-    return 0
-  fi
-
-  # ALB ARN format: arn:aws:elasticloadbalancing:<region>:<acct>:loadbalancer/app/<name>/<id>
-  # Skip non-application LBs (would have loadbalancer/net/... or loadbalancer/gwy/...).
-  echo "$arns" | tr '\t' '\n' | awk -F/ '$2 == "app" { print $3 }'
-}
-
 # =============================================================================
 # Main logic
 # =============================================================================
@@ -200,26 +195,10 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
       )
     fi
 
-    # Discovered ALBs: autocreated by previous scope creations and tagged so we
-    # can include them in the pool without provider config changes.
-    AUTOCREATED_BALANCERS=$(get_autocreated_albs "$INGRESS_VISIBILITY" 2>/dev/null) || AUTOCREATED_BALANCERS=""
-
-    HAS_ADDITIONAL=false
     if [ -n "$ADDITIONAL_BALANCERS" ] && [ "$ADDITIONAL_BALANCERS" != "null" ] && [ "$ADDITIONAL_BALANCERS" != "[]" ]; then
-      HAS_ADDITIONAL=true
-    fi
+      log debug "🔍 Additional balancers configured, resolving least-loaded ALB..."
 
-    if [ "$HAS_ADDITIONAL" = "true" ] || [ -n "$AUTOCREATED_BALANCERS" ]; then
-      log debug "🔍 Resolving least-loaded ALB across declared and autocreated candidates..."
-
-      if [ "$HAS_ADDITIONAL" = "true" ]; then
-        DECLARED_LIST=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
-      else
-        DECLARED_LIST="$ALB_NAME"
-      fi
-
-      # Merge declared + autocreated, deduplicate, drop blanks.
-      CANDIDATES=$(printf '%s\n%s\n' "$DECLARED_LIST" "$AUTOCREATED_BALANCERS" | tr ' ' '\n' | awk 'NF && !seen[$0]++')
+      CANDIDATES=$(echo "$ADDITIONAL_BALANCERS" | jq -r --arg base "$ALB_NAME" '[$base] + . | .[]')
 
       log debug "📋 Candidate balancers: $(echo "$CANDIDATES" | paste -sd ',' - | sed 's/,/, /g')"
 
@@ -271,14 +250,8 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
 
       if [ "$AUTOCREATE_ENABLED" = "true" ] && [ -n "$MAX_CAPACITY" ] && [ "$MIN_RULES" -ge 0 ] && [ "$MIN_RULES" -ge "$MAX_CAPACITY" ]; then
         log info "🔧 All candidate ALBs are at or above capacity ($MIN_RULES/$MAX_CAPACITY); triggering autocreate"
-        source "$_RESOLVE_BALANCER_DIR/autocreate_alb" || {
-          log error "❌ Autocreate failed; ALB '$ALB_NAME' will be used and validate_alb_capacity will reject the deployment"
-          return 1
-        }
-        if [ -n "${AUTOCREATED_ALB_NAME:-}" ]; then
-          ALB_NAME="$AUTOCREATED_ALB_NAME"
-          log info "📝 Using autocreated ALB '$ALB_NAME'"
-        fi
+        # autocreate_alb exports ALB_NAME with the new name (or exits on failure)
+        source "$_RESOLVE_BALANCER_DIR/autocreate_alb"
       fi
     fi
   fi

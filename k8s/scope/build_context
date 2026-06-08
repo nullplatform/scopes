@@ -208,6 +208,13 @@ K8S_MODIFIERS=$(get_config_value \
 )
 K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
 
+OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
+if [ -n "${NP_OUTPUT_DIR:-}" ]; then
+    OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
+fi
+mkdir -p "$OUTPUT_DIR"
+export OUTPUT_DIR
+
 source "$SCRIPT_DIR/networking/resolve_balancer"
 
 NAMESPACE_SLUG=$(echo "$CONTEXT" | jq -r .namespace.slug)
@@ -227,15 +234,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson modifiers "$K8S_MODIFIERS" \
           '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component}')
 
-OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
-if [ -n "${NP_OUTPUT_DIR:-}" ]; then
-    OUTPUT_DIR="$NP_OUTPUT_DIR/output/$SCOPE_ID"
-fi
-
-export OUTPUT_DIR
 export CONTEXT
 export REGION
-
-mkdir -p "$OUTPUT_DIR"
 
 log info "✅ Scope context built successfully"
