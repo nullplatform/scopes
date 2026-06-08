@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.12.0] - 2026-06-08
 - Fix: do not inject file parameter as env vars
 - Public and private scopes now register DNS records in their correct Route53 hosted zone when using `DNS_TYPE=external_dns`, preventing cross-zone record leakage
 - Add configurable main HTTP port for k8s scopes (default 8080) and HTTP support for additional ports
