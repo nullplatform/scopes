@@ -49,9 +49,10 @@ get_alb_rule_count() {
     case "$aws_stderr" in
       *LoadBalancerNotFound*)
         # Concurrent autocreate race: the ALB was just registered in the
-        # provider by another scope but is not yet visible to AWS APIs. Treat
-        # as 0 rules so the in-flight ALB wins selection and we don't trigger
-        # another autocreate.
+        # provider by another scope but is not yet visible to AWS APIs. Return
+        # 0 rules on stdout (same contract as the success path below) so the
+        # in-flight ALB wins least-loaded selection and we don't trigger a
+        # second autocreate.
         log debug "📋 ALB '$alb_name' not yet visible in AWS (likely being provisioned); treating as 0 rules" >&2
         echo 0
         return 0
