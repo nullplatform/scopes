@@ -231,10 +231,12 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg gateway_name "$GATEWAY_NAME" \
           --arg alb_name "$ALB_NAME" \
           --arg component "$COMPONENT" \
+          --arg base_domain "$DOMAIN" \
           --argjson modifiers "$K8S_MODIFIERS" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component}')
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain}')
 
 export CONTEXT
 export REGION
+export DOMAIN
 
 log info "✅ Scope context built successfully"

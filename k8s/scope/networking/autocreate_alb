@@ -117,19 +117,13 @@ render_dummy_ingress() {
 	tmp_context=$(mktemp)
 	trap 'rm -f "$tmp_context"' RETURN
 
-	local base_domain
-	base_domain=$(get_config_value \
-		--env DOMAIN \
-		--provider '.providers["scope-configurations"].networking.base_domain' \
-		--provider '.providers["container-orchestration"].networking.base_domain' \
-		--default "nullapps.io"
-	)
-
+	# build_context already exports $DOMAIN (and adds it to CONTEXT as
+	# `base_domain` after we return). Inject the call-specific fields here.
 	echo "$CONTEXT" | jq \
 		--arg alb_name "$alb_name" \
 		--arg ingress_visibility "$visibility" \
 		--arg k8s_namespace "$namespace" \
-		--arg base_domain "$base_domain" \
+		--arg base_domain "$DOMAIN" \
 		'. + {alb_name: $alb_name, ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, base_domain: $base_domain}' \
 		> "$tmp_context"
 
