@@ -156,8 +156,14 @@ validate_alb_config() {
                     GREEN_WEIGHT=$SWITCH_TRAFFIC
 
                     BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
+                    # Dedupe: when a scope has multiple ingresses on the same ALB listener
+                    # (main + additional HTTP ports), the host-header select returns multiple
+                    # rules and the weight extraction concatenates pairs (e.g. 10/10/90/90).
+                    # We compare by the set of unique weights — false negatives if pairs are
+                    # all consistent with expected; mismatches still surface (extra unique
+                    # values appear as soon as any rule's weights diverge).
                     if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
-                        EXPECTED_WEIGHTS=$(printf "%s\n%s" "$BLUE_WEIGHT" "$GREEN_WEIGHT" | sort -n)
+                        EXPECTED_WEIGHTS=$(printf "%s\n%s" "$BLUE_WEIGHT" "$GREEN_WEIGHT" | sort -un)
                     else
                         EXPECTED_WEIGHTS="$GREEN_WEIGHT"
                     fi
@@ -167,7 +173,7 @@ validate_alb_config() {
                         select(.Type == "forward") |
                         .ForwardConfig.TargetGroups[]? |
                         "\(.Weight // 1)"
-                    ' 2>/dev/null | sort -n)
+                    ' 2>/dev/null | sort -un)
 
                     if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
                         if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then

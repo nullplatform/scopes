@@ -5,14 +5,17 @@
       "type":"object",
       "required":[
          "ram_memory",
+         "ram_memory_limit",
          "visibility",
          "autoscaling",
          "health_check",
          "scaling_type",
          "cpu_millicores",
+         "cpu_millicores_limit",
          "fixed_instances",
          "scheduled_stop",
          "additional_ports",
+         "main_http_port",
          "protocol",
          "continuous_delivery"
       ],
@@ -43,12 +46,22 @@
                "elements":[
                   {
                      "type":"Category",
-                     "label":"Processor",
+                     "label":"Resources",
                      "elements":[
                         {
                            "type":"Control",
                            "label":"CPU Millicores",
                            "scope":"#/properties/cpu_millicores"
+                        },
+                        {
+                           "type":"Control",
+                           "label":"CPU Millicores Limit",
+                           "scope":"#/properties/cpu_millicores_limit"
+                        },
+                        {
+                           "type":"Control",
+                           "label":"RAM Memory Limit",
+                           "scope":"#/properties/ram_memory_limit"
                         }
                      ]
                   },
@@ -125,8 +138,13 @@
                   },
                   {
                      "type":"Category",
-                     "label":"Additional Ports",
+                     "label":"Exposed Ports",
                      "elements":[
+                        {
+                           "type":"Control",
+                           "label":"Main HTTP Port",
+                           "scope":"#/properties/main_http_port"
+                        },
                         {
                            "type":"Control",
                            "scope":"#/properties/additional_ports",
@@ -350,6 +368,27 @@
             "default":128,
             "description":"Amount of RAM memory to allocate to the container (in MB)"
          },
+         "ram_memory_limit":{
+            "type":["integer","null"],
+            "oneOf":[
+               {"const":null,  "title":"Same as request"},
+               {"const":64,    "title":"64 MB"},
+               {"const":128,   "title":"128 MB"},
+               {"const":256,   "title":"256 MB"},
+               {"const":512,   "title":"512 MB"},
+               {"const":1024,  "title":"1 GB"},
+               {"const":2048,  "title":"2 GB"},
+               {"const":4096,  "title":"4 GB"},
+               {"const":8192,  "title":"8 GB"},
+               {"const":16384, "title":"16 GB"}
+            ],
+            "title":"RAM Memory Limit",
+            "default":null,
+            "minimum":{
+               "$data":"1/ram_memory"
+            },
+            "description":"Maximum memory the container can use (in MB). Pick 'Same as request' to leave it equal to the request value."
+         },
          "visibility":{
             "type":"string",
             "oneOf":[
@@ -484,6 +523,24 @@
             "minimum":100,
             "description":"Amount of CPU to allocate (in millicores, 1000m = 1 CPU core)"
          },
+         "cpu_millicores_limit":{
+            "type":["integer","null"],
+            "oneOf":[
+               {"const":null, "title":"Same as request"},
+               {"const":100,  "title":"100 m"},
+               {"const":250,  "title":"250 m"},
+               {"const":500,  "title":"500 m"},
+               {"const":1000, "title":"1000 m"},
+               {"const":2000, "title":"2000 m"},
+               {"const":4000, "title":"4000 m"}
+            ],
+            "title":"CPU Millicores Limit",
+            "default":null,
+            "minimum":{
+               "$data":"1/cpu_millicores"
+            },
+            "description":"Maximum CPU the container can use (in millicores). Pick 'Same as request' to leave it equal to the request value."
+         },
          "scheduled_stop":{
             "type":"object",
             "title":"Scheduled Stop",
@@ -537,6 +594,14 @@
             "minimum":1,
             "description":"Fixed number of instances to run"
          },
+         "main_http_port":{
+            "type":"integer",
+            "title":"Main HTTP Port",
+            "default":8080,
+            "minimum":1024,
+            "maximum":65535,
+            "description":"Port where your application's main HTTP listener binds. Default 8080."
+         },
          "additional_ports":{
             "type":"array",
             "items":{
@@ -555,11 +620,12 @@
                   },
                   "type":{
                      "enum":[
-                        "GRPC"
+                        "GRPC",
+                        "HTTP"
                      ],
                      "type":"string",
                      "title":"Port Type",
-                     "default": "GRPC",
+                     "default": "HTTP",
                      "description":"The protocol type for this port"
                   }
                }

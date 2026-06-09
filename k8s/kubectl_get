@@ -1,0 +1,166 @@
+#!/bin/bash
+# Read-only kubectl wrapper for troubleshooting.
+# Hardcodes `kubectl get` so no other verb can be invoked, and rejects flags
+# that change auth/server/context or could hang the script. When no namespace
+# flag is supplied, defaults to $K8S_NAMESPACE so the agent can target the
+# scope's namespace without repeating it.
+#
+# When 'secret' / 'secrets' is in the resource args, output is forced to JSON
+# and piped through jq to strip .data and .stringData (the only fields that
+# carry secret values). Output formats that can extract those fields directly
+# (jsonpath, go-template, custom-columns) are rejected for secret queries.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$(type -t log 2>/dev/null)" != "function" ]]; then source "$SCRIPT_DIR/logging"; fi
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") <kubectl get args>
+
+Runs 'kubectl get' with the provided arguments. Read-only: any other verb
+or auth/context override is rejected. Secret values are stripped from output.
+
+Examples:
+  $(basename "$0") pods
+  $(basename "$0") pods -l app=foo -o yaml
+  $(basename "$0") events --sort-by=.lastTimestamp -n kube-system
+  $(basename "$0") nodes -A
+  $(basename "$0") secrets                 # data fields stripped
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+BLOCKED_FLAGS=(
+  --server
+  --kubeconfig
+  --token
+  --as
+  --as-group
+  --as-uid
+  --certificate-authority
+  --client-certificate
+  --client-key
+  --username
+  --password
+  --user
+  --cluster
+  --context
+  --insecure-skip-tls-verify
+  -w
+  --watch
+  --watch-only
+)
+
+is_blocked() {
+  local flag_name="${1%%=*}"
+  for blocked in "${BLOCKED_FLAGS[@]}"; do
+    if [[ "$flag_name" == "$blocked" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# True if any arg references the 'secret' / 'secrets' resource. Handles
+# comma-separated resources (secret,configmap), slash form (secret/foo)
+# and apiVersion form (secrets.v1). Uppercase tolerated since kubectl is
+# case-insensitive on resource names.
+involves_secrets() {
+  local arg lower token res
+  for arg in "$@"; do
+    lower=$(echo "$arg" | tr '[:upper:]' '[:lower:]')
+    local IFS=,
+    for token in $lower; do
+      res="${token%%/*}"
+      res="${res%%.*}"
+      if [[ "$res" == "secret" || "$res" == "secrets" ]]; then
+        return 0
+      fi
+    done
+    unset IFS
+  done
+  return 1
+}
+
+# Echoes the value of -o / --output if set; empty otherwise.
+get_output_format() {
+  local prev="" arg
+  for arg in "$@"; do
+    if [[ "$prev" == "-o" || "$prev" == "--output" ]]; then
+      printf '%s\n' "$arg"
+      return
+    fi
+    case "$arg" in
+      -o=*|--output=*) printf '%s\n' "${arg#*=}"; return ;;
+    esac
+    prev="$arg"
+  done
+}
+
+HAS_NAMESPACE_FLAG=false
+
+for arg in "$@"; do
+  if is_blocked "$arg"; then
+    log error "❌ Refusing argument '$arg': flag is blocked to keep this script read-only and safe."
+    log error "   Blocked flags: ${BLOCKED_FLAGS[*]}"
+    exit 1
+  fi
+
+  case "${arg%%=*}" in
+    -n|--namespace|-A|--all-namespaces)
+      HAS_NAMESPACE_FLAG=true
+      ;;
+  esac
+done
+
+ARGS=("$@")
+
+if [[ "$HAS_NAMESPACE_FLAG" == "false" ]] && [[ -n "${K8S_NAMESPACE:-}" ]]; then
+  ARGS+=(-n "$K8S_NAMESPACE")
+fi
+
+if involves_secrets "${ARGS[@]}"; then
+  USER_OUTPUT="$(get_output_format "${ARGS[@]}")"
+
+  case "$USER_OUTPUT" in
+    jsonpath*|go-template*|custom-columns*)
+      log error "❌ Refusing -o '$USER_OUTPUT' on secrets: this format can extract .data directly, bypassing the safety filter."
+      log error "   Use -o yaml, -o json, -o wide, or no -o flag — values are stripped from data/stringData."
+      exit 1
+      ;;
+  esac
+
+  # Strip user's -o flag (we force JSON to feed jq).
+  STRIPPED=()
+  prev=""
+  for arg in "${ARGS[@]}"; do
+    if [[ "$prev" == "-o" || "$prev" == "--output" ]]; then
+      prev=""
+      continue
+    fi
+    case "$arg" in
+      -o|--output) prev="$arg"; continue ;;
+      -o=*|--output=*) prev=""; continue ;;
+    esac
+    prev=""
+    STRIPPED+=("$arg")
+  done
+  STRIPPED+=(-o json)
+
+  if [[ -n "$USER_OUTPUT" && "$USER_OUTPUT" != "json" ]]; then
+    log info "ℹ️  Output forced to JSON (was: $USER_OUTPUT) — secret data fields are stripped for safety."
+  fi
+
+  log debug "📋 Running: kubectl get ${STRIPPED[*]} | jq <strip secret data>"
+
+  kubectl get "${STRIPPED[@]}" | jq 'if .items then .items |= map(del(.data, .stringData)) else del(.data, .stringData) end'
+  exit "${PIPESTATUS[0]}"
+fi
+
+log debug "📋 Running: kubectl get ${ARGS[*]}"
+
+kubectl get "${ARGS[@]}"

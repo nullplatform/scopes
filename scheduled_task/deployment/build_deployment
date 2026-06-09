@@ -2,6 +2,7 @@
 
 DEPLOYMENT_PATH="$OUTPUT_DIR/deployment-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 SECRET_PATH="$OUTPUT_DIR/secret-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+SECRET_FILES_PATH="$OUTPUT_DIR/secret-files-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
 CONTEXT_PATH="$OUTPUT_DIR/context-$SCOPE_ID.json"
 
 echo "$CONTEXT" | jq --arg replicas "$REPLICAS" '. + {replicas: $replicas}' > "$CONTEXT_PATH"
@@ -29,6 +30,19 @@ TEMPLATE_GENERATION_STATUS=$?
 
 if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
     echo "Error building secret template"
+    exit 1
+fi
+
+echo "Building Template: $SECRET_FILES_TEMPLATE to $SECRET_FILES_PATH"
+
+gomplate -c .="$CONTEXT_PATH" \
+  --file "$SECRET_FILES_TEMPLATE" \
+  --out "$SECRET_FILES_PATH"
+
+TEMPLATE_GENERATION_STATUS=$?
+
+if [[ $TEMPLATE_GENERATION_STATUS -ne 0 ]]; then
+    echo "Error building secret-files template"
     exit 1
 fi
 

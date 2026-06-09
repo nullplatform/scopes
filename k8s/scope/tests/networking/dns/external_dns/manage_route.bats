@@ -17,7 +17,7 @@ setup() {
   export SCOPE_ID="scope-123"
   export SCOPE_DOMAIN="myapp.example.com"
   export K8S_NAMESPACE="test-ns"
-  export CONTEXT='{"scope":{"slug":"my-app"}}'
+  export CONTEXT='{"scope":{"slug":"my-scope"},"application":{"slug":"my-app"}}'
   export OUTPUT_DIR="$(mktemp -d)"
 
   # Mock kubectl - default: gateway returns IP
@@ -70,7 +70,7 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "🔍 Building DNSEndpoint manifest for ExternalDNS..."
   assert_contains "$output" "📡 Getting IP for gateway: gw-public"
-  assert_contains "$output" "✅ Gateway IP: 10.0.0.1"
+  assert_contains "$output" "✅ Gateway address: 10.0.0.1 (recordType: A)"
   assert_contains "$output" "📝 Building DNSEndpoint from template:"
   assert_contains "$output" "✅ DNSEndpoint manifest created:"
 }
@@ -98,8 +98,8 @@ teardown() {
   run bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "⚠️  Gateway IP not found, trying service fallback..."
-  assert_contains "$output" "✅ Gateway IP: 10.0.0.2"
+  assert_contains "$output" "⚠️  Gateway hostname not found, trying service fallback..."
+  assert_contains "$output" "✅ Gateway address: 10.0.0.2 (recordType: A)"
 }
 
 # =============================================================================
@@ -158,7 +158,7 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "🔍 Deleting DNSEndpoint for external_dns..."
-  assert_contains "$output" "📝 Deleting DNSEndpoint: k-8-s-my-app-scope-123-dns in namespace test-ns"
+  assert_contains "$output" "📝 Deleting DNSEndpoint: k8s-my-app-my-scope-scope-123-dns in namespace test-ns"
   assert_contains "$output" "✅ DNSEndpoint deletion completed"
 }
 
@@ -180,7 +180,7 @@ teardown() {
   run bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Deleting DNSEndpoint: k-8-s-my-app-scope-123-dns in namespace test-ns"
-  assert_contains "$output" "⚠️  DNSEndpoint 'k-8-s-my-app-scope-123-dns' may already be deleted"
+  assert_contains "$output" "📝 Deleting DNSEndpoint: k8s-my-app-my-scope-scope-123-dns in namespace test-ns"
+  assert_contains "$output" "⚠️  DNSEndpoint 'k8s-my-app-my-scope-scope-123-dns' may already be deleted"
   assert_contains "$output" "✅ DNSEndpoint deletion completed"
 }

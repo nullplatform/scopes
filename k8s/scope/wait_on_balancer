@@ -11,6 +11,10 @@ case "$DNS_TYPE" in
     SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
     SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+    APP_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
+    APP_SLUG_SHORT="${APP_SLUG:0:20}"; APP_SLUG_SHORT="${APP_SLUG_SHORT%-}"
+    SCOPE_SLUG_SHORT="${SCOPE_SLUG:0:20}"; SCOPE_SLUG_SHORT="${SCOPE_SLUG_SHORT%-}"
+    DNS_ENDPOINT_NAME="k8s-${APP_SLUG_SHORT}-${SCOPE_SLUG_SHORT}-${SCOPE_ID}-dns"
 
     log debug "📋 Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
 
@@ -18,7 +22,7 @@ case "$DNS_TYPE" in
         iteration=$((iteration + 1))
         if [ $iteration -gt $MAX_ITERATIONS ]; then
             log error ""
-            log error "   ❌ DNS record creation timeout after $((MAX_ITERATIONS * 10))s"
+            log error "   ❌ DNSEndpoint processing timeout after $((MAX_ITERATIONS * 10))s"
             log error ""
             log error "💡 Possible causes:"
             log error "   ExternalDNS may still be processing the DNSEndpoint resource"
@@ -30,27 +34,17 @@ case "$DNS_TYPE" in
             exit 1
         fi
 
-        log debug "🔍 Checking DNS resolution for $SCOPE_DOMAIN (attempt $iteration/$MAX_ITERATIONS)"
+        log debug "🔍 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME (attempt $iteration/$MAX_ITERATIONS)"
 
-        DNS_ENDPOINT_NAME="k-8-s-${SCOPE_SLUG}-${SCOPE_ID}-dns"
-        log debug "📋 Checking DNSEndpoint status: $DNS_ENDPOINT_NAME"
+        OBSERVED_GEN=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" \
+            -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo "")
 
-        DNS_STATUS=$(kubectl get dnsendpoint "$DNS_ENDPOINT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || echo "not found")
-
-        if [ "$DNS_STATUS" != "not found" ] && [ -n "$DNS_STATUS" ]; then
-            log debug "📋 DNSEndpoint status: $DNS_STATUS"
-        fi
-
-        if nslookup "$SCOPE_DOMAIN" 8.8.8.8 >/dev/null 2>&1; then
-            log info "   ✅ DNS record for $SCOPE_DOMAIN is now resolvable"
-
-            RESOLVED_IP=$(nslookup "$SCOPE_DOMAIN" 8.8.8.8 | grep -A1 "Name:" | tail -1 | awk '{print $2}' 2>/dev/null || echo "unknown")
-            log info "   ✅ Domain $SCOPE_DOMAIN resolves to: $RESOLVED_IP"
-
+        if [ "${OBSERVED_GEN:-0}" -ge 1 ] 2>/dev/null; then
+            log info "   ✅ DNSEndpoint $DNS_ENDPOINT_NAME processed by ExternalDNS (observedGeneration=$OBSERVED_GEN)"
             break
         fi
 
-        log debug "📋 DNS record not yet available, waiting 10s..."
+        log debug "📋 DNSEndpoint not yet processed, waiting 10s..."
         sleep 10
     done
 

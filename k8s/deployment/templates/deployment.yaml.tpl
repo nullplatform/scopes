@@ -135,6 +135,8 @@ spec:
             - containerPort: 80
               protocol: TCP
           env:
+            - name: UPSTREAM_PORT
+              value: '{{ .main_http_port }}'
             - name: HEALTH_CHECK_TYPE
               value: http
             - name: GRACE_PERIOD
@@ -151,7 +153,7 @@ spec:
               cpu: 31m
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
             {{- else }}
             {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
             {{- end }}
@@ -159,7 +161,7 @@ spec:
             failureThreshold: 9
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
             {{- else }}
             {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
             {{- end }}
@@ -167,7 +169,7 @@ spec:
             failureThreshold: 3
           startupProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" 8080 }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
             {{- else }}
             {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
             {{- end }}
@@ -229,6 +231,63 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+        {{ else if eq .type "HTTP" }}
+        - name: http-{{ .port }}
+          securityContext:
+            runAsUser: 0
+          image: {{ $.traffic_image }}
+          ports:
+            - containerPort: {{ .traffic_manager_port }}
+              protocol: TCP
+          env:
+            - name: UPSTREAM_PORT
+              value: '{{ .port }}'
+            - name: HEALTH_CHECK_TYPE
+              value: http
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: http
+            - name: LISTENER_PORT
+              value: '{{ .traffic_manager_port }}'
+            - name: HEALTH_CHECK_PATH
+              value: {{ $.scope.capabilities.health_check.path }}
+          resources:
+            limits:
+              cpu: {{ $.container_cpu_in_millicores }}m
+              memory: {{ $.container_memory_in_memory }}Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .traffic_manager_port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .traffic_manager_port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: {{ $.scope.capabilities.health_check.path }}
+              port: {{ .traffic_manager_port }}
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
         {{ end }}
         {{ end }}
         {{ end }}
@@ -236,47 +295,59 @@ spec:
           envFrom:
             - secretRef:
                 name: s-{{ .scope.id }}-d-{{ .deployment.id }}
+    {{- if .parameters.results }}
+          env:
+      {{- range .parameters.results }}
+        {{- if and (eq .type "file") (gt (len .values) 0) }}
+          {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+            - name: {{ printf "app-data-%s" $key }}
+              value: {{ .destination_path | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
           image: >-
             {{ .asset.url }}
           securityContext:
             runAsUser: 0
           ports:
-            - containerPort: 8080
+            - containerPort: {{ .main_http_port }}
               protocol: TCP
             {{ if .scope.capabilities.additional_ports }}
             {{ range .scope.capabilities.additional_ports }}
+            {{ if eq .type "HTTP" }}
             - containerPort: {{ .port }}
               protocol: TCP
             {{ end }}
             {{ end }}
+            {{ end }}
           resources:
             limits:
-              cpu: {{ .scope.capabilities.cpu_millicores }}m
-              memory: {{ .scope.capabilities.ram_memory }}Mi
+              cpu: {{ .scope.capabilities.cpu_millicores_limit }}m
+              memory: {{ .scope.capabilities.ram_memory_limit }}Mi
             requests:
               cpu: {{ .scope.capabilities.cpu_millicores }}m
               memory: {{ .scope.capabilities.ram_memory }}Mi
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.app_tcp" dict "port" 8080 }}
+            {{- template "probe.app_tcp" dict "port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_http_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 6
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.app_tcp" dict "port" 8080 }}
+            {{- template "probe.app_tcp" dict "port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_http_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
            {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-           {{- template "probe.app_tcp" dict "port" 8080 }}
+           {{- template "probe.app_tcp" dict "port" .main_http_port }}
            {{- else }}
-           {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 8080 }}
+           {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_http_port }}
            {{- end }}
            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
@@ -294,9 +365,10 @@ spec:
       {{- range .parameters.results }}
         {{- if and (eq .type "file") }}
           {{- if gt (len .values) 0 }}
-            - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
-              mountPath: {{ .destination_path }}
-              subPath: {{ filepath.Base .destination_path }}
+            {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+            - name: {{ printf "file-%s" $key }}
+              mountPath: {{ .destination_path | quote }}
+              subPath: {{ filepath.Base .destination_path | quote }}
               readOnly: true
           {{- end }}
         {{- end }}
@@ -312,12 +384,13 @@ spec:
   {{- range .parameters.results }}
     {{- if and (eq .type "file") }}
       {{- if gt (len .values) 0 }}
-      - name: {{ printf "file-%s" (filepath.Base .destination_path | strings.ReplaceAll "." "-" | strings.ReplaceAll "_" "-") }}
+        {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
+      - name: {{ printf "file-%s" $key }}
         secret:
-          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}
+          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
           items:
-          - key: {{ printf "app-data-%s" (filepath.Base .destination_path) }}
-            path: {{ filepath.Base .destination_path }}
+          - key: {{ printf "app-file-%s" $key }}
+            path: {{ filepath.Base .destination_path | quote }}
       {{- end }}
     {{- end }}
   {{- end }}

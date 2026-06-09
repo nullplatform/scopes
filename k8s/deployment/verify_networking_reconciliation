@@ -7,8 +7,10 @@ case "$DNS_TYPE" in
   route53)
     source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
     ;;
+  external_dns)
+    source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
+    ;;
   *)
     log warn "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
-#    source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
     ;;
 esac

@@ -15,6 +15,7 @@ setup() {
   export ALB_NAME="k8s-nullplatform-internet-facing"
   export REGION="us-east-1"
   export ALB_MAX_TARGET_GROUPS="98"
+  export ALB_MAX_LISTENERS="48"
   export DNS_TYPE="route53"
 
   # Base CONTEXT
@@ -22,7 +23,7 @@ setup() {
     "providers": {}
   }'
 
-  # Mock aws - default: ALB with 40 target groups
+  # Mock aws - default: ALB with 40 target groups and 10 listeners
   aws() {
     case "$*" in
       *"describe-load-balancers"*)
@@ -31,6 +32,10 @@ setup() {
         ;;
       *"describe-target-groups"*)
         echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "10"
         return 0
         ;;
     esac
@@ -258,6 +263,10 @@ teardown() {
         echo "0"
         return 0
         ;;
+      *"describe-listeners"*)
+        echo "10"
+        return 0
+        ;;
     esac
   }
   export -f aws
@@ -278,6 +287,10 @@ teardown() {
         ;;
       *"describe-target-groups"*)
         echo "97"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "10"
         return 0
         ;;
     esac
@@ -381,4 +394,221 @@ teardown() {
 
   assert_equal "$status" "0"
   assert_contains "$output" "🔍 Validating ALB target group capacity for 'k8s-nullplatform-internet-facing'..."
+}
+
+# =============================================================================
+# Listener capacity (CLIEN-739)
+# =============================================================================
+@test "validate_alb_target_group_capacity: success message includes listener capacity" {
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 10 listeners (max: 48)"
+  assert_contains "$output" "✅ ALB listener capacity validated: 10/48"
+}
+
+@test "validate_alb_target_group_capacity: fails when listener count is at capacity" {
+  aws() {
+    case "$*" in
+      *"describe-load-balancers"*)
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
+        return 0
+        ;;
+      *"describe-target-groups"*)
+        echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "48"
+        return 0
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 48/48"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "Too many scopes with additional_ports are attached to this ALB"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "Reduce additional_ports across scopes sharing this ALB"
+  assert_contains "$output" "Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)"
+  assert_contains "$output" "Request an AWS service quota increase for listeners per ALB"
+}
+
+@test "validate_alb_target_group_capacity: fails when listener count is over capacity" {
+  aws() {
+    case "$*" in
+      *"describe-load-balancers"*)
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
+        return 0
+        ;;
+      *"describe-target-groups"*)
+        echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "50"
+        return 0
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 50/48"
+}
+
+@test "validate_alb_target_group_capacity: passes at exactly one below listener capacity" {
+  aws() {
+    case "$*" in
+      *"describe-load-balancers"*)
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
+        return 0
+        ;;
+      *"describe-target-groups"*)
+        echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "47"
+        return 0
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "✅ ALB listener capacity validated: 47/48"
+}
+
+@test "validate_alb_target_group_capacity: handles zero listeners" {
+  aws() {
+    case "$*" in
+      *"describe-load-balancers"*)
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
+        return 0
+        ;;
+      *"describe-target-groups"*)
+        echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "0"
+        return 0
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 0 listeners (max: 48)"
+  assert_contains "$output" "✅ ALB listener capacity validated: 0/48"
+}
+
+@test "validate_alb_target_group_capacity: uses default ALB_MAX_LISTENERS of 48" {
+  unset ALB_MAX_LISTENERS
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 ALB 'k8s-nullplatform-internet-facing' has 10 listeners (max: 48)"
+}
+
+@test "validate_alb_target_group_capacity: ALB_MAX_LISTENERS from env var" {
+  export ALB_MAX_LISTENERS="5"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5"
+}
+
+@test "validate_alb_target_group_capacity: ALB_MAX_LISTENERS from scope-configurations provider" {
+  export CONTEXT='{"providers":{"scope-configurations":{"networking":{"alb_max_listeners":"5"}}}}'
+  export ALB_MAX_LISTENERS="48"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5"
+}
+
+@test "validate_alb_target_group_capacity: ALB_MAX_LISTENERS from container-orchestration provider" {
+  export CONTEXT='{"providers":{"container-orchestration":{"balancer":{"alb_max_listeners":"5"}}}}'
+  export ALB_MAX_LISTENERS="48"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5"
+}
+
+@test "validate_alb_target_group_capacity: fails when describe-listeners fails" {
+  aws() {
+    case "$*" in
+      *"describe-load-balancers"*)
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
+        return 0
+        ;;
+      *"describe-target-groups"*)
+        echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "Access Denied" >&2
+        return 1
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to describe listeners for ALB 'k8s-nullplatform-internet-facing'"
+  assert_contains "$output" "Check IAM permissions for elbv2:DescribeListeners"
+}
+
+@test "validate_alb_target_group_capacity: fails when listener count is non-numeric" {
+  aws() {
+    case "$*" in
+      *"describe-load-balancers"*)
+        echo "arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
+        return 0
+        ;;
+      *"describe-target-groups"*)
+        echo "40"
+        return 0
+        ;;
+      *"describe-listeners"*)
+        echo "WARNING: unexpected"
+        return 0
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Unexpected non-numeric listener count from ALB"
+  assert_contains "$output" "📋 Received value: WARNING: unexpected"
+}
+
+@test "validate_alb_target_group_capacity: fails when ALB_MAX_LISTENERS is non-numeric" {
+  export ALB_MAX_LISTENERS="abc"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ ALB_MAX_LISTENERS must be a numeric value, got: 'abc'"
 }

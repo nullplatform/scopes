@@ -59,13 +59,13 @@ spec:
         - group: ""
           kind: Service
           name: d-{{ .scope.id }}-{{ .blue_deployment_id }}
-          port: 8080
+          port: {{ .main_http_port }}
           weight: {{ sub 100 .deployment.strategy_data.desired_switched_traffic }}
         # Green deployment (new version)
         - group: ""
           kind: Service
           name: d-{{ .scope.id }}-{{ .deployment.id }}
-          port: 8080
+          port: {{ .main_http_port }}
           weight: {{ .deployment.strategy_data.desired_switched_traffic }}
       matches:
         - path:

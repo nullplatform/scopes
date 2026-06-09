@@ -44,6 +44,32 @@ teardown() {
   assert_contains "$output" "⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)"
 }
 
+@test "verify_networking_reconciliation: verifies HTTPRoute for external_dns without managing DNS" {
+  export DNS_TYPE="external_dns"
+  export SCOPE_ID="123"
+  export K8S_NAMESPACE="nullplatform"
+  export INGRESS_VISIBILITY="public"
+  export MAX_WAIT_SECONDS="10"
+  export CHECK_INTERVAL="10"
+  export CONTEXT='{"scope":{"slug":"my-app","id":"123","domain":"app.example.com"}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"status\":{\"parents\":[{\"conditions\":[{\"type\":\"Accepted\",\"status\":\"True\",\"reason\":\"Accepted\"},{\"type\":\"ResolvedRefs\",\"status\":\"True\",\"reason\":\"ResolvedRefs\"}]}]}}'
+      return 0
+    }
+    export -f kubectl
+    sleep() { return 0; }
+    export -f sleep
+    source '$BATS_TEST_DIRNAME/../verify_networking_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "🔍 Verifying networking reconciliation for DNS type: external_dns"
+  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
+  assert_contains "$output" "✅ HTTPRoute successfully reconciled"
+}
+
 @test "verify_networking_reconciliation: skips for unsupported DNS types" {
   export DNS_TYPE="unknown"
 
