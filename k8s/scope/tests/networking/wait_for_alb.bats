@@ -110,6 +110,27 @@ mock_aws_state() {
 }
 
 # =============================================================================
+# Heartbeat
+# =============================================================================
+@test "wait_for_alb: emits heartbeat info log when the wait crosses the threshold" {
+	# Shrink both the poll interval and the heartbeat threshold so the test
+	# exercises the heartbeat path without sitting through real 30s intervals.
+	PATCHED_SCRIPT="$BATS_TEST_TMPDIR/wait_for_alb_patched"
+	sed -e 's/^poll_interval=10$/poll_interval=1/' \
+	    -e 's/^heartbeat_interval=30$/heartbeat_interval=1/' \
+	    "$SCRIPT" > "$PATCHED_SCRIPT"
+
+	export ALB_AUTOCREATE_TIMEOUT_SECONDS="3"
+	mock_aws_state "provisioning"
+
+	run bash -c "source '$PATCHED_SCRIPT'"
+
+	# Times out as expected, but we should see at least one heartbeat info log.
+	assert_equal "$status" "1"
+	assert_contains "$output" "⏳ Still waiting for ALB 'test-alb' to become active (provisioning,"
+}
+
+# =============================================================================
 # Tagging on autocreate
 # =============================================================================
 @test "wait_for_alb: tags ALB and logs full tag-success message when ALB_AUTOCREATED=true" {

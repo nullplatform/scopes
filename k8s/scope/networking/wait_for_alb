@@ -23,8 +23,11 @@ TIMEOUT_SECONDS=$(get_config_value \
 	--default "300"
 )
 
-deadline=$(($(date +%s) + TIMEOUT_SECONDS))
+started_at=$(date +%s)
+deadline=$((started_at + TIMEOUT_SECONDS))
 poll_interval=10
+heartbeat_interval=30
+last_heartbeat="$started_at"
 
 log info "⏳ Waiting up to ${TIMEOUT_SECONDS}s for ALB '$ALB_NAME' to become active..."
 
@@ -51,6 +54,14 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 			log error "❌ ALB '$ALB_NAME' reached state 'failed'"
 			exit 1
 		fi
+	fi
+
+	# Heartbeat every ~30s so the operator sees progress on long waits instead
+	# of staring at a frozen line for the full timeout.
+	now=$(date +%s)
+	if [ $((now - last_heartbeat)) -ge "$heartbeat_interval" ]; then
+		log info "⏳ Still waiting for ALB '$ALB_NAME' to become active (${state:-pending}, $((now - started_at))s elapsed)"
+		last_heartbeat="$now"
 	fi
 
 	sleep "$poll_interval"

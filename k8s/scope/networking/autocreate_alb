@@ -113,9 +113,12 @@ render_dummy_ingress() {
 	fi
 	mkdir -p "$OUTPUT_DIR"
 
-	local tmp_context
-	tmp_context=$(mktemp)
-	trap 'rm -f "$tmp_context"' RETURN
+	# The context file MUST have a .json extension. gomplate uses the extension
+	# to pick the parser; a plain mktemp path is treated as an opaque string
+	# and the template fails with "can't evaluate field X in type string".
+	local context_path
+	context_path="$OUTPUT_DIR/ingress-dummy-${alb_name}-context.json"
+	trap 'rm -f "$context_path"' RETURN
 
 	# build_context already exports $DOMAIN (and adds it to CONTEXT as
 	# `base_domain` after we return). Inject the call-specific fields here.
@@ -125,12 +128,12 @@ render_dummy_ingress() {
 		--arg k8s_namespace "$namespace" \
 		--arg base_domain "$DOMAIN" \
 		'. + {alb_name: $alb_name, ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, base_domain: $base_domain}' \
-		> "$tmp_context"
+		> "$context_path"
 
 	local template_path="${INGRESS_DUMMY_TEMPLATE:-$SERVICE_PATH/scope/templates/ingress-dummy.yaml.tpl}"
 	local out_path="$OUTPUT_DIR/ingress-dummy-${alb_name}.yaml"
 
-	if ! gomplate -c .="$tmp_context" --file "$template_path" --out "$out_path"; then
+	if ! gomplate -c .="$context_path" --file "$template_path" --out "$out_path"; then
 		log error "❌ Failed to render ingress-dummy template"
 		log error "📋 Template: $template_path"
 		exit 1
