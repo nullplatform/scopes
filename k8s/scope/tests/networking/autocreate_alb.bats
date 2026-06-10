@@ -11,13 +11,16 @@ setup() {
 	export -f log
 
 	source "$PROJECT_ROOT/k8s/utils/get_config_value"
+	export -f get_config_value
 
 	export SCRIPT="$PROJECT_ROOT/k8s/scope/networking/autocreate_alb"
 	export REGION="us-east-1"
 	export INGRESS_VISIBILITY="internet-facing"
 	export K8S_NAMESPACE="test-ns"
 	export SERVICE_PATH="$PROJECT_ROOT/k8s"
+	export DOMAIN="nullapps.io"
 	export OUTPUT_DIR="$(mktemp -d)"
+	export PATCH_BODY_FILE="$OUTPUT_DIR/_patch_body"
 
 	export CONTEXT='{
 		"scope": {
@@ -34,8 +37,6 @@ setup() {
 		}
 	}'
 
-	export CALL_LOG_FILE="$(mktemp)"
-
 	# Default mocks — each test overrides as needed.
 	gomplate() {
 		local prev=""
@@ -46,8 +47,8 @@ setup() {
 		return 0
 	}
 	export -f gomplate
+
 	np() {
-		echo "np $*" >> "$CALL_LOG_FILE"
 		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
 			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{}}}]}'
 			return 0
@@ -55,7 +56,7 @@ setup() {
 		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then
 			local prev=""
 			for arg in "$@"; do
-				if [ "$prev" = "--body" ]; then echo "$arg" > "$OUTPUT_DIR/_patch_body"; fi
+				if [ "$prev" = "--body" ]; then echo "$arg" > "$PATCH_BODY_FILE"; fi
 				prev="$arg"
 			done
 			return 0
@@ -63,58 +64,57 @@ setup() {
 		return 1
 	}
 	export -f np
+	export -f gomplate
 }
 
 teardown() {
 	unset -f log gomplate np get_config_value
-	rm -rf "$OUTPUT_DIR" "$CALL_LOG_FILE"
+	rm -rf "$OUTPUT_DIR"
 	unset ALB_NAME ALB_AUTOCREATED
 }
 
 # =============================================================================
-# Name generation
+# Happy path — full log sequence (info logs only; debug needs LOG_LEVEL=debug)
 # =============================================================================
-@test "autocreate_alb: generates name with default prefix and public short form" {
-	source "$SCRIPT"
+@test "autocreate_alb: full happy-path log sequence (default prefix, public visibility)" {
+	run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME ALB_AUTOCREATED=$ALB_AUTOCREATED"'
 
-	[[ "$ALB_NAME" =~ ^nullplatform-auto-public-[a-f0-9]{6}$ ]]
+	assert_equal "$status" "0"
+	# First log: name generated + visibility echoed
+	[[ "$output" =~ "🔧 Autocreating ALB 'nullplatform-auto-public-"[a-f0-9]{6}"' (visibility=internet-facing)" ]]
+	# Provider patch log (field name appears explicitly)
+	[[ "$output" =~ "📝 Registering ALB 'nullplatform-auto-public-"[a-f0-9]{6}"' in container-orchestration provider (additional_public_names)" ]]
+	# Render confirmation (debug)
+	assert_contains "$output" "📝 Rendered dummy ingress to $OUTPUT_DIR/ingress-dummy-"
+	# Exports
+	[[ "$output" =~ "ALB_NAME=nullplatform-auto-public-"[a-f0-9]{6}" ALB_AUTOCREATED=true" ]]
 }
 
-@test "autocreate_alb: generates name with private short form for internal visibility" {
+@test "autocreate_alb: internal visibility selects additional_private_names field in registration log" {
 	export INGRESS_VISIBILITY="internal"
 
-	source "$SCRIPT"
+	run bash -c 'source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
-	[[ "$ALB_NAME" =~ ^nullplatform-auto-private-[a-f0-9]{6}$ ]]
+	assert_equal "$status" "0"
+	[[ "$output" =~ "🔧 Autocreating ALB 'nullplatform-auto-private-"[a-f0-9]{6}"' (visibility=internal)" ]]
+	[[ "$output" =~ "📝 Registering ALB 'nullplatform-auto-private-"[a-f0-9]{6}"' in container-orchestration provider (additional_private_names)" ]]
 }
 
-@test "autocreate_alb: respects custom name prefix" {
+@test "autocreate_alb: custom prefix flows into both autocreate and registration logs" {
 	export ALB_AUTOCREATE_NAME_PREFIX="custom-"
 
-	source "$SCRIPT"
+	run bash -c 'source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
-	[[ "$ALB_NAME" =~ ^custom-public-[a-f0-9]{6}$ ]]
-}
-
-@test "autocreate_alb: exports ALB_AUTOCREATED=true" {
-	source "$SCRIPT"
-
-	[ "$ALB_AUTOCREATED" = "true" ]
+	assert_equal "$status" "0"
+	[[ "$output" =~ "🔧 Autocreating ALB 'custom-public-"[a-f0-9]{6}"' (visibility=internet-facing)" ]]
+	[[ "$output" =~ "ALB_NAME=custom-public-"[a-f0-9]{6} ]]
 }
 
 # =============================================================================
-# Provider patching
+# Provider patch shape
 # =============================================================================
-@test "autocreate_alb: calls np provider list with the scope NRN" {
-	source "$SCRIPT"
-
-	grep -q "provider list" "$CALL_LOG_FILE"
-	grep -q -- "--nrn organization=1:account=2:namespace=3:application=4:scope=5" "$CALL_LOG_FILE"
-}
-
-@test "autocreate_alb: patches additional_public_names for internet-facing visibility" {
+@test "autocreate_alb: patches additional_public_names preserving existing entries" {
 	np() {
-		echo "np $*" >> "$CALL_LOG_FILE"
 		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
 			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{"additional_public_names":["existing-1"]}}}]}'
 			return 0
@@ -122,7 +122,7 @@ teardown() {
 		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then
 			local prev=""
 			for arg in "$@"; do
-				if [ "$prev" = "--body" ]; then echo "$arg" > "$OUTPUT_DIR/_patch_body"; fi
+				if [ "$prev" = "--body" ]; then echo "$arg" > "$PATCH_BODY_FILE"; fi
 				prev="$arg"
 			done
 			return 0
@@ -134,7 +134,7 @@ teardown() {
 	source "$SCRIPT"
 
 	local body
-	body=$(cat "$OUTPUT_DIR/_patch_body")
+	body=$(cat "$PATCH_BODY_FILE")
 	echo "$body" | jq -e '.attributes.balancer.additional_public_names | length == 2'
 	echo "$body" | jq -e '.attributes.balancer.additional_public_names[0] == "existing-1"'
 	echo "$body" | jq -e ".attributes.balancer.additional_public_names[1] == \"$ALB_NAME\""
@@ -145,22 +145,19 @@ teardown() {
 
 	source "$SCRIPT"
 
-	cat "$OUTPUT_DIR/_patch_body" | jq -e '.attributes.balancer.additional_private_names | length == 1'
+	cat "$PATCH_BODY_FILE" | jq -e '.attributes.balancer.additional_private_names | length == 1'
 }
 
-@test "autocreate_alb: deduplicates when name already in list (defense in depth)" {
+@test "autocreate_alb: deduplicates name in the patched list" {
 	np() {
-		echo "np $*" >> "$CALL_LOG_FILE"
 		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
-			# Inject a duplicate scenario: pretend existing list already contains the same name
-			# (impossible in practice given random suffix, but the jq pipeline must still be safe)
 			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{"additional_public_names":["a","b"]}}}]}'
 			return 0
 		fi
 		if [ "$1" = "provider" ] && [ "$2" = "patch" ]; then
 			local prev=""
 			for arg in "$@"; do
-				if [ "$prev" = "--body" ]; then echo "$arg" > "$OUTPUT_DIR/_patch_body"; fi
+				if [ "$prev" = "--body" ]; then echo "$arg" > "$PATCH_BODY_FILE"; fi
 				prev="$arg"
 			done
 			return 0
@@ -171,10 +168,13 @@ teardown() {
 
 	source "$SCRIPT"
 
-	cat "$OUTPUT_DIR/_patch_body" | jq -e '.attributes.balancer.additional_public_names | length == 3'
+	cat "$PATCH_BODY_FILE" | jq -e '.attributes.balancer.additional_public_names | length == 3'
 }
 
-@test "autocreate_alb: exits when provider list returns no results" {
+# =============================================================================
+# Error paths — full failure log
+# =============================================================================
+@test "autocreate_alb: exits with full log when provider list returns no results" {
 	np() {
 		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then echo '{"results":[]}'; return 0; fi
 		return 1
@@ -183,11 +183,12 @@ teardown() {
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "No container-orchestration provider found"
+	assert_equal "$status" "1"
+	[[ "$output" =~ "🔧 Autocreating ALB 'nullplatform-auto-public-"[a-f0-9]{6}"' (visibility=internet-facing)" ]]
+	assert_contains "$output" "❌ No container-orchestration provider found for NRN 'organization=1:account=2:namespace=3:application=4:scope=5'"
 }
 
-@test "autocreate_alb: exits when np provider list fails" {
+@test "autocreate_alb: exits with full log when np provider list fails" {
 	np() {
 		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then return 2; fi
 		return 1
@@ -196,11 +197,11 @@ teardown() {
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "Failed to list container-orchestration provider"
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ Failed to list container-orchestration provider for NRN 'organization=1:account=2:namespace=3:application=4:scope=5'"
 }
 
-@test "autocreate_alb: exits when np provider patch fails" {
+@test "autocreate_alb: exits with full log when np provider patch fails" {
 	np() {
 		if [ "$1" = "provider" ] && [ "$2" = "list" ]; then
 			echo '{"results":[{"id":"prov-1","attributes":{"balancer":{}}}]}'
@@ -213,43 +214,46 @@ teardown() {
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "Failed to patch container-orchestration provider"
+	assert_equal "$status" "1"
+	[[ "$output" =~ "📝 Registering ALB 'nullplatform-auto-public-"[a-f0-9]{6}"' in container-orchestration provider (additional_public_names)" ]]
+	assert_contains "$output" "❌ Failed to patch container-orchestration provider with new ALB"
+	assert_contains "$output" "💡 Possible causes: agent lacks write permission on the provider, or NP_TOKEN/NULLPLATFORM_API_KEY is missing"
 }
 
-@test "autocreate_alb: exits when CONTEXT has no scope.nrn" {
+@test "autocreate_alb: exits with full log when CONTEXT has no scope.nrn" {
 	export CONTEXT=$(echo "$CONTEXT" | jq 'del(.scope.nrn)')
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "Could not read scope NRN"
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ Could not read scope NRN from CONTEXT — cannot patch provider"
 }
 
-# =============================================================================
-# Dummy ingress rendering
-# =============================================================================
-@test "autocreate_alb: renders the dummy ingress yaml to OUTPUT_DIR" {
-	source "$SCRIPT"
-
-	[ -f "$OUTPUT_DIR/ingress-dummy-${ALB_NAME}.yaml" ]
-}
-
-@test "autocreate_alb: exits when gomplate fails" {
+@test "autocreate_alb: exits with full log when gomplate fails to render" {
 	gomplate() { return 1; }
 	export -f gomplate
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "Failed to render ingress-dummy template"
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ Failed to render ingress-dummy template"
+	assert_contains "$output" "📋 Template: $SERVICE_PATH/scope/templates/ingress-dummy.yaml.tpl"
 }
 
-@test "autocreate_alb: exits when OUTPUT_DIR is not set" {
+@test "autocreate_alb: exits with full log when OUTPUT_DIR is not set" {
 	unset OUTPUT_DIR
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "OUTPUT_DIR is not set"
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ OUTPUT_DIR is not set — autocreate_alb must run after OUTPUT_DIR is exported"
+}
+
+# =============================================================================
+# Side effects — rendered YAML file
+# =============================================================================
+@test "autocreate_alb: renders the dummy ingress yaml file inside OUTPUT_DIR" {
+	source "$SCRIPT"
+
+	[ -f "$OUTPUT_DIR/ingress-dummy-${ALB_NAME}.yaml" ]
 }

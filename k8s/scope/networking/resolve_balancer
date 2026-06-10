@@ -207,7 +207,10 @@ if [[ "$DNS_TYPE" == "route53" ]]; then
       BEST_ALB="$ALB_NAME"
 
       for CANDIDATE in $CANDIDATES; do
-        RULE_COUNT=$(get_alb_rule_count "$CANDIDATE" 2>/dev/null) || {
+        # No outer stderr redirect: get_alb_rule_count locally suppresses raw
+        # aws CLI stderr and emits only intentional `log` messages there, which
+        # we want visible in the operator output.
+        RULE_COUNT=$(get_alb_rule_count "$CANDIDATE") || {
           log warn "⚠️  Could not query rules for ALB '$CANDIDATE', skipping"
           continue
         }

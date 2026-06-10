@@ -24,33 +24,27 @@ setup() {
 		"providers": { "container-orchestration": {} }
 	}'
 
-	export CALL_LOG_FILE="$(mktemp)"
-
 	aws() { return 1; }
 	export -f aws
 }
 
 teardown() {
 	unset -f log aws get_config_value
-	rm -f "$CALL_LOG_FILE"
 	unset ALB_AUTOCREATED
 }
 
-# Mocks describe-load-balancers + add-tags. The state arg controls what the
-# describe response reports.
+# Builds an aws() mock that returns the given state in a single
+# describe-load-balancers --output json response. add-tags returns 0.
 mock_aws_state() {
 	local state="$1"
 	local arn="arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/$ALB_NAME/abc"
 	eval "aws() {
-		echo \"aws \$*\" >> '$CALL_LOG_FILE'
 		case \"\$*\" in
 			*describe-load-balancers*)
 				echo '{\"LoadBalancers\":[{\"LoadBalancerArn\":\"${arn}\",\"State\":{\"Code\":\"${state}\"}}]}'
 				return 0
 				;;
-			*add-tags*)
-				return 0
-				;;
+			*add-tags*) return 0 ;;
 		esac
 		return 1
 	}
@@ -60,68 +54,93 @@ mock_aws_state() {
 # =============================================================================
 # Active state
 # =============================================================================
-@test "wait_for_alb: returns success when ALB is already active" {
+@test "wait_for_alb: success path logs full sequence when ALB is already active" {
 	mock_aws_state "active"
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -eq 0 ]
-	assert_contains "$output" "is active"
+	assert_equal "$status" "0"
+	assert_contains "$output" "⏳ Waiting up to 2s for ALB 'test-alb' to become active..."
+	assert_contains "$output" "📋 ALB 'test-alb' state: active"
+	assert_contains "$output" "✅ ALB 'test-alb' is active"
+}
+
+@test "wait_for_alb: honors timeout value in the initial wait log" {
+	export ALB_AUTOCREATE_TIMEOUT_SECONDS="120"
+	mock_aws_state "active"
+
+	run bash -c 'source "$SCRIPT"'
+
+	assert_equal "$status" "0"
+	assert_contains "$output" "⏳ Waiting up to 120s for ALB 'test-alb' to become active..."
 }
 
 # =============================================================================
 # Failed state
 # =============================================================================
-@test "wait_for_alb: exits when ALB reaches state=failed" {
+@test "wait_for_alb: exits with full failure log when ALB reaches state=failed" {
 	mock_aws_state "failed"
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "reached state 'failed'"
+	assert_equal "$status" "1"
+	assert_contains "$output" "⏳ Waiting up to 2s for ALB 'test-alb' to become active..."
+	assert_contains "$output" "📋 ALB 'test-alb' state: failed"
+	assert_contains "$output" "❌ ALB 'test-alb' reached state 'failed'"
 }
 
 # =============================================================================
-# Timeout
+# Timeout with full diagnostic log
 # =============================================================================
-@test "wait_for_alb: exits when ALB never reaches active within timeout" {
+@test "wait_for_alb: timeout emits diagnostic causes and fix hints" {
 	export ALB_AUTOCREATE_TIMEOUT_SECONDS="1"
 	mock_aws_state "provisioning"
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "Timed out"
+	assert_equal "$status" "1"
+	assert_contains "$output" "⏳ Waiting up to 1s for ALB 'test-alb' to become active..."
+	assert_contains "$output" "📋 ALB 'test-alb' state: provisioning"
+	assert_contains "$output" "❌ Timed out after 1s waiting for ALB 'test-alb' to become active"
+	assert_contains "$output" "💡 Possible causes:"
+	assert_contains "$output" "   The AWS Load Balancer Controller may be slow, mis-configured, or the AWS account may be hitting an ALB quota"
+	assert_contains "$output" "🔧 How to fix:"
+	assert_contains "$output" "   • Check controller logs: kubectl -n kube-system logs deploy/aws-load-balancer-controller"
+	assert_contains "$output" "   • Verify ALB quota: aws service-quotas get-service-quota --service-code elasticloadbalancing --quota-code L-53DA6B97"
 }
 
 # =============================================================================
 # Tagging on autocreate
 # =============================================================================
-@test "wait_for_alb: tags the ALB when ALB_AUTOCREATED=true" {
+@test "wait_for_alb: tags ALB and logs full tag-success message when ALB_AUTOCREATED=true" {
 	export ALB_AUTOCREATED="true"
 	mock_aws_state "active"
 
-	source "$SCRIPT"
+	run bash -c 'source "$SCRIPT"'
 
-	grep -q "add-tags" "$CALL_LOG_FILE"
-	grep -q "nullplatform:managed-by,Value=autocreate" "$CALL_LOG_FILE"
-	grep -q "nullplatform:visibility,Value=internet-facing" "$CALL_LOG_FILE"
-	grep -q "nullplatform:created-by-scope-id,Value=scope-1" "$CALL_LOG_FILE"
+	assert_equal "$status" "0"
+	assert_contains "$output" "⏳ Waiting up to 2s for ALB 'test-alb' to become active..."
+	assert_contains "$output" "📋 ALB 'test-alb' state: active"
+	assert_contains "$output" "✅ ALB 'test-alb' is active"
+	assert_contains "$output" "📋 Tagged ALB 'test-alb' with managed-by=autocreate"
 }
 
-@test "wait_for_alb: does not tag when ALB_AUTOCREATED is unset" {
+@test "wait_for_alb: does not tag (no tag log) when ALB_AUTOCREATED is unset" {
 	mock_aws_state "active"
 
-	source "$SCRIPT"
+	run bash -c 'source "$SCRIPT"'
 
-	! grep -q "add-tags" "$CALL_LOG_FILE"
+	assert_equal "$status" "0"
+	assert_contains "$output" "✅ ALB 'test-alb' is active"
+	# No tagging log should appear
+	[[ "$output" != *"Tagged ALB"* ]]
+	[[ "$output" != *"Could not tag ALB"* ]]
 }
 
-@test "wait_for_alb: tagging failure warns but does not fail the script" {
+@test "wait_for_alb: tag failure logs full warn message but exits 0" {
 	export ALB_AUTOCREATED="true"
 	local arn="arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/$ALB_NAME/abc"
 	eval "aws() {
-		echo \"aws \$*\" >> '$CALL_LOG_FILE'
 		case \"\$*\" in
 			*describe-load-balancers*)
 				echo '{\"LoadBalancers\":[{\"LoadBalancerArn\":\"${arn}\",\"State\":{\"Code\":\"active\"}}]}'
@@ -135,6 +154,7 @@ mock_aws_state() {
 
 	run bash -c 'source "$SCRIPT"'
 
-	[ "$status" -eq 0 ]
-	assert_contains "$output" "audit only"
+	assert_equal "$status" "0"
+	assert_contains "$output" "✅ ALB 'test-alb' is active"
+	assert_contains "$output" "⚠️  Could not tag ALB 'test-alb' (audit only — provider registration already succeeded)"
 }

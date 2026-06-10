@@ -506,7 +506,7 @@ mock_alb_rules() {
 # =============================================================================
 # LoadBalancerNotFound treated as 0 rules (concurrent autocreate race case)
 # =============================================================================
-@test "resolve_balancer: treats LoadBalancerNotFound as 0 rules so in-flight ALB wins" {
+@test "resolve_balancer: LoadBalancerNotFound is treated as 0 rules and the in-flight ALB wins selection" {
   export INGRESS_VISIBILITY="internet-facing"
   export CONTEXT=$(echo "$CONTEXT" | jq '
     .providers["scope-configurations"].networking.additional_public_balancers = ["in-flight-alb"]
@@ -543,15 +543,22 @@ mock_alb_rules() {
   }
   export -f aws
 
-  source "$SCRIPT"
+  run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
-  assert_equal "$ALB_NAME" "in-flight-alb"
+  assert_equal "$status" "0"
+  assert_contains "$output" "🔍 Additional balancers configured, resolving least-loaded ALB..."
+  assert_contains "$output" "📋 Candidate balancers: co-balancer-public, in-flight-alb"
+  assert_contains "$output" "📋 ALB 'co-balancer-public': 50 rules"
+  assert_contains "$output" "📋 ALB 'in-flight-alb' not yet visible in AWS (likely being provisioned); treating as 0 rules"
+  assert_contains "$output" "📋 ALB 'in-flight-alb': 0 rules"
+  assert_contains "$output" "📝 Selected ALB 'in-flight-alb' (0 rules) over default 'co-balancer-public'"
+  assert_contains "$output" "ALB_NAME=in-flight-alb"
 }
 
 # =============================================================================
 # Autocreate trigger
 # =============================================================================
-@test "resolve_balancer: sources autocreate_alb when all candidates over threshold and feature enabled" {
+@test "resolve_balancer: sources autocreate_alb and logs full trigger sequence when all candidates over threshold" {
   export INGRESS_VISIBILITY="internet-facing"
   export ALB_AUTOCREATE_ENABLED="true"
   export ALB_MAX_CAPACITY="50"
@@ -560,38 +567,41 @@ mock_alb_rules() {
   ')
   mock_alb_rules "co-balancer-public 60" "alb-extra-1 55"
 
-  # Stub autocreate_alb: simulate it exporting the new ALB name.
+  # Stub autocreate_alb so the trigger path runs end-to-end without requiring
+  # gomplate / np. The stub exports the new ALB name as the real script would.
   cat > "$BATS_TEST_TMPDIR/autocreate_alb_stub" <<'STUB'
 export ALB_NAME="auto-public-stubbed"
 export ALB_AUTOCREATED="true"
 STUB
-  export INGRESS_DUMMY_TEMPLATE="$BATS_TEST_TMPDIR/ignored.tpl"
-  # Replace the real autocreate_alb with the stub by intercepting the source path
-  AUTOCREATE_STUB="$BATS_TEST_TMPDIR/autocreate_alb_stub"
-  # The script does: source "$_RESOLVE_BALANCER_DIR/autocreate_alb"
-  # Override via shadow path: copy resolve_balancer to tmp with patched source line.
   PATCHED_SCRIPT="$BATS_TEST_TMPDIR/resolve_balancer_patched"
+  AUTOCREATE_STUB="$BATS_TEST_TMPDIR/autocreate_alb_stub"
   sed "s|\\\$_RESOLVE_BALANCER_DIR/autocreate_alb|$AUTOCREATE_STUB|" "$SCRIPT" > "$PATCHED_SCRIPT"
 
-  source "$PATCHED_SCRIPT"
+  run bash -c "export LOG_LEVEL=debug; source '$PATCHED_SCRIPT'; echo \"ALB_NAME=\$ALB_NAME ALB_AUTOCREATED=\$ALB_AUTOCREATED\""
 
-  assert_equal "$ALB_NAME" "auto-public-stubbed"
-  [ "$ALB_AUTOCREATED" = "true" ]
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 ALB 'co-balancer-public': 60 rules"
+  assert_contains "$output" "📋 ALB 'alb-extra-1': 55 rules"
+  assert_contains "$output" "🔧 All candidate ALBs are at or above capacity (55/50); triggering autocreate"
+  assert_contains "$output" "ALB_NAME=auto-public-stubbed ALB_AUTOCREATED=true"
 }
 
-@test "resolve_balancer: does not autocreate when feature disabled even if all candidates full" {
+@test "resolve_balancer: does not autocreate (no trigger log) when feature disabled even if candidates full" {
   export INGRESS_VISIBILITY="internet-facing"
   export ALB_AUTOCREATE_ENABLED="false"
   export ALB_MAX_CAPACITY="50"
   export CONTEXT=$(echo "$CONTEXT" | jq '
     .providers["scope-configurations"].networking.additional_public_balancers = ["alb-extra-1"]
   ')
-  # Both above threshold but autocreate disabled → keeps least-loaded
   mock_alb_rules "co-balancer-public 60" "alb-extra-1 55"
 
-  source "$SCRIPT"
+  run bash -c 'source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
-  assert_equal "$ALB_NAME" "alb-extra-1"
+  assert_equal "$status" "0"
+  assert_contains "$output" "📝 Selected ALB 'alb-extra-1' (55 rules) over default 'co-balancer-public'"
+  assert_contains "$output" "ALB_NAME=alb-extra-1"
+  # No autocreate trigger log
+  [[ "$output" != *"triggering autocreate"* ]]
 }
 
 @test "resolve_balancer: does not autocreate when at least one candidate below threshold" {
@@ -603,12 +613,15 @@ STUB
   ')
   mock_alb_rules "co-balancer-public 60" "alb-extra-1 10"
 
-  source "$SCRIPT"
+  run bash -c 'source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
-  assert_equal "$ALB_NAME" "alb-extra-1"
+  assert_equal "$status" "0"
+  assert_contains "$output" "📝 Selected ALB 'alb-extra-1' (10 rules) over default 'co-balancer-public'"
+  assert_contains "$output" "ALB_NAME=alb-extra-1"
+  [[ "$output" != *"triggering autocreate"* ]]
 }
 
-@test "resolve_balancer: warns and skips autocreate when ALB_MAX_CAPACITY is non-numeric" {
+@test "resolve_balancer: emits full warn when ALB_MAX_CAPACITY is non-numeric and skips autocreate" {
   export INGRESS_VISIBILITY="internet-facing"
   export ALB_AUTOCREATE_ENABLED="true"
   export ALB_MAX_CAPACITY="not-a-number"
@@ -617,8 +630,10 @@ STUB
   ')
   mock_alb_rules "co-balancer-public 60" "alb-extra-1 55"
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
-  [ "$status" -eq 0 ]
-  assert_contains "$output" "ALB_MAX_CAPACITY must be numeric"
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  ALB_MAX_CAPACITY must be numeric, got: 'not-a-number' — skipping autocreate evaluation"
+  assert_contains "$output" "ALB_NAME=alb-extra-1"
+  [[ "$output" != *"triggering autocreate"* ]]
 }
