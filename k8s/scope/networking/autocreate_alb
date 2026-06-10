@@ -154,7 +154,11 @@ render_dummy_ingress() {
 	# and the template fails with "can't evaluate field X in type string".
 	local context_path
 	context_path="$OUTPUT_DIR/ingress-dummy-${alb_name}-context.json"
-	trap 'rm -f "$context_path"' RETURN
+	# Use double quotes so $context_path is baked into the trap string now.
+	# Single quotes would defer expansion until the trap fires on RETURN, by
+	# which point the local variable is out of scope and `set -u` would trip
+	# with "context_path: unbound variable".
+	trap "rm -f '$context_path'" RETURN
 
 	echo "$CONTEXT" | jq \
 		--arg alb_name "$alb_name" \

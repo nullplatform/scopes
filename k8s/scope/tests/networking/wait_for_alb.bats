@@ -112,22 +112,25 @@ mock_aws_state() {
 # =============================================================================
 # Heartbeat
 # =============================================================================
-@test "wait_for_alb: emits heartbeat info log when the wait crosses the threshold" {
-	# Shrink both the poll interval and the heartbeat threshold so the test
-	# exercises the heartbeat path without sitting through real 30s intervals.
+@test "wait_for_alb: emits heartbeat info log on clean elapsed boundaries" {
+	# Shrink the poll interval and the polls-per-heartbeat so the test runs
+	# in seconds instead of full 30s intervals. With poll_interval=1 and
+	# polls_per_heartbeat=2, the first heartbeat fires after 2 polls and
+	# the displayed elapsed is 2*1=2s.
 	PATCHED_SCRIPT="$BATS_TEST_TMPDIR/wait_for_alb_patched"
 	sed -e 's/^poll_interval=10$/poll_interval=1/' \
-	    -e 's/^heartbeat_interval=30$/heartbeat_interval=1/' \
+	    -e 's/^polls_per_heartbeat=3$/polls_per_heartbeat=2/' \
 	    "$SCRIPT" > "$PATCHED_SCRIPT"
 
-	export ALB_AUTOCREATE_TIMEOUT_SECONDS="3"
+	export ALB_AUTOCREATE_TIMEOUT_SECONDS="5"
 	mock_aws_state "provisioning"
 
 	run bash -c "source '$PATCHED_SCRIPT'"
 
-	# Times out as expected, but we should see at least one heartbeat info log.
+	# Times out as expected. We should see at least one heartbeat with a clean
+	# elapsed multiple (2s, 4s) — never odd numbers like 3s or 5s.
 	assert_equal "$status" "1"
-	assert_contains "$output" "⏳ Still waiting for ALB 'test-alb' to become active (provisioning,"
+	assert_contains "$output" "⏳ Still waiting for ALB 'test-alb' to become active (provisioning, ~2s elapsed)"
 }
 
 # =============================================================================
