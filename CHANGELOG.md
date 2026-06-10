@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- Add opt-in ALB autocreation for k8s scopes: when every declared ALB is at or above `ALB_MAX_CAPACITY`, the platform provisions a new ALB via a dummy Ingress, registers it in the container-orchestration provider via `np provider patch`, and uses it for the scope. Disabled by default; enable with `ALB_AUTOCREATE_ENABLED=true`. Requires write access to the nullplatform API (via `NP_TOKEN` or `NULLPLATFORM_API_KEY`) and the additional AWS permission `elasticloadbalancing:AddTags` for audit tagging
+- Add support to auto-create ALBs on scope create
 
 ## [1.12.0] - 2026-06-08
 - Fix: do not inject file parameter as env vars
