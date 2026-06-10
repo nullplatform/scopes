@@ -261,6 +261,24 @@ teardown() {
 # =============================================================================
 # Dummy host generation
 # =============================================================================
+@test "autocreate_alb: rejects ALB_AUTOCREATE_NAME_PREFIX with invalid chars (uppercase)" {
+	export ALB_AUTOCREATE_NAME_PREFIX="Bad-Prefix-"
+
+	run bash -c 'source "$SCRIPT"'
+
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ ALB_AUTOCREATE_NAME_PREFIX must match ^[a-z0-9-]+\$, got: 'Bad-Prefix-'"
+}
+
+@test "autocreate_alb: rejects ALB_AUTOCREATE_NAME_PREFIX longer than 18 chars" {
+	export ALB_AUTOCREATE_NAME_PREFIX="this-prefix-is-far-too-long-"
+
+	run bash -c 'source "$SCRIPT"'
+
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ ALB_AUTOCREATE_NAME_PREFIX must be ≤18 chars"
+}
+
 @test "autocreate_alb: derives dummy host via domain-generate using the ALB name as scopeSlug" {
 	# Run with the real domain-generate binary (no mock) — it's deterministic.
 	# Use a custom gomplate that writes the rendered output through so we can

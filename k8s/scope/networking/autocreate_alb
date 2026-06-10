@@ -190,6 +190,22 @@ NAME_PREFIX=$(get_config_value \
 	--default "nullplatform-auto-"
 )
 
+# Final ALB name is "<prefix><public|private>-<6 hex>". AWS rejects names that
+# exceed 32 chars or contain anything outside [a-zA-Z0-9-]. If an invalid name
+# slips through, the AWS Load Balancer Controller silently refuses to create
+# the ALB and wait_for_alb hangs to timeout with an opaque error. Catch it
+# here with a clear message instead.
+if ! [[ "$NAME_PREFIX" =~ ^[a-z0-9-]+$ ]]; then
+	log error "❌ ALB_AUTOCREATE_NAME_PREFIX must match ^[a-z0-9-]+$, got: '$NAME_PREFIX'"
+	exit 1
+fi
+
+# 14 = len("private-") + 6 hex chars; total must stay ≤32 (AWS ALB name limit)
+if [ "${#NAME_PREFIX}" -gt 18 ]; then
+	log error "❌ ALB_AUTOCREATE_NAME_PREFIX must be ≤18 chars (AWS caps ALB names at 32, the visibility+hex suffix uses 14); got ${#NAME_PREFIX}"
+	exit 1
+fi
+
 NEW_ALB_NAME=$(generate_alb_name "$NAME_PREFIX" "$INGRESS_VISIBILITY")
 log info "🔧 Autocreating ALB '$NEW_ALB_NAME' (visibility=$INGRESS_VISIBILITY)"
 

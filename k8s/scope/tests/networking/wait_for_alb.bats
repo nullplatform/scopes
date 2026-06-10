@@ -17,6 +17,7 @@ setup() {
 	export REGION="us-east-1"
 	export ALB_NAME="test-alb"
 	export INGRESS_VISIBILITY="internet-facing"
+	export DNS_TYPE="route53"
 	export ALB_AUTOCREATE_TIMEOUT_SECONDS="2"
 
 	export CONTEXT='{
@@ -159,6 +160,39 @@ mock_aws_state() {
 	# No tagging log should appear
 	[[ "$output" != *"Tagged ALB"* ]]
 	[[ "$output" != *"Could not tag ALB"* ]]
+}
+
+@test "wait_for_alb: early returns for DNS_TYPE != route53 without polling" {
+	export DNS_TYPE="external_dns"
+	# If the polling code ran, the default `aws()` returning 1 would loop until
+	# timeout (2s) and exit 1. The early-return must skip that entirely.
+	aws() { echo "AWS SHOULD NOT BE CALLED" >&2; return 1; }
+	export -f aws
+
+	run bash -c 'source "$SCRIPT"'
+
+	assert_equal "$status" "0"
+	assert_contains "$output" "📋 DNS type is 'external_dns', skipping ALB active-state wait"
+	[[ "$output" != *"AWS SHOULD NOT BE CALLED"* ]]
+	[[ "$output" != *"Waiting up to"* ]]
+}
+
+@test "wait_for_alb: exits with validation error when ALB_AUTOCREATE_TIMEOUT_SECONDS is non-numeric" {
+	export ALB_AUTOCREATE_TIMEOUT_SECONDS="not-a-number"
+
+	run bash -c 'source "$SCRIPT"'
+
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: 'not-a-number'"
+}
+
+@test "wait_for_alb: exits with validation error when ALB_AUTOCREATE_TIMEOUT_SECONDS is zero" {
+	export ALB_AUTOCREATE_TIMEOUT_SECONDS="0"
+
+	run bash -c 'source "$SCRIPT"'
+
+	assert_equal "$status" "1"
+	assert_contains "$output" "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: '0'"
 }
 
 @test "wait_for_alb: tag failure logs full warn message but exits 0" {

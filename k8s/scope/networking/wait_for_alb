@@ -17,11 +17,26 @@
 #   ALB_AUTOCREATE_TIMEOUT_SECONDS   - Max seconds to wait (default 300)
 #   CONTEXT                          - For scope-id in the tag value
 
+# Step gating: only block on ALB readiness for the path that actually relies
+# on it — route53 scopes that manage ALBs via the AWS Load Balancer Controller.
+# Other DNS types (azure, external_dns) provision a different networking stack
+# and would never see the ALB transition to `active`, so the wait would always
+# time out and fail the scope creation.
+if [ "${DNS_TYPE:-}" != "route53" ]; then
+	log debug "📋 DNS type is '${DNS_TYPE:-unset}', skipping ALB active-state wait"
+	return 0 2>/dev/null || exit 0
+fi
+
 TIMEOUT_SECONDS=$(get_config_value \
 	--env ALB_AUTOCREATE_TIMEOUT_SECONDS \
 	--provider '.providers["container-orchestration"].balancer.autocreate_timeout_seconds' \
 	--default "300"
 )
+
+if ! [[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+	log error "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: '$TIMEOUT_SECONDS'"
+	exit 1
+fi
 
 deadline=$(($(date +%s) + TIMEOUT_SECONDS))
 poll_interval=10
