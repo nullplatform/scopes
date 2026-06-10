@@ -257,3 +257,34 @@ teardown() {
 
 	[ -f "$OUTPUT_DIR/ingress-dummy-${ALB_NAME}.yaml" ]
 }
+
+# =============================================================================
+# Dummy host generation
+# =============================================================================
+@test "autocreate_alb: derives dummy host via domain-generate using the ALB name as scopeSlug" {
+	# Run with the real domain-generate binary (no mock) — it's deterministic.
+	# Use a custom gomplate that writes the rendered output through so we can
+	# inspect the final host.
+	gomplate() {
+		local prev=""
+		for arg in "$@"; do
+			if [ "$prev" = "--out" ]; then OUT_PATH="$arg"; fi
+			if [ "$prev" = "-c" ]; then CTX_ARG="$arg"; fi
+			prev="$arg"
+		done
+		# Copy the context json next to the rendered file for assertion access
+		local ctx_file="${CTX_ARG#.=}"
+		cp "$ctx_file" "$OUTPUT_DIR/_rendered_context.json"
+		echo "rendered" > "$OUT_PATH"
+		return 0
+	}
+	export -f gomplate
+
+	source "$SCRIPT"
+
+	# domain-generate produces "ns-app-<alb_name>-<hash>.nullapps.io" with the
+	# slugs taken from CONTEXT.namespace / .application and scopeSlug=$ALB_NAME.
+	local dummy_host
+	dummy_host=$(jq -r '.dummy_host' "$OUTPUT_DIR/_rendered_context.json")
+	[[ "$dummy_host" =~ ^ns-1-app-1-${ALB_NAME}-[a-z0-9]+\.nullapps\.io$ ]]
+}

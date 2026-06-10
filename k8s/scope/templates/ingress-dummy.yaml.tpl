@@ -8,9 +8,7 @@ metadata:
     nullplatform-autocreate: "true"
     alb_name: {{ .alb_name }}
   annotations:
-    alb.ingress.kubernetes.io/actions.response-404: >-
-      {"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404
-        scope not found or has not been deployed yet"}}
+    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
     alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/load-balancer-name: {{ .alb_name }}
@@ -20,7 +18,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-    - host: {{ .alb_name }}.{{ .base_domain }}
+    - host: {{ .dummy_host }}
       http:
         paths:
           - path: /
