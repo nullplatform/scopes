@@ -1,0 +1,32 @@
+name: Publish Scopes Artifact
+
+# Every push to this branch registers the repository at the pushed commit as
+# a platform artifact, visible to every organization. Registration is an
+# idempotent upsert: the repo URL identifies the artifact, each commit mints
+# one immutable revision — re-runs of the same commit return the same ids.
+on:
+  push:
+    branches: [alpha-packages]
+
+jobs:
+  publish-artifact:
+    name: Register git_repository artifact
+    runs-on: ubuntu-24.04
+    env:
+      NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
+      # Owner NRN for the artifact (configure as a repository/organization
+      # variable). Writes are gated on it; making the artifact globally
+      # visible additionally requires artifact permissions org-wide.
+      NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
+    steps:
+      - name: Install np CLI (alpha-packages build)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
+
+      - name: Register scopes artifact (visible to everyone)
+        run: |
+          np artifact create \
+            --nrn "$NP_ARTIFACT_NRN" \
+            --type git_repository \
+            --url "https://github.com/${{ github.repository }}.git" \
+            --reference "${{ github.sha }}" \
+            --visible-to "organization=*"
