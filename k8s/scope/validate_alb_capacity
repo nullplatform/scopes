@@ -135,6 +135,7 @@ if [[ "$TOTAL_RULES" -ge "$ALB_MAX_CAPACITY" ]]; then
     log error "   • Increase ALB_MAX_CAPACITY in values.yaml or container-orchestration provider (AWS limit is 100 per listener)"
     log error "   • Request an AWS service quota increase for rules per ALB listener"
     log error "   • Consider using a separate ALB for additional scopes"
+    log error "   • Enable ALB autocreation so the platform provisions a new ALB automatically when the pool is exhausted: set ALB_AUTOCREATE_ENABLED=true in values.yaml or in the container-orchestration provider"
     log error ""
     exit 1
 fi
