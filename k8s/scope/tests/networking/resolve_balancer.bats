@@ -373,8 +373,8 @@ mock_alb_rules() {
 
   run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"'
 
-  assert_contains "$output" "🔍 Additional balancers configured, resolving least-loaded ALB..."
-  assert_contains "$output" "📋 Candidate balancers: co-balancer-public, alb-extra-1, alb-extra-2"
+  assert_contains "$output" "🔍 Resolving ALB for visibility=internet-facing (DNS_TYPE=route53)"
+  assert_contains "$output" "📋 Candidate balancers (base + additional): co-balancer-public, alb-extra-1, alb-extra-2"
 }
 
 # =============================================================================
@@ -546,8 +546,8 @@ mock_alb_rules() {
   run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "🔍 Additional balancers configured, resolving least-loaded ALB..."
-  assert_contains "$output" "📋 Candidate balancers: co-balancer-public, in-flight-alb"
+  assert_contains "$output" "🔍 Resolving ALB for visibility=internet-facing (DNS_TYPE=route53)"
+  assert_contains "$output" "📋 Candidate balancers (base + additional): co-balancer-public, in-flight-alb"
   assert_contains "$output" "📋 ALB 'co-balancer-public': 50 rules"
   assert_contains "$output" "📋 ALB 'in-flight-alb' not yet visible in AWS (likely being provisioned); treating as 0 rules"
   assert_contains "$output" "📋 ALB 'in-flight-alb': 0 rules"
@@ -582,7 +582,7 @@ STUB
   assert_equal "$status" "0"
   assert_contains "$output" "📋 ALB 'co-balancer-public': 60 rules"
   assert_contains "$output" "📋 ALB 'alb-extra-1': 55 rules"
-  assert_contains "$output" "🔧 All candidate ALBs are at or above capacity (55/50); triggering autocreate"
+  assert_contains "$output" "🔧 Best candidate ALB 'alb-extra-1' is at or above capacity (55/50); triggering autocreate"
   assert_contains "$output" "ALB_NAME=auto-public-stubbed ALB_AUTOCREATED=true"
 }
 
@@ -619,6 +619,44 @@ STUB
   assert_contains "$output" "📝 Selected ALB 'alb-extra-1' (10 rules) over default 'co-balancer-public'"
   assert_contains "$output" "ALB_NAME=alb-extra-1"
   [[ "$output" != *"triggering autocreate"* ]]
+}
+
+@test "resolve_balancer: triggers autocreate on single-ALB setup (no additional balancers) when over capacity" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export ALB_AUTOCREATE_ENABLED="true"
+  export ALB_MAX_CAPACITY="10"
+  # No additional_public_balancers — pool is just the base ALB
+  mock_alb_rules "co-balancer-public 16"
+
+  cat > "$BATS_TEST_TMPDIR/autocreate_alb_stub" <<'STUB'
+export ALB_NAME="auto-public-stubbed"
+export ALB_AUTOCREATED="true"
+STUB
+  PATCHED_SCRIPT="$BATS_TEST_TMPDIR/resolve_balancer_patched"
+  AUTOCREATE_STUB="$BATS_TEST_TMPDIR/autocreate_alb_stub"
+  sed "s|\\\$_RESOLVE_BALANCER_DIR/autocreate_alb|$AUTOCREATE_STUB|" "$SCRIPT" > "$PATCHED_SCRIPT"
+
+  run bash -c "export LOG_LEVEL=debug; source '$PATCHED_SCRIPT'; echo \"ALB_NAME=\$ALB_NAME ALB_AUTOCREATED=\$ALB_AUTOCREATED\""
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 No additional balancers configured; candidate pool is just the base ALB 'co-balancer-public'"
+  assert_contains "$output" "📋 ALB 'co-balancer-public': 16 rules"
+  assert_contains "$output" "🔧 Best candidate ALB 'co-balancer-public' is at or above capacity (16/10); triggering autocreate"
+  assert_contains "$output" "ALB_NAME=auto-public-stubbed ALB_AUTOCREATED=true"
+}
+
+@test "resolve_balancer: single-ALB setup over capacity but autocreate disabled logs reason and lets validate reject" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export ALB_AUTOCREATE_ENABLED="false"
+  export ALB_MAX_CAPACITY="10"
+  mock_alb_rules "co-balancer-public 16"
+
+  run bash -c 'export LOG_LEVEL=debug; source "$SCRIPT"; echo "ALB_NAME=$ALB_NAME"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 ALB 'co-balancer-public': 16 rules"
+  assert_contains "$output" "📋 Best candidate ALB 'co-balancer-public' is over capacity (16/10) but autocreate is disabled; validate_alb_capacity will reject the deployment"
+  assert_contains "$output" "ALB_NAME=co-balancer-public"
 }
 
 @test "resolve_balancer: emits full warn when ALB_MAX_CAPACITY is non-numeric and skips autocreate" {
