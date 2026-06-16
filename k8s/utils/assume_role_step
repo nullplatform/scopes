@@ -1,0 +1,39 @@
+#!/bin/bash
+# Dedicated workflow step: resolve the target IAM role and assume it, exporting
+# temporary credentials so every subsequent step inherits them.
+#
+# Runs FIRST in each AWS-touching workflow (right after `load logging`). The
+# workflow YAML must declare AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
+# AWS_SESSION_TOKEN as output:environment so the engine propagates them.
+#
+# Resolution precedence (see resolve_assume_role_arn in assume_role_lib):
+#   $ASSUME_ROLE_ARN -> IAM provider by selector -> scope-config
+#                    -> $ASSUME_ROLE_ARN_DEFAULT -> agent credentials
+#
+# Requires: aws CLI, jq, np. Expects: CONTEXT (engine-injected), SCOPE_ID (opt).
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/assume_role_lib"
+
+# Account NRN from CONTEXT, stripping the :namespace= segment and everything
+# after it — the AWS IAM provider is account-level.
+NRN=$(echo "${CONTEXT:-}" | jq -r '.scope.nrn // .service.nrn // .entity_nrn // ""' 2>/dev/null)
+ACCOUNT_NRN=$(echo "$NRN" | sed 's/:namespace=.*$//')
+ASSUME_ROLE_SELECTOR="${ASSUME_ROLE_SELECTOR:-k8s}"
+
+ASSUME_ROLE_ARN=$(resolve_assume_role_arn "$ACCOUNT_NRN" "$ASSUME_ROLE_SELECTOR")
+export ASSUME_ROLE_ARN
+
+# utils/assume_role performs sts:AssumeRole and exports AWS_* when an ARN is set,
+# or no-ops (leaving agent credentials in place) when empty. Non-zero only when
+# sts:AssumeRole itself fails.
+if ! source "$SCRIPT_DIR/assume_role"; then
+  log error "   ❌ assume_role step failed: could not assume $ASSUME_ROLE_ARN"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • The agent's role is not allowed to sts:AssumeRole the target role"
+  log error "   • The target role's trust policy does not trust the agent role"
+  log error "   • The resolved ARN is wrong (check IAM provider selector=$ASSUME_ROLE_SELECTOR)"
+  log error ""
+  exit 1
+fi
