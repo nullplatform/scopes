@@ -97,8 +97,9 @@ if [ "$state" != "active" ]; then
 fi
 
 # Audit tags — only on the scope that triggered the autocreate, so the cloud
-# carries the lineage of which scope created which ALB. Discovery does not
-# depend on these tags.
+# carries the lineage of which scope created which ALB. Failure is non-fatal:
+# the provider registration (the authoritative source) already succeeded; the
+# tags are documentation only.
 if [ "${ALB_AUTOCREATED:-false}" = "true" ]; then
 	scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // "unknown"')
 	if ! aws elbv2 add-tags \
@@ -109,7 +110,8 @@ if [ "${ALB_AUTOCREATED:-false}" = "true" ]; then
 			"Key=nullplatform:visibility,Value=$INGRESS_VISIBILITY" \
 			"Key=nullplatform:created-by-scope-id,Value=$scope_id" \
 		>/dev/null 2>&1; then
-		log warn "⚠️  Could not tag ALB '$ALB_NAME' (audit only — provider registration already succeeded)"
+		log warn "⚠️  Could not tag ALB '$ALB_NAME' (audit only — provider registration already succeeded, continuing)"
+		log warn "💡 The agent role needs the IAM permission 'elasticloadbalancing:AddTags' on Application Load Balancers in region '$REGION' to write the audit tags (nullplatform:managed-by, nullplatform:visibility, nullplatform:created-by-scope-id)"
 	else
 		log debug "📋 Tagged ALB '$ALB_NAME' with managed-by=autocreate"
 	fi

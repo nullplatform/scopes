@@ -195,7 +195,7 @@ mock_aws_state() {
 	assert_contains "$output" "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: '0'"
 }
 
-@test "wait_for_alb: tag failure logs full warn message but exits 0" {
+@test "wait_for_alb: tag failure logs warn with required IAM permission but exits 0" {
 	export ALB_AUTOCREATED="true"
 	local arn="arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/$ALB_NAME/abc"
 	eval "aws() {
@@ -214,5 +214,6 @@ mock_aws_state() {
 
 	assert_equal "$status" "0"
 	assert_contains "$output" "✅ ALB 'test-alb' is active"
-	assert_contains "$output" "⚠️  Could not tag ALB 'test-alb' (audit only — provider registration already succeeded)"
+	assert_contains "$output" "⚠️  Could not tag ALB 'test-alb' (audit only — provider registration already succeeded, continuing)"
+	assert_contains "$output" "💡 The agent role needs the IAM permission 'elasticloadbalancing:AddTags' on Application Load Balancers in region 'us-east-1' to write the audit tags (nullplatform:managed-by, nullplatform:visibility, nullplatform:created-by-scope-id)"
 }
