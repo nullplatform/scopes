@@ -41,6 +41,13 @@ teardown() {
   assert_equal "$output" "arn:aws:iam::111:role/k8s-role"
 }
 
+@test "arn_for_selector_from_json: first match wins when selector is duplicated" {
+  json='{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/first"},{"selector":"k8s","arn":"arn:aws:iam::111:role/second"}]}}}'
+  run arn_for_selector_from_json "$json" "k8s"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "arn:aws:iam::111:role/first"
+}
+
 @test "arn_for_selector_from_json: empty when no selector matches" {
   json='{"attributes":{"iam_role_arns":{"arns":[{"selector":"lambda","arn":"arn:aws:iam::111:role/lambda-role"}]}}}'
   run arn_for_selector_from_json "$json" "k8s"
