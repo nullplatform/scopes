@@ -18,7 +18,7 @@ setup() {
   aws() {
     case "$*" in
       *"sts assume-role"*)
-        echo '{"Credentials":{"AccessKeyId":"AKIAEXAMPLE","SecretAccessKey":"secret123","SessionToken":"token123"}}' ;;
+        echo '{"Credentials":{"AccessKeyId":"AKIAEXAMPLE","SecretAccessKey":"secret123","SessionToken":"token123"}}'; return 0 ;;
       *) return 0 ;;
     esac
   }
@@ -46,6 +46,22 @@ setup() {
       *) return 0 ;;
     esac
   }
+  export -f aws
+  run bash -c "source '$HELPER'"
+  [ "$status" -ne 0 ]
+}
+
+@test "assume_role: returns non-zero when sts returns malformed JSON" {
+  export ASSUME_ROLE_ARN="arn:aws:iam::111:role/k8s-role"
+  aws() { echo "not-json"; return 0; }
+  export -f aws
+  run bash -c "source '$HELPER'"
+  [ "$status" -ne 0 ]
+}
+
+@test "assume_role: returns non-zero when sts JSON lacks Credentials" {
+  export ASSUME_ROLE_ARN="arn:aws:iam::111:role/k8s-role"
+  aws() { echo '{}'; return 0; }
   export -f aws
   run bash -c "source '$HELPER'"
   [ "$status" -ne 0 ]
