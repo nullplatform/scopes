@@ -44,9 +44,11 @@ setup() {
 @test "assume_role_step: no role resolved is not an error (agent creds remain)" {
   np() { echo '{"results":[]}'; }
   export -f np
-  run bash -c "source '$STEP'; echo \"key=\${AWS_ACCESS_KEY_ID:-none} arn=[\${ASSUME_ROLE_ARN}]\""
+  run bash -c "source '$STEP'; echo \"ak=\${AWS_ACCESS_KEY_ID:-none} sk=\${AWS_SECRET_ACCESS_KEY:-none} st=\${AWS_SESSION_TOKEN:-none} arn=[\${ASSUME_ROLE_ARN}]\""
   [ "$status" -eq 0 ]
-  assert_contains "$output" "key=none"
+  assert_contains "$output" "ak=none"
+  assert_contains "$output" "sk=none"
+  assert_contains "$output" "st=none"
   assert_contains "$output" "arn=[]"
 }
 
@@ -76,4 +78,12 @@ setup() {
   run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
   [ "$status" -eq 0 ]
   assert_contains "$output" "arn:aws:iam::111:role/custom-role"
+}
+
+@test "assume_role_step: pre-set ASSUME_ROLE_ARN overrides provider resolution" {
+  export ASSUME_ROLE_ARN="arn:aws:iam::111:role/explicit-override"
+  # np would resolve a different role, but the explicit override must win
+  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN|\$AWS_ACCESS_KEY_ID\""
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "arn:aws:iam::111:role/explicit-override|AKIA1"
 }
