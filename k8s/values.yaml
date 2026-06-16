@@ -19,6 +19,13 @@ configuration:
   ALB_MAX_LISTENERS: 48
   ALB_METRICS_PUBLISH_ENABLED: false
 # ALB_METRICS_PUBLISH_TARGET: cloudwatch # Available values: cloudwatch | datadog
+  ALB_AUTOCREATE_ENABLED: false
+# When true and every candidate ALB is at or above ALB_MAX_CAPACITY, the scope
+# creation provisions a new ALB via a dummy Ingress, patches the
+# container-orchestration provider to register the new ALB in the
+# additional_*_names list, and waits for it to become active.
+  ALB_AUTOCREATE_NAME_PREFIX: nullplatform-auto-
+  ALB_AUTOCREATE_TIMEOUT_SECONDS: 300
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"

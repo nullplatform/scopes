@@ -127,6 +127,7 @@ teardown() {
   assert_contains "$output" "Increase ALB_MAX_CAPACITY in values.yaml or container-orchestration provider (AWS limit is 100 per listener)"
   assert_contains "$output" "Request an AWS service quota increase for rules per ALB listener"
   assert_contains "$output" "Consider using a separate ALB for additional scopes"
+  assert_contains "$output" "Enable ALB autocreation so the platform provisions a new ALB automatically when the pool is exhausted: set ALB_AUTOCREATE_ENABLED=true in values.yaml or in the container-orchestration provider"
 }
 
 @test "validate_alb_capacity: fails when over capacity" {

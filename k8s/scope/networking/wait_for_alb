@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# Waits for the resolved ALB to reach `active` state in AWS. Runs as the post
+# step of the apply_templates that lands the dummy Ingress (the trigger for
+# the AWS Load Balancer Controller to provision the ALB).
+#
+# When ALB_AUTOCREATED is set, also tags the ALB so the cloud has a record of
+# what is managed by the platform. The tag is documentation only — the
+# authoritative registration is in the container-orchestration provider, done
+# by autocreate_alb.
+#
+# Inputs (env vars):
+#   ALB_NAME                         - Resolved ALB name
+#   REGION                           - AWS region
+#   INGRESS_VISIBILITY               - For the visibility tag value
+#   ALB_AUTOCREATED                  - "true" when this scope triggered autocreate
+#   ALB_AUTOCREATE_TIMEOUT_SECONDS   - Max seconds to wait (default 300)
+#   CONTEXT                          - For scope-id in the tag value
+
+# Step gating: only block on ALB readiness for the path that actually relies
+# on it — route53 scopes that manage ALBs via the AWS Load Balancer Controller.
+# Other DNS types (azure, external_dns) provision a different networking stack
+# and would never see the ALB transition to `active`, so the wait would always
+# time out and fail the scope creation.
+if [ "${DNS_TYPE:-}" != "route53" ]; then
+	log debug "📋 DNS type is '${DNS_TYPE:-unset}', skipping ALB active-state wait"
+	return 0 2>/dev/null || exit 0
+fi
+
+TIMEOUT_SECONDS=$(get_config_value \
+	--env ALB_AUTOCREATE_TIMEOUT_SECONDS \
+	--provider '.providers["container-orchestration"].balancer.autocreate_timeout_seconds' \
+	--default "300"
+)
+
+if ! [[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+	log error "❌ ALB_AUTOCREATE_TIMEOUT_SECONDS must be a positive integer, got: '$TIMEOUT_SECONDS'"
+	exit 1
+fi
+
+deadline=$(($(date +%s) + TIMEOUT_SECONDS))
+poll_interval=10
+polls_per_heartbeat=3
+# Counter-based heartbeat: every Nth poll we emit a progress log. Using a
+# counter (instead of wall-clock diff) keeps the displayed elapsed time on
+# clean 30s boundaries; otherwise the latency of each AWS call drifts the
+# wall-clock heartbeat to odd numbers like 33s or 63s.
+polls_since_heartbeat=0
+heartbeats_emitted=0
+
+log info "⏳ Waiting up to ${TIMEOUT_SECONDS}s for ALB '$ALB_NAME' to become active..."
+
+state=""
+alb_arn=""
+while [ "$(date +%s)" -lt "$deadline" ]; do
+	lb_json=$(aws elbv2 describe-load-balancers \
+		--names "$ALB_NAME" \
+		--region "$REGION" \
+		--output json 2>/dev/null) || lb_json=""
+
+	alb_arn=$(echo "$lb_json" | jq -r '.LoadBalancers[0].LoadBalancerArn // empty' 2>/dev/null) || alb_arn=""
+	state=$(echo "$lb_json" | jq -r '.LoadBalancers[0].State.Code // empty' 2>/dev/null) || state=""
+
+	if [ -n "$alb_arn" ]; then
+		log debug "📋 ALB '$ALB_NAME' state: ${state:-pending}"
+
+		if [ "$state" = "active" ]; then
+			log info "✅ ALB '$ALB_NAME' is active"
+			break
+		fi
+
+		if [ "$state" = "failed" ]; then
+			log error "❌ ALB '$ALB_NAME' reached state 'failed'"
+			exit 1
+		fi
+	fi
+
+	polls_since_heartbeat=$((polls_since_heartbeat + 1))
+	if [ "$polls_since_heartbeat" -ge "$polls_per_heartbeat" ]; then
+		heartbeats_emitted=$((heartbeats_emitted + 1))
+		elapsed=$((heartbeats_emitted * polls_per_heartbeat * poll_interval))
+		log info "⏳ Still waiting for ALB '$ALB_NAME' to become active (${state:-pending}, ~${elapsed}s elapsed)"
+		polls_since_heartbeat=0
+	fi
+
+	sleep "$poll_interval"
+done
+
+if [ "$state" != "active" ]; then
+	log error "❌ Timed out after ${TIMEOUT_SECONDS}s waiting for ALB '$ALB_NAME' to become active"
+	log error "💡 Possible causes:"
+	log error "   The AWS Load Balancer Controller may be slow, mis-configured, or the AWS account may be hitting an ALB quota"
+	log error "🔧 How to fix:"
+	log error "   • Check controller logs: kubectl -n kube-system logs deploy/aws-load-balancer-controller"
+	log error "   • Verify ALB quota: aws service-quotas get-service-quota --service-code elasticloadbalancing --quota-code L-53DA6B97"
+	exit 1
+fi
+
+# Audit tags — only on the scope that triggered the autocreate, so the cloud
+# carries the lineage of which scope created which ALB. Failure is non-fatal:
+# the provider registration (the authoritative source) already succeeded; the
+# tags are documentation only.
+if [ "${ALB_AUTOCREATED:-false}" = "true" ]; then
+	scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // "unknown"')
+	if ! aws elbv2 add-tags \
+		--resource-arns "$alb_arn" \
+		--region "$REGION" \
+		--tags \
+			"Key=nullplatform:managed-by,Value=autocreate" \
+			"Key=nullplatform:visibility,Value=$INGRESS_VISIBILITY" \
+			"Key=nullplatform:created-by-scope-id,Value=$scope_id" \
+		>/dev/null 2>&1; then
+		log warn "⚠️  Could not tag ALB '$ALB_NAME' (audit only — provider registration already succeeded, continuing)"
+		log warn "💡 The agent role needs the IAM permission 'elasticloadbalancing:AddTags' on Application Load Balancers in region '$REGION' to write the audit tags (nullplatform:managed-by, nullplatform:visibility, nullplatform:created-by-scope-id)"
+	else
+		log debug "📋 Tagged ALB '$ALB_NAME' with managed-by=autocreate"
+	fi
+fi
