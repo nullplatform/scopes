@@ -28,5 +28,5 @@ jobs:
             --nrn "$NP_ARTIFACT_NRN" \
             --type git_repository \
             --url "https://github.com/${{ github.repository }}.git" \
-            --reference "2836cfb5b090843095d6ede5b6b56bc1065d89b6" \
+            --reference "328e44c1e688178a0ce45768585d76f790cf94ee" \
             --visible-to "organization=*"
