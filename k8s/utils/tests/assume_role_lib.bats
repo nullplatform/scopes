@@ -30,15 +30,19 @@ setup() {
   unset ASSUME_ROLE_ARN ASSUME_ROLE_ARN_DEFAULT
 }
 
+teardown() {
+  unset ASSUME_ROLE_ARN ASSUME_ROLE_ARN_DEFAULT
+}
+
 @test "arn_for_selector_from_json: returns the arn matching the selector" {
-  json='{"attributes":{"iam_role_arns":{"arns":[{"selector":"lambda","arn":"arn:lambda"},{"selector":"k8s","arn":"arn:k8s"}]}}}'
+  json='{"attributes":{"iam_role_arns":{"arns":[{"selector":"lambda","arn":"arn:aws:iam::111:role/lambda-role"},{"selector":"k8s","arn":"arn:aws:iam::111:role/k8s-role"}]}}}'
   run arn_for_selector_from_json "$json" "k8s"
   [ "$status" -eq 0 ]
-  assert_equal "$output" "arn:k8s"
+  assert_equal "$output" "arn:aws:iam::111:role/k8s-role"
 }
 
 @test "arn_for_selector_from_json: empty when no selector matches" {
-  json='{"attributes":{"iam_role_arns":{"arns":[{"selector":"lambda","arn":"arn:lambda"}]}}}'
+  json='{"attributes":{"iam_role_arns":{"arns":[{"selector":"lambda","arn":"arn:aws:iam::111:role/lambda-role"}]}}}'
   run arn_for_selector_from_json "$json" "k8s"
   [ "$status" -eq 0 ]
   assert_equal "$output" ""
@@ -84,6 +88,34 @@ setup() {
   np() { echo '{"results":[]}'; }
   export -f np
   run resolve_assume_role_arn "organization=1:account=2" "k8s"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" ""
+}
+
+@test "provider_arn_for_selector: resolves the arn for the matching selector via np" {
+  run provider_arn_for_selector "organization=1:account=2" "k8s"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "arn:aws:iam::111:role/k8s-role"
+}
+
+@test "provider_arn_for_selector: empty when no IAM provider is found" {
+  np() { echo '{"results":[]}'; }
+  export -f np
+  run provider_arn_for_selector "organization=1:account=2" "k8s"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" ""
+}
+
+@test "scope_config_assume_role_arn: returns assume_role.arn from scope-configurations provider" {
+  run scope_config_assume_role_arn "organization=1:account=2"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "arn:aws:iam::111:role/scope-cfg-role"
+}
+
+@test "scope_config_assume_role_arn: empty when no scope-configurations provider" {
+  np() { echo '{"results":[]}'; }
+  export -f np
+  run scope_config_assume_role_arn "organization=1:account=2"
   [ "$status" -eq 0 ]
   assert_equal "$output" ""
 }
