@@ -34,7 +34,7 @@ provider_arn_for_selector() {
           --specification_slug aws-iam-configuration \
           --format json --limit 100 2>/dev/null \
         | jq -r '[ (.results // [])[] ] | first | .id // ""' 2>/dev/null)
-  [ -n "$pid" ] && [ "$pid" != "null" ] || return 0
+  [ -n "$pid" ] && [ "$pid" != "null" ] || return 0  # != "null": defensive in case the // "" jq default is ever removed
 
   data=$(np provider read --id "$pid" --format json 2>/dev/null)
   arn_for_selector_from_json "$data" "$selector"
@@ -57,6 +57,9 @@ scope_config_assume_role_arn() {
 #   2. AWS IAM provider (aws-iam-configuration) by <selector>
 #   3. scope-configurations provider assume_role.arn (back-compat)
 #   4. $ASSUME_ROLE_ARN_DEFAULT env var (per-account agent default)
+# Note: ASSUME_ROLE_ARN="" (explicitly empty) is treated the same as unset —
+# the chain continues to the next source. This is intentional and matches the
+# upstream scopes-lambda reference behavior.
 resolve_assume_role_arn() {
   local nrn="$1" selector="$2" arn=""
 
