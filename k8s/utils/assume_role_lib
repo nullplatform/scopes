@@ -1,0 +1,75 @@
+#!/bin/bash
+# Sourceable library of PURE helpers for assume-role resolution.
+# Defines functions only — NO side effects on source, so it can be unit-tested
+# and reused by utils/assume_role_step.
+#
+# Requires (at call time): np, jq.
+
+# arn_for_selector_from_json <provider_read_json> <selector>
+# Echoes the IAM role ARN whose entry matches <selector>, or "" if none.
+# First match wins. Returns "" on missing/malformed input (never crashes).
+arn_for_selector_from_json() {
+  local json="$1" selector="$2"
+  [ -n "$json" ] || return 0
+  [ -n "$selector" ] || return 0
+  printf '%s' "$json" | jq -r --arg sel "$selector" '
+    [ .attributes.iam_role_arns.arns[]?
+      | select(.selector == $sel)
+      | .arn ]
+    | first // ""' 2>/dev/null
+}
+
+# provider_arn_for_selector <nrn> <selector>
+# Looks up the AWS IAM provider (specification aws-iam-configuration) at <nrn>,
+# reads it, and echoes the ARN matching <selector>. Empty if no provider/match.
+# `np provider list` does not return deep attributes, so we list to get the id
+# then `np provider read --id` to obtain the arns.
+provider_arn_for_selector() {
+  local nrn="$1" selector="$2"
+  [ -n "$nrn" ] || return 0
+  [ -n "$selector" ] || return 0
+
+  local pid data
+  pid=$(np provider list --nrn "$nrn" \
+          --specification_slug aws-iam-configuration \
+          --format json --limit 100 2>/dev/null \
+        | jq -r '[ (.results // [])[] ] | first | .id // ""' 2>/dev/null)
+  [ -n "$pid" ] && [ "$pid" != "null" ] || return 0
+
+  data=$(np provider read --id "$pid" --format json 2>/dev/null)
+  arn_for_selector_from_json "$data" "$selector"
+}
+
+# scope_config_assume_role_arn <nrn>
+# Back-compat fallback: first .attributes.assume_role.arn in the
+# scope-configurations provider(s) at <nrn>, or "".
+scope_config_assume_role_arn() {
+  local nrn="$1"
+  [ -n "$nrn" ] || return 0
+  np provider list --nrn "$nrn" --categories scope-configurations \
+      --format json --limit 100 2>/dev/null \
+    | jq -r '[ (.results // [])[] | .attributes.assume_role.arn? // empty ] | first // ""' 2>/dev/null
+}
+
+# resolve_assume_role_arn <account_nrn> <selector>
+# Full precedence chain. Echoes the ARN to assume ("" = use agent credentials):
+#   1. $ASSUME_ROLE_ARN env var (explicit override)
+#   2. AWS IAM provider (aws-iam-configuration) by <selector>
+#   3. scope-configurations provider assume_role.arn (back-compat)
+#   4. $ASSUME_ROLE_ARN_DEFAULT env var (per-account agent default)
+resolve_assume_role_arn() {
+  local nrn="$1" selector="$2" arn=""
+
+  arn="${ASSUME_ROLE_ARN:-}"
+
+  if [ -z "$arn" ] && [ -n "$nrn" ] && [ -n "$selector" ]; then
+    arn=$(provider_arn_for_selector "$nrn" "$selector")
+  fi
+
+  if [ -z "$arn" ] && [ -n "$nrn" ]; then
+    arn=$(scope_config_assume_role_arn "$nrn")
+  fi
+
+  arn="${arn:-${ASSUME_ROLE_ARN_DEFAULT:-}}"
+  printf '%s' "$arn"
+}
