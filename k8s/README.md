@@ -134,6 +134,34 @@ AWS IAM configuration for Kubernetes service accounts.
 | **IAM_POLICIES** | List of IAM policies to attach to the role | `security.iam_policies` |
 | **IAM_BOUNDARY_ARN** | ARN of the permissions boundary policy | `security.iam_boundary_arn` |
 
+#### Assuming an IAM role for AWS operations
+
+By default the scope's AWS CLI calls (IAM, ELBv2, Route53, S3, CloudWatch) use
+the agent's own credentials. To run them under a dedicated IAM role per account,
+configure the nullplatform **AWS IAM provider** (`aws-iam-configuration`) with an
+`iam_role_arns.arns` entry whose `selector` is `k8s`:
+
+```hcl
+attributes = {
+  iam_role_arns = {
+    arns = [
+      { selector = "k8s", arn = "arn:aws:iam::<account>:role/<role>" }
+    ]
+  }
+}
+```
+
+Resolution precedence (first non-empty wins):
+
+1. `ASSUME_ROLE_ARN` environment variable (explicit override).
+2. AWS IAM provider entry matching the selector (`ASSUME_ROLE_SELECTOR`, default `k8s`).
+3. `scope-configurations` provider `assume_role.arn` (back-compat).
+4. `ASSUME_ROLE_ARN_DEFAULT` environment variable.
+5. None configured → the agent's credentials are used (no role assumed).
+
+The target role's trust policy must allow the agent's role to call
+`sts:AssumeRole`.
+
 #### Vault
 
 HashiCorp Vault configuration for secrets management.

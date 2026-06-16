@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Scopes that use AWS can now assume an IAM role resolved from the nullplatform AWS IAM provider (selector `k8s`), falling back to the agent's credentials when no role is configured.
+
 ## [1.12.0] - 2026-06-08
 - Fix: do not inject file parameter as env vars
 - Public and private scopes now register DNS records in their correct Route53 hosted zone when using `DNS_TYPE=external_dns`, preventing cross-zone record leakage
