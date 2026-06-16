@@ -155,5 +155,5 @@ testing/docker/certs/
 # Visual Studio Code
 .vscode/
 
-# Superpowers implementation plans (local-only)
-docs/superpowers/plans/
+# Superpowers specs and implementation plans (local-only)
+docs/superpowers/
