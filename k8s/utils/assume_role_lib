@@ -19,19 +19,26 @@ arn_for_selector_from_json() {
     | first // ""' 2>/dev/null
 }
 
-# provider_arn_for_selector <nrn> <selector>
+# provider_arn_for_selector <nrn> <selector> [dimensions]
 # Looks up the AWS IAM provider (specification aws-iam-configuration) at <nrn>,
 # reads it, and echoes the ARN matching <selector>. Empty if no provider/match.
+# When <dimensions> ("key=value,key=value") is given, it is passed to
+# `np provider list --dimensions` so the platform resolves the provider config
+# that applies to the scope's dimensions (e.g. a region-specific IAM provider).
 # `np provider list` does not return deep attributes, so we list to get the id
 # then `np provider read --id` to obtain the arns.
 provider_arn_for_selector() {
-  local nrn="$1" selector="$2"
+  local nrn="$1" selector="$2" dimensions="${3:-}"
   [ -n "$nrn" ] || return 0
   [ -n "$selector" ] || return 0
+
+  local -a dim_args=()
+  [ -n "$dimensions" ] && dim_args=(--dimensions "$dimensions")
 
   local pid data
   pid=$(np provider list --nrn "$nrn" \
           --specification_slug aws-iam-configuration \
+          "${dim_args[@]}" \
           --format json --limit 100 2>/dev/null \
         | jq -r '[ (.results // [])[] ] | first | .id // ""' 2>/dev/null)
   [ -n "$pid" ] && [ "$pid" != "null" ] || return 0  # != "null": defensive in case the // "" jq default is ever removed
@@ -40,37 +47,42 @@ provider_arn_for_selector() {
   arn_for_selector_from_json "$data" "$selector"
 }
 
-# scope_config_assume_role_arn <nrn>
+# scope_config_assume_role_arn <nrn> [dimensions]
 # Back-compat fallback: first .attributes.assume_role.arn in the
-# scope-configurations provider(s) at <nrn>, or "".
+# scope-configurations provider(s) at <nrn>, or "". <dimensions> is passed
+# through to `np provider list --dimensions` for dimension-aware resolution.
 scope_config_assume_role_arn() {
-  local nrn="$1"
+  local nrn="$1" dimensions="${2:-}"
   [ -n "$nrn" ] || return 0
+  local -a dim_args=()
+  [ -n "$dimensions" ] && dim_args=(--dimensions "$dimensions")
   np provider list --nrn "$nrn" --categories scope-configurations \
-      --format json --limit 100 2>/dev/null \
+      "${dim_args[@]}" --format json --limit 100 2>/dev/null \
     | jq -r '[ (.results // [])[] | .attributes.assume_role.arn? // empty ] | first // ""' 2>/dev/null
 }
 
-# resolve_assume_role_arn <account_nrn> <selector>
+# resolve_assume_role_arn <account_nrn> <selector> [dimensions]
 # Full precedence chain. Echoes the ARN to assume ("" = use agent credentials):
 #   1. $ASSUME_ROLE_ARN env var (explicit override)
-#   2. AWS IAM provider (aws-iam-configuration) by <selector>
+#   2. AWS IAM provider (aws-iam-configuration) by <selector>, resolved for <dimensions>
 #   3. scope-configurations provider assume_role.arn (back-compat)
 #   4. $ASSUME_ROLE_ARN_DEFAULT env var (per-account agent default)
+# <dimensions> ("key=value,key=value") selects the dimension-appropriate provider
+# config; pass "" to list without dimension filtering.
 # Note: ASSUME_ROLE_ARN="" (explicitly empty) is treated the same as unset —
 # the chain continues to the next source. This is intentional and matches the
 # upstream scopes-lambda reference behavior.
 resolve_assume_role_arn() {
-  local nrn="$1" selector="$2" arn=""
+  local nrn="$1" selector="$2" dimensions="${3:-}" arn=""
 
   arn="${ASSUME_ROLE_ARN:-}"
 
   if [ -z "$arn" ] && [ -n "$nrn" ] && [ -n "$selector" ]; then
-    arn=$(provider_arn_for_selector "$nrn" "$selector")
+    arn=$(provider_arn_for_selector "$nrn" "$selector" "$dimensions")
   fi
 
   if [ -z "$arn" ] && [ -n "$nrn" ]; then
-    arn=$(scope_config_assume_role_arn "$nrn")
+    arn=$(scope_config_assume_role_arn "$nrn" "$dimensions")
   fi
 
   arn="${arn:-${ASSUME_ROLE_ARN_DEFAULT:-}}"
