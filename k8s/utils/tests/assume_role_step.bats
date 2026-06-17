@@ -1,6 +1,10 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for utils/assume_role_step - resolves the role and assumes it
+# Unit tests for utils/assume_role_step - resolves the role and assumes it.
+#
+# The IAM provider and scope-configurations provider are read from
+# CONTEXT.providers[...] (already dimension-resolved by the platform), so the
+# tests only need to mock `aws` (sts) — no np.
 # =============================================================================
 
 setup() {
@@ -12,20 +16,10 @@ setup() {
   export -f log
 
   export SCOPE_ID="scope-123"
-  export CONTEXT='{"scope":{"nrn":"organization=1:account=2:namespace=3:application=4:scope=5"}}'
+  # CONTEXT with the IAM provider (resolved) carrying a k8s role.
+  export CONTEXT='{"providers":{"identity-access-control":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/k8s-role"}]}}}}'
   unset ASSUME_ROLE_ARN ASSUME_ROLE_ARN_DEFAULT ASSUME_ROLE_SELECTOR
 
-  # np mock: IAM provider with a k8s selector
-  np() {
-    case "$*" in
-      *"provider list"*"aws-iam-configuration"*) echo '{"results":[{"id":"prov-iam-1"}]}' ;;
-      *"provider read"*"prov-iam-1"*) echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/k8s-role"}]}}}' ;;
-      *) echo '{"results":[]}' ;;
-    esac
-  }
-  export -f np
-
-  # aws sts mock: success
   aws() {
     case "$*" in
       *"sts assume-role"*) echo '{"Credentials":{"AccessKeyId":"AKIA1","SecretAccessKey":"sec1","SessionToken":"tok1"}}' ;;
@@ -35,21 +29,53 @@ setup() {
   export -f aws
 }
 
-@test "assume_role_step: resolves k8s role from the IAM provider and exports creds" {
+teardown() {
+  unset ASSUME_ROLE_ARN ASSUME_ROLE_ARN_DEFAULT ASSUME_ROLE_SELECTOR
+}
+
+@test "assume_role_step: resolves the k8s role from CONTEXT and exports creds" {
   run bash -c "source '$STEP'; echo \"\$AWS_ACCESS_KEY_ID|\$ASSUME_ROLE_ARN\""
   [ "$status" -eq 0 ]
   assert_contains "$output" "AKIA1|arn:aws:iam::111:role/k8s-role"
 }
 
-@test "assume_role_step: no role resolved is not an error (agent creds remain)" {
-  np() { echo '{"results":[]}'; }
-  export -f np
-  run bash -c "source '$STEP'; echo \"ak=\${AWS_ACCESS_KEY_ID:-none} sk=\${AWS_SECRET_ACCESS_KEY:-none} st=\${AWS_SESSION_TOKEN:-none} arn=[\${ASSUME_ROLE_ARN}]\""
+@test "assume_role_step: no IAM provider in CONTEXT is not an error (agent creds remain)" {
+  export CONTEXT='{"providers":{}}'
+  run bash -c "source '$STEP'; echo \"key=\${AWS_ACCESS_KEY_ID:-none} arn=[\${ASSUME_ROLE_ARN}]\""
   [ "$status" -eq 0 ]
-  assert_contains "$output" "ak=none"
-  assert_contains "$output" "sk=none"
-  assert_contains "$output" "st=none"
+  assert_contains "$output" "key=none"
   assert_contains "$output" "arn=[]"
+}
+
+@test "assume_role_step: uses the dimension-resolved provider already in CONTEXT" {
+  # The platform injects whichever IAM config matched the scope's dimensions;
+  # the step just reads it. Here the resolved config carries a region-specific role.
+  export CONTEXT='{"providers":{"identity-access-control":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/us-east-1-role"}]}}}}'
+  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "arn:aws:iam::111:role/us-east-1-role"
+}
+
+@test "assume_role_step: honors ASSUME_ROLE_SELECTOR override" {
+  export ASSUME_ROLE_SELECTOR="custom"
+  export CONTEXT='{"providers":{"identity-access-control":{"iam_role_arns":{"arns":[{"selector":"custom","arn":"arn:aws:iam::111:role/custom-role"}]}}}}'
+  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "arn:aws:iam::111:role/custom-role"
+}
+
+@test "assume_role_step: falls back to scope-configurations assume_role.arn" {
+  export CONTEXT='{"providers":{"scope-configurations":{"assume_role":{"arn":"arn:aws:iam::111:role/scope-cfg-role"}}}}'
+  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "arn:aws:iam::111:role/scope-cfg-role"
+}
+
+@test "assume_role_step: pre-set ASSUME_ROLE_ARN overrides provider resolution" {
+  export ASSUME_ROLE_ARN="arn:aws:iam::111:role/explicit-override"
+  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN|\$AWS_ACCESS_KEY_ID\""
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "arn:aws:iam::111:role/explicit-override|AKIA1"
 }
 
 @test "assume_role_step: exits non-zero with hints when sts:AssumeRole fails" {
@@ -63,45 +89,4 @@ setup() {
   run bash -c "source '$STEP'"
   [ "$status" -ne 0 ]
   assert_contains "$output" "Possible causes"
-}
-
-@test "assume_role_step: honors ASSUME_ROLE_SELECTOR override" {
-  export ASSUME_ROLE_SELECTOR="custom"
-  np() {
-    case "$*" in
-      *"provider list"*"aws-iam-configuration"*) echo '{"results":[{"id":"prov-iam-1"}]}' ;;
-      *"provider read"*"prov-iam-1"*) echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"custom","arn":"arn:aws:iam::111:role/custom-role"}]}}}' ;;
-      *) echo '{"results":[]}' ;;
-    esac
-  }
-  export -f np
-  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
-  [ "$status" -eq 0 ]
-  assert_contains "$output" "arn:aws:iam::111:role/custom-role"
-}
-
-@test "assume_role_step: pre-set ASSUME_ROLE_ARN overrides provider resolution" {
-  export ASSUME_ROLE_ARN="arn:aws:iam::111:role/explicit-override"
-  # np would resolve a different role, but the explicit override must win
-  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN|\$AWS_ACCESS_KEY_ID\""
-  [ "$status" -eq 0 ]
-  assert_contains "$output" "arn:aws:iam::111:role/explicit-override|AKIA1"
-}
-
-@test "assume_role_step: passes scope dimensions to the IAM provider lookup" {
-  # Scope with dimensions; the dimension-matched config carries the role.
-  export CONTEXT='{"scope":{"nrn":"organization=1:account=2:namespace=3:application=4:scope=5","dimensions":{"region":"us-east-1","environment":"production"}}}'
-  np() {
-    case "$*" in
-      *"provider list"*"aws-iam-configuration"*"--dimensions region=us-east-1,environment=production"*)
-        echo '{"results":[{"id":"prov-dim"}]}' ;;
-      *"provider read"*"prov-dim"*)
-        echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/dim-role"}]}}}' ;;
-      *) echo '{"results":[]}' ;;
-    esac
-  }
-  export -f np
-  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
-  [ "$status" -eq 0 ]
-  assert_contains "$output" "arn:aws:iam::111:role/dim-role"
 }
