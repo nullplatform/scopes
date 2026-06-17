@@ -126,3 +126,59 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_equal "$output" ""
 }
+
+# --- dimension filtering ---
+
+@test "provider_arn_for_selector: passes --dimensions and uses the dimension-matched config" {
+  np() {
+    case "$*" in
+      *"provider list"*"aws-iam-configuration"*"--dimensions region=us-east-1"*)
+        echo '{"results":[{"id":"prov-region"}]}' ;;
+      *"provider list"*"aws-iam-configuration"*)
+        echo '{"results":[{"id":"prov-default"}]}' ;;
+      *"provider read"*"prov-region"*)
+        echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/region-role"}]}}}' ;;
+      *"provider read"*"prov-default"*)
+        echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/default-role"}]}}}' ;;
+      *) echo '{"results":[]}' ;;
+    esac
+  }
+  export -f np
+  run provider_arn_for_selector "organization=1:account=2" "k8s" "region=us-east-1"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "arn:aws:iam::111:role/region-role"
+}
+
+@test "provider_arn_for_selector: no dimensions lists without the --dimensions flag" {
+  np() {
+    case "$*" in
+      *"provider list"*"aws-iam-configuration"*"--dimensions"*)
+        echo '{"results":[{"id":"prov-region"}]}' ;;
+      *"provider list"*"aws-iam-configuration"*)
+        echo '{"results":[{"id":"prov-default"}]}' ;;
+      *"provider read"*"prov-default"*)
+        echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/default-role"}]}}}' ;;
+      *) echo '{"results":[]}' ;;
+    esac
+  }
+  export -f np
+  run provider_arn_for_selector "organization=1:account=2" "k8s"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "arn:aws:iam::111:role/default-role"
+}
+
+@test "resolve_assume_role_arn: threads dimensions into the provider lookup" {
+  np() {
+    case "$*" in
+      *"provider list"*"aws-iam-configuration"*"--dimensions environment=prod"*)
+        echo '{"results":[{"id":"prov-prod"}]}' ;;
+      *"provider read"*"prov-prod"*)
+        echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/prod-role"}]}}}' ;;
+      *) echo '{"results":[]}' ;;
+    esac
+  }
+  export -f np
+  run resolve_assume_role_arn "organization=1:account=2" "k8s" "environment=prod"
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "arn:aws:iam::111:role/prod-role"
+}

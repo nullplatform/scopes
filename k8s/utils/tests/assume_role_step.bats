@@ -87,3 +87,21 @@ setup() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "arn:aws:iam::111:role/explicit-override|AKIA1"
 }
+
+@test "assume_role_step: passes scope dimensions to the IAM provider lookup" {
+  # Scope with dimensions; the dimension-matched config carries the role.
+  export CONTEXT='{"scope":{"nrn":"organization=1:account=2:namespace=3:application=4:scope=5","dimensions":{"region":"us-east-1","environment":"production"}}}'
+  np() {
+    case "$*" in
+      *"provider list"*"aws-iam-configuration"*"--dimensions region=us-east-1,environment=production"*)
+        echo '{"results":[{"id":"prov-dim"}]}' ;;
+      *"provider read"*"prov-dim"*)
+        echo '{"attributes":{"iam_role_arns":{"arns":[{"selector":"k8s","arn":"arn:aws:iam::111:role/dim-role"}]}}}' ;;
+      *) echo '{"results":[]}' ;;
+    esac
+  }
+  export -f np
+  run bash -c "source '$STEP'; echo \"\$ASSUME_ROLE_ARN\""
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "arn:aws:iam::111:role/dim-role"
+}
