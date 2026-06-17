@@ -1,0 +1,12 @@
+steps:
+  - name: build_context
+    type: script
+    file: "$SERVICE_PATH/parameters/build_context"
+    output:
+      - { name: ACTIVE_PROVIDER, type: environment }
+      - { name: PROVIDER_DIR, type: environment }
+      - { name: PARAMETER_KIND, type: environment }
+      - { name: EXTERNAL_ID, type: environment }
+  - name: delete
+    type: script
+    file: "$SERVICE_PATH/parameters/delete"

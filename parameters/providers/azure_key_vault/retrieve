@@ -1,0 +1,43 @@
+#!/bin/bash
+set -euo pipefail
+
+# Retrieves a secret from Azure Key Vault by external_id.
+#
+# Semantics:
+#   - Success → return {value: "<value>"}
+#   - SecretNotFound → return {value: "value not found"}
+#   - Any other error → exit 1 with troubleshooting
+#
+# Required env: EXTERNAL_ID, AZ_VAULT_NAME, AZ_SECRET_PREFIX
+
+SECRET_NAME="${AZ_SECRET_PREFIX}${EXTERNAL_ID}"
+
+err_file=$(mktemp)
+if VALUE=$(az keyvault secret show \
+        --vault-name "$AZ_VAULT_NAME" \
+        --name "$SECRET_NAME" \
+        --query value \
+        --output tsv 2>"$err_file"); then
+  rm -f "$err_file"
+  jq -n --arg value "$VALUE" '{value: $value}'
+else
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+  if echo "$err" | grep -qE "(SecretNotFound|secret with .* was not found)"; then
+    echo '{
+      "value": "value not found"
+    }'
+  else
+    log error "❌ Failed to retrieve secret '$SECRET_NAME' from Azure Key Vault '$AZ_VAULT_NAME'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • Identity lacks 'Get' permission on vault $AZ_VAULT_NAME"
+    log error "   • Vault firewall blocks the caller"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify identity: az account show"
+    log error "   • Check access policy: az keyvault show --name $AZ_VAULT_NAME --query properties.accessPolicies"
+    log error "Underlying error: $err"
+    exit 1
+  fi
+fi

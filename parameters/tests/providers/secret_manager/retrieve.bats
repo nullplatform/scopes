@@ -1,0 +1,85 @@
+#!/usr/bin/env bats
+# =============================================================================
+# Unit tests for parameters/providers/secret_manager/retrieve
+# =============================================================================
+
+setup() {
+  export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../../.." && pwd)"
+  export PARAMETERS_DIR="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+
+  source "$PROJECT_ROOT/testing/assertions.sh"
+
+  export SCRIPT="$PARAMETERS_DIR/providers/secret_manager/retrieve"
+
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
+  cat > "$BATS_TEST_TMPDIR/bin/aws" << 'EOF'
+#!/bin/bash
+echo "ARGS: $@" >> "$AWS_LOG"
+case "${MOCK_AWS_MODE:-success}" in
+  success)
+    echo '{"parameter_id":42,"value":"the-real-value","stored_at":"2026-01-01T00:00:00Z","external_id":"abc-123"}'
+    ;;
+  not_found)
+    echo "An error occurred (ResourceNotFoundException) when calling the GetSecretValue operation: Secret not found." >&2
+    exit 254
+    ;;
+  auth_error)
+    echo "An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User not authorized." >&2
+    exit 254
+    ;;
+  *)
+    echo "An error occurred (UnknownError) when calling." >&2
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/aws"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+
+  export AWS_REGION="us-east-1"
+  export SM_NAME_PREFIX="parameters/"
+  export EXTERNAL_ID="abc-123"
+
+  export DEPS="source $PARAMETERS_DIR/utils/log"
+}
+
+@test "secret_manager retrieve: success → extracts .value from envelope" {
+  run bash -c "$DEPS; source $SCRIPT"
+
+  assert_equal "$status" "0"
+  value=$(echo "$output" | jq -r '.value')
+  assert_equal "$value" "the-real-value"
+}
+
+@test "secret_manager retrieve: ResourceNotFoundException → 'value not found'" {
+  run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
+
+  assert_equal "$status" "0"
+  value=$(echo "$output" | jq -r '.value')
+  assert_equal "$value" "value not found"
+}
+
+@test "secret_manager retrieve: AccessDenied fails with troubleshooting" {
+  run bash -c "$DEPS; MOCK_AWS_MODE=auth_error source $SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Failed to retrieve secret"
+  assert_contains "$output" "lacks secretsmanager:GetSecretValue"
+}
+
+@test "secret_manager retrieve: unknown errors fail loud" {
+  run bash -c "$DEPS; MOCK_AWS_MODE=other source $SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Failed to retrieve secret"
+}
+
+@test "secret_manager retrieve: calls aws with correct args" {
+  run bash -c "$DEPS; source $SCRIPT"
+
+  captured=$(cat "$AWS_LOG")
+  assert_contains "$captured" "secretsmanager get-secret-value"
+  assert_contains "$captured" "--region us-east-1"
+  assert_contains "$captured" "--secret-id parameters/abc-123"
+}

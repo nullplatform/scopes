@@ -1,0 +1,16 @@
+steps:
+  - name: build_context
+    type: script
+    file: "$SERVICE_PATH/parameters/build_context"
+    output:
+      - { name: ACTIVE_PROVIDER, type: environment }
+      - { name: PROVIDER_DIR, type: environment }
+      - { name: PARAMETER_KIND, type: environment }
+      - { name: EXTERNAL_ID, type: environment }
+      - { name: PARAMETER_ID, type: environment }
+      - { name: PARAMETER_VALUE, type: environment }
+      - { name: PARAMETER_NAME, type: environment }
+      - { name: PARAMETER_ENCODING, type: environment }
+  - name: store
+    type: script
+    file: "$SERVICE_PATH/parameters/store"

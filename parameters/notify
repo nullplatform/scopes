@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+
+# Dispatch: delegate to the active provider's notify implementation if defined,
+# otherwise return the default success ack. Notify is optional per provider.
+if [ -f "$PROVIDER_DIR/notify" ]; then
+  source "$PROVIDER_DIR/notify"
+else
+  echo '{"success":true}'
+fi

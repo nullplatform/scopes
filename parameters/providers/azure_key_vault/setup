@@ -1,0 +1,48 @@
+#!/bin/bash
+set -euo pipefail
+
+# Validates Azure Key Vault connection config.
+#
+# Reads, in priority order: PROVIDER_CONFIG, environment variables, defaults.
+# Exports: AZ_VAULT_NAME, AZ_SECRET_PREFIX
+#
+# Auth comes from the Azure CLI's default credential chain (managed identity,
+# az login, service principal env vars). Not validated here — az will surface
+# auth errors on the first call.
+
+AZ_VAULT_NAME=$(get_config_value \
+  --env AZURE_KEY_VAULT_NAME \
+  --provider '.vault_name')
+
+AZ_SECRET_PREFIX=$(get_config_value \
+  --env AZURE_KEY_VAULT_SECRET_PREFIX \
+  --provider '.secret_prefix' \
+  --default 'parameters-')
+
+if [ -z "$AZ_VAULT_NAME" ]; then
+  log error "❌ Azure Key Vault name not configured"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • AZURE_KEY_VAULT_NAME env var is not set"
+  log error "   • .vault_name is missing in the azure_key_vault provider config"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set AZURE_KEY_VAULT_NAME=<your-vault-name>"
+  log error "   • Or populate PROVIDER_CONFIG.vault_name via providers/azure_key_vault/fetch_configuration"
+  exit 1
+fi
+
+# Azure Key Vault secret names are constrained: alphanumeric + dashes, max 127 chars.
+# UUIDs satisfy this. Validate the prefix uses only valid chars.
+if [[ ! "$AZ_SECRET_PREFIX" =~ ^[A-Za-z0-9-]*$ ]]; then
+  log error "❌ Invalid AZ_SECRET_PREFIX '$AZ_SECRET_PREFIX'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • Azure Key Vault secret names allow only alphanumerics and dashes"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set AZURE_KEY_VAULT_SECRET_PREFIX to a string matching [A-Za-z0-9-]*"
+  exit 1
+fi
+
+export AZ_VAULT_NAME AZ_SECRET_PREFIX

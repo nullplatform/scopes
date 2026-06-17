@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+# Retrieves a value from Vault by external_id.
+#
+# Semantics:
+#   - HTTP 2xx → return {value: "<stored value>"}
+#   - HTTP 404 → return {value: "value not found"} (legitimate miss)
+#   - Any other HTTP status or network error → exit 1 with troubleshooting
+#
+# Required env: EXTERNAL_ID, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
+
+VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID"
+
+if ! RESPONSE=$(curl -s -w "\n%{http_code}" \
+    -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/$VAULT_PATH" 2>/dev/null); then
+  log error "❌ Network error calling Vault at $VAULT_ADDR"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • Vault host unreachable (DNS / network / firewall)"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Test connectivity: curl -s $VAULT_ADDR/v1/sys/health"
+  exit 1
+fi
+
+HTTP_STATUS="${RESPONSE##*$'\n'}"
+HTTP_BODY="${RESPONSE%$'\n'*}"
+
+case "$HTTP_STATUS" in
+  2*)
+    STORED_VALUE=$(echo "$HTTP_BODY" | jq -r '.data.data.value // empty')
+    echo '{
+      "value": "'$STORED_VALUE'"
+    }'
+    ;;
+  404)
+    echo '{
+      "value": "value not found"
+    }'
+    ;;
+  *)
+    log error "❌ Vault GET failed with HTTP $HTTP_STATUS at $VAULT_PATH"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • VAULT_TOKEN lacks read permission (403)"
+    log error "   • Server-side error (5xx)"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify token: curl -s -H \"X-Vault-Token: \$VAULT_TOKEN\" $VAULT_ADDR/v1/auth/token/lookup-self"
+    log error "Vault response: $HTTP_BODY"
+    exit 1
+    ;;
+esac

@@ -1,0 +1,36 @@
+#!/bin/bash
+set -euo pipefail
+
+# Stores a parameter value as an Azure Key Vault secret.
+# AKV encrypts all secrets transparently — PARAMETER_KIND does not change behavior.
+#
+# Required env: PARAMETER_VALUE, AZ_VAULT_NAME, AZ_SECRET_PREFIX
+
+EXTERNAL_ID=$(uuidgen 2>/dev/null || echo "$(openssl rand -hex 16 | sed 's/\(.{8}\)\(.{4}\)\(.{4}\)\(.{4}\)\(.{12}\)/\1-\2-\3-\4-\5/')")
+SECRET_NAME="${AZ_SECRET_PREFIX}${EXTERNAL_ID}"
+
+if ! AKV_ID=$(az keyvault secret set \
+        --vault-name "$AZ_VAULT_NAME" \
+        --name "$SECRET_NAME" \
+        --value "$PARAMETER_VALUE" \
+        --query id \
+        --output tsv 2>/dev/null); then
+  log error "❌ Failed to store secret in Azure Key Vault '$AZ_VAULT_NAME'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • Identity lacks Set permission on $AZ_VAULT_NAME"
+  log error "   • Vault is in soft-deleted state or firewall blocks the caller"
+  log error "   • Secret name '$SECRET_NAME' contains characters AKV rejects (only alphanumeric + dashes allowed)"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify identity: az account show"
+  log error "   • Check access policy: az keyvault show --name $AZ_VAULT_NAME --query properties.accessPolicies"
+  exit 1
+fi
+
+jq -n \
+    --arg external_id "$EXTERNAL_ID" \
+    --arg secret_id "$AKV_ID" \
+    --arg secret_name "$SECRET_NAME" \
+    --arg vault_name "$AZ_VAULT_NAME" \
+    '{external_id: $external_id, metadata: {azure_secret_id: $secret_id, secret_name: $secret_name, vault_name: $vault_name}}'

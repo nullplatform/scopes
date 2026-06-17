@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+
+# Stores a parameter value as an AWS Secrets Manager secret.
+# One secret per parameter (each ~$0.40/month). External_id is a fresh UUIDv4.
+#
+# Required env: PARAMETER_ID, PARAMETER_VALUE, AWS_REGION, SM_NAME_PREFIX
+# Optional env: SM_KMS_KEY_ID (uses default aws/secretsmanager key when empty)
+
+EXTERNAL_ID=$(uuidgen 2>/dev/null || echo "$(openssl rand -hex 16 | sed 's/\(.{8}\)\(.{4}\)\(.{4}\)\(.{4}\)\(.{12}\)/\1-\2-\3-\4-\5/')")
+SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
+
+SECRET_PAYLOAD=$(jq -n \
+    --argjson parameter_id "${PARAMETER_ID:-null}" \
+    --arg value "$PARAMETER_VALUE" \
+    --arg stored_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    --arg external_id "$EXTERNAL_ID" \
+    '{parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id}')
+
+create_args=(
+  --region "$AWS_REGION"
+  --name "$SECRET_NAME"
+  --secret-string "$SECRET_PAYLOAD"
+  --query ARN
+  --output text
+)
+if [ -n "${SM_KMS_KEY_ID:-}" ]; then
+  create_args+=(--kms-key-id "$SM_KMS_KEY_ID")
+fi
+
+if ! SECRET_ARN=$(aws secretsmanager create-secret "${create_args[@]}" 2>/dev/null); then
+  log error "❌ Failed to store parameter in AWS Secrets Manager"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • IAM principal lacks secretsmanager:CreateSecret for $SECRET_NAME"
+  log error "   • Same-name secret is in soft-delete window (change prefix or wait)"
+  log error "   • Region '$AWS_REGION' unreachable"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify identity: aws sts get-caller-identity --region $AWS_REGION"
+  log error "   • Check policy: aws iam simulate-principal-policy --action-names secretsmanager:CreateSecret"
+  exit 1
+fi
+
+jq -n \
+    --arg external_id "$EXTERNAL_ID" \
+    --arg secret_arn "$SECRET_ARN" \
+    --arg secret_name "$SECRET_NAME" \
+    --arg region "$AWS_REGION" \
+    '{external_id: $external_id, metadata: {secret_arn: $secret_arn, secret_name: $secret_name, region: $region}}'

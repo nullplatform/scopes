@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+# Retrieves a value from AWS Secrets Manager by external_id.
+#
+# Semantics:
+#   - Success → return {value: "<stored value>"} (extracted from JSON envelope)
+#   - ResourceNotFoundException → return {value: "value not found"}
+#   - Any other error → exit 1 with troubleshooting
+#
+# Required env: EXTERNAL_ID, AWS_REGION, SM_NAME_PREFIX
+
+SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
+
+err_file=$(mktemp)
+if SECRET_STRING=$(aws secretsmanager get-secret-value \
+        --region "$AWS_REGION" \
+        --secret-id "$SECRET_NAME" \
+        --query SecretString \
+        --output text 2>"$err_file"); then
+  rm -f "$err_file"
+  STORED_VALUE=$(echo "$SECRET_STRING" | jq -r '.value // empty')
+  jq -n --arg value "$STORED_VALUE" '{value: $value}'
+else
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+  if echo "$err" | grep -q "ResourceNotFoundException"; then
+    echo '{
+      "value": "value not found"
+    }'
+  else
+    log error "❌ Failed to retrieve secret '$SECRET_NAME' from AWS Secrets Manager"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • IAM principal lacks secretsmanager:GetSecretValue"
+    log error "   • KMS key permission missing (kms:Decrypt) for CMK-encrypted secrets"
+    log error "   • Region '$AWS_REGION' unreachable"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify identity: aws sts get-caller-identity --region $AWS_REGION"
+    log error "Underlying error: $err"
+    exit 1
+  fi
+fi

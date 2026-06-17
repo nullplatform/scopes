@@ -1,0 +1,45 @@
+#!/bin/bash
+set -euo pipefail
+
+# Validates HashiCorp Vault connection config.
+# Sourced once by parameters/build_context before any operation script runs.
+#
+# Reads, in priority order: PROVIDER_CONFIG (if populated by fetch_configuration),
+# environment variables, defaults.
+#
+# Exports for operation scripts: VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
+
+VAULT_ADDR=$(get_config_value --env VAULT_ADDR --provider '.address')
+VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN --provider '.token')
+VAULT_PATH_PREFIX=$(get_config_value \
+  --env VAULT_PATH_PREFIX \
+  --provider '.path_prefix' \
+  --default 'secret/data/parameters')
+
+if [ -z "$VAULT_ADDR" ]; then
+  log error "❌ Vault address not configured"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • VAULT_ADDR env var is not set in the workflow runtime"
+  log error "   • .address is missing in the hashicorp_vault provider config"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set VAULT_ADDR=https://your-vault-host"
+  log error "   • Or populate PROVIDER_CONFIG.address via providers/hashicorp_vault/fetch_configuration"
+  exit 1
+fi
+
+if [ -z "$VAULT_TOKEN" ]; then
+  log error "❌ Vault token not configured"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • VAULT_TOKEN env var is not set in the workflow runtime"
+  log error "   • .token is missing in the hashicorp_vault provider config"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set VAULT_TOKEN=<your-token>"
+  log error "   • Or populate PROVIDER_CONFIG.token via providers/hashicorp_vault/fetch_configuration"
+  exit 1
+fi
+
+export VAULT_ADDR VAULT_TOKEN VAULT_PATH_PREFIX

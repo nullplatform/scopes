@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+
+# Dispatch: delegate to the active provider's delete implementation.
+# PROVIDER_DIR is exported by build_context.
+source "$PROVIDER_DIR/delete"

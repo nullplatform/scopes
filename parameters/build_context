@@ -1,0 +1,100 @@
+#!/bin/bash
+set -euo pipefail
+
+# Resolves which provider implementation handles this workflow run.
+#
+# Inputs:
+#   CONTEXT             — JSON of the notification body (set by entrypoint)
+#   PARAMETER_KIND      — "secret" | "parameter" (set by workflow `configuration` block;
+#                          falls back to deriving from $CONTEXT.secret if absent — e.g. notify)
+#   SECRET_PROVIDER     — env var: name of provider to use when kind=secret
+#   PARAMETER_PROVIDER  — env var: name of provider to use when kind=parameter
+#
+# Per-provider config fetching is delegated to providers/<name>/fetch_configuration
+# (optional). Each provider owns its own fetching mechanism — no global config
+# fetcher in this layer.
+#
+# Outputs (exported for subsequent workflow steps):
+#   PARAMETER_KIND, ACTIVE_PROVIDER, PROVIDER_DIR, PARAMETERS_ROOT
+#   EXTERNAL_ID, PARAMETER_ID, PARAMETER_VALUE, PARAMETER_NAME, PARAMETER_ENCODING
+#   Plus any vars the provider's fetch_configuration and setup scripts export.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PARAMETERS_ROOT="$SCRIPT_DIR"
+
+source "$SCRIPT_DIR/utils/log"
+source "$SCRIPT_DIR/utils/get_config_value"
+
+export EXTERNAL_ID=$(echo "$CONTEXT" | jq -r '.external_id // empty')
+export PARAMETER_ID=$(echo "$CONTEXT" | jq -r '.parameter_id // empty')
+export PARAMETER_VALUE=$(echo "$CONTEXT" | jq -r '.value // empty')
+export PARAMETER_NAME=$(echo "$CONTEXT" | jq -r '.parameter_name // empty')
+export PARAMETER_ENCODING=$(echo "$CONTEXT" | jq -r '.encoding // empty')
+
+if [ -z "${PARAMETER_KIND:-}" ]; then
+  # `// empty` would swallow `false` (jq's // treats false as missing), so use tostring.
+  case "$(echo "$CONTEXT" | jq -r '.secret | tostring')" in
+    true)  PARAMETER_KIND="secret" ;;
+    false) PARAMETER_KIND="parameter" ;;
+    *)     PARAMETER_KIND="" ;;
+  esac
+fi
+export PARAMETER_KIND
+
+# Selector resolution is env-only at this layer.
+# If the platform wants to derive selectors from provider config, it must
+# populate these env vars BEFORE invoking the entrypoint.
+case "$PARAMETER_KIND" in
+  secret)
+    ACTIVE_PROVIDER="${SECRET_PROVIDER:-}"
+    selector_env="SECRET_PROVIDER"
+    ;;
+  parameter)
+    ACTIVE_PROVIDER="${PARAMETER_PROVIDER:-}"
+    selector_env="PARAMETER_PROVIDER"
+    ;;
+  *)
+    ACTIVE_PROVIDER="${SECRET_PROVIDER:-${PARAMETER_PROVIDER:-}}"
+    selector_env="SECRET_PROVIDER or PARAMETER_PROVIDER"
+    ;;
+esac
+
+if [ -z "$ACTIVE_PROVIDER" ]; then
+  log error "❌ No provider configured for kind '$PARAMETER_KIND'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • $selector_env env var is not set in the workflow runtime"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set $selector_env=<provider_name> in the agent/runner environment"
+  log error "   • Available providers: $(ls "$SCRIPT_DIR/providers" 2>/dev/null | grep -v '^README' | tr '\n' ' ' || true)"
+  exit 1
+fi
+
+PROVIDER_DIR="$SCRIPT_DIR/providers/$ACTIVE_PROVIDER"
+if [ ! -d "$PROVIDER_DIR" ]; then
+  available=$(ls "$SCRIPT_DIR/providers" 2>/dev/null | grep -v '^README' | tr '\n' ' ' || true)
+  log error "❌ Provider implementation not found: '$ACTIVE_PROVIDER'"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Available providers: ${available:-(none installed)}"
+  log error "   • Set $selector_env to one of the above, or add a provider at parameters/providers/$ACTIVE_PROVIDER/"
+  exit 1
+fi
+export ACTIVE_PROVIDER
+export PROVIDER_DIR
+
+log debug "📦 active_provider=$ACTIVE_PROVIDER kind=$PARAMETER_KIND"
+
+# Each provider owns its config fetching (np CLI, REST call, file, env vars, etc.)
+# Optional: if absent, the provider relies on whatever's already in the environment.
+if [ -f "$PROVIDER_DIR/fetch_configuration" ]; then
+  log debug "📡 Sourcing $ACTIVE_PROVIDER/fetch_configuration"
+  source "$PROVIDER_DIR/fetch_configuration"
+fi
+
+# Validation + connection handles. Operations downstream assume invariants hold.
+if [ -f "$PROVIDER_DIR/setup" ]; then
+  log debug "📡 Sourcing $ACTIVE_PROVIDER/setup"
+  source "$PROVIDER_DIR/setup"
+fi
