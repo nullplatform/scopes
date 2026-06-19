@@ -2,44 +2,43 @@
 # Dedicated workflow step: resolve the target IAM role and assume it, exporting
 # temporary credentials so every subsequent step inherits them.
 #
-# Runs FIRST in each AWS-touching workflow (right after `load logging`). The
-# workflow YAML must declare AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
-# AWS_SESSION_TOKEN as output:environment so the engine propagates them.
+# Runs FIRST in each AWS-touching workflow (right after `load logging`, which
+# provides the `log` function). The workflow YAML must declare AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN as output:environment so the engine
+# propagates them.
 #
-# The AWS IAM provider (category "identity-access-control") and the
-# scope-configurations provider are read from CONTEXT.providers[...], where the
-# platform has ALREADY resolved them for the scope's dimensions. This requires
-# "identity-access-control" to be listed in values.yaml provider_categories.
+# The AWS IAM provider (category "identity-access-control") is read from
+# CONTEXT.providers[...], where the platform has ALREADY resolved it for the
+# scope's dimensions. Requires "identity-access-control" to be listed in
+# values.yaml provider_categories.
 #
 # Resolution precedence (see resolve_assume_role_arn in assume_role_lib):
-#   $ASSUME_ROLE_ARN -> IAM provider by selector (dimension-resolved)
-#                    -> scope-config assume_role.arn -> $ASSUME_ROLE_ARN_DEFAULT
-#                    -> agent credentials
+#   $CONTAINERS_ASSUME_ROLE_ARN -> IAM provider by selector
+#     -> $CONTAINERS_ASSUME_ROLE_ARN_DEFAULT -> agent credentials
 #
 # Requires: aws CLI, jq. Expects: CONTEXT (engine-injected), SCOPE_ID (optional).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/assume_role_lib"
 
-ASSUME_ROLE_SELECTOR="${ASSUME_ROLE_SELECTOR:-k8s}"
+CONTAINERS_ASSUME_ROLE_SELECTOR="${CONTAINERS_ASSUME_ROLE_SELECTOR:-containers}"
 
-# Providers as resolved for the scope's dimensions by the platform.
+# IAM provider as resolved for the scope's dimensions by the platform.
 IAM_PROVIDER=$(echo "${CONTEXT:-}" | jq -c '.providers["identity-access-control"] // {}' 2>/dev/null)
-SCOPE_CONFIG=$(echo "${CONTEXT:-}" | jq -c '.providers["scope-configurations"] // {}' 2>/dev/null)
 
-ASSUME_ROLE_ARN=$(resolve_assume_role_arn "$IAM_PROVIDER" "$ASSUME_ROLE_SELECTOR" "$SCOPE_CONFIG")
-export ASSUME_ROLE_ARN
+CONTAINERS_ASSUME_ROLE_ARN=$(resolve_assume_role_arn "$IAM_PROVIDER" "$CONTAINERS_ASSUME_ROLE_SELECTOR")
+export CONTAINERS_ASSUME_ROLE_ARN
 
 # utils/assume_role performs sts:AssumeRole and exports AWS_* when an ARN is set,
 # or no-ops (leaving agent credentials in place) when empty. Non-zero only when
 # sts:AssumeRole itself fails.
 if ! source "$SCRIPT_DIR/assume_role"; then
-  log error "   ❌ assume_role step failed: could not assume $ASSUME_ROLE_ARN"
+  log error "   ❌ assume_role step failed: could not assume $CONTAINERS_ASSUME_ROLE_ARN"
   log error ""
   log error "💡 Possible causes:"
   log error "   • The agent's role is not allowed to sts:AssumeRole the target role"
-  log error "   • The target role's trust policy does not trust the agent role"
-  log error "   • The resolved ARN is wrong (check IAM provider selector=$ASSUME_ROLE_SELECTOR)"
+  log error "   • The target role does not exist or does not trust the agent role"
+  log error "   • There is no role ARN configured for selector=$CONTAINERS_ASSUME_ROLE_SELECTOR"
   log error ""
   exit 1
 fi
