@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - Add support to get AWS credentials via assume role
+- Pin the traffic-manager image version from the `container-orchestration` provider (`traffic_manager.version`), keeping the protocol-derived default when unset
 
 ## [1.12.0] - 2026-06-08
 - Fix: do not inject file parameter as env vars

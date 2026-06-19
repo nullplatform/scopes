@@ -1038,3 +1038,41 @@ set_capabilities() {
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
 }
+
+# =============================================================================
+# Traffic-manager image / version resolution
+# =============================================================================
+
+@test "traffic image: defaults to :latest when no provider version (http)" {
+  setup_full_build_context
+  source "$SCRIPT"
+  assert_equal "$TRAFFIC_CONTAINER_IMAGE" "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+}
+
+@test "traffic image: web_sockets protocol defaults to :websocket2 without provider version" {
+  setup_full_build_context
+  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.protocol = "web_sockets"')
+  source "$SCRIPT"
+  assert_equal "$TRAFFIC_CONTAINER_IMAGE" "public.ecr.aws/nullplatform/k8s-traffic-manager:websocket2"
+}
+
+@test "traffic image: uses container-orchestration traffic_manager.version when set" {
+  setup_full_build_context
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager = {"version":"1.7.0"}')
+  source "$SCRIPT"
+  assert_equal "$TRAFFIC_CONTAINER_IMAGE" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.7.0"
+}
+
+@test "traffic image: provider version overrides the protocol default" {
+  setup_full_build_context
+  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.protocol = "web_sockets" | .providers["container-orchestration"].traffic_manager = {"version":"2.0.0"}')
+  source "$SCRIPT"
+  assert_equal "$TRAFFIC_CONTAINER_IMAGE" "public.ecr.aws/nullplatform/k8s-traffic-manager:2.0.0"
+}
+
+@test "traffic image: scope-configurations full image override wins over provider version" {
+  setup_full_build_context
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager = {"version":"1.7.0"} | .providers["scope-configurations"] = {"deployment":{"traffic_container_image":"my.registry/custom:tag"}}')
+  source "$SCRIPT"
+  assert_equal "$TRAFFIC_CONTAINER_IMAGE" "my.registry/custom:tag"
+}

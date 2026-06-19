@@ -145,6 +145,14 @@ if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
   TRAFFIC_CONTAINER_VERSION="websocket2"
 fi
 
+# The container-orchestration provider may pin the traffic-manager version.
+# When set, it overrides the protocol-derived default; otherwise the default
+# (latest / websocket2) is kept.
+TRAFFIC_CONTAINER_VERSION=$(get_config_value \
+  --provider '.providers["container-orchestration"].traffic_manager.version' \
+  --default "$TRAFFIC_CONTAINER_VERSION"
+)
+
 TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
   --env TRAFFIC_CONTAINER_IMAGE \
   --provider '.providers["scope-configurations"].deployment.traffic_container_image' \

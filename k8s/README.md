@@ -92,6 +92,12 @@ Configuration for the traffic manager sidecar container.
 | **TRAFFIC_CONTAINER_IMAGE** | Traffic manager sidecar container image | `deployment.traffic_container_image` |
 | **TRAFFIC_MANAGER_CONFIG_MAP** | ConfigMap name with custom traffic manager configuration | `deployment.traffic_manager_config_map` |
 
+The traffic-manager image **tag** can be pinned from the `container-orchestration`
+provider via `traffic_manager.version`. Precedence for the resolved image:
+`TRAFFIC_CONTAINER_IMAGE` env / `scope-configurations.deployment.traffic_container_image`
+(full image override) > `container-orchestration.traffic_manager.version` (tag) >
+the protocol-derived default (`websocket2` for `web_sockets`, otherwise `latest`).
+
 #### Pod Disruption Budget
 
 Configuration for Pod Disruption Budget to control pod availability during disruptions.
