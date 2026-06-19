@@ -139,13 +139,13 @@ AWS IAM configuration for Kubernetes service accounts.
 By default the scope's AWS CLI calls (IAM, ELBv2, Route53, S3, CloudWatch) use
 the agent's own credentials. To run them under a dedicated IAM role per account,
 configure the nullplatform **AWS IAM provider** (`aws-iam-configuration`) with an
-`iam_role_arns.arns` entry whose `selector` is `k8s`:
+`iam_role_arns.arns` entry whose `selector` is `containers`:
 
 ```hcl
 attributes = {
   iam_role_arns = {
     arns = [
-      { selector = "k8s", arn = "arn:aws:iam::<account>:role/<role>" }
+      { selector = "containers", arn = "arn:aws:iam::<account>:role/<role>" }
     ]
   }
 }
@@ -153,11 +153,10 @@ attributes = {
 
 Resolution precedence (first non-empty wins):
 
-1. `ASSUME_ROLE_ARN` environment variable (explicit override).
-2. AWS IAM provider entry matching the selector (`ASSUME_ROLE_SELECTOR`, default `k8s`).
-3. `scope-configurations` provider `assume_role.arn` (back-compat).
-4. `ASSUME_ROLE_ARN_DEFAULT` environment variable.
-5. None configured → the agent's credentials are used (no role assumed).
+1. `CONTAINERS_ASSUME_ROLE_ARN` environment variable (explicit override).
+2. AWS IAM provider entry matching the selector (`CONTAINERS_ASSUME_ROLE_SELECTOR`, default `containers`).
+3. `CONTAINERS_ASSUME_ROLE_ARN_DEFAULT` environment variable.
+4. None configured → the agent's credentials are used (no role assumed).
 
 The IAM provider is resolved **for the scope's dimensions** by the platform: it
 is read from `CONTEXT.providers["identity-access-control"]`, which the engine
