@@ -10,7 +10,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 |---|---|
 | Skeleton (entrypoint, build_context, dispatch, utils, workflows) | ✅ Implementado |
 | Provider `hashicorp_vault` | ✅ Implementado |
-| Provider `secret_manager` | ✅ Implementado (renombre a `aws_secret_manager` pendiente) |
+| Provider `aws_secret_manager` | ✅ Implementado |
 | Provider `parameter_store` | ✅ Implementado |
 | Provider `azure_key_vault` | ✅ Implementado |
 | Error handling (not_found → idempotent, otros → fail loud) | ✅ Aplicado a deletes y retrieves |
@@ -21,7 +21,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 | **Resolución de provider via `provider.specification_id`** | **✅ Implementado** (era pendiente, hecho hoy) |
 | **`PROVIDER_CONFIG` desde `provider.attributes`** | **✅ Implementado** (era pendiente como `fetch_configuration`, ahora viene en payload) |
 | Naming NRN+slug-based | ✅ Implementado (utils/build_external_id + 4 providers refactorizados) |
-| Rename `secret_manager` → `aws_secret_manager` | ⏳ Pendiente (opcional, no bloqueante) |
+| Rename `secret_manager` → `aws_secret_manager` | ✅ Implementado |
 
 ---
 
@@ -44,13 +44,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 
 ## Pendiente
 
-### 1. Rename `secret_manager` → `aws_secret_manager` (opcional)
-
-Decisión tomada pero no aplicada. No bloqueante. Cuando se haga:
-
-- Mover `parameters/providers/secret_manager/` → `parameters/providers/aws_secret_manager/`
-- Update referencias en docs
-- Update tests en `parameters/tests/providers/secret_manager/` (mover y renombrar)
+Sin items pendientes a la fecha. Todas las decisiones aprobadas están implementadas.
 
 ---
 
@@ -116,7 +110,7 @@ Distribución actual (151 tests):
 
 - Skeleton (entrypoint, build_context, dispatch, utils): 56 tests
 - hashicorp_vault: 27 tests
-- secret_manager: 17 tests
+- aws_secret_manager: 17 tests (renombrado desde `secret_manager`)
 - parameter_store: 23 tests
 - azure_key_vault: 15 tests
 - utils/log + utils/get_config_value: 13 tests
@@ -137,7 +131,7 @@ parameters/
 ├── providers/
 │   ├── README.md                       # contrato del provider
 │   ├── hashicorp_vault/
-│   ├── secret_manager/
+│   ├── aws_secret_manager/
 │   ├── parameter_store/
 │   └── azure_key_vault/
 ├── tests/                              # 151 BATS tests

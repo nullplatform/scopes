@@ -106,7 +106,7 @@ parameters/
 ├── providers/
 │   ├── README.md           # Contract every provider must satisfy
 │   ├── hashicorp_vault/    # HTTP API
-│   ├── secret_manager/     # aws CLI
+│   ├── aws_secret_manager/     # aws CLI
 │   ├── parameter_store/    # aws CLI (only kind-branching provider)
 │   └── azure_key_vault/    # az CLI
 ├── tests/                  # BATS — mirrors source structure

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/secret_manager/store
+# Unit tests for parameters/providers/aws_secret_manager/store
 # =============================================================================
 
 setup() {
@@ -10,7 +10,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/secret_manager/store"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws_secret_manager/store"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
 
@@ -59,7 +59,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "secret_manager store: external_id is composite of entities + parameter_id" {
+@test "aws_secret_manager store: external_id is composite of entities + parameter_id" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -68,7 +68,7 @@ EOF
   assert_equal "$external_id" "$expected"
 }
 
-@test "secret_manager store: secret_name has prefix + composite" {
+@test "aws_secret_manager store: secret_name has prefix + composite" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -76,7 +76,7 @@ EOF
   assert_contains "$secret_name" "parameters/organization=acme-1255165411"
 }
 
-@test "secret_manager store: calls aws with composite name" {
+@test "aws_secret_manager store: calls aws with composite name" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")
@@ -85,7 +85,7 @@ EOF
   assert_contains "$captured" "--name parameters/organization=acme-1255165411"
 }
 
-@test "secret_manager store: includes --kms-key-id when SM_KMS_KEY_ID set" {
+@test "aws_secret_manager store: includes --kms-key-id when SM_KMS_KEY_ID set" {
   export SM_KMS_KEY_ID="alias/my-key"
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -94,14 +94,14 @@ EOF
   assert_contains "$captured" "--kms-key-id alias/my-key"
 }
 
-@test "secret_manager store: omits --kms-key-id when SM_KMS_KEY_ID empty" {
+@test "aws_secret_manager store: omits --kms-key-id when SM_KMS_KEY_ID empty" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")
   [[ "$captured" != *"--kms-key-id"* ]]
 }
 
-@test "secret_manager store: dimensions sorted alphabetically in external_id" {
+@test "aws_secret_manager store: dimensions sorted alphabetically in external_id" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.dimensions = {environment: "prod", country: "arg"}')
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -111,7 +111,7 @@ EOF
   assert_contains "$external_id" "country=arg/environment=prod/42"
 }
 
-@test "secret_manager store: fails with troubleshooting on aws error" {
+@test "aws_secret_manager store: fails with troubleshooting on aws error" {
   run bash -c "$DEPS; MOCK_AWS_EXIT=1 source $SCRIPT"
 
   [ "$status" -ne 0 ]

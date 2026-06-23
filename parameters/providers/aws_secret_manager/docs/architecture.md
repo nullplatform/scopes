@@ -1,6 +1,6 @@
 # AWS Secrets Manager — Architecture
 
-This document describes how the `parameters/providers/secret_manager/` provider stores, retrieves, and deletes nullplatform parameters using AWS Secrets Manager (SM), and how it differs from clear-text parameters.
+This document describes how the `parameters/providers/aws_secret_manager/` provider stores, retrieves, and deletes nullplatform parameters using AWS Secrets Manager (SM), and how it differs from clear-text parameters.
 
 ---
 

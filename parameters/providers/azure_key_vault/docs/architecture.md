@@ -27,7 +27,7 @@ This document describes the `parameters/providers/azure_key_vault/` implementati
 - Full secret name example: `parameters-f47ac10b-58cc-4372-a567-0e02b2c3d479`
 - Max 127 chars total. With a UUID (36 chars + dashes), you have ~90 chars left for the prefix.
 
-This naming differs from `secret_manager` and `parameter_store` (which support slashes for hierarchical organization) — AKV is flat-namespace.
+This naming differs from `aws_secret_manager` and `parameter_store` (which support slashes for hierarchical organization) — AKV is flat-namespace.
 
 ---
 

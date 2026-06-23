@@ -1,6 +1,6 @@
 # IAM Policy — Least Privilege
 
-This document specifies the minimum IAM permissions required to operate the `parameters/providers/secret_manager/` provider. The policy is scoped to the `parameters/*` namespace and avoids account-wide wildcards.
+This document specifies the minimum IAM permissions required to operate the `parameters/providers/aws_secret_manager/` provider. The policy is scoped to the `parameters/*` namespace and avoids account-wide wildcards.
 
 ---
 

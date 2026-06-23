@@ -27,7 +27,7 @@ This is the first provider in the package that branches on `PARAMETER_KIND`:
 | `parameter` | `String`        | None (plain text)                                    |
 | `secret`    | `SecureString`  | `PS_KMS_KEY_ID` if set, otherwise `alias/aws/ssm`    |
 
-For `secret_manager`, `hashicorp_vault`, and `azure_key_vault`, the kind is informational — those backends encrypt all values uniformly. Parameter Store is different because it distinguishes the storage type at the API level.
+For `aws_secret_manager`, `hashicorp_vault`, and `azure_key_vault`, the kind is informational — those backends encrypt all values uniformly. Parameter Store is different because it distinguishes the storage type at the API level.
 
 ---
 

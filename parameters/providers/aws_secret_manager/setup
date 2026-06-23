@@ -23,15 +23,15 @@ SM_KMS_KEY_ID=$(get_config_value \
   --default '')
 
 if [ -z "$AWS_REGION" ]; then
-  log error "❌ AWS region not configured for secret_manager"
+  log error "❌ AWS region not configured for aws_secret_manager"
   log error ""
   log error "💡 Possible causes:"
   log error "   • AWS_REGION (or AWS_DEFAULT_REGION) env var is not set"
-  log error "   • .region is missing in the secret_manager provider config"
+  log error "   • .region is missing in the aws_secret_manager provider config"
   log error ""
   log error "🔧 How to fix:"
   log error "   • Set AWS_REGION=<your-region> (e.g. us-east-1)"
-  log error "   • Or populate PROVIDER_CONFIG.region via providers/secret_manager/fetch_configuration"
+  log error "   • Or populate PROVIDER_CONFIG.region via providers/aws_secret_manager/fetch_configuration"
   exit 1
 fi
 

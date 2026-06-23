@@ -166,7 +166,7 @@ tests/providers/<provider_name>/
 └── delete.bats      # Always-success, CLI args, idempotency
 ```
 
-Use the patterns from existing providers (`hashicorp_vault`, `secret_manager`, `parameter_store`, `azure_key_vault`):
+Use the patterns from existing providers (`hashicorp_vault`, `aws_secret_manager`, `parameter_store`, `azure_key_vault`):
 
 - Mock the backend CLI as a script in `$BATS_TEST_TMPDIR/bin/`, export PATH to find it.
 - Capture CLI args to a log file, assert on them.

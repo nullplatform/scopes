@@ -83,7 +83,7 @@ The shape of `$CONTEXT.provider.attributes` for each provider:
 }
 ```
 
-### `aws_secret_manager` (currently named `secret_manager`)
+### `aws_secret_manager` (currently named `aws_secret_manager`)
 
 ```json
 {

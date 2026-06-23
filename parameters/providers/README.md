@@ -148,7 +148,7 @@ Output:
 { "value": "<stored value>" }
 ```
 
-If not found, return `{"value": "value not found"}` rather than erroring (precedent: existing vault/secret_manager impls).
+If not found, return `{"value": "value not found"}` rather than erroring (precedent: existing vault/aws_secret_manager impls).
 
 ### `delete` — required
 

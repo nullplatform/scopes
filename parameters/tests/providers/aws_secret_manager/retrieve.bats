@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/secret_manager/delete
+# Unit tests for parameters/providers/aws_secret_manager/retrieve
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/secret_manager/delete"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws_secret_manager/retrieve"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
@@ -17,13 +17,15 @@ setup() {
 #!/bin/bash
 echo "ARGS: $@" >> "$AWS_LOG"
 case "${MOCK_AWS_MODE:-success}" in
-  success) ;;
+  success)
+    echo '{"parameter_id":42,"value":"the-real-value","stored_at":"2026-01-01T00:00:00Z","external_id":"abc-123"}'
+    ;;
   not_found)
-    echo "An error occurred (ResourceNotFoundException) when calling the DeleteSecret operation: Secret not found." >&2
+    echo "An error occurred (ResourceNotFoundException) when calling the GetSecretValue operation: Secret not found." >&2
     exit 254
     ;;
   auth_error)
-    echo "An error occurred (AccessDeniedException) when calling the DeleteSecret operation: User not authorized." >&2
+    echo "An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User not authorized." >&2
     exit 254
     ;;
   *)
@@ -42,45 +44,42 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "secret_manager delete: success → {success: true}" {
+@test "aws_secret_manager retrieve: success → extracts .value from envelope" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
-  success=$(echo "$output" | jq -r '.success')
-  assert_equal "$success" "true"
+  value=$(echo "$output" | jq -r '.value')
+  assert_equal "$value" "the-real-value"
 }
 
-@test "secret_manager delete: ResourceNotFoundException is idempotent → success" {
+@test "aws_secret_manager retrieve: ResourceNotFoundException → 'value not found'" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
   assert_equal "$status" "0"
-  success=$(echo "$output" | jq -r '.success')
-  assert_equal "$success" "true"
+  value=$(echo "$output" | jq -r '.value')
+  assert_equal "$value" "value not found"
 }
 
-@test "secret_manager delete: AccessDenied fails with troubleshooting" {
+@test "aws_secret_manager retrieve: AccessDenied fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Failed to delete secret"
-  assert_contains "$output" "lacks secretsmanager:DeleteSecret"
-  assert_contains "$output" "AccessDeniedException"
+  assert_contains "$output" "❌ Failed to retrieve secret"
+  assert_contains "$output" "lacks secretsmanager:GetSecretValue"
 }
 
-@test "secret_manager delete: unknown errors fail with troubleshooting" {
+@test "aws_secret_manager retrieve: unknown errors fail loud" {
   run bash -c "$DEPS; MOCK_AWS_MODE=other source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Failed to delete secret"
-  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "❌ Failed to retrieve secret"
 }
 
-@test "secret_manager delete: calls aws with force-delete flag" {
+@test "aws_secret_manager retrieve: calls aws with correct args" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")
-  assert_contains "$captured" "secretsmanager delete-secret"
+  assert_contains "$captured" "secretsmanager get-secret-value"
   assert_contains "$captured" "--region us-east-1"
   assert_contains "$captured" "--secret-id parameters/abc-123"
-  assert_contains "$captured" "--force-delete-without-recovery"
 }
