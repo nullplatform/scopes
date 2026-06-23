@@ -4,20 +4,24 @@ set -euo pipefail
 # Resolves which provider implementation handles this workflow run.
 #
 # Inputs:
-#   CONTEXT             — JSON of the notification body (set by entrypoint)
-#   PARAMETER_KIND      — "secret" | "parameter" (set by workflow `configuration` block;
-#                          falls back to deriving from $CONTEXT.secret if absent — e.g. notify)
-#   SECRET_PROVIDER     — env var: name of provider to use when kind=secret
-#   PARAMETER_PROVIDER  — env var: name of provider to use when kind=parameter
+#   CONTEXT — JSON of the notification body (set by entrypoint)
 #
-# Per-provider config fetching is delegated to providers/<name>/fetch_configuration
-# (optional). Each provider owns its own fetching mechanism — no global config
-# fetcher in this layer.
+# Flow:
+#   1. Extract notification fields into env vars
+#   2. Derive PARAMETER_KIND from $CONTEXT.secret (still useful for providers
+#      like parameter_store that choose String vs SecureString)
+#   3. Resolve ACTIVE_PROVIDER from $CONTEXT.provider.specification_id via
+#      `np provider specification read` — its `.slug` IS the provider directory name
+#   4. Set PROVIDER_CONFIG from $CONTEXT.provider.attributes (config travels in
+#      the payload — no separate fetch_configuration step needed)
+#   5. Source providers/<active>/setup (validates provider-specific config and
+#      exports connection handles)
 #
-# Outputs (exported for subsequent workflow steps):
-#   PARAMETER_KIND, ACTIVE_PROVIDER, PROVIDER_DIR, PARAMETERS_ROOT
-#   EXTERNAL_ID, PARAMETER_ID, PARAMETER_VALUE, PARAMETER_NAME, PARAMETER_ENCODING
-#   Plus any vars the provider's fetch_configuration and setup scripts export.
+# Outputs (exported for downstream workflow steps):
+#   PARAMETERS_ROOT, ACTIVE_PROVIDER, PROVIDER_DIR, PARAMETER_KIND
+#   PROVIDER_CONFIG, EXTERNAL_ID, PARAMETER_ID, PARAMETER_VALUE
+#   PARAMETER_NAME, PARAMETER_ENCODING
+#   Plus anything the provider's setup exports (VAULT_ADDR, AWS_REGION, etc.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PARAMETERS_ROOT="$SCRIPT_DIR"
@@ -25,75 +29,78 @@ export PARAMETERS_ROOT="$SCRIPT_DIR"
 source "$SCRIPT_DIR/utils/log"
 source "$SCRIPT_DIR/utils/get_config_value"
 
+# --- Notification fields ---
 export EXTERNAL_ID=$(echo "$CONTEXT" | jq -r '.external_id // empty')
 export PARAMETER_ID=$(echo "$CONTEXT" | jq -r '.parameter_id // empty')
 export PARAMETER_VALUE=$(echo "$CONTEXT" | jq -r '.value // empty')
 export PARAMETER_NAME=$(echo "$CONTEXT" | jq -r '.parameter_name // empty')
 export PARAMETER_ENCODING=$(echo "$CONTEXT" | jq -r '.encoding // empty')
 
-if [ -z "${PARAMETER_KIND:-}" ]; then
-  # `// empty` would swallow `false` (jq's // treats false as missing), so use tostring.
-  case "$(echo "$CONTEXT" | jq -r '.secret | tostring')" in
-    true)  PARAMETER_KIND="secret" ;;
-    false) PARAMETER_KIND="parameter" ;;
-    *)     PARAMETER_KIND="" ;;
-  esac
-fi
+case "$(echo "$CONTEXT" | jq -r '.secret | tostring')" in
+  true)  PARAMETER_KIND="secret" ;;
+  false) PARAMETER_KIND="parameter" ;;
+  *)     PARAMETER_KIND="" ;;
+esac
 export PARAMETER_KIND
 
-# Selector resolution is env-only at this layer.
-# If the platform wants to derive selectors from provider config, it must
-# populate these env vars BEFORE invoking the entrypoint.
-case "$PARAMETER_KIND" in
-  secret)
-    ACTIVE_PROVIDER="${SECRET_PROVIDER:-}"
-    selector_env="SECRET_PROVIDER"
-    ;;
-  parameter)
-    ACTIVE_PROVIDER="${PARAMETER_PROVIDER:-}"
-    selector_env="PARAMETER_PROVIDER"
-    ;;
-  *)
-    ACTIVE_PROVIDER="${SECRET_PROVIDER:-${PARAMETER_PROVIDER:-}}"
-    selector_env="SECRET_PROVIDER or PARAMETER_PROVIDER"
-    ;;
-esac
-
-if [ -z "$ACTIVE_PROVIDER" ]; then
-  log error "❌ No provider configured for kind '$PARAMETER_KIND'"
+# --- Resolve ACTIVE_PROVIDER from $.provider.specification_id ---
+SPEC_ID=$(echo "$CONTEXT" | jq -r '.provider.specification_id // empty')
+if [ -z "$SPEC_ID" ]; then
+  log error "❌ Missing .provider.specification_id in CONTEXT"
   log error ""
   log error "💡 Possible causes:"
-  log error "   • $selector_env env var is not set in the workflow runtime"
+  log error "   • The notification payload is malformed"
+  log error "   • The parameter has no associated provider in nullplatform"
   log error ""
   log error "🔧 How to fix:"
-  log error "   • Set $selector_env=<provider_name> in the agent/runner environment"
-  log error "   • Available providers: $(ls "$SCRIPT_DIR/providers" 2>/dev/null | grep -v '^README' | tr '\n' ' ' || true)"
+  log error "   • Verify the parameter has a provider configured"
+  exit 1
+fi
+
+if ! SPEC_JSON=$(np provider specification read --id "$SPEC_ID" --output json 2>&1); then
+  log error "❌ Failed to read provider specification (id=$SPEC_ID)"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • The specification_id does not exist in nullplatform"
+  log error "   • np CLI is not authenticated in this environment"
+  log error "   • Network connectivity to nullplatform API"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify the spec exists: np provider specification read --id $SPEC_ID"
+  log error "   • Check np auth: np whoami"
+  log error "Underlying output: $SPEC_JSON"
+  exit 1
+fi
+
+ACTIVE_PROVIDER=$(echo "$SPEC_JSON" | jq -r '.slug // empty')
+if [ -z "$ACTIVE_PROVIDER" ]; then
+  log error "❌ Provider specification has no slug (id=$SPEC_ID)"
+  log error "Spec response: $SPEC_JSON"
   exit 1
 fi
 
 PROVIDER_DIR="$SCRIPT_DIR/providers/$ACTIVE_PROVIDER"
 if [ ! -d "$PROVIDER_DIR" ]; then
   available=$(ls "$SCRIPT_DIR/providers" 2>/dev/null | grep -v '^README' | tr '\n' ' ' || true)
-  log error "❌ Provider implementation not found: '$ACTIVE_PROVIDER'"
+  log error "❌ Provider implementation not found for slug '$ACTIVE_PROVIDER'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • The provider specification slug doesn't match any installed provider"
   log error ""
   log error "🔧 How to fix:"
   log error "   • Available providers: ${available:-(none installed)}"
-  log error "   • Set $selector_env to one of the above, or add a provider at parameters/providers/$ACTIVE_PROVIDER/"
+  log error "   • Rename the spec slug, or add a provider at parameters/providers/$ACTIVE_PROVIDER/"
   exit 1
 fi
 export ACTIVE_PROVIDER
 export PROVIDER_DIR
 
-log debug "📦 active_provider=$ACTIVE_PROVIDER kind=$PARAMETER_KIND"
+# --- PROVIDER_CONFIG comes directly from the payload (no fetch needed) ---
+export PROVIDER_CONFIG=$(echo "$CONTEXT" | jq -c '.provider.attributes // {}')
 
-# Each provider owns its config fetching (np CLI, REST call, file, env vars, etc.)
-# Optional: if absent, the provider relies on whatever's already in the environment.
-if [ -f "$PROVIDER_DIR/fetch_configuration" ]; then
-  log debug "📡 Sourcing $ACTIVE_PROVIDER/fetch_configuration"
-  source "$PROVIDER_DIR/fetch_configuration"
-fi
+log debug "📦 active_provider=$ACTIVE_PROVIDER kind=$PARAMETER_KIND spec_id=$SPEC_ID"
 
-# Validation + connection handles. Operations downstream assume invariants hold.
+# --- Source provider's setup for validation + connection handles ---
 if [ -f "$PROVIDER_DIR/setup" ]; then
   log debug "📡 Sourcing $ACTIVE_PROVIDER/setup"
   source "$PROVIDER_DIR/setup"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/build_context — provider resolution + sourcing
+# Unit tests for parameters/build_context — provider resolution via spec_id
 # =============================================================================
 
 setup() {
@@ -12,61 +12,75 @@ setup() {
   export SCRIPT="$PARAMETERS_DIR/build_context"
   export TEST_PROVIDER_DIR="$PARAMETERS_DIR/providers/test_provider"
 
-  # Sensible CONTEXT default (a secret payload). Individual tests can override.
-  export CONTEXT='{"external_id":"ext-123","parameter_id":42,"value":"my-val","parameter_name":"DB_PASS","encoding":"plain","secret":true}'
+  # Mock the np CLI
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  export NP_LOG="$BATS_TEST_TMPDIR/np.log"
+  cat > "$BATS_TEST_TMPDIR/bin/np" << 'EOF'
+#!/bin/bash
+echo "ARGS: $@" >> "$NP_LOG"
+if [ "$1" = "provider" ] && [ "$2" = "specification" ] && [ "$3" = "read" ]; then
+  case "${MOCK_NP_SPEC_MODE:-success}" in
+    success)
+      slug="${MOCK_NP_SPEC_SLUG:-test_provider}"
+      echo "{\"slug\":\"$slug\",\"id\":\"some-uuid\"}"
+      ;;
+    not_found)
+      echo "Error: Specification not found" >&2
+      exit 1
+      ;;
+    no_slug)
+      echo "{\"id\":\"some-uuid\"}"
+      ;;
+  esac
+fi
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/np"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+
+  # Default CONTEXT: a valid payload with provider.specification_id pointing to test_provider
+  export CONTEXT='{
+    "parameter_id": 42,
+    "value": "my-val",
+    "parameter_name": "DB_PASS",
+    "encoding": "plain",
+    "secret": true,
+    "entities": {
+      "organization": "1255165411",
+      "account": "95118862",
+      "namespace": "37094320",
+      "application": "321402625"
+    },
+    "provider": {
+      "specification_id": "ec885dd0-7c38-45b8-af2c-0b9e1deb7d3d",
+      "attributes": {
+        "region": "us-east-1",
+        "name_prefix": "parameters/"
+      }
+    }
+  }'
 }
 
 teardown() {
   rm -rf "$TEST_PROVIDER_DIR"
+  unset MOCK_NP_SPEC_MODE MOCK_NP_SPEC_SLUG
   unset PARAMETER_KIND ACTIVE_PROVIDER PROVIDER_DIR PARAMETERS_ROOT
-  unset SECRET_PROVIDER PARAMETER_PROVIDER
   unset EXTERNAL_ID PARAMETER_ID PARAMETER_VALUE PARAMETER_NAME PARAMETER_ENCODING
   unset PROVIDER_CONFIG
 }
 
 @test "build_context: extracts notification fields and exports them" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
   mkdir -p "$TEST_PROVIDER_DIR"
 
-  run bash -c "source $SCRIPT && echo EID=\$EXTERNAL_ID PID=\$PARAMETER_ID VAL=\$PARAMETER_VALUE NAME=\$PARAMETER_NAME ENC=\$PARAMETER_ENCODING"
+  run bash -c "source $SCRIPT && echo PID=\$PARAMETER_ID VAL=\$PARAMETER_VALUE NAME=\$PARAMETER_NAME ENC=\$PARAMETER_ENCODING"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "EID=ext-123"
   assert_contains "$output" "PID=42"
   assert_contains "$output" "VAL=my-val"
   assert_contains "$output" "NAME=DB_PASS"
   assert_contains "$output" "ENC=plain"
 }
 
-@test "build_context: secret kind selects SECRET_PROVIDER" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
-  mkdir -p "$TEST_PROVIDER_DIR"
-
-  run bash -c "source $SCRIPT && echo PROV=\$ACTIVE_PROVIDER KIND=\$PARAMETER_KIND"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "PROV=test_provider"
-  assert_contains "$output" "KIND=secret"
-}
-
-@test "build_context: parameter kind selects PARAMETER_PROVIDER" {
-  export CONTEXT='{"external_id":"e","secret":false}'
-  export PARAMETER_KIND="parameter"
-  export PARAMETER_PROVIDER="test_provider"
-  mkdir -p "$TEST_PROVIDER_DIR"
-
-  run bash -c "source $SCRIPT && echo PROV=\$ACTIVE_PROVIDER KIND=\$PARAMETER_KIND"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "PROV=test_provider"
-  assert_contains "$output" "KIND=parameter"
-}
-
-@test "build_context: derives PARAMETER_KIND from CONTEXT.secret when unset" {
-  unset PARAMETER_KIND
-  export SECRET_PROVIDER="test_provider"
+@test "build_context: derives PARAMETER_KIND=secret when .secret is true" {
   mkdir -p "$TEST_PROVIDER_DIR"
 
   run bash -c "source $SCRIPT && echo KIND=\$PARAMETER_KIND"
@@ -75,68 +89,90 @@ teardown() {
   assert_contains "$output" "KIND=secret"
 }
 
-@test "build_context: derives parameter kind when CONTEXT.secret is false" {
-  export CONTEXT='{"external_id":"e","secret":false}'
-  unset PARAMETER_KIND
-  export PARAMETER_PROVIDER="test_provider"
+@test "build_context: derives PARAMETER_KIND=parameter when .secret is false" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.secret = false')
   mkdir -p "$TEST_PROVIDER_DIR"
 
-  run bash -c "source $SCRIPT && echo KIND=\$PARAMETER_KIND PROV=\$ACTIVE_PROVIDER"
+  run bash -c "source $SCRIPT && echo KIND=\$PARAMETER_KIND"
 
   assert_equal "$status" "0"
   assert_contains "$output" "KIND=parameter"
+}
+
+@test "build_context: resolves ACTIVE_PROVIDER from spec_id via np CLI" {
+  mkdir -p "$TEST_PROVIDER_DIR"
+
+  run bash -c "source $SCRIPT && echo PROV=\$ACTIVE_PROVIDER"
+
+  assert_equal "$status" "0"
   assert_contains "$output" "PROV=test_provider"
 }
 
-@test "build_context: fails with troubleshooting when SECRET_PROVIDER is unset" {
-  export PARAMETER_KIND="secret"
-  unset SECRET_PROVIDER
+@test "build_context: calls np with correct args" {
+  mkdir -p "$TEST_PROVIDER_DIR"
+
+  run bash -c "source $SCRIPT"
+
+  captured=$(cat "$NP_LOG")
+  assert_contains "$captured" "provider specification read"
+  assert_contains "$captured" "--id ec885dd0-7c38-45b8-af2c-0b9e1deb7d3d"
+  assert_contains "$captured" "--output json"
+}
+
+@test "build_context: fails when specification_id is missing" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.provider.specification_id)')
 
   run bash -c "source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ No provider configured for kind 'secret'"
-  assert_contains "$output" "SECRET_PROVIDER env var is not set"
+  assert_contains "$output" "❌ Missing .provider.specification_id"
+  assert_contains "$output" "💡 Possible causes:"
+}
+
+@test "build_context: fails when np CLI fails to read spec" {
+  run bash -c "MOCK_NP_SPEC_MODE=not_found source $SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Failed to read provider specification"
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "build_context: fails with troubleshooting when PARAMETER_PROVIDER is unset" {
-  export PARAMETER_KIND="parameter"
-  unset PARAMETER_PROVIDER
-
-  run bash -c "source $SCRIPT"
+@test "build_context: fails when spec has no slug" {
+  run bash -c "MOCK_NP_SPEC_MODE=no_slug source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ No provider configured for kind 'parameter'"
-  assert_contains "$output" "PARAMETER_PROVIDER env var is not set"
+  assert_contains "$output" "❌ Provider specification has no slug"
 }
 
 @test "build_context: fails when provider directory doesn't exist" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="nonexistent_provider"
-
-  run bash -c "source $SCRIPT"
+  # Resolved slug points to "nonexistent_provider" but no dir
+  run bash -c "MOCK_NP_SPEC_SLUG=nonexistent_provider source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Provider implementation not found: 'nonexistent_provider'"
-  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "❌ Provider implementation not found for slug 'nonexistent_provider'"
 }
 
-@test "build_context: sources provider fetch_configuration when present" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
+@test "build_context: PROVIDER_CONFIG comes from .provider.attributes" {
   mkdir -p "$TEST_PROVIDER_DIR"
-  echo 'export FETCH_RAN="yes"' > "$TEST_PROVIDER_DIR/fetch_configuration"
 
-  run bash -c "source $SCRIPT && echo FETCH=\$FETCH_RAN"
+  run bash -c "source $SCRIPT && echo CONFIG=\$PROVIDER_CONFIG"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "FETCH=yes"
+  assert_contains "$output" '"region":"us-east-1"'
+  assert_contains "$output" '"name_prefix":"parameters/"'
+}
+
+@test "build_context: PROVIDER_CONFIG defaults to {} when attributes is missing" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.provider.attributes)')
+  mkdir -p "$TEST_PROVIDER_DIR"
+
+  run bash -c "source $SCRIPT && echo CONFIG=\$PROVIDER_CONFIG"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "CONFIG={}"
 }
 
 @test "build_context: sources provider setup when present" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
   mkdir -p "$TEST_PROVIDER_DIR"
   echo 'export SETUP_RAN="yes"' > "$TEST_PROVIDER_DIR/setup"
 
@@ -146,22 +182,20 @@ teardown() {
   assert_contains "$output" "SETUP=yes"
 }
 
-@test "build_context: sources fetch_configuration before setup" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
+@test "build_context: setup can read PROVIDER_CONFIG via get_config_value" {
   mkdir -p "$TEST_PROVIDER_DIR"
-  echo 'export ORDER="${ORDER:-}fetch,"' > "$TEST_PROVIDER_DIR/fetch_configuration"
-  echo 'export ORDER="${ORDER:-}setup"' > "$TEST_PROVIDER_DIR/setup"
+  cat > "$TEST_PROVIDER_DIR/setup" << 'EOF'
+REGION=$(get_config_value --provider '.region')
+export RESOLVED_REGION="$REGION"
+EOF
 
-  run bash -c "source $SCRIPT && echo ORDER=\$ORDER"
+  run bash -c "source $SCRIPT && echo REGION=\$RESOLVED_REGION"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "ORDER=fetch,setup"
+  assert_contains "$output" "REGION=us-east-1"
 }
 
-@test "build_context: succeeds when provider has no fetch_configuration or setup" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
+@test "build_context: succeeds when provider has no setup" {
   mkdir -p "$TEST_PROVIDER_DIR"
 
   run bash -c "source $SCRIPT && echo PROV=\$ACTIVE_PROVIDER"
@@ -171,8 +205,6 @@ teardown() {
 }
 
 @test "build_context: exports PROVIDER_DIR and PARAMETERS_ROOT" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
   mkdir -p "$TEST_PROVIDER_DIR"
 
   run bash -c "source $SCRIPT && echo PD=\$PROVIDER_DIR ROOT=\$PARAMETERS_ROOT"
@@ -180,20 +212,4 @@ teardown() {
   assert_equal "$status" "0"
   assert_contains "$output" "PD=$PARAMETERS_DIR/providers/test_provider"
   assert_contains "$output" "ROOT=$PARAMETERS_DIR"
-}
-
-@test "build_context: provider setup can read get_config_value with --provider" {
-  export PARAMETER_KIND="secret"
-  export SECRET_PROVIDER="test_provider"
-  export PROVIDER_CONFIG='{"address":"https://example.com"}'
-  mkdir -p "$TEST_PROVIDER_DIR"
-  cat > "$TEST_PROVIDER_DIR/setup" << 'EOF'
-ADDR=$(get_config_value --provider '.address')
-export RESOLVED_ADDR="$ADDR"
-EOF
-
-  run bash -c "source $SCRIPT && echo ADDR=\$RESOLVED_ADDR"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "ADDR=https://example.com"
 }

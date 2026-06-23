@@ -1,56 +1,77 @@
 # Configuration
 
-How the parameters package resolves which provider to use and where each provider gets its config.
+How the parameters package decides which provider to use and where each provider gets its config — all from the notification payload.
 
 ---
 
-## Two layers of configuration
+## Where everything comes from
 
-### 1. Provider selection (which backend handles this request)
+Each notification from nullplatform includes the full information needed to handle the parameter:
 
-Two env variables:
+| Field in `$CONTEXT` | Purpose |
+|---|---|
+| `parameter_id` | nullplatform parameter ID |
+| `value` | the value to persist (only on store) |
+| `external_id` | provider's handle for the parameter (on retrieve/delete/notify) |
+| `secret` | bool — discriminates secret vs plain parameter |
+| `parameter_name` | human-readable name |
+| `encoding` | encoding of the value (`plain`, `base64`, etc.) |
+| `entities` | NRN parsed into entity IDs (organization, account, namespace, application) |
+| `dimensions` | optional object — parameter scoping (env, country, etc.) |
+| **`provider.specification_id`** | **UUID identifying which provider handles this parameter** |
+| **`provider.attributes`** | **Provider-specific configuration (region, vault address, etc.)** |
+| `provider.nrn` | Provider-instance NRN (informational) |
+| `provider.dimensions` | Provider-instance dimensions (informational, different from parameter dimensions) |
+| `provider.id` | Provider-instance ID (informational) |
 
-| Env var              | Purpose                                          |
-|----------------------|--------------------------------------------------|
-| `SECRET_PROVIDER`    | Which provider handles `kind=secret` requests    |
-| `PARAMETER_PROVIDER` | Which provider handles `kind=parameter` requests |
-
-Values are the directory names under `providers/` (e.g. `secret_manager`, `parameter_store`, `hashicorp_vault`, `azure_key_vault`).
-
-**Resolution:** env-only. There is no provider-config fallback for selectors at this layer — that would create a chicken-and-egg problem (build_context needs to know which provider to fetch config from, but the config tells it which provider to use). If you want the platform to drive selectors, populate these env vars in the agent/runner environment before invoking the entrypoint.
-
-### 2. Provider-specific configuration (settings for the chosen backend)
-
-Each provider's `setup` script reads its own config from a combination of env vars and `PROVIDER_CONFIG` (a JSON string scoped to that one provider).
-
-**Resolution priority** (highest to lowest):
-
-1. `PROVIDER_CONFIG` (via `get_config_value --provider '.field'`)
-2. Environment variable (via `get_config_value --env NAME`)
-3. Default (via `get_config_value --default 'value'`)
-
-`PROVIDER_CONFIG` is populated by the active provider's `fetch_configuration` script (optional). If `fetch_configuration` doesn't exist or doesn't set `PROVIDER_CONFIG`, the provider falls back entirely to env vars.
+The two fields that drive the dispatch are `provider.specification_id` (which provider) and `provider.attributes` (its config).
 
 ---
 
-## The four strategies
+## Provider resolution
 
-| Strategy                         | `PARAMETER_PROVIDER` | `SECRET_PROVIDER`      |
-|----------------------------------|----------------------|------------------------|
-| Full Secrets Manager             | `secret_manager`     | `secret_manager`       |
-| Full Parameter Store (cheapest)  | `parameter_store`    | `parameter_store`      |
-| Mixed AWS (recommended for AWS)  | `parameter_store`    | `secret_manager`       |
-| Full HashiCorp Vault             | `hashicorp_vault`    | `hashicorp_vault`      |
-| Full Azure Key Vault             | `azure_key_vault`    | `azure_key_vault`      |
-| Hybrid Azure secrets, AWS params | `parameter_store`    | `azure_key_vault`      |
+`build_context` calls:
 
-Switching strategies = changing two env vars. Zero code changes.
+```bash
+np provider specification read --id <provider.specification_id> --output json
+```
+
+The response includes a `slug` field. That slug must match the name of a directory under `parameters/providers/`. For example:
+
+| Slug returned | Provider directory used |
+|---|---|
+| `hashicorp_vault` | `parameters/providers/hashicorp_vault/` |
+| `aws_secret_manager` | `parameters/providers/aws_secret_manager/` |
+| `parameter_store` | `parameters/providers/parameter_store/` |
+| `azure_key_vault` | `parameters/providers/azure_key_vault/` |
+
+If the slug doesn't match any installed provider, `build_context` fails with a list of available providers and instructions to either rename the spec slug or add the missing provider.
+
+---
+
+## Provider config
+
+`build_context` exports `PROVIDER_CONFIG` as a JSON string containing whatever is in `$CONTEXT.provider.attributes`. The shape is provider-specific.
+
+Each provider's `setup` script reads from `PROVIDER_CONFIG` via `get_config_value`:
+
+```bash
+REGION=$(get_config_value --env AWS_REGION --provider '.region')
+```
+
+Priority order (highest to lowest):
+
+1. Provider config (`get_config_value --provider '.field'`)
+2. Environment variable (`get_config_value --env NAME`)
+3. Default (`get_config_value --default 'value'`)
+
+Env vars take precedence ONLY when the provider attribute is missing. This lets you override config in a local dev environment by setting env vars while keeping the platform-controlled config as the production source of truth.
 
 ---
 
 ## Per-provider config shapes
 
-The shape of `PROVIDER_CONFIG` for each provider:
+The shape of `$CONTEXT.provider.attributes` for each provider:
 
 ### `hashicorp_vault`
 
@@ -62,9 +83,7 @@ The shape of `PROVIDER_CONFIG` for each provider:
 }
 ```
 
-Equivalent env vars: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_PATH_PREFIX`.
-
-### `secret_manager`
+### `aws_secret_manager` (currently named `secret_manager`)
 
 ```json
 {
@@ -74,7 +93,7 @@ Equivalent env vars: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_PATH_PREFIX`.
 }
 ```
 
-Equivalent env vars: `AWS_REGION` (or `AWS_DEFAULT_REGION`), `SM_NAME_PREFIX`, `SM_KMS_KEY_ID`. `kms_key_id` is optional (defaults to AWS-managed key).
+`kms_key_id` is optional (defaults to AWS-managed key).
 
 ### `parameter_store`
 
@@ -87,7 +106,7 @@ Equivalent env vars: `AWS_REGION` (or `AWS_DEFAULT_REGION`), `SM_NAME_PREFIX`, `
 }
 ```
 
-Equivalent env vars: `AWS_REGION`, `PS_NAME_PREFIX`, `PS_KMS_KEY_ID`, `PS_TIER`. `kms_key_id` only matters for `kind=secret` (SecureString). `tier` ∈ {`Standard`, `Advanced`, `Intelligent-Tiering`}.
+`kms_key_id` only matters for `kind=secret` (SecureString). `tier` ∈ {`Standard`, `Advanced`, `Intelligent-Tiering`}.
 
 ### `azure_key_vault`
 
@@ -98,38 +117,40 @@ Equivalent env vars: `AWS_REGION`, `PS_NAME_PREFIX`, `PS_KMS_KEY_ID`, `PS_TIER`.
 }
 ```
 
-Equivalent env vars: `AZURE_KEY_VAULT_NAME`, `AZURE_KEY_VAULT_SECRET_PREFIX`. Auth comes from the Azure CLI's default credential chain.
+Authentication comes from the Azure CLI's default credential chain.
 
 ---
 
-## How `PROVIDER_CONFIG` gets populated
+## What's NOT in this package
 
-Each provider may have a `fetch_configuration` script. When `build_context` activates that provider, it sources `providers/<name>/fetch_configuration` before `setup`. The script's job:
+Two things that used to be design points but are obsolete now:
 
-1. Fetch the provider's config from wherever it lives.
-2. Export `PROVIDER_CONFIG` as a JSON string.
+- **`SECRET_PROVIDER` / `PARAMETER_PROVIDER` env vars** — not needed. The platform sends `specification_id` per parameter, so there's no global "which provider to use" setting.
+- **`fetch_configuration` scripts per provider** — not needed. Config comes in the payload as `provider.attributes`, no separate fetching step.
 
-Where the config "lives" is up to each provider:
-
-- **`np provider get`** — call the nullplatform CLI to read providers config.
-- **REST call** — query an internal config service.
-- **File** — read a mounted config file.
-- **Env vars only** — skip `fetch_configuration` entirely; rely on env.
-
-The provider package doesn't care which mechanism you choose. If you want a uniform mechanism across providers, you can implement them all the same way; if you want each to source config differently (e.g. Vault config from Consul, AWS config from instance profile), nothing forces them to align.
+Providers can still be tested locally with env vars (e.g., `VAULT_ADDR=http://localhost:8200`) because `get_config_value` falls back to env when `PROVIDER_CONFIG` doesn't have the field. This is useful for development without involving the platform.
 
 ---
 
 ## Local development
 
-For local testing without wiring `fetch_configuration`, set everything via env vars:
+For local testing without involving the platform, set the relevant env vars and use a stubbed `np` CLI that returns a known slug:
 
 ```bash
-export SECRET_PROVIDER=hashicorp_vault
-export PARAMETER_PROVIDER=hashicorp_vault
+# Stub np in PATH
+cat > /tmp/np << 'EOF'
+#!/bin/bash
+echo '{"slug": "hashicorp_vault"}'
+EOF
+chmod +x /tmp/np
+export PATH=/tmp:$PATH
+
+# Set the provider's env vars
 export VAULT_ADDR=http://localhost:8200
 export VAULT_TOKEN=root-token
-# ...then invoke the entrypoint
+
+# Now invoke the entrypoint
+NP_ACTION_CONTEXT='...' NOTIFICATION_ACTION='parameter:store' ./parameters/entrypoint
 ```
 
-All providers fall through to env vars when `PROVIDER_CONFIG` is unset or empty.
+All providers fall through to env vars when `PROVIDER_CONFIG` is missing fields, making local-only iteration possible.
