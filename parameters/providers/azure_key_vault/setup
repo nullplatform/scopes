@@ -17,7 +17,7 @@ AZ_VAULT_NAME=$(get_config_value \
 AZ_SECRET_PREFIX=$(get_config_value \
   --env AZURE_KEY_VAULT_SECRET_PREFIX \
   --provider '.secret_prefix' \
-  --default 'parameters-')
+  --default 'nullplatform-')
 
 if [ -z "$AZ_VAULT_NAME" ]; then
   log error "❌ Azure Key Vault name not configured"

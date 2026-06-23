@@ -2,11 +2,15 @@
 set -euo pipefail
 
 # Stores a parameter as an Azure Key Vault secret.
-# external_id composed from entities + dimensions + parameter_id via build_external_id.
+#
+# Versioning model:
+#   nullplatform parameter values are immutable. Each update is a new VERSION.
+#   Azure Key Vault has native versioning — every `secret set` creates a new
+#   version, all retained inside the same secret. No special logic needed.
+#
 # AKV doesn't allow `/` or `=` in secret names, so the canonical EXTERNAL_ID is
 # transformed (slash → dash, equals → dash) for the secret name. The external_id
-# returned to nullplatform keeps the canonical slash form for cross-provider
-# consistency.
+# returned to nullplatform keeps the canonical slash form.
 #
 # Required env: PARAMETER_VALUE, AZ_VAULT_NAME, AZ_SECRET_PREFIX
 
@@ -21,6 +25,7 @@ if ! AKV_ID=$(az keyvault secret set \
         --vault-name "$AZ_VAULT_NAME" \
         --name "$SECRET_NAME" \
         --value "$PARAMETER_VALUE" \
+        --tags "managed_by=nullplatform" \
         --query id \
         --output tsv 2>/dev/null); then
   log error "❌ Failed to store secret in Azure Key Vault '$AZ_VAULT_NAME'"

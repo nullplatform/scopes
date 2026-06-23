@@ -21,7 +21,7 @@ Each notification from nullplatform includes the full information needed to hand
 | **`provider.specification_id`** | **UUID identifying which provider handles this parameter** |
 | **`provider.attributes`** | **Provider-specific configuration (region, vault address, etc.)** |
 | `provider.nrn` | Provider-instance NRN (informational) |
-| `provider.dimensions` | Provider-instance dimensions (informational, different from parameter dimensions) |
+| `provider.dimensions` | Provider-instance dimensions. **Do NOT use this field** — it is internal to the platform's provider system and unrelated to the parameter's `.dimensions`. Parameter dimensions come from top-level `.dimensions` only. |
 | `provider.id` | Provider-instance ID (informational) |
 
 The two fields that drive the dispatch are `provider.specification_id` (which provider) and `provider.attributes` (its config).
@@ -33,7 +33,7 @@ The two fields that drive the dispatch are `provider.specification_id` (which pr
 `build_context` calls:
 
 ```bash
-np provider specification read --id <provider.specification_id> --output json
+np provider specification read --id <provider.specification_id> --format json
 ```
 
 The response includes a `slug` field. That slug must match the name of a directory under `parameters/providers/`. For example:
@@ -118,17 +118,6 @@ The shape of `$CONTEXT.provider.attributes` for each provider:
 ```
 
 Authentication comes from the Azure CLI's default credential chain.
-
----
-
-## What's NOT in this package
-
-Two things that used to be design points but are obsolete now:
-
-- **`SECRET_PROVIDER` / `PARAMETER_PROVIDER` env vars** — not needed. The platform sends `specification_id` per parameter, so there's no global "which provider to use" setting.
-- **`fetch_configuration` scripts per provider** — not needed. Config comes in the payload as `provider.attributes`, no separate fetching step.
-
-Providers can still be tested locally with env vars (e.g., `VAULT_ADDR=http://localhost:8200`) because `get_config_value` falls back to env when `PROVIDER_CONFIG` doesn't have the field. This is useful for development without involving the platform.
 
 ---
 

@@ -1,8 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
-# Stores a parameter as an AWS Secrets Manager secret.
-# external_id composed from entities + dimensions + parameter_id via build_external_id.
+# Stores a parameter value in AWS Secrets Manager.
+#
+# Versioning model:
+#   nullplatform parameter values are immutable. Each update of the same
+#   (parameter_id, nrn, dimensions) tuple is a new VERSION of the same value.
+#   AWS Secrets Manager has native versioning — every PutSecretValue creates a
+#   new version, all retained inside the same secret, and AWSCURRENT moves to
+#   the latest. We exploit this:
+#     - First store for this external_id → CreateSecret
+#     - Subsequent stores → PutSecretValue (new version, same secret)
+#   This keeps the version history without paying for a separate secret per
+#   version (each AWS SM secret costs $0.40/month regardless of version count).
 #
 # Required env: PARAMETER_ID, PARAMETER_VALUE, AWS_REGION, SM_NAME_PREFIX
 # Optional env: SM_KMS_KEY_ID
@@ -12,17 +22,19 @@ build_external_id
 
 SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
 
-SECRET_PAYLOAD=$(jq -n \
+SECRET_PAYLOAD=$(jq -nc \
     --argjson parameter_id "${PARAMETER_ID:-null}" \
     --arg value "$PARAMETER_VALUE" \
     --arg stored_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --arg external_id "$EXTERNAL_ID" \
-    '{parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id}')
+    --arg managed_by "nullplatform" \
+    '{parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id, managed_by: $managed_by}')
 
 create_args=(
   --region "$AWS_REGION"
   --name "$SECRET_NAME"
   --secret-string "$SECRET_PAYLOAD"
+  --tags "Key=managed_by,Value=nullplatform"
   --query ARN
   --output text
 )
@@ -30,16 +42,45 @@ if [ -n "${SM_KMS_KEY_ID:-}" ]; then
   create_args+=(--kms-key-id "$SM_KMS_KEY_ID")
 fi
 
-if ! SECRET_ARN=$(aws secretsmanager create-secret "${create_args[@]}" 2>/dev/null); then
+err_file=$(mktemp)
+if SECRET_ARN=$(aws secretsmanager create-secret "${create_args[@]}" 2>"$err_file"); then
+  rm -f "$err_file"
+elif grep -q "ResourceExistsException" "$err_file"; then
+  rm -f "$err_file"
+  log debug "Secret '$SECRET_NAME' exists; adding new version (history preserved by AWS SM)"
+  err_file=$(mktemp)
+  if ! SECRET_ARN=$(aws secretsmanager put-secret-value \
+          --region "$AWS_REGION" \
+          --secret-id "$SECRET_NAME" \
+          --secret-string "$SECRET_PAYLOAD" \
+          --query ARN \
+          --output text 2>"$err_file"); then
+    err=$(cat "$err_file")
+    rm -f "$err_file"
+    log error "❌ Failed to add new version to secret '$SECRET_NAME'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • IAM principal lacks secretsmanager:PutSecretValue on this resource"
+    log error "   • Secret is in a deletion-pending state"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify identity: aws sts get-caller-identity --region $AWS_REGION"
+    log error "Underlying error: $err"
+    exit 1
+  fi
+  rm -f "$err_file"
+else
+  err=$(cat "$err_file")
+  rm -f "$err_file"
   log error "❌ Failed to store parameter in AWS Secrets Manager"
   log error ""
   log error "💡 Possible causes:"
-  log error "   • IAM principal lacks secretsmanager:CreateSecret for $SECRET_NAME"
-  log error "   • Same-name secret is in soft-delete window"
-  log error "   • Region '$AWS_REGION' unreachable"
+  log error "   • IAM principal lacks secretsmanager:CreateSecret on this resource"
+  log error "   • Region '$AWS_REGION' unreachable or wrong"
   log error ""
   log error "🔧 How to fix:"
   log error "   • Verify identity: aws sts get-caller-identity --region $AWS_REGION"
+  log error "Underlying error: $err"
   exit 1
 fi
 

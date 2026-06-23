@@ -38,13 +38,13 @@ teardown() {
   assert_contains "$output" "REGION=eu-west-1"
 }
 
-@test "aws_secret_manager setup: default name_prefix is 'parameters/'" {
+@test "aws_secret_manager setup: default name_prefix is 'nullplatform/'" {
   export AWS_REGION="us-east-1"
 
   run bash -c "$DEPS; source $SCRIPT && echo PREFIX=\$SM_NAME_PREFIX"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "PREFIX=parameters/"
+  assert_contains "$output" "PREFIX=nullplatform/"
 }
 
 @test "aws_secret_manager setup: PROVIDER_CONFIG wins over env" {

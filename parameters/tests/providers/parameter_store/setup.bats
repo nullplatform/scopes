@@ -32,7 +32,7 @@ teardown() {
   run bash -c "$DEPS; source $SCRIPT && echo PREFIX=\$PS_NAME_PREFIX"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "PREFIX=/nullplatform/parameters/"
+  assert_contains "$output" "PREFIX=/nullplatform/"
 }
 
 @test "parameter_store setup: normalizes prefix without leading slash" {

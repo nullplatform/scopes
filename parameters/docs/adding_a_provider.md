@@ -27,7 +27,7 @@ mkdir -p parameters/providers/<provider_name>/docs
 mkdir -p parameters/tests/providers/<provider_name>
 ```
 
-`<provider_name>` is `snake_case` and is what users will set in `SECRET_PROVIDER` / `PARAMETER_PROVIDER`.
+`<provider_name>` must match the `slug` field of the `parameters-storage` provider specification you (or the platform admin) registered in nullplatform. The agent's `build_context` calls `np provider specification read --id <specification_id>`, reads `.slug`, and uses it to find your directory.
 
 ---
 
@@ -35,14 +35,20 @@ mkdir -p parameters/tests/providers/<provider_name>
 
 Validate config and export connection handles. Don't repeat this in operation scripts — `setup` is the DRY anchor.
 
+Config values can come from **two sources**, and `get_config_value` picks whichever is present (provider config wins, env fallback, defaults last):
+
+1. **`parameters-storage` provider in nullplatform** — values set when the provider is registered, sent to the agent in `$CONTEXT.provider.attributes`. Good for non-sensitive operational settings (region, name prefix, vault address, etc.).
+2. **Environment variables on the agent** — set by the operator outside nullplatform. **Recommended for credentials, tokens, and any sensitive material** that should not be stored in nullplatform's database. This keeps ownership of sensitive data 100% on the operator side and lets them use their own protection mechanisms (secret stores, rotation, etc.).
+
 ```bash
 #!/bin/bash
 set -euo pipefail
 
 # Read config (provider config wins, env fallback, defaults last)
 MY_ENDPOINT=$(get_config_value --env MY_ENDPOINT --provider '.endpoint')
-MY_TOKEN=$(get_config_value --env MY_TOKEN --provider '.token')
-MY_PREFIX=$(get_config_value --env MY_PREFIX --provider '.prefix' --default 'parameters-')
+# Token: only env var — do NOT pass via provider config (keep credentials off-platform)
+MY_TOKEN=$(get_config_value --env MY_TOKEN)
+MY_PREFIX=$(get_config_value --env MY_PREFIX --provider '.prefix' --default 'nullplatform-')
 
 if [ -z "$MY_ENDPOINT" ]; then
   log error "❌ <Backend> endpoint not configured"
@@ -139,21 +145,6 @@ Skip the file unless your backend needs a per-notify side effect. The dispatch r
 
 ---
 
-## Step 4: Write `fetch_configuration` (optional)
-
-If the platform stores your provider's config somewhere fetchable, add a `fetch_configuration` script that exports `PROVIDER_CONFIG` as a JSON string with the shape your `setup` expects.
-
-```bash
-#!/bin/bash
-# providers/<provider_name>/fetch_configuration
-PROVIDER_CONFIG=$(np provider get --type <something> --output json)
-export PROVIDER_CONFIG
-```
-
-If you skip this file, `PROVIDER_CONFIG` stays unset and `setup` reads everything from env vars.
-
----
-
 ## Step 5: Write tests
 
 Mirror the source structure under `parameters/tests/providers/<provider_name>/`:
@@ -199,10 +190,10 @@ If the backend needs IAM-style permissions (AWS, GCP), add `iam-policy.md` with 
 
 ## Step 7: Wire it up
 
-1. Set the env var: `SECRET_PROVIDER=<provider_name>` and/or `PARAMETER_PROVIDER=<provider_name>`.
-2. If using `fetch_configuration`, the platform team needs to ensure the fetch mechanism (np CLI, REST endpoint, etc.) returns the JSON shape your provider expects.
+1. Register a `parameters-storage` provider in nullplatform with `slug: <provider_name>` and the schema for your provider's config attributes (use a `.json.tpl` file as the spec — see existing providers for examples).
+2. Bind parameters in nullplatform to that provider specification.
 
-Done. The new provider is reachable from every workflow without any other change.
+Done. The agent receives `provider.specification_id` and `provider.attributes` in every notification for those parameters; `build_context` resolves the slug, finds your directory, and dispatches.
 
 ---
 

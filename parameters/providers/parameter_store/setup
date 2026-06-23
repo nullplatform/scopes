@@ -17,7 +17,7 @@ AWS_REGION=$(get_config_value \
 PS_NAME_PREFIX=$(get_config_value \
   --env PS_NAME_PREFIX \
   --provider '.name_prefix' \
-  --default '/nullplatform/parameters/')
+  --default '/nullplatform/')
 
 PS_KMS_KEY_ID=$(get_config_value \
   --env PS_KMS_KEY_ID \

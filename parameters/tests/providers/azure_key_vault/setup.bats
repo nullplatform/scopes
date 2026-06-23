@@ -32,7 +32,7 @@ teardown() {
 
   assert_equal "$status" "0"
   assert_contains "$output" "VAULT=my-vault"
-  assert_contains "$output" "PREFIX=parameters-"
+  assert_contains "$output" "PREFIX=nullplatform-"
 }
 
 @test "azure_key_vault setup: PROVIDER_CONFIG wins over env" {
@@ -65,5 +65,5 @@ teardown() {
 
   assert_equal "$status" "0"
   # Empty env should fall through to default 'parameters-'
-  assert_contains "$output" "PREFIX=[parameters-]"
+  assert_contains "$output" "PREFIX=[nullplatform-]"
 }

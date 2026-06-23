@@ -15,7 +15,7 @@ AWS_REGION=$(get_config_value \
 SM_NAME_PREFIX=$(get_config_value \
   --env SM_NAME_PREFIX \
   --provider '.name_prefix' \
-  --default 'parameters/')
+  --default 'nullplatform/')
 
 SM_KMS_KEY_ID=$(get_config_value \
   --env SM_KMS_KEY_ID \

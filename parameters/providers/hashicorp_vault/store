@@ -2,8 +2,12 @@
 set -euo pipefail
 
 # Stores a parameter value in HashiCorp Vault KV v2.
-# external_id is composed from entities (with slugs fetched via np CLI) +
-# dimensions + parameter_id. See parameters/utils/build_external_id.
+#
+# Versioning model:
+#   nullplatform parameter values are immutable. Each update is a new VERSION.
+#   Vault KV v2 has native versioning — every POST to the data endpoint creates
+#   a new version, all retained inside the same path, and the latest is returned
+#   on read by default. No special logic needed; the POST IS the versioning.
 #
 # Required env: PARAMETER_ID, PARAMETER_VALUE, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
@@ -12,10 +16,18 @@ build_external_id
 
 VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID"
 
+PAYLOAD=$(jq -nc \
+    --argjson parameter_id "${PARAMETER_ID:-null}" \
+    --arg value "$PARAMETER_VALUE" \
+    --arg stored_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    --arg external_id "$EXTERNAL_ID" \
+    --arg managed_by "nullplatform" \
+    '{data: {parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id, managed_by: $managed_by}}')
+
 if ! curl -s -X POST \
     -H "X-Vault-Token: $VAULT_TOKEN" \
     "$VAULT_ADDR/v1/$VAULT_PATH" \
-    -d "{\"data\":{\"parameter_id\":$PARAMETER_ID,\"value\":$(echo "$PARAMETER_VALUE" | jq -R .),\"stored_at\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\"external_id\":\"$EXTERNAL_ID\"}}" >/dev/null; then
+    -d "$PAYLOAD" >/dev/null; then
   log error "❌ Failed to store parameter in Vault at $VAULT_ADDR"
   log error ""
   log error "💡 Possible causes:"

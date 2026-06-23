@@ -14,7 +14,7 @@ VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN --provider '.token')
 VAULT_PATH_PREFIX=$(get_config_value \
   --env VAULT_PATH_PREFIX \
   --provider '.path_prefix' \
-  --default 'secret/data/parameters')
+  --default 'secret/data/nullplatform')
 
 if [ -z "$VAULT_ADDR" ]; then
   log error "❌ Vault address not configured"

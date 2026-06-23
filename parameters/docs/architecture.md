@@ -15,7 +15,7 @@ nullplatform scopes need to persist parameter values somewhere. Different organi
 
 A monolithic scope tied to one backend forces fork-and-modify for every variation. This package inverts the relationship: the **dispatch layer is the package**, the **backends are pluggable modules** dropped into `providers/`.
 
-The platform decides which provider handles each parameter — there is no per-environment / per-agent configuration of "which provider to use". The notification payload carries that information directly.
+The platform decides which provider handles each parameter and which configuration it uses. Operators register `parameters-storage` providers in nullplatform (one per backend they want to support — AWS Secrets Manager, Vault, etc.) with their region/address/etc. The notification payload then carries both the choice and its configuration to the agent. A single agent can serve parameters routed to multiple backends simultaneously without per-agent configuration.
 
 ---
 
@@ -72,6 +72,20 @@ The dispatch layer is **provider-agnostic**. It has zero knowledge of any specif
 
 ---
 
+## Storage naming: human-friendliness principle
+
+Every provider composes its storage path from the parameter's NRN entities (slugs + IDs), dimensions, and parameter name + ID. The principle is that an operator entering the storage layer manually (AWS console, Vault UI, az portal) must be able to find any secret by knowing the parameter's context, without consulting nullplatform's database.
+
+The shared helper `parameters/utils/build_external_id` constructs the canonical form, fetching slugs from the np CLI in parallel:
+
+```
+<provider_prefix>/organization=<slug>-<id>/account=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+```
+
+Each provider applies the prefix (default `nullplatform/`) and any backend-specific sanitization (Azure Key Vault flattens slashes and equals to dashes; everyone else uses the canonical form). The canonical `external_id` returned to nullplatform is the same across all providers, which makes parameter migration between backends mechanically possible.
+
+---
+
 ## How the provider is chosen
 
 For each parameter, nullplatform stores which provider should handle it. That choice travels with every notification as `provider.specification_id` — a UUID pointing to a "provider specification" entity in nullplatform.
@@ -87,7 +101,7 @@ The slug becomes `ACTIVE_PROVIDER`, which must match a directory under `paramete
 
 The provider's configuration travels in the same payload at `provider.attributes`. `build_context` exports it as `PROVIDER_CONFIG` (a JSON string). Each provider's `setup` reads from `PROVIDER_CONFIG` via `get_config_value --provider '.field'` to extract specific fields (region, kms_key_id, etc.).
 
-This means **there is no per-environment configuration of "which provider"** — the platform decides per-parameter. A single agent can serve parameters routed to Vault and secrets routed to Secrets Manager at the same time, without any agent-side configuration.
+The provider's configuration is registered upfront as a `parameters-storage` provider in nullplatform. The platform then attaches that configuration to each parameter via `provider.specification_id`. A single agent can serve parameters routed to multiple backends at the same time, without per-agent configuration.
 
 ---
 

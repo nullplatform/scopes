@@ -1,7 +1,11 @@
 #!/bin/bash
 
 # Constructs EXTERNAL_ID for a store operation by composing:
-#   <entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_id>
+#   <entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+#
+# The path is human-friendly: anyone entering the storage layer manually (AWS
+# console, Vault UI, az portal) sees the entity hierarchy, the dimensions, and
+# the parameter name + id directly in the path.
 #
 # Slugs are fetched in parallel via `np <type> read --id <id> --format json --query '.slug'`.
 # Entities are iterated in canonical NRN order; only present entities are included.
@@ -17,6 +21,12 @@
 # Each provider's store decides how to use EXTERNAL_ID:
 #   - vault/SM/PS: append to a prefix that ends with `/`
 #   - AKV: replace `/` and `=` with `-` (AKV doesn't allow those chars)
+
+# Replaces characters not allowed by AWS SM / Parameter Store secret names.
+# AWS SM allows alphanumerics and /_+=.@- ; everything else becomes underscore.
+sanitize_for_path() {
+  echo "$1" | sed 's|[^A-Za-z0-9._-]|_|g'
+}
 
 build_external_id() {
   local entities_json
@@ -49,7 +59,6 @@ build_external_id() {
       log error "💡 Possible causes:"
       log error "   • Entity does not exist in nullplatform"
       log error "   • np CLI is not authenticated"
-      log error "   • Entity type '$entity_type' is not supported by np CLI"
       log error ""
       log error "🔧 How to fix:"
       log error "   • Verify: np $entity_type read --id $entity_id --format json"
@@ -65,9 +74,14 @@ build_external_id() {
     [ -n "$dim" ] && segments+=("$dim")
   done < <(echo "$CONTEXT" | jq -r '(.dimensions // {}) | to_entries | sort_by(.key) | .[] | "\(.key)=\(.value)"')
 
-  local param_id
+  local param_id param_name
   param_id=$(echo "$CONTEXT" | jq -r '.parameter_id // empty')
-  [ -n "$param_id" ] && segments+=("$param_id")
+  param_name=$(echo "$CONTEXT" | jq -r '.parameter_name // empty')
+  if [ -n "$param_name" ] && [ -n "$param_id" ]; then
+    segments+=("$(sanitize_for_path "$param_name")-$param_id")
+  elif [ -n "$param_id" ]; then
+    segments+=("$param_id")
+  fi
 
   rm -rf "$tmp_dir"
 

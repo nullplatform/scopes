@@ -48,7 +48,7 @@ teardown() {
   assert_equal "$status" "0"
   assert_contains "$output" "ADDR=https://vault.example.com"
   assert_contains "$output" "TOKEN=hvs.xxx"
-  assert_contains "$output" "PREFIX=secret/data/parameters"
+  assert_contains "$output" "PREFIX=secret/data/nullplatform"
 }
 
 @test "vault setup: PROVIDER_CONFIG wins over env var" {
