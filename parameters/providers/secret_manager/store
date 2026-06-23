@@ -1,13 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-# Stores a parameter value as an AWS Secrets Manager secret.
-# One secret per parameter (each ~$0.40/month). External_id is a fresh UUIDv4.
+# Stores a parameter as an AWS Secrets Manager secret.
+# external_id composed from entities + dimensions + parameter_id via build_external_id.
 #
 # Required env: PARAMETER_ID, PARAMETER_VALUE, AWS_REGION, SM_NAME_PREFIX
-# Optional env: SM_KMS_KEY_ID (uses default aws/secretsmanager key when empty)
+# Optional env: SM_KMS_KEY_ID
 
-EXTERNAL_ID=$(uuidgen 2>/dev/null || echo "$(openssl rand -hex 16 | sed 's/\(.{8}\)\(.{4}\)\(.{4}\)\(.{4}\)\(.{12}\)/\1-\2-\3-\4-\5/')")
+source "$PARAMETERS_ROOT/utils/build_external_id"
+build_external_id
+
 SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
 
 SECRET_PAYLOAD=$(jq -n \
@@ -33,12 +35,11 @@ if ! SECRET_ARN=$(aws secretsmanager create-secret "${create_args[@]}" 2>/dev/nu
   log error ""
   log error "💡 Possible causes:"
   log error "   • IAM principal lacks secretsmanager:CreateSecret for $SECRET_NAME"
-  log error "   • Same-name secret is in soft-delete window (change prefix or wait)"
+  log error "   • Same-name secret is in soft-delete window"
   log error "   • Region '$AWS_REGION' unreachable"
   log error ""
   log error "🔧 How to fix:"
   log error "   • Verify identity: aws sts get-caller-identity --region $AWS_REGION"
-  log error "   • Check policy: aws iam simulate-principal-policy --action-names secretsmanager:CreateSecret"
   exit 1
 fi
 

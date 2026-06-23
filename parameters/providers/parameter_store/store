@@ -1,14 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# Stores a parameter in AWS Systems Manager Parameter Store.
-# - kind=secret    → Type=SecureString (encrypted via KMS_KEY_ID or default aws/ssm)
-# - kind=parameter → Type=String       (plain text)
+# Stores a parameter in AWS SSM Parameter Store.
+# external_id composed from entities + dimensions + parameter_id via build_external_id.
+# Type=SecureString for kind=secret, Type=String for kind=parameter.
 #
 # Required env: PARAMETER_KIND, PARAMETER_VALUE, AWS_REGION, PS_NAME_PREFIX, PS_TIER
 # Optional env: PS_KMS_KEY_ID
 
-EXTERNAL_ID=$(uuidgen 2>/dev/null || echo "$(openssl rand -hex 16 | sed 's/\(.{8}\)\(.{4}\)\(.{4}\)\(.{4}\)\(.{12}\)/\1-\2-\3-\4-\5/')")
+source "$PARAMETERS_ROOT/utils/build_external_id"
+build_external_id
+
 PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID}"
 
 SSM_TYPE="String"
@@ -30,7 +32,6 @@ if ! aws ssm put-parameter "${put_args[@]}" >/dev/null 2>&1; then
   log error ""
   log error "💡 Possible causes:"
   log error "   • IAM principal lacks ssm:PutParameter for $PARAM_NAME"
-  log error "   • A parameter with this name already exists (UUID collision — extremely unlikely)"
   log error "   • Tier '$PS_TIER' rejects this value size (Standard caps at 4KB)"
   if [ "$SSM_TYPE" = "SecureString" ] && [ -n "${PS_KMS_KEY_ID:-}" ]; then
     log error "   • IAM principal lacks kms:Encrypt on $PS_KMS_KEY_ID"

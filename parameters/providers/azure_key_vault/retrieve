@@ -3,14 +3,11 @@ set -euo pipefail
 
 # Retrieves a secret from Azure Key Vault by external_id.
 #
-# Semantics:
-#   - Success → return {value: "<value>"}
-#   - SecretNotFound → return {value: "value not found"}
-#   - Any other error → exit 1 with troubleshooting
-#
-# Required env: EXTERNAL_ID, AZ_VAULT_NAME, AZ_SECRET_PREFIX
+# Required env: EXTERNAL_ID (canonical slash form), AZ_VAULT_NAME, AZ_SECRET_PREFIX
 
-SECRET_NAME="${AZ_SECRET_PREFIX}${EXTERNAL_ID}"
+# AKV stores with dashes (no `/` or `=`); transform from canonical form.
+AKV_SUFFIX=$(echo "$EXTERNAL_ID" | tr '/=' '--')
+SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
 
 err_file=$(mktemp)
 if VALUE=$(az keyvault secret show \
@@ -36,7 +33,6 @@ else
     log error ""
     log error "🔧 How to fix:"
     log error "   • Verify identity: az account show"
-    log error "   • Check access policy: az keyvault show --name $AZ_VAULT_NAME --query properties.accessPolicies"
     log error "Underlying error: $err"
     exit 1
   fi

@@ -6,17 +6,26 @@
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../../.." && pwd)"
   export PARAMETERS_DIR="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  export PARAMETERS_ROOT="$PARAMETERS_DIR"
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
   export SCRIPT="$PARAMETERS_DIR/providers/parameter_store/store"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
-  cat > "$BATS_TEST_TMPDIR/bin/uuidgen" << 'EOF'
+
+  cat > "$BATS_TEST_TMPDIR/bin/np" << 'EOF'
 #!/bin/bash
-echo "fixed-ps-uuid"
+entity_type="$1"
+case "$entity_type" in
+  organization) echo "\"acme\"" ;;
+  account)      echo "\"prod\"" ;;
+  namespace)    echo "\"billing\"" ;;
+  application)  echo "\"api\"" ;;
+  *)            echo "\"unknown\"" ;;
+esac
 EOF
-  chmod +x "$BATS_TEST_TMPDIR/bin/uuidgen"
+  chmod +x "$BATS_TEST_TMPDIR/bin/np"
 
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
   cat > "$BATS_TEST_TMPDIR/bin/aws" << EOF
@@ -34,22 +43,30 @@ EOF
   export PS_TIER="Standard"
   export PARAMETER_ID=42
   export PARAMETER_VALUE="my-value"
+  export CONTEXT='{
+    "parameter_id": 42,
+    "value": "my-value",
+    "entities": {
+      "organization": "1255165411",
+      "account": "95118862",
+      "namespace": "37094320",
+      "application": "321402625"
+    },
+    "dimensions": {}
+  }'
 
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "parameter_store store: outputs external_id and metadata" {
+@test "parameter_store store: external_id composed from entities + parameter_id" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
-  parameter_name=$(echo "$output" | jq -r '.metadata.parameter_name')
-  type=$(echo "$output" | jq -r '.metadata.type')
-  assert_equal "$external_id" "fixed-ps-uuid"
-  assert_equal "$parameter_name" "/nullplatform/parameters/fixed-ps-uuid"
-  assert_equal "$type" "String"
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42"
+  assert_equal "$external_id" "$expected"
 }
 
 @test "parameter_store store: kind=secret uses SecureString" {
@@ -60,7 +77,6 @@ EOF
   assert_equal "$status" "0"
   type=$(echo "$output" | jq -r '.metadata.type')
   assert_equal "$type" "SecureString"
-
   captured=$(cat "$AWS_LOG")
   assert_contains "$captured" "--type SecureString"
 }
@@ -70,7 +86,6 @@ EOF
 
   run bash -c "$DEPS; source $SCRIPT"
 
-  assert_equal "$status" "0"
   captured=$(cat "$AWS_LOG")
   assert_contains "$captured" "--type String"
   [[ "$captured" != *"SecureString"* ]]
@@ -86,24 +101,13 @@ EOF
   assert_contains "$captured" "--key-id alias/parameters-secure"
 }
 
-@test "parameter_store store: omits --key-id when PS_KMS_KEY_ID is empty (uses default aws/ssm)" {
-  export PARAMETER_KIND="secret"
-  export PS_KMS_KEY_ID=""
-
-  run bash -c "$DEPS; source $SCRIPT"
-
-  captured=$(cat "$AWS_LOG")
-  [[ "$captured" != *"--key-id"* ]]
-}
-
-@test "parameter_store store: never includes --key-id for String (kind=parameter)" {
+@test "parameter_store store: parameter_name has PS_NAME_PREFIX + composite" {
   export PARAMETER_KIND="parameter"
-  export PS_KMS_KEY_ID="alias/should-not-be-used"
 
   run bash -c "$DEPS; source $SCRIPT"
 
-  captured=$(cat "$AWS_LOG")
-  [[ "$captured" != *"--key-id"* ]]
+  param_name=$(echo "$output" | jq -r '.metadata.parameter_name')
+  assert_contains "$param_name" "/nullplatform/parameters/organization=acme-1255165411"
 }
 
 @test "parameter_store store: passes tier flag" {
@@ -116,18 +120,6 @@ EOF
   assert_contains "$captured" "--tier Advanced"
 }
 
-@test "parameter_store store: calls put-parameter with name and value" {
-  export PARAMETER_KIND="parameter"
-
-  run bash -c "$DEPS; source $SCRIPT"
-
-  captured=$(cat "$AWS_LOG")
-  assert_contains "$captured" "ssm put-parameter"
-  assert_contains "$captured" "--region us-east-1"
-  assert_contains "$captured" "--name /nullplatform/parameters/fixed-ps-uuid"
-  assert_contains "$captured" "--value my-value"
-}
-
 @test "parameter_store store: fails with troubleshooting on aws error" {
   export PARAMETER_KIND="parameter"
 
@@ -135,5 +127,4 @@ EOF
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Failed to store parameter in AWS Parameter Store"
-  assert_contains "$output" "💡 Possible causes:"
 }

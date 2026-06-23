@@ -116,7 +116,7 @@ teardown() {
   captured=$(cat "$NP_LOG")
   assert_contains "$captured" "provider specification read"
   assert_contains "$captured" "--id ec885dd0-7c38-45b8-af2c-0b9e1deb7d3d"
-  assert_contains "$captured" "--output json"
+  assert_contains "$captured" "--format json"
 }
 
 @test "build_context: fails when specification_id is missing" {

@@ -1,27 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deletes a secret from Azure Key Vault.
+# Deletes a secret from Azure Key Vault. Idempotent.
+# Soft-delete + purge (purge is best-effort, downgraded to warning on failure).
 #
-# AKV uses soft-delete by default (90-day retention). The flow is:
-#   1. `delete` → moves to soft-deleted state (the user-facing "deleted" semantic)
-#   2. `purge`  → hard-deletes from soft-delete bin; releases the name immediately
-#
-# Idempotency semantics:
-#   - Successful delete → continue to purge
-#   - SecretNotFound on delete → success (already gone; idempotent)
-#   - Any other delete error → exit 1 with troubleshooting
-#
-# Purge is housekeeping (frees the name, stops retention billing). Failures
-# during purge are downgraded to warnings: the user-facing delete contract is
-# already satisfied by step 1. The secret stays in the soft-delete window
-# (auto-cleaned at retention expiry).
-#
-# Required env: EXTERNAL_ID, AZ_VAULT_NAME, AZ_SECRET_PREFIX
+# Required env: EXTERNAL_ID (canonical slash form), AZ_VAULT_NAME, AZ_SECRET_PREFIX
 
-SECRET_NAME="${AZ_SECRET_PREFIX}${EXTERNAL_ID}"
+# AKV stores with dashes (no `/` or `=`); transform from canonical form.
+AKV_SUFFIX=$(echo "$EXTERNAL_ID" | tr '/=' '--')
+SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
 
-# --- Step 1: soft-delete ---
 err_file=$(mktemp)
 if az keyvault secret delete \
         --vault-name "$AZ_VAULT_NAME" \
@@ -45,13 +33,12 @@ else
     log error ""
     log error "🔧 How to fix:"
     log error "   • Verify identity: az account show"
-    log error "   • Check access policy: az keyvault show --name $AZ_VAULT_NAME --query properties.accessPolicies"
     log error "Underlying error: $err"
     exit 1
   fi
 fi
 
-# --- Step 2: purge (best-effort) ---
+# Best-effort purge to release name and stop retention billing.
 purge_err=$(mktemp)
 if ! az keyvault secret purge \
         --vault-name "$AZ_VAULT_NAME" \

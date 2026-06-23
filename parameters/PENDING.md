@@ -20,7 +20,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 | Decision doc para equipo | ✅ `aws-secret-manager-strategies.docx` (en root del repo) |
 | **Resolución de provider via `provider.specification_id`** | **✅ Implementado** (era pendiente, hecho hoy) |
 | **`PROVIDER_CONFIG` desde `provider.attributes`** | **✅ Implementado** (era pendiente como `fetch_configuration`, ahora viene en payload) |
-| Naming NRN+slug-based | ⏳ Pendiente — ver "1. Refactor de naming" |
+| Naming NRN+slug-based | ✅ Implementado (utils/build_external_id + 4 providers refactorizados) |
 | Rename `secret_manager` → `aws_secret_manager` | ⏳ Pendiente (opcional, no bloqueante) |
 
 ---
@@ -44,59 +44,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 
 ## Pendiente
 
-### 1. Refactor de naming a NRN+slugs+ids
-
-**Bloqueado por:** confirmar syntax exacta del `np` CLI para obtener slugs de entities por ID.
-
-**Hipótesis (a confirmar antes de implementar):**
-
-```bash
-np organization get --id 1255165411 --output json
-# → { "slug": "acme", "id": "1255165411", ... }
-```
-
-#### Diseño aprobado
-
-El `external_id` retornado a nullplatform (y por tanto el nombre del secret en cada provider) se compone así:
-
-```
-<entity_type>=<slug>-<id>/<entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_id>
-```
-
-- Entities iteradas en orden NRN canónico: `organization → account → namespace → application → scope`. Solo se incluyen las presentes.
-- Dimensiones (desde `$CONTEXT.dimensions`, top-level, no `provider.dimensions`) ordenadas alfabéticamente por key.
-- `parameter_id` al final como identificador único.
-- Slugs son inmutables en nullplatform (garantía del contrato), por lo que el external_id no sufre deriva.
-
-#### Ejemplo
-
-Con `entities = {organization: "1255165411", account: "95118862", namespace: "37094320", application: "321402625"}`, `dimensions = {environment: "development", country: "argentina"}`, `parameter_id = 359535238`:
-
-```
-organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/country=argentina/environment=development/359535238
-```
-
-#### Pasos
-
-1. Crear `parameters/utils/build_external_id` con fetch paralelo de slugs vía `np` CLI (usando `mktemp` + `&` + `wait`).
-2. Refactorizar `store` de los 4 providers:
-   - `hashicorp_vault/store`: nombre `secret/data/parameters/<external_id>`
-   - `secret_manager/store`: nombre `<SM_NAME_PREFIX><external_id>`
-   - `parameter_store/store`: nombre `<PS_NAME_PREFIX><external_id>`
-   - `azure_key_vault/store`: AKV solo permite alfanumérico + `-`, transformar `/` → `-` y remover `=`.
-3. `retrieve`/`delete`/`notify` NO cambian: usan el `EXTERNAL_ID` que llega de nullplatform.
-4. Tests: mock de `np <entity> get` en `$BATS_TEST_TMPDIR/bin/`, expected paths actualizados.
-5. Update de `parameters/providers/<name>/docs/architecture.md` con el nuevo naming.
-
-#### Edge cases (todos confirmados)
-
-- Entities siempre vienen (parte del contrato de nullplatform).
-- `np` CLI siempre está disponible (instalado en la imagen Docker base del agente).
-- Slugs inmutables — no hay riesgo de deriva o reconstrucción incorrecta.
-
----
-
-### 2. Rename `secret_manager` → `aws_secret_manager` (opcional)
+### 1. Rename `secret_manager` → `aws_secret_manager` (opcional)
 
 Decisión tomada pero no aplicada. No bloqueante. Cuando se haga:
 

@@ -57,7 +57,7 @@ if [ -z "$SPEC_ID" ]; then
   exit 1
 fi
 
-if ! SPEC_JSON=$(np provider specification read --id "$SPEC_ID" --output json 2>&1); then
+if ! SPEC_JSON=$(np provider specification read --id "$SPEC_ID" --format json 2>&1); then
   log error "❌ Failed to read provider specification (id=$SPEC_ID)"
   log error ""
   log error "💡 Possible causes:"

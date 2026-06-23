@@ -2,12 +2,14 @@
 set -euo pipefail
 
 # Stores a parameter value in HashiCorp Vault KV v2.
-# Generates a fresh UUID as external_id (the canonical handle returned to nullplatform).
+# external_id is composed from entities (with slugs fetched via np CLI) +
+# dimensions + parameter_id. See parameters/utils/build_external_id.
 #
-# Required env (exported by build_context + setup):
-#   PARAMETER_ID, PARAMETER_VALUE, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
+# Required env: PARAMETER_ID, PARAMETER_VALUE, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
-EXTERNAL_ID=$(uuidgen 2>/dev/null || echo "$(openssl rand -hex 16 | sed 's/\(.{8}\)\(.{4}\)\(.{4}\)\(.{4}\)\(.{12}\)/\1-\2-\3-\4-\5/')")
+source "$PARAMETERS_ROOT/utils/build_external_id"
+build_external_id
+
 VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID"
 
 if ! curl -s -X POST \
@@ -27,9 +29,7 @@ if ! curl -s -X POST \
   exit 1
 fi
 
-echo '{
-  "external_id": "'$EXTERNAL_ID'",
-  "metadata": {
-    "vault_path": "'$VAULT_PATH'"
-  }
-}'
+jq -n \
+    --arg external_id "$EXTERNAL_ID" \
+    --arg vault_path "$VAULT_PATH" \
+    '{external_id: $external_id, metadata: {vault_path: $vault_path}}'

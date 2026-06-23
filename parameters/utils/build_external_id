@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# Constructs EXTERNAL_ID for a store operation by composing:
+#   <entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_id>
+#
+# Slugs are fetched in parallel via `np <type> read --id <id> --format json --query '.slug'`.
+# Entities are iterated in canonical NRN order; only present entities are included.
+# Dimensions are sorted alphabetically by key for determinism.
+#
+# Slugs in nullplatform are immutable (contract guarantee), so the resulting
+# EXTERNAL_ID is stable for the lifetime of the parameter.
+#
+# Requires: np CLI in PATH, jq, mktemp
+# Reads: CONTEXT (set by entrypoint), log function in scope
+# Exports: EXTERNAL_ID (slash-separated canonical form)
+#
+# Each provider's store decides how to use EXTERNAL_ID:
+#   - vault/SM/PS: append to a prefix that ends with `/`
+#   - AKV: replace `/` and `=` with `-` (AKV doesn't allow those chars)
+
+build_external_id() {
+  local entities_json
+  entities_json=$(echo "$CONTEXT" | jq -c '.entities // {}')
+
+  local tmp_dir
+  tmp_dir=$(mktemp -d)
+
+  local entity_order=("organization" "account" "namespace" "application" "scope")
+  local present=()
+
+  for entity_type in "${entity_order[@]}"; do
+    local entity_id
+    entity_id=$(echo "$entities_json" | jq -r ".$entity_type // empty")
+    if [ -n "$entity_id" ]; then
+      present+=("$entity_type:$entity_id")
+      ( np "$entity_type" read --id "$entity_id" --format json --query '.slug' 2>/dev/null \
+          | jq -r '. // empty' > "$tmp_dir/$entity_type" || true ) &
+    fi
+  done
+  wait
+
+  local segments=()
+  for pair in "${present[@]}"; do
+    local entity_type="${pair%%:*}"
+    local entity_id="${pair##*:}"
+    if [ ! -s "$tmp_dir/$entity_type" ]; then
+      log error "❌ Failed to fetch slug for $entity_type=$entity_id via np CLI"
+      log error ""
+      log error "💡 Possible causes:"
+      log error "   • Entity does not exist in nullplatform"
+      log error "   • np CLI is not authenticated"
+      log error "   • Entity type '$entity_type' is not supported by np CLI"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Verify: np $entity_type read --id $entity_id --format json"
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
+    local slug
+    slug=$(cat "$tmp_dir/$entity_type")
+    segments+=("$entity_type=${slug}-${entity_id}")
+  done
+
+  while IFS= read -r dim; do
+    [ -n "$dim" ] && segments+=("$dim")
+  done < <(echo "$CONTEXT" | jq -r '(.dimensions // {}) | to_entries | sort_by(.key) | .[] | "\(.key)=\(.value)"')
+
+  local param_id
+  param_id=$(echo "$CONTEXT" | jq -r '.parameter_id // empty')
+  [ -n "$param_id" ] && segments+=("$param_id")
+
+  rm -rf "$tmp_dir"
+
+  local IFS=/
+  EXTERNAL_ID="${segments[*]}"
+  export EXTERNAL_ID
+}
