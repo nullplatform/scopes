@@ -7,7 +7,7 @@ set -euo pipefail
 # Required env: EXTERNAL_ID (canonical slash form), AZ_VAULT_NAME, AZ_SECRET_PREFIX
 
 # AKV stores with dashes (no `/` or `=`); transform from canonical form.
-AKV_SUFFIX=$(echo "$EXTERNAL_ID" | tr '/=' '--')
+AKV_SUFFIX=$(echo "$EXTERNAL_ID_PATH" | tr '/=' '--')
 SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
 
 err_file=$(mktemp)

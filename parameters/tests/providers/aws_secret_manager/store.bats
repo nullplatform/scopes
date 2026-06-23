@@ -95,12 +95,12 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "aws_secret_manager store: external_id includes entities + parameter_name-id" {
+@test "aws_secret_manager store: external_id includes entities + parameter_name-id + version" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
-  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/DB_PASSWORD-42"
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/DB_PASSWORD-42#v1-create-uuid"
   assert_equal "$external_id" "$expected"
 }
 
@@ -122,20 +122,22 @@ EOF
   [[ "$captured" != *"put-secret-value"* ]]
 }
 
-@test "aws_secret_manager store: returns version_id in metadata" {
+@test "aws_secret_manager store: version_id is encoded as #suffix in external_id" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
-  version_id=$(echo "$output" | jq -r '.metadata.version_id')
-  assert_equal "$version_id" "v1-create-uuid"
+  external_id=$(echo "$output" | jq -r '.external_id')
+  version="${external_id##*#}"
+  assert_equal "$version" "v1-create-uuid"
 }
 
-@test "aws_secret_manager store: PutSecretValue returns its own version_id (different from create)" {
+@test "aws_secret_manager store: PutSecretValue's version_id replaces create's in external_id" {
   run bash -c "$DEPS; MOCK_AWS_MODE=exists source $SCRIPT"
 
   assert_equal "$status" "0"
-  version_id=$(echo "$output" | jq -r '.metadata.version_id')
-  assert_equal "$version_id" "v2-put-uuid"
+  external_id=$(echo "$output" | jq -r '.external_id')
+  version="${external_id##*#}"
+  assert_equal "$version" "v2-put-uuid"
 }
 
 @test "aws_secret_manager store: ResourceExistsException falls through to PutSecretValue" {

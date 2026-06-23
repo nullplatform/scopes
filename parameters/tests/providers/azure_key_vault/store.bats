@@ -57,12 +57,13 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "azure_key_vault store: external_id is canonical slash form" {
+@test "azure_key_vault store: external_id is canonical slash form + version suffix" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
-  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42"
+  # Mock URL ends in /abc123 — that's the version
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42#abc123"
   assert_equal "$external_id" "$expected"
 }
 

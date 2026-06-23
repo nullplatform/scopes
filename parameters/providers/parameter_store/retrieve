@@ -11,13 +11,12 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, AWS_REGION, PS_NAME_PREFIX
 
-PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID}"
+# EXTERNAL_ID_PATH and EXTERNAL_ID_VERSION are set by build_context.
+PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID_PATH}"
 
-# Optional historical version via .version_id (PS uses integer versions, addressed
-# by suffixing the parameter name with `:<version>`).
-VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
+# PS addresses historical versions by suffixing `:<version>` to the parameter name.
 LOOKUP_NAME="$PARAM_NAME"
-[ -n "$VERSION_ID" ] && LOOKUP_NAME="${PARAM_NAME}:${VERSION_ID}"
+[ -n "${EXTERNAL_ID_VERSION:-}" ] && LOOKUP_NAME="${PARAM_NAME}:${EXTERNAL_ID_VERSION}"
 
 err_file=$(mktemp)
 if VALUE=$(aws ssm get-parameter \

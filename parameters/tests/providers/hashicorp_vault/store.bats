@@ -64,12 +64,13 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "vault store: external_id composed from entities + parameter_id" {
+@test "vault store: external_id composed from entities + parameter_id + version" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
-  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42"
+  # Mock returns .data.version=3
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42#3"
   assert_equal "$external_id" "$expected"
 }
 
@@ -127,6 +128,6 @@ EOF
 
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
-  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42"
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42#3"
   assert_equal "$external_id" "$expected"
 }

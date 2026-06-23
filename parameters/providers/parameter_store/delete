@@ -10,7 +10,7 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, AWS_REGION, PS_NAME_PREFIX
 
-PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID}"
+PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID_PATH}"
 
 err_file=$(mktemp)
 if aws ssm delete-parameter \

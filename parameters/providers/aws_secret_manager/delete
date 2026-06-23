@@ -12,7 +12,8 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, AWS_REGION, SM_NAME_PREFIX
 
-SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
+# Delete removes ALL versions; EXTERNAL_ID_VERSION suffix (if present) is ignored.
+SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID_PATH}"
 
 err_file=$(mktemp)
 if aws secretsmanager delete-secret \

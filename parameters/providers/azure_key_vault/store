@@ -45,10 +45,12 @@ fi
 # The last path component is the version id (hex string).
 VERSION_ID="${AKV_ID##*/}"
 
+# Encode version into external_id (the canonical handle nullplatform persists).
+[ -n "$VERSION_ID" ] && EXTERNAL_ID="${EXTERNAL_ID}#${VERSION_ID}"
+
 jq -n \
     --arg external_id "$EXTERNAL_ID" \
     --arg secret_id "$AKV_ID" \
     --arg secret_name "$SECRET_NAME" \
     --arg vault_name "$AZ_VAULT_NAME" \
-    --arg version_id "$VERSION_ID" \
-    '{external_id: $external_id, metadata: {azure_secret_id: $secret_id, secret_name: $secret_name, vault_name: $vault_name, version_id: $version_id}}'
+    '{external_id: $external_id, metadata: {azure_secret_id: $secret_id, secret_name: $secret_name, vault_name: $vault_name}}'

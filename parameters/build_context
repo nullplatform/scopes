@@ -31,6 +31,16 @@ source "$SCRIPT_DIR/utils/get_config_value"
 
 # --- Notification fields ---
 export EXTERNAL_ID=$(echo "$CONTEXT" | jq -r '.external_id // empty')
+# external_id format: <canonical_path>#<version_id>
+# Split into path (used for backend naming) and version (optional, used by retrieve).
+# Store rebuilds EXTERNAL_ID after the backend returns the new version_id.
+if [[ "$EXTERNAL_ID" == *"#"* ]]; then
+  export EXTERNAL_ID_PATH="${EXTERNAL_ID%#*}"
+  export EXTERNAL_ID_VERSION="${EXTERNAL_ID##*#}"
+else
+  export EXTERNAL_ID_PATH="$EXTERNAL_ID"
+  export EXTERNAL_ID_VERSION=""
+fi
 export PARAMETER_ID=$(echo "$CONTEXT" | jq -r '.parameter_id // empty')
 export PARAMETER_VALUE=$(echo "$CONTEXT" | jq -r '.value // empty')
 export PARAMETER_NAME=$(echo "$CONTEXT" | jq -r '.parameter_name // empty')

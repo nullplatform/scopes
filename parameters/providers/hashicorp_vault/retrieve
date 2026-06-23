@@ -10,13 +10,12 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
-VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID"
+# EXTERNAL_ID_PATH and EXTERNAL_ID_VERSION are set by build_context.
+VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID_PATH"
 
-# Optional historical version via .version_id (Vault KV v2 uses integer versions)
-VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
 URL="$VAULT_ADDR/v1/$VAULT_PATH"
-if [ -n "$VERSION_ID" ]; then
-  URL="${URL}?version=${VERSION_ID}"
+if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
+  URL="${URL}?version=${EXTERNAL_ID_VERSION}"
 fi
 
 if ! RESPONSE=$(curl -s -w "\n%{http_code}" \

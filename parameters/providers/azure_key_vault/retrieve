@@ -5,12 +5,10 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID (canonical slash form), AZ_VAULT_NAME, AZ_SECRET_PREFIX
 
-# AKV stores with dashes (no `/` or `=`); transform from canonical form.
-AKV_SUFFIX=$(echo "$EXTERNAL_ID" | tr '/=' '--')
+# EXTERNAL_ID_PATH and EXTERNAL_ID_VERSION are set by build_context.
+# AKV stores with dashes (no `/` or `=`); transform from canonical path.
+AKV_SUFFIX=$(echo "$EXTERNAL_ID_PATH" | tr '/=' '--')
 SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
-
-# Optional historical version via .version_id (AKV uses hex strings).
-VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
 
 show_args=(
   --vault-name "$AZ_VAULT_NAME"
@@ -18,7 +16,7 @@ show_args=(
   --query value
   --output tsv
 )
-[ -n "$VERSION_ID" ] && show_args+=(--version "$VERSION_ID")
+[ -n "${EXTERNAL_ID_VERSION:-}" ] && show_args+=(--version "$EXTERNAL_ID_VERSION")
 
 err_file=$(mktemp)
 if VALUE=$(az keyvault secret show "${show_args[@]}" 2>"$err_file"); then

@@ -63,14 +63,15 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "parameter_store store: external_id composed from entities + parameter_id" {
+@test "parameter_store store: external_id composed from entities + parameter_id + version" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
-  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42"
+  # Mock returns .Version=7
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/42#7"
   assert_equal "$external_id" "$expected"
 }
 

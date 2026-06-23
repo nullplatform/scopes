@@ -10,7 +10,7 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
-VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID"
+VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID_PATH"
 
 if ! RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
     -H "X-Vault-Token: $VAULT_TOKEN" \

@@ -14,9 +14,8 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, AWS_REGION, SM_NAME_PREFIX
 
-SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
-
-VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
+# EXTERNAL_ID_PATH and EXTERNAL_ID_VERSION are set by build_context (split on `#`).
+SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID_PATH}"
 
 get_args=(
   --region "$AWS_REGION"
@@ -24,8 +23,8 @@ get_args=(
   --query SecretString
   --output text
 )
-if [ -n "$VERSION_ID" ]; then
-  get_args+=(--version-id "$VERSION_ID")
+if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
+  get_args+=(--version-id "$EXTERNAL_ID_VERSION")
 fi
 
 err_file=$(mktemp)
@@ -47,8 +46,8 @@ else
     log error "   • IAM principal lacks secretsmanager:GetSecretValue"
     log error "   • KMS key permission missing (kms:Decrypt) for CMK-encrypted secrets"
     log error "   • Region '$AWS_REGION' unreachable"
-    if [ -n "$VERSION_ID" ]; then
-      log error "   • Requested version_id '$VERSION_ID' does not exist for this secret"
+    if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
+      log error "   • Requested version '$EXTERNAL_ID_VERSION' does not exist for this secret"
     fi
     log error ""
     log error "🔧 How to fix:"

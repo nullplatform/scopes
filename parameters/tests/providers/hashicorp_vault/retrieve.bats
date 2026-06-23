@@ -32,6 +32,8 @@ EOF
   export VAULT_PATH_PREFIX="secret/data/nullplatform"
   export EXTERNAL_ID="abc-123"
 
+  export EXTERNAL_ID_PATH="$EXTERNAL_ID"
+  export EXTERNAL_ID_VERSION=""
   export CONTEXT='{}'
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }

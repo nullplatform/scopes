@@ -85,9 +85,30 @@ nullplatform parameter values are **immutable**. Each update of the same (parame
 
 AWS Secrets Manager has native version retention. We use it as the source of truth:
 
-- **First `store`** for a given external_id → `CreateSecret`. A new secret is created with version 1.
-- **Subsequent `store`** for the same external_id → `PutSecretValue`. A new version is appended, and `AWSCURRENT` moves to it.
+- **First `store`** for a given path → `CreateSecret`. A new secret is created with version 1.
+- **Subsequent `store`** for the same path → `PutSecretValue`. A new version is appended, and `AWSCURRENT` moves to it.
 - **All previous versions are retained inside the same secret** (up to AWS SM's 100-version cap, after which the oldest unlabeled versions are pruned automatically).
+
+### Version identity in external_id
+
+The `external_id` returned by `store` encodes both the path and the version:
+
+```
+<canonical_path>#<version_id>
+```
+
+For AWS SM, `version_id` is the `VersionId` UUID returned by `CreateSecret` / `PutSecretValue`. Example:
+
+```
+organization=acme-1255165411/.../DB_PASSWORD-42#abcd1234-uuid-5678-version
+```
+
+This means nullplatform — which already persists and re-sends `external_id` on every operation — automatically retains the version reference without needing a separate field. On `retrieve`:
+
+- If `external_id` carries `#version` → fetch that specific historical version.
+- If `external_id` has no `#` suffix → fetch `AWSCURRENT` (latest).
+
+On `delete`, the version suffix is ignored — `DeleteSecret` removes all versions of the secret.
 
 ### Why this matters for cost
 
@@ -95,7 +116,7 @@ AWS SM charges $0.40 per secret per month, **regardless of version count**. Putt
 
 ### Why this matters for history
 
-Storing all versions in a single secret means operators can view and (with the right API call) restore older values. The version history is the audit trail.
+Storing all versions in a single secret means operators can view and restore older values. Restoration is platform-orchestrated: read an old version via `retrieve(external_id with #version)`, then store the value again — that becomes the new latest version.
 
 ---
 
