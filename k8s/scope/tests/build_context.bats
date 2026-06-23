@@ -154,6 +154,7 @@ teardown() {
     "gateway_name": "co-gateway-public",
     "alb_name": "co-balancer-public",
     "component": "test-namespace-test-app",
+    "base_domain": "cloud-domain.io",
     "k8s_modifiers": {}
   }'
 
@@ -213,6 +214,7 @@ teardown() {
     "gateway_name": "co-gateway-private",
     "alb_name": "co-balancer-private",
     "component": "test-namespace-test-app",
+    "base_domain": "cloud-domain.io",
     "k8s_modifiers": {}
   }'
 

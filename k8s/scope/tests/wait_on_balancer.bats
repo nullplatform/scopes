@@ -72,9 +72,15 @@ teardown() {
 # external_dns: Success after retries
 # =============================================================================
 @test "wait_on_balancer: external_dns success after retries" {
-  local call_count=0
+  # The script reads kubectl output via command substitution ($(kubectl ...)),
+  # which runs the mock in a subshell — an in-memory counter would reset every
+  # call. Persist the attempt count in a file so it survives across subshells.
+  export CALL_COUNT_FILE="$BATS_TEST_TMPDIR/dnsendpoint_calls"
+  echo 0 > "$CALL_COUNT_FILE"
   kubectl() {
-    call_count=$((call_count + 1))
+    local call_count
+    call_count=$(($(cat "$CALL_COUNT_FILE") + 1))
+    echo "$call_count" > "$CALL_COUNT_FILE"
     case "$*" in
       "get dnsendpoint k8s-my-app-my-scope-scope-123-dns -n default-namespace -o jsonpath={.status.observedGeneration}")
         if [ "$call_count" -ge 2 ]; then
