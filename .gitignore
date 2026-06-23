@@ -138,7 +138,6 @@ np-agent-manifest.yaml
 
 # Git worktrees
 .worktrees/
-
 .DS_Store
 # Integration test runtime data
 frontend/deployment/tests/integration/volume/

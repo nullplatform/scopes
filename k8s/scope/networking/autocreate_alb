@@ -1,0 +1,217 @@
+#!/bin/bash
+
+# Provisions a new ALB on demand when the existing pool is exhausted.
+#
+# Workflow contract:
+#   1. Generates a unique ALB name.
+#   2. Patches the container-orchestration provider via `np provider patch` so
+#      the new ALB is recorded as an additional balancer. Subsequent scope
+#      creations that read the provider see the new ALB and re-use it instead
+#      of triggering another autocreate.
+#   3. Renders the dummy-ingress template to $OUTPUT_DIR. The next workflow
+#      step (apply_templates) applies it; that is what triggers the AWS Load
+#      Balancer Controller to actually provision the ALB.
+#   4. Exports ALB_NAME (the new name) and ALB_AUTOCREATED=true so the wait
+#      step downstream knows to poll for active state and tag the ALB.
+#
+# Inputs (env vars):
+#   CONTEXT                          - Scope CONTEXT JSON
+#   INGRESS_VISIBILITY               - "internet-facing" or "internal"
+#   K8S_NAMESPACE                    - Namespace for the dummy Ingress
+#   OUTPUT_DIR                       - Where the rendered YAML is written
+#   ALB_AUTOCREATE_NAME_PREFIX       - Optional prefix for the new ALB
+#
+# Outputs (env vars):
+#   ALB_NAME                         - Replaced with the new ALB name
+#   ALB_AUTOCREATED                  - Set to "true"
+
+_AUTOCREATE_ALB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+generate_alb_name() {
+	local prefix="$1"
+	local visibility="$2"
+
+	local vis_short
+	if [ "$visibility" = "internet-facing" ]; then
+		vis_short="public"
+	else
+		vis_short="private"
+	fi
+
+	local suffix
+	suffix=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 6) || {
+		suffix=$(printf '%06x' $((RANDOM * RANDOM % 16777215)))
+	}
+
+	echo "${prefix}${vis_short}-${suffix}"
+}
+
+# Reads the container-orchestration provider id and current additional balancer
+# list for the requested visibility, then patches the provider to append the new
+# ALB name. Surfaces the existing balancer.* attributes so the patch is a
+# merge of the full balancer object, not a destructive replacement.
+register_alb_in_provider() {
+	local new_alb_name="$1"
+	local visibility="$2"
+	local nrn
+	nrn=$(echo "$CONTEXT" | jq -r '.scope.nrn // empty')
+	if [ -z "$nrn" ]; then
+		log error "❌ Could not read scope NRN from CONTEXT — cannot patch provider"
+		exit 1
+	fi
+
+	local provider_json
+	provider_json=$(np provider list --categories container-orchestration --nrn "$nrn" --format json 2>/dev/null) || {
+		log error "❌ Failed to list container-orchestration provider for NRN '$nrn'"
+		exit 1
+	}
+
+	local provider_id
+	provider_id=$(echo "$provider_json" | jq -r '.results[0].id // empty')
+	if [ -z "$provider_id" ]; then
+		log error "❌ No container-orchestration provider found for NRN '$nrn'"
+		exit 1
+	fi
+
+	local field
+	if [ "$visibility" = "internet-facing" ]; then
+		field="additional_public_names"
+	else
+		field="additional_private_names"
+	fi
+
+	# Merge: current balancer.* + appended ALB in the right field.
+	local patch_body
+	patch_body=$(echo "$provider_json" | jq -c \
+		--arg field "$field" \
+		--arg new_alb "$new_alb_name" \
+		'{
+			attributes: {
+				balancer: (
+					(.results[0].attributes.balancer // {}) as $bal |
+					$bal + { ($field): (($bal[$field] // []) + [$new_alb] | unique) }
+				)
+			}
+		}')
+
+	log info "📝 Registering ALB '$new_alb_name' in container-orchestration provider ($field)"
+	if ! np provider patch --id "$provider_id" --body "$patch_body" --no-output 2>/dev/null; then
+		log error "❌ Failed to patch container-orchestration provider with new ALB"
+		log error "💡 Possible causes: agent lacks write permission on the provider, or NP_TOKEN/NULLPLATFORM_API_KEY is missing"
+		exit 1
+	fi
+}
+
+# Builds the dummy ingress host via the same domain-generate binary the
+# platform uses for scope domains. Substituting scopeSlug with the ALB name
+# keeps the host inside whatever wildcard cert/DNS pattern the platform
+# already maintains.
+generate_dummy_host() {
+	local alb_name="$1"
+
+	local account_slug namespace_slug application_slug
+	account_slug=$(echo "$CONTEXT" | jq -r '.account.slug')
+	namespace_slug=$(echo "$CONTEXT" | jq -r '.namespace.slug')
+	application_slug=$(echo "$CONTEXT" | jq -r '.application.slug')
+
+	local host
+	host=$("$SERVICE_PATH/scope/networking/dns/domain/domain-generate" \
+		--accountSlug="$account_slug" \
+		--namespaceSlug="$namespace_slug" \
+		--applicationSlug="$application_slug" \
+		--scopeSlug="$alb_name" \
+		--domain="$DOMAIN" \
+		--useAccountSlug="${USE_ACCOUNT_SLUG:-false}") || {
+		log error "❌ Failed to generate dummy ingress host via domain-generate"
+		log error "💡 Possible causes:"
+		log error "   The domain-generate binary returned an error"
+		log error "🔧 How to fix:"
+		log error "   • Check the domain-generate binary exists: ls -la $SERVICE_PATH/scope/networking/dns/domain/domain-generate"
+		log error "   • Verify the input slugs are valid"
+		exit 1
+	}
+
+	echo "$host"
+}
+
+render_dummy_ingress() {
+	local alb_name="$1"
+	local visibility="$2"
+	local namespace="$3"
+
+	if [ -z "${OUTPUT_DIR:-}" ]; then
+		log error "❌ OUTPUT_DIR is not set — autocreate_alb must run after OUTPUT_DIR is exported"
+		exit 1
+	fi
+	mkdir -p "$OUTPUT_DIR"
+
+	local dummy_host
+	dummy_host=$(generate_dummy_host "$alb_name")
+	log debug "📋 Dummy ingress host: $dummy_host"
+
+	# The context file MUST have a .json extension. gomplate uses the extension
+	# to pick the parser; a plain mktemp path is treated as an opaque string
+	# and the template fails with "can't evaluate field X in type string".
+	local context_path
+	context_path="$OUTPUT_DIR/ingress-dummy-${alb_name}-context.json"
+	# Use double quotes so $context_path is baked into the trap string now.
+	# Single quotes would defer expansion until the trap fires on RETURN, by
+	# which point the local variable is out of scope and `set -u` would trip
+	# with "context_path: unbound variable".
+	trap "rm -f '$context_path'" RETURN
+
+	echo "$CONTEXT" | jq \
+		--arg alb_name "$alb_name" \
+		--arg ingress_visibility "$visibility" \
+		--arg k8s_namespace "$namespace" \
+		--arg dummy_host "$dummy_host" \
+		'. + {alb_name: $alb_name, ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, dummy_host: $dummy_host}' \
+		> "$context_path"
+
+	local template_path="${INGRESS_DUMMY_TEMPLATE:-$SERVICE_PATH/scope/templates/ingress-dummy.yaml.tpl}"
+	local out_path="$OUTPUT_DIR/ingress-dummy-${alb_name}.yaml"
+
+	if ! gomplate -c .="$context_path" --file "$template_path" --out "$out_path"; then
+		log error "❌ Failed to render ingress-dummy template"
+		log error "📋 Template: $template_path"
+		exit 1
+	fi
+
+	log debug "📝 Rendered dummy ingress to $out_path"
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+NAME_PREFIX=$(get_config_value \
+	--env ALB_AUTOCREATE_NAME_PREFIX \
+	--provider '.providers["container-orchestration"].balancer.autocreate_name_prefix' \
+	--default "nullplatform-auto-"
+)
+
+# Final ALB name is "<prefix><public|private>-<6 hex>". AWS rejects names that
+# exceed 32 chars or contain anything outside [a-zA-Z0-9-]. If an invalid name
+# slips through, the AWS Load Balancer Controller silently refuses to create
+# the ALB and wait_for_alb hangs to timeout with an opaque error. Catch it
+# here with a clear message instead.
+if ! [[ "$NAME_PREFIX" =~ ^[a-z0-9-]+$ ]]; then
+	log error "❌ ALB_AUTOCREATE_NAME_PREFIX must match ^[a-z0-9-]+$, got: '$NAME_PREFIX'"
+	exit 1
+fi
+
+# 14 = len("private-") + 6 hex chars; total must stay ≤32 (AWS ALB name limit)
+if [ "${#NAME_PREFIX}" -gt 18 ]; then
+	log error "❌ ALB_AUTOCREATE_NAME_PREFIX must be ≤18 chars (AWS caps ALB names at 32, the visibility+hex suffix uses 14); got ${#NAME_PREFIX}"
+	exit 1
+fi
+
+NEW_ALB_NAME=$(generate_alb_name "$NAME_PREFIX" "$INGRESS_VISIBILITY")
+log info "🔧 Autocreating ALB '$NEW_ALB_NAME' (visibility=$INGRESS_VISIBILITY)"
+
+register_alb_in_provider "$NEW_ALB_NAME" "$INGRESS_VISIBILITY"
+
+render_dummy_ingress "$NEW_ALB_NAME" "$INGRESS_VISIBILITY" "$K8S_NAMESPACE"
+
+export ALB_NAME="$NEW_ALB_NAME"
+export ALB_AUTOCREATED="true"
