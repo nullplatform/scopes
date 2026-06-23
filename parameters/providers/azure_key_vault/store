@@ -41,9 +41,14 @@ if ! AKV_ID=$(az keyvault secret set \
   exit 1
 fi
 
+# AKV id URL format: https://<vault>.vault.azure.net/secrets/<name>/<version>
+# The last path component is the version id (hex string).
+VERSION_ID="${AKV_ID##*/}"
+
 jq -n \
     --arg external_id "$EXTERNAL_ID" \
     --arg secret_id "$AKV_ID" \
     --arg secret_name "$SECRET_NAME" \
     --arg vault_name "$AZ_VAULT_NAME" \
-    '{external_id: $external_id, metadata: {azure_secret_id: $secret_id, secret_name: $secret_name, vault_name: $vault_name}}'
+    --arg version_id "$VERSION_ID" \
+    '{external_id: $external_id, metadata: {azure_secret_id: $secret_id, secret_name: $secret_name, vault_name: $vault_name, version_id: $version_id}}'

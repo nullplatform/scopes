@@ -31,14 +31,19 @@ EOF
   cat > "$BATS_TEST_TMPDIR/bin/aws" << EOF
 #!/bin/bash
 echo "ARGS: \$@" >> "$AWS_LOG"
-exit \${MOCK_AWS_EXIT:-0}
+if [ "\${MOCK_AWS_EXIT:-0}" -ne 0 ]; then exit \$MOCK_AWS_EXIT; fi
+# put-parameter --output json returns { "Version": N, "Tier": "..." }
+if [[ "\$*" == *"put-parameter"* ]]; then
+  echo '{"Version":7,"Tier":"Standard"}'
+fi
+exit 0
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/aws"
 
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 
   export AWS_REGION="us-east-1"
-  export PS_NAME_PREFIX="/nullplatform/parameters/"
+  export PS_NAME_PREFIX="/nullplatform/"
   export PS_KMS_KEY_ID=""
   export PS_TIER="Standard"
   export PARAMETER_ID=42
@@ -107,7 +112,7 @@ EOF
   run bash -c "$DEPS; source $SCRIPT"
 
   param_name=$(echo "$output" | jq -r '.metadata.parameter_name')
-  assert_contains "$param_name" "/nullplatform/parameters/organization=acme-1255165411"
+  assert_contains "$param_name" "/nullplatform/organization=acme-1255165411"
 }
 
 @test "parameter_store store: passes tier flag" {

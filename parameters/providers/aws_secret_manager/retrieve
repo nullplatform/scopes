@@ -1,7 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# Retrieves a value from AWS Secrets Manager by external_id.
+# Retrieves a value from AWS Secrets Manager.
+#
+# Versioning:
+#   - If $CONTEXT.version_id is present, retrieves that specific historical version.
+#   - Otherwise retrieves AWSCURRENT (the latest version).
 #
 # Semantics:
 #   - Success → return {value: "<stored value>"} (extracted from JSON envelope)
@@ -12,12 +16,20 @@ set -euo pipefail
 
 SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID}"
 
+VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
+
+get_args=(
+  --region "$AWS_REGION"
+  --secret-id "$SECRET_NAME"
+  --query SecretString
+  --output text
+)
+if [ -n "$VERSION_ID" ]; then
+  get_args+=(--version-id "$VERSION_ID")
+fi
+
 err_file=$(mktemp)
-if SECRET_STRING=$(aws secretsmanager get-secret-value \
-        --region "$AWS_REGION" \
-        --secret-id "$SECRET_NAME" \
-        --query SecretString \
-        --output text 2>"$err_file"); then
+if SECRET_STRING=$(aws secretsmanager get-secret-value "${get_args[@]}" 2>"$err_file"); then
   rm -f "$err_file"
   STORED_VALUE=$(echo "$SECRET_STRING" | jq -r '.value // empty')
   jq -n --arg value "$STORED_VALUE" '{value: $value}'
@@ -35,6 +47,9 @@ else
     log error "   • IAM principal lacks secretsmanager:GetSecretValue"
     log error "   • KMS key permission missing (kms:Decrypt) for CMK-encrypted secrets"
     log error "   • Region '$AWS_REGION' unreachable"
+    if [ -n "$VERSION_ID" ]; then
+      log error "   • Requested version_id '$VERSION_ID' does not exist for this secret"
+    fi
     log error ""
     log error "🔧 How to fix:"
     log error "   • Verify identity: aws sts get-caller-identity --region $AWS_REGION"

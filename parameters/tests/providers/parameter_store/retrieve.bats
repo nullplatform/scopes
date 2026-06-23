@@ -38,9 +38,10 @@ EOF
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 
   export AWS_REGION="us-east-1"
-  export PS_NAME_PREFIX="/nullplatform/parameters/"
+  export PS_NAME_PREFIX="/nullplatform/"
   export EXTERNAL_ID="abc-123"
 
+  export CONTEXT='{}'
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
@@ -81,6 +82,6 @@ EOF
   captured=$(cat "$AWS_LOG")
   assert_contains "$captured" "ssm get-parameter"
   assert_contains "$captured" "--region us-east-1"
-  assert_contains "$captured" "--name /nullplatform/parameters/abc-123"
+  assert_contains "$captured" "--name /nullplatform/abc-123"
   assert_contains "$captured" "--with-decryption"
 }

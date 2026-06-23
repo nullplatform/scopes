@@ -29,7 +29,7 @@ EOF
 
   export VAULT_ADDR="https://vault.example.com"
   export VAULT_TOKEN="hvs.test-token"
-  export VAULT_PATH_PREFIX="secret/data/parameters"
+  export VAULT_PATH_PREFIX="secret/data/nullplatform"
   export EXTERNAL_ID="abc-123"
 
   export DEPS="source $PARAMETERS_DIR/utils/log"
@@ -90,7 +90,7 @@ EOF
   captured=$(cat "$CURL_LOG")
   assert_contains "$captured" "-X DELETE"
   assert_contains "$captured" "-H X-Vault-Token: hvs.test-token"
-  assert_contains "$captured" "https://vault.example.com/v1/secret/data/parameters/abc-123"
+  assert_contains "$captured" "https://vault.example.com/v1/secret/data/nullplatform/abc-123"
 }
 
 @test "vault delete: honors custom VAULT_PATH_PREFIX" {

@@ -9,12 +9,19 @@ set -euo pipefail
 AKV_SUFFIX=$(echo "$EXTERNAL_ID" | tr '/=' '--')
 SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
 
+# Optional historical version via .version_id (AKV uses hex strings).
+VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
+
+show_args=(
+  --vault-name "$AZ_VAULT_NAME"
+  --name "$SECRET_NAME"
+  --query value
+  --output tsv
+)
+[ -n "$VERSION_ID" ] && show_args+=(--version "$VERSION_ID")
+
 err_file=$(mktemp)
-if VALUE=$(az keyvault secret show \
-        --vault-name "$AZ_VAULT_NAME" \
-        --name "$SECRET_NAME" \
-        --query value \
-        --output tsv 2>"$err_file"); then
+if VALUE=$(az keyvault secret show "${show_args[@]}" 2>"$err_file"); then
   rm -f "$err_file"
   jq -n --arg value "$VALUE" '{value: $value}'
 else

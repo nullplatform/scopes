@@ -9,6 +9,10 @@ set -euo pipefail
 #   a new version, all retained inside the same path, and the latest is returned
 #   on read by default. No special logic needed; the POST IS the versioning.
 #
+# Vault returns the new version number in the response body
+# (.data.version). We include it in metadata so the platform can persist it
+# and pass it back to retrieve when fetching a specific historical version.
+#
 # Required env: PARAMETER_ID, PARAMETER_VALUE, VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
 source "$PARAMETERS_ROOT/utils/build_external_id"
@@ -21,13 +25,12 @@ PAYLOAD=$(jq -nc \
     --arg value "$PARAMETER_VALUE" \
     --arg stored_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --arg external_id "$EXTERNAL_ID" \
-    --arg managed_by "nullplatform" \
-    '{data: {parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id, managed_by: $managed_by}}')
+    '{data: {parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id}}')
 
-if ! curl -s -X POST \
+if ! RESPONSE=$(curl -s -X POST \
     -H "X-Vault-Token: $VAULT_TOKEN" \
     "$VAULT_ADDR/v1/$VAULT_PATH" \
-    -d "$PAYLOAD" >/dev/null; then
+    -d "$PAYLOAD"); then
   log error "❌ Failed to store parameter in Vault at $VAULT_ADDR"
   log error ""
   log error "💡 Possible causes:"
@@ -41,7 +44,10 @@ if ! curl -s -X POST \
   exit 1
 fi
 
+VERSION_ID=$(echo "$RESPONSE" | jq -r '.data.version // empty')
+
 jq -n \
     --arg external_id "$EXTERNAL_ID" \
     --arg vault_path "$VAULT_PATH" \
-    '{external_id: $external_id, metadata: {vault_path: $vault_path}}'
+    --arg version_id "$VERSION_ID" \
+    '{external_id: $external_id, metadata: {vault_path: $vault_path, version_id: $version_id}}'

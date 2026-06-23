@@ -44,7 +44,7 @@ mode="${MOCK_AWS_MODE:-success}"
 if [[ "$*" == *"create-secret"* ]]; then
   case "$mode" in
     success)
-      echo "arn:aws:secretsmanager:us-east-1:111122223333:secret:nullplatform/test-AbCdEf"
+      echo '{"ARN":"arn:aws:secretsmanager:us-east-1:111122223333:secret:nullplatform/test-AbCdEf","VersionId":"v1-create-uuid","Name":"nullplatform/test"}'
       exit 0
       ;;
     exists|put_error)
@@ -59,7 +59,7 @@ if [[ "$*" == *"create-secret"* ]]; then
 elif [[ "$*" == *"put-secret-value"* ]]; then
   case "$mode" in
     exists)
-      echo "arn:aws:secretsmanager:us-east-1:111122223333:secret:nullplatform/test-AbCdEf"
+      echo '{"ARN":"arn:aws:secretsmanager:us-east-1:111122223333:secret:nullplatform/test-AbCdEf","VersionId":"v2-put-uuid"}'
       exit 0
       ;;
     put_error)
@@ -122,11 +122,20 @@ EOF
   [[ "$captured" != *"put-secret-value"* ]]
 }
 
-@test "aws_secret_manager store: payload includes managed_by=nullplatform" {
+@test "aws_secret_manager store: returns version_id in metadata" {
   run bash -c "$DEPS; source $SCRIPT"
 
-  captured=$(cat "$AWS_LOG")
-  assert_contains "$captured" '"managed_by":"nullplatform"'
+  assert_equal "$status" "0"
+  version_id=$(echo "$output" | jq -r '.metadata.version_id')
+  assert_equal "$version_id" "v1-create-uuid"
+}
+
+@test "aws_secret_manager store: PutSecretValue returns its own version_id (different from create)" {
+  run bash -c "$DEPS; MOCK_AWS_MODE=exists source $SCRIPT"
+
+  assert_equal "$status" "0"
+  version_id=$(echo "$output" | jq -r '.metadata.version_id')
+  assert_equal "$version_id" "v2-put-uuid"
 }
 
 @test "aws_secret_manager store: ResourceExistsException falls through to PutSecretValue" {

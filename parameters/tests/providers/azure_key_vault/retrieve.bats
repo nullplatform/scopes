@@ -41,6 +41,7 @@ EOF
   export AZ_SECRET_PREFIX="parameters-"
   export EXTERNAL_ID="abc-123"
 
+  export CONTEXT='{}'
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 

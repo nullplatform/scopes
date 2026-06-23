@@ -13,10 +13,16 @@ set -euo pipefail
 
 PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID}"
 
+# Optional historical version via .version_id (PS uses integer versions, addressed
+# by suffixing the parameter name with `:<version>`).
+VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
+LOOKUP_NAME="$PARAM_NAME"
+[ -n "$VERSION_ID" ] && LOOKUP_NAME="${PARAM_NAME}:${VERSION_ID}"
+
 err_file=$(mktemp)
 if VALUE=$(aws ssm get-parameter \
         --region "$AWS_REGION" \
-        --name "$PARAM_NAME" \
+        --name "$LOOKUP_NAME" \
         --with-decryption \
         --query Parameter.Value \
         --output text 2>"$err_file"); then

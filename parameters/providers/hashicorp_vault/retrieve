@@ -12,9 +12,16 @@ set -euo pipefail
 
 VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID"
 
+# Optional historical version via .version_id (Vault KV v2 uses integer versions)
+VERSION_ID=$(echo "$CONTEXT" | jq -r '.version_id // empty')
+URL="$VAULT_ADDR/v1/$VAULT_PATH"
+if [ -n "$VERSION_ID" ]; then
+  URL="${URL}?version=${VERSION_ID}"
+fi
+
 if ! RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "X-Vault-Token: $VAULT_TOKEN" \
-    "$VAULT_ADDR/v1/$VAULT_PATH" 2>/dev/null); then
+    "$URL" 2>/dev/null); then
   log error "❌ Network error calling Vault at $VAULT_ADDR"
   log error ""
   log error "💡 Possible causes:"

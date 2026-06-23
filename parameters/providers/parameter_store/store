@@ -38,7 +38,7 @@ if [ "$SSM_TYPE" = "SecureString" ] && [ -n "${PS_KMS_KEY_ID:-}" ]; then
 fi
 
 err_file=$(mktemp)
-if ! aws ssm put-parameter "${put_args[@]}" >/dev/null 2>"$err_file"; then
+if ! PUT_RESULT=$(aws ssm put-parameter "${put_args[@]}" --output json 2>"$err_file"); then
   err=$(cat "$err_file")
   rm -f "$err_file"
   log error "❌ Failed to store parameter in AWS Parameter Store"
@@ -58,6 +58,8 @@ if ! aws ssm put-parameter "${put_args[@]}" >/dev/null 2>"$err_file"; then
 fi
 rm -f "$err_file"
 
+VERSION_ID=$(echo "$PUT_RESULT" | jq -r '.Version // empty')
+
 # Best-effort tagging — Parameter Store tags survive overwrites; we only need
 # to (re)apply on first creation. Suppress errors here: missing tags don't
 # break correctness.
@@ -73,4 +75,5 @@ jq -n \
     --arg region "$AWS_REGION" \
     --arg type "$SSM_TYPE" \
     --arg tier "$PS_TIER" \
-    '{external_id: $external_id, metadata: {parameter_name: $parameter_name, region: $region, type: $type, tier: $tier}}'
+    --arg version_id "$VERSION_ID" \
+    '{external_id: $external_id, metadata: {parameter_name: $parameter_name, region: $region, type: $type, tier: $tier, version_id: $version_id}}'

@@ -14,6 +14,10 @@ set -euo pipefail
 #   This keeps the version history without paying for a separate secret per
 #   version (each AWS SM secret costs $0.40/month regardless of version count).
 #
+# The VersionId returned by AWS is included in the result metadata so the
+# platform can persist it per value version. Retrieve uses it to fetch a
+# specific historical version when the platform passes it back.
+#
 # Required env: PARAMETER_ID, PARAMETER_VALUE, AWS_REGION, SM_NAME_PREFIX
 # Optional env: SM_KMS_KEY_ID
 
@@ -27,34 +31,31 @@ SECRET_PAYLOAD=$(jq -nc \
     --arg value "$PARAMETER_VALUE" \
     --arg stored_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --arg external_id "$EXTERNAL_ID" \
-    --arg managed_by "nullplatform" \
-    '{parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id, managed_by: $managed_by}')
+    '{parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id}')
 
 create_args=(
   --region "$AWS_REGION"
   --name "$SECRET_NAME"
   --secret-string "$SECRET_PAYLOAD"
   --tags "Key=managed_by,Value=nullplatform"
-  --query ARN
-  --output text
+  --output json
 )
 if [ -n "${SM_KMS_KEY_ID:-}" ]; then
   create_args+=(--kms-key-id "$SM_KMS_KEY_ID")
 fi
 
 err_file=$(mktemp)
-if SECRET_ARN=$(aws secretsmanager create-secret "${create_args[@]}" 2>"$err_file"); then
+if RESULT=$(aws secretsmanager create-secret "${create_args[@]}" 2>"$err_file"); then
   rm -f "$err_file"
 elif grep -q "ResourceExistsException" "$err_file"; then
   rm -f "$err_file"
   log debug "Secret '$SECRET_NAME' exists; adding new version (history preserved by AWS SM)"
   err_file=$(mktemp)
-  if ! SECRET_ARN=$(aws secretsmanager put-secret-value \
+  if ! RESULT=$(aws secretsmanager put-secret-value \
           --region "$AWS_REGION" \
           --secret-id "$SECRET_NAME" \
           --secret-string "$SECRET_PAYLOAD" \
-          --query ARN \
-          --output text 2>"$err_file"); then
+          --output json 2>"$err_file"); then
     err=$(cat "$err_file")
     rm -f "$err_file"
     log error "❌ Failed to add new version to secret '$SECRET_NAME'"
@@ -84,9 +85,13 @@ else
   exit 1
 fi
 
+SECRET_ARN=$(echo "$RESULT" | jq -r '.ARN')
+VERSION_ID=$(echo "$RESULT" | jq -r '.VersionId')
+
 jq -n \
     --arg external_id "$EXTERNAL_ID" \
     --arg secret_arn "$SECRET_ARN" \
     --arg secret_name "$SECRET_NAME" \
     --arg region "$AWS_REGION" \
-    '{external_id: $external_id, metadata: {secret_arn: $secret_arn, secret_name: $secret_name, region: $region}}'
+    --arg version_id "$VERSION_ID" \
+    '{external_id: $external_id, metadata: {secret_arn: $secret_arn, secret_name: $secret_name, region: $region, version_id: $version_id}}'

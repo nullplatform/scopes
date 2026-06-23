@@ -41,6 +41,7 @@ EOF
   export SM_NAME_PREFIX="nullplatform/"
   export EXTERNAL_ID="abc-123"
 
+  export CONTEXT='{}'
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 

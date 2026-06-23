@@ -36,7 +36,9 @@ EOF
   cat > "$BATS_TEST_TMPDIR/bin/curl" << EOF
 #!/bin/bash
 echo "ARGS: \$@" >> "$CURL_LOG"
-exit \${MOCK_CURL_EXIT:-0}
+if [ "\${MOCK_CURL_EXIT:-0}" -ne 0 ]; then exit \$MOCK_CURL_EXIT; fi
+# Vault KV v2 returns the new version number in response body
+echo '{"data":{"created_time":"2026-06-23T00:00:00Z","version":3,"deletion_time":"","destroyed":false}}'
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
 
@@ -44,7 +46,7 @@ EOF
 
   export VAULT_ADDR="https://vault.example.com"
   export VAULT_TOKEN="hvs.test-token"
-  export VAULT_PATH_PREFIX="secret/data/parameters"
+  export VAULT_PATH_PREFIX="secret/data/nullplatform"
   export PARAMETER_ID=42
   export PARAMETER_VALUE="my-secret"
   export CONTEXT='{
@@ -87,7 +89,7 @@ EOF
 
   assert_equal "$status" "0"
   vault_path=$(echo "$output" | jq -r '.metadata.vault_path')
-  assert_contains "$vault_path" "secret/data/parameters/organization=acme-1255165411"
+  assert_contains "$vault_path" "secret/data/nullplatform/organization=acme-1255165411"
   assert_contains "$vault_path" "/42"
 }
 
@@ -97,7 +99,7 @@ EOF
   captured=$(cat "$CURL_LOG")
   assert_contains "$captured" "-X POST"
   assert_contains "$captured" "-H X-Vault-Token: hvs.test-token"
-  assert_contains "$captured" "https://vault.example.com/v1/secret/data/parameters/organization=acme-1255165411"
+  assert_contains "$captured" "https://vault.example.com/v1/secret/data/nullplatform/organization=acme-1255165411"
 }
 
 @test "vault store: POST body contains parameter_id, value, external_id, stored_at" {
