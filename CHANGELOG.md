@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Add support to get AWS credentials via assume role
 - Add support to auto-create ALBs on scope create
 
 ## [1.12.0] - 2026-06-08
