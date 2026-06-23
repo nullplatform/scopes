@@ -1,6 +1,6 @@
 # Azure Key Vault — Provider Architecture
 
-This document describes the `parameters/providers/azure_key_vault/` implementation. It stores nullplatform parameters as Azure Key Vault (AKV) secrets.
+This document describes the `parameters/providers/azure_key_vault/` implementation. It stores nullplatform parameters as Azure Key Vault (AKV) secrets, exploiting AKV's native versioning.
 
 ---
 
@@ -8,52 +8,65 @@ This document describes the `parameters/providers/azure_key_vault/` implementati
 
 | Step | What happens                                                                  |
 |------|-------------------------------------------------------------------------------|
-| `setup`     | Reads `AZ_VAULT_NAME`, `AZ_SECRET_PREFIX`. Fails if vault name missing or prefix has invalid chars. |
-| `store`     | Generates UUID. Calls `az keyvault secret set`. Returns `{external_id, metadata}`. |
-| `retrieve`  | Calls `az keyvault secret show`. Returns `{value}` or `{value: "value not found"}`. |
-| `delete`    | Calls `az keyvault secret delete` + `az keyvault secret purge` (both with `\|\| true`). |
+| `setup`     | Reads `AZ_VAULT_NAME`, `AZ_SECRET_PREFIX` (default `nullplatform-`). Validates prefix matches `[A-Za-z0-9-]*`. |
+| `store`     | Composes canonical path via `build_external_id`. Transforms (slash → dash, equals → dash) for AKV naming. Calls `az keyvault secret set` with `--tags managed_by=nullplatform`. Extracts version from the returned id URL. Returns `external_id = <canonical_path>#<version>`. |
+| `retrieve`  | Parses canonical path + version. Re-transforms path to AKV name. Calls `az keyvault secret show` with `--version <V>` if a version is present. |
+| `delete`    | Calls `az keyvault secret delete` + best-effort `purge`. Idempotent. |
 | `notify`    | Not implemented — dispatcher returns default `{success: true}`. |
 
 ---
 
-## Naming convention
+## Storage layout
+
+AKV secret names allow only alphanumerics and dashes (no slashes, no equals, no underscores). The canonical path from `build_external_id` contains slashes and equals, so we transform it:
 
 ```
-<AZ_SECRET_PREFIX><external_id>
+canonical:  organization=acme-1255165411/account=prod-95118862/.../DB_PASSWORD-42
+AKV name:   nullplatform-organization-acme-1255165411-account-prod-95118862-...-DB_PASSWORD-42
 ```
 
-- `AZ_SECRET_PREFIX` defaults to `parameters-`. Must match `[A-Za-z0-9-]*` — AKV secret names allow only alphanumerics and dashes (no slashes, no dots, no underscores).
-- `external_id` is a UUIDv4 generated at store time. UUIDs already satisfy AKV's character constraints.
-- Full secret name example: `parameters-f47ac10b-58cc-4372-a567-0e02b2c3d479`
-- Max 127 chars total. With a UUID (36 chars + dashes), you have ~90 chars left for the prefix.
+The transformation is `/=` → `-`, deterministic. The canonical form (with `/` and `=`) is what nullplatform sees in `external_id`; the AKV-safe form is only used internally to address the secret.
 
-This naming differs from `aws_secret_manager` and `parameter_store` (which support slashes for hierarchical organization) — AKV is flat-namespace.
+Max secret name length in AKV is 127 characters. The provider checks this and surfaces a helpful error if exceeded.
 
 ---
 
-## PARAMETER_KIND is informational here
+## Versioning
 
-AKV transparently encrypts all secrets using vault-managed keys (or a customer key if the vault is configured with one). The provider does **not** branch on `PARAMETER_KIND`:
+AKV has native versioning. Every `az keyvault secret set` creates a new version, all retained inside the same secret. The version identifier is the last segment of the returned `id` URL.
 
-- `kind=secret` → AKV secret (encrypted at rest by AKV)
-- `kind=parameter` → AKV secret (encrypted at rest by AKV)
+### Version identity in external_id
 
-Both end up identical. If you need to distinguish parameter vs secret semantics at the storage layer, use the `parameter_store` provider instead (it uses SSM Type=String vs SecureString).
+The `external_id` returned by `store` encodes both the path and the version:
+
+```
+<canonical_path>#<version_id>
+```
+
+For Azure Key Vault, `version_id` is **the literal hex string version returned by AKV** — we do not invent or normalize it. AKV returns the secret's id as a URL like `https://my-vault.vault.azure.net/secrets/my-secret/93a0b2eb12a64fa7b3acb18900a8d33d`; we extract the last path segment. Real example:
+
+```
+organization=acme-1255165411/.../DB_PASSWORD-42#93a0b2eb12a64fa7b3acb18900a8d33d
+```
+
+That 32-char hex string is the AKV version identifier. It can be used as-is with `az keyvault secret show --version 93a0b2eb12a64fa7b3acb18900a8d33d` to fetch that specific historical version.
+
+On `retrieve`:
+- With `#<hex>` → fetch that version via `--version <hex>`.
+- Without → fetch the latest.
+
+On `delete`, the version suffix is ignored — `secret delete` + `secret purge` remove all versions.
 
 ---
 
-## Soft-delete behavior
+## Soft-delete + purge
 
-Azure Key Vault has soft-delete enabled by default with 90-day retention:
+AKV uses soft-delete by default (90-day retention). The provider does both:
 
-1. `az keyvault secret delete` moves the secret to a soft-deleted state. The name is reserved (cannot recreate with same name) and the secret is recoverable for 90 days.
-2. `az keyvault secret purge` hard-deletes from the soft-delete bin, freeing the name immediately.
+1. `az keyvault secret delete` — moves to soft-deleted state.
+2. `az keyvault secret purge` — hard-deletes from the soft-delete bin, freeing the name immediately.
 
-The provider's `delete` script does **both** sequentially. Both calls suppress errors (`|| true`), so:
-
-- If you have the `Purge` permission: hard-deletes immediately, no retention cost.
-- If you only have `Delete`: soft-deletes, retention applies. Since we use UUIDs, name reuse is not a concern in practice.
-- If the secret already doesn't exist: both calls fail silently, the operation still returns `{success: true}`.
+If the identity lacks `Purge` permission, purge fails with a warning but delete still succeeds. The secret stays in the soft-delete window and is auto-cleaned by Azure at retention expiry.
 
 ---
 
@@ -64,40 +77,8 @@ The provider's `delete` script does **both** sequentially. Both calls suppress e
 ```json
 {
   "vault_name":    "my-keyvault",
-  "secret_prefix": "parameters-"
+  "secret_prefix": "nullplatform-"
 }
 ```
 
-Equivalent env vars: `AZURE_KEY_VAULT_NAME`, `AZURE_KEY_VAULT_SECRET_PREFIX`. `PROVIDER_CONFIG` wins per `get_config_value` priority.
-
-Authentication uses the Azure CLI's default credential chain:
-
-1. Managed Identity (Azure-hosted environments)
-2. Service Principal env vars (`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`)
-3. `az login` cached credentials
-
-The provider does not validate auth in `setup` — the first `az keyvault` call surfaces auth errors.
-
----
-
-## Required permissions on the vault
-
-The identity running the provider scripts needs an access policy or RBAC role on the vault:
-
-| Operation | Access policy permission       | RBAC role                            |
-|-----------|--------------------------------|--------------------------------------|
-| store     | Set                            | Key Vault Secrets Officer / Contributor |
-| retrieve  | Get                            | Key Vault Secrets User               |
-| delete    | Delete, Purge (optional)       | Key Vault Secrets Officer + Purge action |
-
-The `Purge` permission is optional but recommended. Without it, soft-deletes accumulate and you may hit vault soft-delete quotas if you cycle many secrets.
-
----
-
-## Compatibility with the contract
-
-| Operation | Output shape | Notes |
-|-----------|--------------|-------|
-| store     | `{external_id, metadata: {azure_secret_id, secret_name, vault_name}}` | `azure_secret_id` is the full AKV resource ID (URL form) |
-| retrieve  | `{value}` or `{value: "value not found"}` | |
-| delete    | `{success: true}` | Always; idempotent |
+Authentication comes from the Azure CLI's default credential chain (managed identity, az login, service principal env vars).

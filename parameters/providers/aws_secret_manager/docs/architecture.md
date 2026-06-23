@@ -97,15 +97,17 @@ The `external_id` returned by `store` encodes both the path and the version:
 <canonical_path>#<version_id>
 ```
 
-For AWS SM, `version_id` is the `VersionId` UUID returned by `CreateSecret` / `PutSecretValue`. Example:
+For AWS SM, `version_id` is **the literal `VersionId` UUID v4 returned by `CreateSecret` / `PutSecretValue`** — we do not invent or normalize it. AWS returns it in the response; we copy it verbatim into the suffix. Real example:
 
 ```
-organization=acme-1255165411/.../DB_PASSWORD-42#abcd1234-uuid-5678-version
+organization=acme-1255165411/.../DB_PASSWORD-42#a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
 ```
+
+The hex string after `#` is the exact VersionId AWS reports for that PutSecretValue / CreateSecret call. It can be used as-is with `aws secretsmanager get-secret-value --version-id` to fetch that specific version.
 
 This means nullplatform — which already persists and re-sends `external_id` on every operation — automatically retains the version reference without needing a separate field. On `retrieve`:
 
-- If `external_id` carries `#version` → fetch that specific historical version.
+- If `external_id` carries `#<version_id>` → fetch that specific historical version using `--version-id <VersionId>`.
 - If `external_id` has no `#` suffix → fetch `AWSCURRENT` (latest).
 
 On `delete`, the version suffix is ignored — `DeleteSecret` removes all versions of the secret.

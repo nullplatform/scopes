@@ -84,6 +84,25 @@ The shared helper `parameters/utils/build_external_id` constructs the canonical 
 
 Each provider applies the prefix (default `nullplatform/`) and any backend-specific sanitization (Azure Key Vault flattens slashes and equals to dashes; everyone else uses the canonical form). The canonical `external_id` returned to nullplatform is the same across all providers, which makes parameter migration between backends mechanically possible.
 
+### Version encoding in external_id
+
+The `external_id` also carries the version identifier as a suffix:
+
+```
+<canonical_path>#<version_id>
+```
+
+The `version_id` is **the native version identifier returned by each backend** — no normalization, no invention. Each provider copies it verbatim from the backend's response. The format varies per backend:
+
+| Provider             | Version ID format               | Example                                          |
+|----------------------|----------------------------------|--------------------------------------------------|
+| `aws_secret_manager` | UUID v4 (from `VersionId`)       | `a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d`           |
+| `hashicorp_vault`    | Integer (from `.data.version`)   | `3`                                              |
+| `parameter_store`    | Integer (from `.Version`)        | `7`                                              |
+| `azure_key_vault`    | 32-char hex (URL last segment)   | `93a0b2eb12a64fa7b3acb18900a8d33d`               |
+
+Because nullplatform already persists and re-sends `external_id` on every operation, this versioning works without any platform-side changes. On `retrieve`, the dispatcher's `build_context` splits the suffix; provider scripts use it to target a specific historical version via the backend's native version-fetching mechanism (`--version-id`, `?version=N`, `:N`, `--version`).
+
 ---
 
 ## How the provider is chosen

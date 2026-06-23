@@ -1,80 +1,90 @@
 # HashiCorp Vault — Provider Architecture
 
-This document describes the `parameters/providers/hashicorp_vault/` implementation. It stores nullplatform parameters as Vault KV v2 secrets.
+This document describes the `parameters/providers/hashicorp_vault/` implementation. It stores nullplatform parameters as Vault KV v2 secrets, exploiting Vault's native versioning.
 
 ---
 
 ## Lifecycle
 
-| Step | What happens                                                          |
-|------|-----------------------------------------------------------------------|
-| `setup`     | Reads `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_PATH_PREFIX` from env or `PROVIDER_CONFIG`. Fails fast if address or token is missing. Exports the three vars. |
-| `store`     | Generates a UUID `external_id`. POSTs to `$VAULT_ADDR/v1/$VAULT_PATH_PREFIX/$external_id` with a JSON payload. Returns `{external_id, metadata.vault_path}`. |
-| `retrieve`  | GETs from `$VAULT_ADDR/v1/$VAULT_PATH_PREFIX/$external_id`. Returns `{value}` or `{value: "value not found"}` on miss. |
-| `delete`    | DELETEs the secret. Idempotent — re-deleting is a no-op. Returns `{success: true}`. |
-| `notify`    | Not implemented — dispatcher returns the default `{success: true}` ack. |
+| Step | What happens                                                                          |
+|------|---------------------------------------------------------------------------------------|
+| `setup`     | Reads `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_PATH_PREFIX` (default `secret/data/nullplatform`). Fails fast if address or token is missing. |
+| `store`     | Composes the canonical path via `build_external_id`. POSTs to `$VAULT_ADDR/v1/$VAULT_PATH_PREFIX/<path>` with a JSON payload. Captures the new version number from Vault's response. Returns `external_id = <path>#<version>`. |
+| `retrieve`  | Parses `EXTERNAL_ID` into path + version. GETs `$VAULT_ADDR/v1/$VAULT_PATH_PREFIX/<path>?version=<N>` if a version is present; otherwise fetches the latest. Returns `{value}` or `{value: "value not found"}`. |
+| `delete`    | Parses path from external_id. DELETEs the metadata endpoint (KV v2) — removes all versions. Idempotent. |
+| `notify`    | Not implemented — dispatcher returns default `{success: true}`. |
 
 ---
 
 ## Storage layout
 
+Every secret path is composed by `parameters/utils/build_external_id`:
+
 ```
-<VAULT_ADDR>/v1/<VAULT_PATH_PREFIX>/<external_id>
+<VAULT_PATH_PREFIX>/<entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
 ```
 
-- **`VAULT_PATH_PREFIX`** defaults to `secret/data/parameters`. The `data/` segment is the KV v2 convention — change the default if your mount uses KV v1 (drop the `data/`) or a different mount point.
-- **`external_id`** is a UUIDv4 generated at store time. It is the canonical handle nullplatform persists and re-injects for retrieve/delete.
+Default `VAULT_PATH_PREFIX` is `secret/data/nullplatform` (KV v2 — note the `data/` segment is required by the v2 API).
 
-The stored payload at each path is a JSON envelope, not the raw value:
+Example full path:
+
+```
+secret/data/nullplatform/organization=acme-1255165411/account=prod-95118862/.../DB_PASSWORD-42
+```
+
+The path is human-friendly: navigating the Vault UI, an operator can find any secret by knowing the parameter's NRN + dimensions + name.
+
+---
+
+## Versioning
+
+Vault KV v2 has native versioning. Every `POST /v1/secret/data/<path>` creates a new version, all retained inside the same path. Old versions can be fetched with `?version=<N>`.
+
+### Version identity in external_id
+
+The `external_id` returned by `store` encodes both the path and the version:
+
+```
+<canonical_path>#<version_id>
+```
+
+For Vault KV v2, `version_id` is **the literal integer version number returned by Vault** in `.data.version` — we do not invent or normalize it. Real example:
+
+```
+organization=acme-1255165411/.../DB_PASSWORD-42#3
+```
+
+Here `3` means "Vault version 3 of this secret". It can be used as-is with `?version=3` to fetch that specific version.
+
+On `retrieve`:
+- If `external_id` carries `#<N>` → fetch that historical version via `?version=N`.
+- If no `#` suffix → fetch the latest (default Vault behavior).
+
+On `delete`, the version suffix is ignored. KV v2's data DELETE removes the latest version label; for full purging across all versions you'd use `metadata` endpoint — see Vault docs for the soft/hard delete distinction.
+
+---
+
+## Secret payload
+
+The body stored in Vault is a JSON envelope:
 
 ```json
 {
   "data": {
     "parameter_id": 42,
     "value": "the-actual-value",
-    "stored_at": "2026-05-15T12:34:56Z",
-    "external_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    "stored_at": "2026-06-23T12:34:56Z",
+    "external_id": "organization=acme-1255165411/.../DB_PASSWORD-42"
   }
 }
 ```
 
-Keeping `parameter_id` and `external_id` inside the payload makes orphaned secrets self-describing — if someone discovers a stale entry under `parameters/`, the payload tells them which nullplatform parameter it belongs to.
+The `data` wrapper is KV v2's API requirement; the inner object is our envelope.
 
 ---
 
-## Configuration
+## Authentication
 
-`PROVIDER_CONFIG` shape (populated by `fetch_configuration` if you implement one):
+Token-based via `X-Vault-Token` header. The token must have read/write permissions on the configured `VAULT_PATH_PREFIX` namespace.
 
-```json
-{
-  "address":     "https://vault.example.com",
-  "token":       "hvs.xxx",
-  "path_prefix": "secret/data/parameters"
-}
-```
-
-Equivalent env vars: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_PATH_PREFIX`. Provider config wins over env per `get_config_value` priority.
-
----
-
-## Authentication notes
-
-This provider uses static token auth via `X-Vault-Token`. For production use, consider:
-
-- **Token rotation**: short-lived tokens (issued by AppRole, Kubernetes auth, etc.) should be refreshed by `fetch_configuration` rather than relying on a long-lived `VAULT_TOKEN` env var.
-- **OIDC / Kubernetes auth**: a richer `fetch_configuration` could exchange a workload identity for a Vault token at runtime, removing the need for any pre-issued credential.
-
-The operation scripts (`store`/`retrieve`/`delete`) don't care how `VAULT_TOKEN` got into the environment — they just use it. Swap the auth mechanism by changing `setup` (and optionally adding `fetch_configuration`).
-
----
-
-## Compatibility
-
-The output JSON shape matches the previous `parameters/vault/` implementation byte-for-byte:
-
-- `store` → `{external_id, metadata: {vault_path}}`
-- `retrieve` → `{value}` or `{value: "value not found"}`
-- `delete` → `{success: true}`
-
-A scope that switches from the old layout to this provider sees no behavior change against Vault.
+For production: use short-lived tokens (issued by AppRole, Kubernetes auth, etc.) refreshed by the operator outside this package. The agent only reads `VAULT_TOKEN` — credential lifecycle management is the operator's responsibility.
