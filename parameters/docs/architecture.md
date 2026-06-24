@@ -81,8 +81,14 @@ Every provider composes its storage path from the parameter's NRN entities (slug
 The shared helper `parameters/utils/build_external_id` constructs the canonical form, fetching slugs from the np CLI in parallel:
 
 ```
-<provider_prefix>/organization=<slug>-<id>/account=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+<provider_prefix>/organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>[/scope=<slug>-<id>][/<dim_key>=<dim_value>...]/<parameter_name>-<parameter_id>
 ```
+
+**Required entities** (always present, always in this order): `organization`, `account`, `namespace`, `application`.
+
+**Optional entity**: `scope` — appears as a segment between `application` and dimensions, only when the parameter is bound to a specific deployment scope.
+
+**Optional dimensions**: zero or more `key=value` segments, sorted alphabetically by key for determinism. A parameter without dimensions has no dimension segments in the path at all.
 
 Each provider applies the prefix (default `nullplatform/`) and any backend-specific sanitization (Azure Key Vault flattens slashes and equals to dashes; everyone else uses the canonical form). The canonical `external_id` returned to nullplatform is the same across all providers, which makes parameter migration between backends mechanically possible.
 

@@ -23,8 +23,10 @@ Cheapest provider in the package — Standard tier is free up to 10,000 paramete
 Every parameter name is composed by `parameters/utils/build_external_id`:
 
 ```
-<PS_NAME_PREFIX><entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+<PS_NAME_PREFIX>organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>[/scope=<slug>-<id>][/<dim_key>=<dim_value>...]/<parameter_name>-<parameter_id>
 ```
+
+The `scope` entity is optional (only present when the parameter is bound to a deployment scope). Dimensions are also optional. See `parameters/docs/architecture.md` for the complete naming convention.
 
 Default `PS_NAME_PREFIX` is `/nullplatform/`. SSM requires names to start with `/` for hierarchical organization.
 

@@ -27,6 +27,8 @@ AKV name:   nullplatform-organization-acme-1255165411-account-prod-95118862-...-
 
 The transformation is `/=` → `-`, deterministic. The canonical form (with `/` and `=`) is what nullplatform sees in `external_id`; the AKV-safe form is only used internally to address the secret.
 
+The canonical path follows the standard convention: required entities `organization`, `account`, `namespace`, `application`, plus the optional `scope` entity (when the parameter is bound to a deployment scope), plus optional dimensions (zero or more, sorted alphabetically). See `parameters/docs/architecture.md` for the complete naming convention.
+
 Max secret name length in AKV is 127 characters. The provider checks this and surfaces a helpful error if exceeded.
 
 ---

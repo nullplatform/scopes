@@ -36,18 +36,39 @@ nullplatform/organization=<slug>-<id>/account=<slug>-<id>/.../<dim_key>=<dim_val
 
 The path follows the **human-friendliness principle**: anyone entering the AWS Secrets Manager console must be able to find the secret by knowing the parameter's context, without consulting nullplatform metadata.
 
-### Example
+### Optional path components
 
-For a parameter with:
+Two segments of the path are conditional:
 
-- Entities: `organization=1255165411`, `account=95118862`, `namespace=37094320`, `application=321402625`
-- Dimensions: `environment=production`, `country=argentina`
-- Parameter: `name=DB_PASSWORD`, `id=42`
+- **`scope` entity** — optional. It appears as a segment between `application=...` and the dimensions, only when the parameter is bound to a specific deployment scope. When absent, the path goes directly from `application=...` to dimensions (or to the parameter name if no dimensions).
+- **Dimensions** — optional. A parameter may have zero dimensions, in which case no `key=value` segments appear. If present, they are sorted alphabetically by key.
 
-The secret name is:
+The canonical entity order is `organization → account → namespace → application → scope`. The first four are always present in nullplatform's NRN; `scope` is added on demand.
+
+### Examples
+
+**Minimal** — parameter with required entities only, no scope, no dimensions:
+
+```
+nullplatform/organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/DB_PASSWORD-42
+```
+
+**With scope** — same parameter bound to a deployment scope:
+
+```
+nullplatform/organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/scope=staging-789/DB_PASSWORD-42
+```
+
+**With dimensions** — same parameter without scope but with two dimensions:
 
 ```
 nullplatform/organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/country=argentina/environment=production/DB_PASSWORD-42
+```
+
+**Full** — parameter with scope AND dimensions:
+
+```
+nullplatform/organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/scope=staging-789/country=argentina/environment=production/DB_PASSWORD-42
 ```
 
 Notes:

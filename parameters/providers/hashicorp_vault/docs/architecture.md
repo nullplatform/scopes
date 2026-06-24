@@ -21,8 +21,10 @@ This document describes the `parameters/providers/hashicorp_vault/` implementati
 Every secret path is composed by `parameters/utils/build_external_id`:
 
 ```
-<VAULT_PATH_PREFIX>/<entity_type>=<slug>-<id>/.../<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+<VAULT_PATH_PREFIX>/organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>[/scope=<slug>-<id>][/<dim_key>=<dim_value>...]/<parameter_name>-<parameter_id>
 ```
+
+The `scope` entity is optional (only present when the parameter is bound to a deployment scope). Dimensions are also optional — a parameter may have zero of them. See `parameters/docs/architecture.md` for the complete naming convention.
 
 Default `VAULT_PATH_PREFIX` is `secret/data/nullplatform` (KV v2 — note the `data/` segment is required by the v2 API).
 

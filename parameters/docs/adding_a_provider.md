@@ -19,8 +19,15 @@ All names are grouped under a `nullplatform` top-level prefix (default — opera
 The shared helper `parameters/utils/build_external_id` constructs the canonical form. Your `store` calls it once at the top:
 
 ```
-nullplatform/organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>/<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+nullplatform/organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>[/scope=<slug>-<id>][/<dim_key>=<dim_value>...]/<parameter_name>-<parameter_id>
 ```
+
+Two segments are conditional:
+
+- **`scope` entity** is optional — appears only when the parameter is bound to a specific deployment scope, between `application` and dimensions.
+- **Dimensions** are optional — a parameter may have zero, one, or many. Present dimensions are sorted alphabetically by key.
+
+The required entities (`organization`, `account`, `namespace`, `application`) are always present in nullplatform's NRN, in that canonical order.
 
 The principle: an operator who opens the backend's UI (AWS Console, Vault UI, Azure Portal) must be able to navigate to any secret by knowing the parameter's nullplatform context, without consulting the platform's database. The path tells the story.
 
