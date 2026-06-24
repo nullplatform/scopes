@@ -3,50 +3,29 @@ set -euo pipefail
 
 # Validates AWS Systems Manager Parameter Store connection config.
 #
-# Required env (exported by parameters/build_context):
+# AWS_REGION is injected by the agent's runtime, not by provider config.
+# The name prefix is hardcoded to `/nullplatform/` — invariant namespace for
+# all platform parameters.
+#
+# Operator-configurable: kms_key_id (for SecureString) and tier.
+#
+# Required env (from build_context):
 #   PARAMETER_KIND — "secret" or "parameter"; determines String vs SecureString
 #
-# Reads, in priority order: PROVIDER_CONFIG, environment variables, defaults.
 # Exports: AWS_REGION, PS_NAME_PREFIX, PS_KMS_KEY_ID, PS_TIER
 
-AWS_REGION=$(get_config_value \
-  --env AWS_REGION \
-  --env AWS_DEFAULT_REGION \
-  --provider '.region')
+: "${AWS_REGION:?AWS_REGION must be set by the agent runtime}"
 
-PS_NAME_PREFIX=$(get_config_value \
-  --env PS_NAME_PREFIX \
-  --provider '.name_prefix' \
-  --default '/nullplatform/')
+PS_NAME_PREFIX="/nullplatform/"
 
 PS_KMS_KEY_ID=$(get_config_value \
-  --env PS_KMS_KEY_ID \
   --provider '.kms_key_id' \
   --default '')
 
 PS_TIER=$(get_config_value \
-  --env PS_TIER \
   --provider '.tier' \
   --default 'Standard')
 
-if [ -z "$AWS_REGION" ]; then
-  log error "❌ AWS region not configured for parameter_store"
-  log error ""
-  log error "💡 Possible causes:"
-  log error "   • AWS_REGION (or AWS_DEFAULT_REGION) env var is not set"
-  log error "   • .region is missing in the parameter_store provider config"
-  log error ""
-  log error "🔧 How to fix:"
-  log error "   • Set AWS_REGION=<your-region>"
-  log error "   • Or populate PROVIDER_CONFIG.region via providers/parameter_store/fetch_configuration"
-  exit 1
-fi
-
-# Normalize the name prefix: must start with '/' (SSM hierarchical naming) and end with '/'.
-[[ "$PS_NAME_PREFIX" != /* ]] && PS_NAME_PREFIX="/$PS_NAME_PREFIX"
-[[ "$PS_NAME_PREFIX" != */ ]] && PS_NAME_PREFIX="$PS_NAME_PREFIX/"
-
-# Tier must be one of the valid SSM values.
 case "$PS_TIER" in
   Standard|Advanced|Intelligent-Tiering) ;;
   *)

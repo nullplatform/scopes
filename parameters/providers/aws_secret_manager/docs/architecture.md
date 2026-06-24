@@ -188,10 +188,10 @@ For nullplatform's model — where the version history is the recovery mechanism
 | Error condition                        | `store`           | `retrieve`               | `delete`           |
 |----------------------------------------|-------------------|--------------------------|--------------------|
 | Resource exists (on store)             | New version added | N/A                      | N/A                |
-| ResourceNotFoundException              | N/A               | `{value: "value not found"}` | Idempotent success |
+| ResourceNotFoundException              | N/A               | Exit 1 + troubleshooting | Idempotent success |
 | Any other error (IAM, network, region) | Exit 1 + troubleshooting | Exit 1 + troubleshooting | Exit 1 + troubleshooting |
 
-Only `ResourceNotFoundException` is treated as idempotent success. Every other error — particularly IAM permission failures — propagates as a real error with troubleshooting guidance. Silent success on permission failures would lead to "the parameter says deleted but the secret is still there" bugs.
+For `delete`, `ResourceNotFoundException` is treated as idempotent success — the resource is already in the desired state, the work is done. For `retrieve`, not-found is a real error: returning a sentinel like "value not found" as the value would mislead the platform into displaying that string as the parameter's actual value. Every other error — particularly IAM permission failures — propagates as a real error with troubleshooting guidance.
 
 ### Encryption at rest
 

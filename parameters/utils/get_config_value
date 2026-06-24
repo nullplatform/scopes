@@ -27,24 +27,28 @@ get_config_value() {
   done
 
   # Priority 1: provider config
-  for jq_path in "${providers[@]}"; do
-    if [[ -n "$jq_path" && -n "${PROVIDER_CONFIG:-}" ]]; then
-      local v
-      v=$(echo "$PROVIDER_CONFIG" | jq -r "$jq_path // empty" 2>/dev/null || true)
-      if [[ -n "$v" && "$v" != "null" ]]; then
-        echo "$v"
-        return 0
+  if [ "${#providers[@]}" -gt 0 ]; then
+    for jq_path in "${providers[@]}"; do
+      if [[ -n "$jq_path" && -n "${PROVIDER_CONFIG:-}" ]]; then
+        local v
+        v=$(echo "$PROVIDER_CONFIG" | jq -r "$jq_path // empty" 2>/dev/null || true)
+        if [[ -n "$v" && "$v" != "null" ]]; then
+          echo "$v"
+          return 0
+        fi
       fi
-    fi
-  done
+    done
+  fi
 
   # Priority 2: env vars
-  for env_var in "${env_vars[@]}"; do
-    if [[ -n "$env_var" && -n "${!env_var:-}" ]]; then
-      echo "${!env_var}"
-      return 0
-    fi
-  done
+  if [ "${#env_vars[@]}" -gt 0 ]; then
+    for env_var in "${env_vars[@]}"; do
+      if [[ -n "$env_var" && -n "${!env_var:-}" ]]; then
+        echo "${!env_var}"
+        return 0
+      fi
+    done
+  fi
 
   # Priority 3: default
   if [[ -n "$default_value" ]]; then

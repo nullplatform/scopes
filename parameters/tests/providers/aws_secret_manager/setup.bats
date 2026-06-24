@@ -14,32 +14,22 @@ setup() {
 }
 
 teardown() {
-  unset AWS_REGION AWS_DEFAULT_REGION SM_NAME_PREFIX SM_KMS_KEY_ID PROVIDER_CONFIG
+  unset AWS_REGION SM_NAME_PREFIX SM_KMS_KEY_ID PROVIDER_CONFIG
 }
 
-@test "aws_secret_manager setup: fails when AWS_REGION is missing" {
-  unset AWS_REGION AWS_DEFAULT_REGION
+@test "aws_secret_manager setup: fails fast when AWS_REGION is missing" {
+  unset AWS_REGION
 
   run bash -c "$DEPS; source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ AWS region not configured for aws_secret_manager"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "AWS_REGION"
 }
 
-@test "aws_secret_manager setup: AWS_DEFAULT_REGION is honored when AWS_REGION is unset" {
-  unset AWS_REGION
-  export AWS_DEFAULT_REGION="eu-west-1"
-
-  run bash -c "$DEPS; source $SCRIPT && echo REGION=\$AWS_REGION"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "REGION=eu-west-1"
-}
-
-@test "aws_secret_manager setup: default name_prefix is 'nullplatform/'" {
+@test "aws_secret_manager setup: name_prefix is hardcoded to 'nullplatform/'" {
   export AWS_REGION="us-east-1"
+  # Even if PROVIDER_CONFIG tries to set name_prefix, it's ignored (hardcoded invariant)
+  export PROVIDER_CONFIG='{"name_prefix":"custom/"}'
 
   run bash -c "$DEPS; source $SCRIPT && echo PREFIX=\$SM_NAME_PREFIX"
 
@@ -47,21 +37,27 @@ teardown() {
   assert_contains "$output" "PREFIX=nullplatform/"
 }
 
-@test "aws_secret_manager setup: PROVIDER_CONFIG wins over env" {
-  export AWS_REGION="us-east-1"
-  export PROVIDER_CONFIG='{"region":"eu-central-1","name_prefix":"custom/","kms_key_id":"alias/mykey"}'
+@test "aws_secret_manager setup: AWS_REGION is taken from env (runtime-injected)" {
+  export AWS_REGION="eu-west-1"
 
-  run bash -c "$DEPS; source $SCRIPT && echo REGION=\$AWS_REGION PREFIX=\$SM_NAME_PREFIX KMS=\$SM_KMS_KEY_ID"
+  run bash -c "$DEPS; source $SCRIPT && echo REGION=\$AWS_REGION"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "REGION=eu-central-1"
-  assert_contains "$output" "PREFIX=custom/"
+  assert_contains "$output" "REGION=eu-west-1"
+}
+
+@test "aws_secret_manager setup: kms_key_id from PROVIDER_CONFIG" {
+  export AWS_REGION="us-east-1"
+  export PROVIDER_CONFIG='{"kms_key_id":"alias/mykey"}'
+
+  run bash -c "$DEPS; source $SCRIPT && echo KMS=\$SM_KMS_KEY_ID"
+
+  assert_equal "$status" "0"
   assert_contains "$output" "KMS=alias/mykey"
 }
 
-@test "aws_secret_manager setup: kms_key_id is optional (empty when unset)" {
+@test "aws_secret_manager setup: kms_key_id is empty by default" {
   export AWS_REGION="us-east-1"
-  unset SM_KMS_KEY_ID
 
   run bash -c "$DEPS; source $SCRIPT && echo KMS=[\$SM_KMS_KEY_ID]"
 

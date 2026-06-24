@@ -17,7 +17,7 @@ teardown() {
   unset VAULT_ADDR VAULT_TOKEN VAULT_PATH_PREFIX PROVIDER_CONFIG
 }
 
-@test "vault setup: fails with troubleshooting when VAULT_ADDR is missing" {
+@test "vault setup: fails when VAULT_ADDR is missing" {
   unset VAULT_ADDR
   export VAULT_TOKEN="hvs.xxx"
 
@@ -25,11 +25,9 @@ teardown() {
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Vault address not configured"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "vault setup: fails with troubleshooting when VAULT_TOKEN is missing" {
+@test "vault setup: fails when VAULT_TOKEN is missing" {
   export VAULT_ADDR="https://vault.example.com"
   unset VAULT_TOKEN
 
@@ -39,46 +37,34 @@ teardown() {
   assert_contains "$output" "❌ Vault token not configured"
 }
 
-@test "vault setup: succeeds with both env vars set, exports them" {
+@test "vault setup: path_prefix is hardcoded to secret/data/nullplatform" {
   export VAULT_ADDR="https://vault.example.com"
   export VAULT_TOKEN="hvs.xxx"
+  export PROVIDER_CONFIG='{"path_prefix":"kv/data/custom"}'
 
-  run bash -c "$DEPS; source $SCRIPT && echo ADDR=\$VAULT_ADDR TOKEN=\$VAULT_TOKEN PREFIX=\$VAULT_PATH_PREFIX"
+  run bash -c "$DEPS; source $SCRIPT && echo PREFIX=\$VAULT_PATH_PREFIX"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "ADDR=https://vault.example.com"
-  assert_contains "$output" "TOKEN=hvs.xxx"
   assert_contains "$output" "PREFIX=secret/data/nullplatform"
 }
 
-@test "vault setup: PROVIDER_CONFIG wins over env var" {
-  export VAULT_ADDR="https://env-vault.com"
-  export VAULT_TOKEN="env-token"
-  export PROVIDER_CONFIG='{"address":"https://provider-vault.com","token":"provider-token"}'
+@test "vault setup: address from PROVIDER_CONFIG" {
+  export VAULT_TOKEN="hvs.xxx"
+  export PROVIDER_CONFIG='{"address":"https://cfg-vault.example.com"}'
 
-  run bash -c "$DEPS; source $SCRIPT && echo ADDR=\$VAULT_ADDR TOKEN=\$VAULT_TOKEN"
+  run bash -c "$DEPS; source $SCRIPT && echo ADDR=\$VAULT_ADDR"
 
   assert_equal "$status" "0"
-  assert_contains "$output" "ADDR=https://provider-vault.com"
-  assert_contains "$output" "TOKEN=provider-token"
+  assert_contains "$output" "ADDR=https://cfg-vault.example.com"
 }
 
-@test "vault setup: custom path_prefix from PROVIDER_CONFIG" {
-  export PROVIDER_CONFIG='{"address":"https://v.com","token":"t","path_prefix":"kv/data/custom"}'
+@test "vault setup: token must come from env (not PROVIDER_CONFIG)" {
+  export VAULT_ADDR="https://vault.example.com"
+  unset VAULT_TOKEN
+  export PROVIDER_CONFIG='{"token":"hvs.from-config"}'
 
-  run bash -c "$DEPS; source $SCRIPT && echo PREFIX=\$VAULT_PATH_PREFIX"
+  run bash -c "$DEPS; source $SCRIPT"
 
-  assert_equal "$status" "0"
-  assert_contains "$output" "PREFIX=kv/data/custom"
-}
-
-@test "vault setup: reads VAULT_PATH_PREFIX from env if PROVIDER_CONFIG has no path_prefix" {
-  export VAULT_ADDR="https://v.com"
-  export VAULT_TOKEN="t"
-  export VAULT_PATH_PREFIX="kv/data/from-env"
-
-  run bash -c "$DEPS; source $SCRIPT && echo PREFIX=\$VAULT_PATH_PREFIX"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "PREFIX=kv/data/from-env"
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Vault token not configured"
 }

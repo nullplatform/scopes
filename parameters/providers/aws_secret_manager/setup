@@ -2,40 +2,22 @@
 set -euo pipefail
 
 # Validates AWS Secrets Manager connection config.
-# Sourced once by parameters/build_context before any operation script runs.
 #
-# Reads, in priority order: PROVIDER_CONFIG, environment variables, defaults.
-# Exports for operation scripts: AWS_REGION, SM_NAME_PREFIX, SM_KMS_KEY_ID
+# AWS_REGION is injected by the agent's runtime (IRSA / instance profile /
+# service account env), not by provider config. The name prefix is hardcoded
+# to `nullplatform/` to guarantee a single invariant namespace for all platform
+# secrets — changing it would break retrieval of historical external_ids.
+#
+# Only KMS key choice is operator-configurable, via PROVIDER_CONFIG.kms_key_id.
+#
+# Exports: AWS_REGION, SM_NAME_PREFIX, SM_KMS_KEY_ID
 
-AWS_REGION=$(get_config_value \
-  --env AWS_REGION \
-  --env AWS_DEFAULT_REGION \
-  --provider '.region')
+: "${AWS_REGION:?AWS_REGION must be set by the agent runtime}"
 
-SM_NAME_PREFIX=$(get_config_value \
-  --env SM_NAME_PREFIX \
-  --provider '.name_prefix' \
-  --default 'nullplatform/')
+SM_NAME_PREFIX="nullplatform/"
 
 SM_KMS_KEY_ID=$(get_config_value \
-  --env SM_KMS_KEY_ID \
   --provider '.kms_key_id' \
   --default '')
-
-if [ -z "$AWS_REGION" ]; then
-  log error "❌ AWS region not configured for aws_secret_manager"
-  log error ""
-  log error "💡 Possible causes:"
-  log error "   • AWS_REGION (or AWS_DEFAULT_REGION) env var is not set"
-  log error "   • .region is missing in the aws_secret_manager provider config"
-  log error ""
-  log error "🔧 How to fix:"
-  log error "   • Set AWS_REGION=<your-region> (e.g. us-east-1)"
-  log error "   • Or populate PROVIDER_CONFIG.region via providers/aws_secret_manager/fetch_configuration"
-  exit 1
-fi
-
-# AWS credentials come from the SDK default chain (IRSA, instance profile, env vars).
-# Not validated here — AWS CLI will surface auth errors on the first call.
 
 export AWS_REGION SM_NAME_PREFIX SM_KMS_KEY_ID

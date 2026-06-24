@@ -10,25 +10,12 @@
   "allow_dimensions": true,
   "schema": {
     "type": "object",
-    "required": [
-      "region"
-    ],
     "properties": {
-      "region": {
-        "type": "string",
-        "title": "AWS Region",
-        "description": "AWS region where parameters will be stored (e.g. us-east-1)"
-      },
-      "name_prefix": {
-        "type": "string",
-        "title": "Parameter Name Prefix",
-        "description": "Prefix prepended to every parameter name. Must start with a slash",
-        "default": "/nullplatform/"
-      },
       "kms_key_id": {
         "type": "string",
         "title": "KMS Key ID (optional)",
-        "description": "Customer-managed KMS key for SecureString parameters. If empty, the default alias/aws/ssm key is used"
+        "description": "Customer-managed KMS key for SecureString parameters. If empty, the default alias/aws/ssm key is used",
+        "default": ""
       },
       "tier": {
         "type": "string",

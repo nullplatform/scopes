@@ -40,7 +40,6 @@ else
     log error ""
     log error "💡 Possible causes:"
     log error "   • The secret was manually deleted from AWS"
-    log error "   • The external_id is stale (parameter was deleted in nullplatform but referenced elsewhere)"
     if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
       log error "   • Requested version '$EXTERNAL_ID_VERSION' was pruned (AWS SM auto-removes oldest unlabeled versions past 100)"
     fi

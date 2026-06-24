@@ -18,13 +18,6 @@
         "type": "string",
         "title": "Vault Name",
         "description": "Azure Key Vault name (without https:// or .vault.azure.net suffix)"
-      },
-      "secret_prefix": {
-        "type": "string",
-        "title": "Secret Name Prefix",
-        "description": "Prefix prepended to every secret name. AKV only allows alphanumerics and dashes",
-        "default": "nullplatform-",
-        "pattern": "^[A-Za-z0-9-]*$"
       }
     }
   }

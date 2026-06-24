@@ -2,19 +2,16 @@
 set -euo pipefail
 
 # Validates HashiCorp Vault connection config.
-# Sourced once by parameters/build_context before any operation script runs.
 #
-# Reads, in priority order: PROVIDER_CONFIG (if populated by fetch_configuration),
-# environment variables, defaults.
+# The KV path prefix is hardcoded to `secret/data/nullplatform` — invariant
+# namespace for all platform secrets. VAULT_ADDR is operator-configurable
+# (per Vault instance). VAULT_TOKEN is sensitive and should come from env only.
 #
-# Exports for operation scripts: VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
+# Exports: VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
 VAULT_ADDR=$(get_config_value --env VAULT_ADDR --provider '.address')
-VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN --provider '.token')
-VAULT_PATH_PREFIX=$(get_config_value \
-  --env VAULT_PATH_PREFIX \
-  --provider '.path_prefix' \
-  --default 'secret/data/nullplatform')
+VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN)
+VAULT_PATH_PREFIX="secret/data/nullplatform"
 
 if [ -z "$VAULT_ADDR" ]; then
   log error "❌ Vault address not configured"
@@ -25,7 +22,7 @@ if [ -z "$VAULT_ADDR" ]; then
   log error ""
   log error "🔧 How to fix:"
   log error "   • Set VAULT_ADDR=https://your-vault-host"
-  log error "   • Or populate PROVIDER_CONFIG.address via providers/hashicorp_vault/fetch_configuration"
+  log error "   • Or set .address in the provider config attributes"
   exit 1
 fi
 
@@ -33,12 +30,11 @@ if [ -z "$VAULT_TOKEN" ]; then
   log error "❌ Vault token not configured"
   log error ""
   log error "💡 Possible causes:"
-  log error "   • VAULT_TOKEN env var is not set in the workflow runtime"
-  log error "   • .token is missing in the hashicorp_vault provider config"
+  log error "   • VAULT_TOKEN env var is not set in the agent runtime"
   log error ""
   log error "🔧 How to fix:"
-  log error "   • Set VAULT_TOKEN=<your-token>"
-  log error "   • Or populate PROVIDER_CONFIG.token via providers/hashicorp_vault/fetch_configuration"
+  log error "   • Set VAULT_TOKEN=<your-token> in the agent environment"
+  log error "   • Tokens are sensitive — set via env, never via provider config"
   exit 1
 fi
 
