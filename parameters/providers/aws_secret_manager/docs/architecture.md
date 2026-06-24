@@ -90,14 +90,24 @@ A single ARN pattern covers everything this provider creates, without granting a
 
 ### sts:AssumeRole
 
-Before any AWS call, this provider's `setup` sources `utils/assume_role_step`, which:
+Before any AWS call, this provider's `setup` declares its IAM identity and sources the shared `utils/assume_role_step`:
+
+```bash
+ASSUME_ROLE_SELECTOR="secret_manager"
+ASSUME_ROLE_OVERRIDE_ENV="SECRET_MANAGER_ASSUME_ROLE_ARN"
+ASSUME_ROLE_DEFAULT_ENV="SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT"
+ASSUME_ROLE_SESSION_PREFIX="np-secret-manager"
+source "$PARAMETERS_ROOT/utils/assume_role_step"
+```
+
+The step is provider-agnostic — `parameter_store` does the same with its own selector (`parameter_store`) and env-var names (`PARAMETER_STORE_ASSUME_ROLE_ARN[_DEFAULT]`). The step:
 
 1. Reads the scope's NRN and dimensions from `CONTEXT` (falling back to `np scope read` when dimensions are not in the payload).
 2. Calls `np provider list --categories identity-access-control --nrn <nrn> [--dimensions ...]` to fetch the IAM provider that the platform has dimension-resolved for this scope.
-3. Picks the ARN from `.iam_role_arns.arns[]` whose `selector` is `secret_manager` (override with `SECRET_MANAGER_ASSUME_ROLE_SELECTOR`).
+3. Picks the ARN from `.iam_role_arns.arns[]` whose `selector` matches `ASSUME_ROLE_SELECTOR`.
 4. Calls `sts:AssumeRole` and exports `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`.
 
-Precedence: `SECRET_MANAGER_ASSUME_ROLE_ARN` env override → IAM provider selector → `SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT` env (per-account agent default) → agent credentials. The same step is shared with `parameter_store` since both providers act on the same IAM domain.
+Precedence: `${!ASSUME_ROLE_OVERRIDE_ENV}` (e.g. `SECRET_MANAGER_ASSUME_ROLE_ARN`) → IAM provider selector → `${!ASSUME_ROLE_DEFAULT_ENV}` (per-account agent default) → agent credentials.
 
 ### ARN suffix
 

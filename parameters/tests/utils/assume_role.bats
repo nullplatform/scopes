@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # =============================================================================
 # Unit tests for parameters/utils/assume_role — sourceable sts:AssumeRole step.
+# Reads ASSUME_ROLE_ARN_RESOLVED (provider-agnostic) set by assume_role_step.
 # =============================================================================
 
 setup() {
@@ -10,17 +11,17 @@ setup() {
   source "$PROJECT_ROOT/testing/assertions.sh"
 
   export SCRIPT="$PARAMETERS_DIR/utils/assume_role"
-  # Each test runs under `bash -c` with a fresh PATH that puts our fakes first.
   export BIN_DIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN_DIR"
 }
 
 teardown() {
-  unset SECRET_MANAGER_ASSUME_ROLE_ARN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+  unset ASSUME_ROLE_ARN_RESOLVED ASSUME_ROLE_SESSION_PREFIX \
+    AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 }
 
-@test "assume_role: no-op when SECRET_MANAGER_ASSUME_ROLE_ARN is empty" {
-  unset SECRET_MANAGER_ASSUME_ROLE_ARN
+@test "assume_role: no-op when ASSUME_ROLE_ARN_RESOLVED is empty" {
+  unset ASSUME_ROLE_ARN_RESOLVED
 
   run bash -c "
     source $PARAMETERS_DIR/utils/log
@@ -35,7 +36,6 @@ teardown() {
 @test "assume_role: success exports temp credentials and logs ✅" {
   cat > "$BIN_DIR/aws" << 'EOF'
 #!/bin/bash
-# Mock: only handle 'sts assume-role'
 [ "$1 $2" = "sts assume-role" ] || { echo "unexpected: $*" >&2; exit 1; }
 cat << 'JSON'
 {
@@ -50,8 +50,9 @@ JSON
 EOF
   chmod +x "$BIN_DIR/aws"
 
-  export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:aws:iam::1:role/test"
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/test"
   export SCOPE_ID="scope-42"
+  export ASSUME_ROLE_SESSION_PREFIX="np-secret-manager"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
@@ -70,6 +71,58 @@ EOF
   assert_contains "$output" "✅ Role assumed successfully"
 }
 
+@test "assume_role: session name uses ASSUME_ROLE_SESSION_PREFIX + SCOPE_ID" {
+  export AWS_ARGS_LOG="$BATS_TEST_TMPDIR/aws-args"
+  cat > "$BIN_DIR/aws" << 'EOF'
+#!/bin/bash
+echo "$*" > "$AWS_ARGS_LOG"
+cat << 'JSON'
+{"Credentials":{"AccessKeyId":"a","SecretAccessKey":"s","SessionToken":"t","Expiration":"2026-01-01T00:00:00Z"}}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:role/x"
+  export SCOPE_ID="scp-99"
+  export ASSUME_ROLE_SESSION_PREFIX="np-parameter-store"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  run cat "$AWS_ARGS_LOG"
+  assert_contains "$output" "--role-session-name np-parameter-store-scp-99"
+}
+
+@test "assume_role: session name falls back to 'np-parameters' when prefix unset" {
+  export AWS_ARGS_LOG="$BATS_TEST_TMPDIR/aws-args"
+  cat > "$BIN_DIR/aws" << 'EOF'
+#!/bin/bash
+echo "$*" > "$AWS_ARGS_LOG"
+cat << 'JSON'
+{"Credentials":{"AccessKeyId":"a","SecretAccessKey":"s","SessionToken":"t","Expiration":"2026-01-01T00:00:00Z"}}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:role/x"
+  export SCOPE_ID="scp-1"
+  unset ASSUME_ROLE_SESSION_PREFIX
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  run cat "$AWS_ARGS_LOG"
+  assert_contains "$output" "--role-session-name np-parameters-scp-1"
+}
+
 @test "assume_role: returns 1 when aws sts assume-role fails" {
   cat > "$BIN_DIR/aws" << 'EOF'
 #!/bin/bash
@@ -78,9 +131,8 @@ exit 255
 EOF
   chmod +x "$BIN_DIR/aws"
 
-  export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:aws:iam::1:role/test"
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/test"
 
-  # Source in a subshell — `return 1` from sourced script becomes exit 1
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
     source $PARAMETERS_DIR/utils/log
@@ -99,7 +151,7 @@ echo '{"Credentials":{"AccessKeyId":"AKIA","SecretAccessKey":"","SessionToken":"
 EOF
   chmod +x "$BIN_DIR/aws"
 
-  export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:aws:iam::1:role/test"
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/test"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH

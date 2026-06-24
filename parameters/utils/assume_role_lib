@@ -1,12 +1,11 @@
 #!/bin/bash
 # Sourceable library of PURE helpers for assume-role resolution.
 #
-# Input is the AWS IAM provider's `attributes` object as returned by
-# `np provider list --categories identity-access-control` (see assume_role_step).
-# These helpers only pick a selector, make NO np/aws calls, and have no source
-# side effects — fully unit-testable.
+# Provider-agnostic: each caller passes its own selector and the names of the
+# env vars to consult. Makes NO np/aws calls and has no source side effects —
+# fully unit-testable.
 #
-# Requires (at call time): jq.
+# Requires (at call time): jq, bash >= 4 (uses ${!var} indirect expansion).
 
 # arn_for_selector <iam_attributes_json> <selector>
 # Echoes the ARN whose entry in .iam_role_arns.arns[] matches <selector>,
@@ -22,23 +21,28 @@ arn_for_selector() {
     | first // ""' 2>/dev/null
 }
 
-# resolve_assume_role_arn <iam_attributes_json> <selector>
-# Echoes the ARN to assume ("" = use agent credentials):
-#   1. $SECRET_MANAGER_ASSUME_ROLE_ARN env var (explicit override)
-#   2. AWS IAM provider entry matching <selector> (caller pre-resolved the
+# resolve_assume_role_arn <iam_attributes_json> <selector> <override_env_name> <default_env_name>
+# Echoes the ARN to assume ("" = use agent credentials), in precedence order:
+#   1. ${!override_env_name} — explicit per-run override
+#   2. iam_attributes_json entry matching <selector> (caller pre-resolved the
 #      provider via `np provider list` for the scope's dimensions)
-#   3. $SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT env var (per-account agent default)
-# Note: SECRET_MANAGER_ASSUME_ROLE_ARN="" (explicitly empty) is treated the same
-# as unset — the chain continues to the next source.
+#   3. ${!default_env_name} — per-account agent default
+# Empty <override_env_name>/<default_env_name> are treated as unset (chain continues).
+# An explicitly-empty ${!override_env_name}="" is also treated as unset.
 resolve_assume_role_arn() {
-  local iam_json="$1" selector="$2" arn=""
+  local iam_json="$1" selector="$2" override_env="$3" default_env="$4" arn=""
 
-  arn="${SECRET_MANAGER_ASSUME_ROLE_ARN:-}"
+  if [ -n "$override_env" ]; then
+    arn="${!override_env:-}"
+  fi
 
   if [ -z "$arn" ] && [ -n "$iam_json" ] && [ -n "$selector" ]; then
     arn=$(arn_for_selector "$iam_json" "$selector")
   fi
 
-  arn="${arn:-${SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT:-}}"
+  if [ -z "$arn" ] && [ -n "$default_env" ]; then
+    arn="${!default_env:-}"
+  fi
+
   printf '%s' "$arn"
 }

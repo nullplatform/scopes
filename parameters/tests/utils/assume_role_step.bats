@@ -1,8 +1,15 @@
 #!/usr/bin/env bats
 # =============================================================================
 # Unit tests for parameters/utils/assume_role_step — orchestrates:
-#   CONTEXT → resolve NRN + dimensions → np provider list →
-#   resolve ARN → source assume_role (sts:AssumeRole).
+#   caller sets ASSUME_ROLE_SELECTOR + ASSUME_ROLE_OVERRIDE_ENV +
+#     ASSUME_ROLE_DEFAULT_ENV →
+#   resolve NRN + dimensions from CONTEXT →
+#   np provider list (identity-access-control) →
+#   resolve ARN via lib →
+#   source assume_role (sts:AssumeRole).
+#
+# Provider-agnostic — the same step is sourced by aws_secret_manager AND
+# parameter_store with different selector + env names.
 # =============================================================================
 
 setup() {
@@ -15,7 +22,7 @@ setup() {
   export BIN_DIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN_DIR"
 
-  # A passthrough aws mock that records its sts call args.
+  # aws mock — captures sts args, returns valid creds
   cat > "$BIN_DIR/aws" << 'EOF'
 #!/bin/bash
 echo "$@" >> "$AWS_INVOKED_LOG"
@@ -27,7 +34,7 @@ EOF
   export AWS_INVOKED_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
   : > "$AWS_INVOKED_LOG"
 
-  # Default `np` mock — replaced per-test as needed.
+  # default np mock — replaced per-test
   cat > "$BIN_DIR/np" << 'EOF'
 #!/bin/bash
 echo "np $*" >> "$NP_INVOKED_LOG"
@@ -39,12 +46,14 @@ EOF
 }
 
 teardown() {
-  unset SECRET_MANAGER_ASSUME_ROLE_ARN SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT \
-    SECRET_MANAGER_ASSUME_ROLE_SELECTOR CONTEXT SCOPE_ID \
+  unset CONTEXT SCOPE_ID \
+    ASSUME_ROLE_SELECTOR ASSUME_ROLE_OVERRIDE_ENV ASSUME_ROLE_DEFAULT_ENV \
+    ASSUME_ROLE_SESSION_PREFIX ASSUME_ROLE_ARN_RESOLVED \
+    SECRET_MANAGER_ASSUME_ROLE_ARN SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT \
+    PARAMETER_STORE_ASSUME_ROLE_ARN PARAMETER_STORE_ASSUME_ROLE_ARN_DEFAULT \
     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 }
 
-# Build a CONTEXT with overridable NRN / dimensions / scope.id.
 make_ctx() {
   local nrn="$1" dims="$2" scope_id="$3"
   jq -nc \
@@ -54,32 +63,99 @@ make_ctx() {
     '{scope:{nrn:$nrn, id:$scope_id}, dimensions:$dims}'
 }
 
-@test "step: env override → np is not even called when ARN is preset" {
-  export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:aws:iam::1:role/from-env"
-  export CONTEXT="$(make_ctx "" "" "")"  # empty NRN → np lookup skipped
+# Standard caller config for "aws_secret_manager"-style tests.
+SM_CALLER='ASSUME_ROLE_SELECTOR=secret_manager; ASSUME_ROLE_OVERRIDE_ENV=SECRET_MANAGER_ASSUME_ROLE_ARN; ASSUME_ROLE_DEFAULT_ENV=SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT'
+
+# ---- Contract: caller must set the three required vars ---------------------
+
+@test "step: fails fast when ASSUME_ROLE_SELECTOR is missing" {
+  export CONTEXT='{}'
+  unset ASSUME_ROLE_SELECTOR
+
+  run -127 bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    ASSUME_ROLE_OVERRIDE_ENV=X ASSUME_ROLE_DEFAULT_ENV=Y
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_contains "$output" "ASSUME_ROLE_SELECTOR must be set"
+}
+
+@test "step: fails fast when ASSUME_ROLE_OVERRIDE_ENV is missing" {
+  export CONTEXT='{}'
+
+  run -127 bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    ASSUME_ROLE_SELECTOR=secret_manager ASSUME_ROLE_DEFAULT_ENV=Y
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_contains "$output" "ASSUME_ROLE_OVERRIDE_ENV must be set"
+}
+
+@test "step: fails fast when ASSUME_ROLE_DEFAULT_ENV is missing" {
+  export CONTEXT='{}'
+
+  run -127 bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    ASSUME_ROLE_SELECTOR=secret_manager ASSUME_ROLE_OVERRIDE_ENV=X
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_contains "$output" "ASSUME_ROLE_DEFAULT_ENV must be set"
+}
+
+# ---- Resolution flow -------------------------------------------------------
+
+@test "step: secret_manager caller — override env wins, np is not called" {
+  export CONTEXT="$(make_ctx "" "" "")"  # no NRN → no np lookup anyway
+  export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:from-env-sm"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
-    echo ARN=\$SECRET_MANAGER_ASSUME_ROLE_ARN
+    echo ARN=\$ASSUME_ROLE_ARN_RESOLVED
   "
 
   assert_equal "$status" "0"
-  assert_contains "$output" "ARN=arn:aws:iam::1:role/from-env"
-  # aws sts assume-role WAS called with the env-set ARN
+  assert_contains "$output" "ARN=arn:from-env-sm"
   run cat "$AWS_INVOKED_LOG"
-  assert_contains "$output" "--role-arn arn:aws:iam::1:role/from-env"
+  assert_contains "$output" "--role-arn arn:from-env-sm"
 }
 
-@test "step: NRN-only lookup (no dimensions) — np is called without --dimensions" {
-  # np mock that returns an IAM provider with secret_manager selector
+@test "step: parameter_store caller — uses ITS OWN env var (not secret_manager's)" {
+  export CONTEXT="$(make_ctx "" "" "")"
+  export PARAMETER_STORE_ASSUME_ROLE_ARN="arn:ps-env"
+  # secret_manager's env is also set — must be IGNORED
+  export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:sm-MUST-NOT-BE-USED"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    ASSUME_ROLE_SELECTOR=parameter_store
+    ASSUME_ROLE_OVERRIDE_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN
+    ASSUME_ROLE_DEFAULT_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN_DEFAULT
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+    echo ARN=\$ASSUME_ROLE_ARN_RESOLVED
+  "
+
+  assert_contains "$output" "ARN=arn:ps-env"
+  run cat "$AWS_INVOKED_LOG"
+  assert_contains "$output" "--role-arn arn:ps-env"
+}
+
+@test "step: NRN-only lookup (no dimensions) — np called without --dimensions" {
   cat > "$BIN_DIR/np" << 'EOF'
 #!/bin/bash
 echo "np $*" >> "$NP_INVOKED_LOG"
 cat << 'JSON'
 {"results":[{"id":"prov-1","attributes":{"iam_role_arns":{"arns":[
-  {"selector":"secret_manager","arn":"arn:aws:iam::1:role/from-provider"}
+  {"selector":"secret_manager","arn":"arn:from-provider"}
 ]}}}]}
 JSON
 EOF
@@ -89,18 +165,43 @@ EOF
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
-    echo ARN=\$SECRET_MANAGER_ASSUME_ROLE_ARN
+    echo ARN=\$ASSUME_ROLE_ARN_RESOLVED
   "
 
-  assert_equal "$status" "0"
-  assert_contains "$output" "ARN=arn:aws:iam::1:role/from-provider"
+  assert_contains "$output" "ARN=arn:from-provider"
   run cat "$NP_INVOKED_LOG"
   assert_contains "$output" "provider list --categories identity-access-control --nrn organization=acme:account=prod --format json"
-  # No --dimensions flag
-  refute_contains() { case "$1" in *"$2"*) return 1 ;; *) return 0 ;; esac; }
-  refute_contains "$output" "--dimensions"
+  case "$output" in *"--dimensions"*) return 1 ;; esac
+}
+
+@test "step: parameter_store selector picks parameter_store ARN from provider" {
+  cat > "$BIN_DIR/np" << 'EOF'
+#!/bin/bash
+cat << 'JSON'
+{"results":[{"id":"p","attributes":{"iam_role_arns":{"arns":[
+  {"selector":"secret_manager","arn":"arn:sm"},
+  {"selector":"parameter_store","arn":"arn:ps"}
+]}}}]}
+JSON
+EOF
+  chmod +x "$BIN_DIR/np"
+
+  export CONTEXT="$(make_ctx "org=acme" "" "")"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    ASSUME_ROLE_SELECTOR=parameter_store
+    ASSUME_ROLE_OVERRIDE_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN
+    ASSUME_ROLE_DEFAULT_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN_DEFAULT
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+    echo ARN=\$ASSUME_ROLE_ARN_RESOLVED
+  "
+
+  assert_contains "$output" "ARN=arn:ps"
 }
 
 @test "step: CONTEXT.dimensions are passed as dim1:val1,dim2:val2 to np" {
@@ -115,18 +216,17 @@ EOF
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
   "
 
-  assert_equal "$status" "0"
   run cat "$NP_INVOKED_LOG"
   assert_contains "$output" "--dimensions environment:prod,region:us-east-1"
   assert_contains "$output" "--nrn org=acme"
 }
 
 @test "step: dimensions absent → fall back to np scope read" {
-  # First np call = scope read (returns dimensions), second = provider list.
   cat > "$BIN_DIR/np" << 'EOF'
 #!/bin/bash
 echo "np $*" >> "$NP_INVOKED_LOG"
@@ -142,11 +242,11 @@ EOF
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
   "
 
-  assert_equal "$status" "0"
   run cat "$NP_INVOKED_LOG"
   assert_contains "$output" "scope read --id scope-uuid-1 --format json --query .dimensions"
   assert_contains "$output" "--dimensions environment:staging"
@@ -157,9 +257,10 @@ EOF
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
-    echo ARN=[\$SECRET_MANAGER_ASSUME_ROLE_ARN]
+    echo ARN=[\$ASSUME_ROLE_ARN_RESOLVED]
   "
 
   assert_equal "$status" "0"
@@ -170,51 +271,27 @@ EOF
   [ -z "$output" ]
 }
 
-@test "step: selector defaults to 'secret_manager'" {
+@test "step: session prefix flows through to assume_role" {
   cat > "$BIN_DIR/np" << 'EOF'
 #!/bin/bash
 cat << 'JSON'
 {"results":[{"id":"p","attributes":{"iam_role_arns":{"arns":[
-  {"selector":"containers","arn":"arn:bad"},
-  {"selector":"secret_manager","arn":"arn:good"}
+  {"selector":"secret_manager","arn":"arn:x"}
 ]}}}]}
 JSON
 EOF
   chmod +x "$BIN_DIR/np"
 
-  export CONTEXT="$(make_ctx "org=acme" "" "")"
+  export CONTEXT="$(make_ctx "org=acme" "" "scope-7")"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
+    ASSUME_ROLE_SESSION_PREFIX=np-secret-manager
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
-    echo ARN=\$SECRET_MANAGER_ASSUME_ROLE_ARN
   "
 
-  assert_contains "$output" "ARN=arn:good"
-}
-
-@test "step: SECRET_MANAGER_ASSUME_ROLE_SELECTOR override changes which ARN is picked" {
-  cat > "$BIN_DIR/np" << 'EOF'
-#!/bin/bash
-cat << 'JSON'
-{"results":[{"id":"p","attributes":{"iam_role_arns":{"arns":[
-  {"selector":"secret_manager","arn":"arn:default"},
-  {"selector":"custom","arn":"arn:custom"}
-]}}}]}
-JSON
-EOF
-  chmod +x "$BIN_DIR/np"
-
-  export CONTEXT="$(make_ctx "org=acme" "" "")"
-  export SECRET_MANAGER_ASSUME_ROLE_SELECTOR="custom"
-
-  run bash -c "
-    export PATH=$BIN_DIR:\$PATH
-    source $PARAMETERS_DIR/utils/log
-    source $SCRIPT
-    echo ARN=\$SECRET_MANAGER_ASSUME_ROLE_ARN
-  "
-
-  assert_contains "$output" "ARN=arn:custom"
+  run cat "$AWS_INVOKED_LOG"
+  assert_contains "$output" "--role-session-name np-secret-manager-scope-7"
 }

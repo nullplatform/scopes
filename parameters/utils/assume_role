@@ -1,23 +1,30 @@
 #!/bin/bash
 # Sourceable helper — do NOT execute directly.
-# Reads SECRET_MANAGER_ASSUME_ROLE_ARN from the environment. If set, calls
+# Reads ASSUME_ROLE_ARN_RESOLVED from the environment. If set, calls
 # sts:AssumeRole and exports temporary credentials so all subsequent AWS calls
 # use that role. If empty, does nothing — the agent's credentials (pod IRSA)
 # handle auth.
 #
+# Provider-agnostic: the caller's setup goes through utils/assume_role_step,
+# which writes the final ARN to ASSUME_ROLE_ARN_RESOLVED regardless of which
+# provider-specific env var name was used as the override source.
+#
 # Requires: aws CLI, jq, and the `log` function (loaded by the workflow).
-# Expects:  SECRET_MANAGER_ASSUME_ROLE_ARN (set by utils/assume_role_step),
-#           SCOPE_ID (optional, used for the session name).
+# Expects:  ASSUME_ROLE_ARN_RESOLVED (set by utils/assume_role_step),
+#           ASSUME_ROLE_SESSION_PREFIX (set by assume_role_step, defaults to
+#           "np-parameters"), SCOPE_ID (optional, used for the session name).
 
-if [ -n "${SECRET_MANAGER_ASSUME_ROLE_ARN:-}" ]; then
-  log info "   🔑 Assuming role: $SECRET_MANAGER_ASSUME_ROLE_ARN"
+if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
+  log info "   🔑 Assuming role: $ASSUME_ROLE_ARN_RESOLVED"
+
+  _ar_session_name="${ASSUME_ROLE_SESSION_PREFIX:-np-parameters}-${SCOPE_ID:-workflow}"
 
   _ar_sts_error=$(mktemp)
   if ! ASSUMED_CREDS=$(aws sts assume-role \
-    --role-arn "$SECRET_MANAGER_ASSUME_ROLE_ARN" \
-    --role-session-name "np-parameters-${SCOPE_ID:-workflow}" \
+    --role-arn "$ASSUME_ROLE_ARN_RESOLVED" \
+    --role-session-name "$_ar_session_name" \
     --output json 2>"$_ar_sts_error"); then
-    log error "   ❌ sts:AssumeRole failed for $SECRET_MANAGER_ASSUME_ROLE_ARN"
+    log error "   ❌ sts:AssumeRole failed for $ASSUME_ROLE_ARN_RESOLVED"
     log error "$(cat "$_ar_sts_error")"
     rm -f "$_ar_sts_error"
     return 1
@@ -29,7 +36,7 @@ if [ -n "${SECRET_MANAGER_ASSUME_ROLE_ARN:-}" ]; then
   _ar_session_token=$(echo "$ASSUMED_CREDS" | jq -r '.Credentials.SessionToken // ""')
 
   if [ -z "$_ar_access_key" ] || [ -z "$_ar_secret_key" ] || [ -z "$_ar_session_token" ]; then
-    log error "   ❌ sts:AssumeRole returned incomplete credentials for $SECRET_MANAGER_ASSUME_ROLE_ARN"
+    log error "   ❌ sts:AssumeRole returned incomplete credentials for $ASSUME_ROLE_ARN_RESOLVED"
     return 1
   fi
 
