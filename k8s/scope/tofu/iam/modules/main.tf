@@ -1,7 +1,7 @@
 ################################################################################
 # IAM permissions role assumed by the nullplatform agent role
 #
-# Holds the actual workload policies (Route53, EKS, ELB, AVP). Its trust policy
+# Holds the actual workload policies (Route53, EKS, ELB). Its trust policy
 # trusts only the agent IRSA role, so the agent's IRSA token cannot exercise
 # these permissions without first assuming this role (sts:AssumeRole).
 #
@@ -51,13 +51,6 @@ resource "aws_iam_role_policy_attachment" "permissions_elb" {
 
   role       = aws_iam_role.nullplatform_agent_permissions[0].name
   policy_arn = aws_iam_policy.nullplatform_elb_policy[0].arn
-}
-
-resource "aws_iam_role_policy_attachment" "permissions_avp" {
-  count = local.iam_create ? 1 : 0
-
-  role       = aws_iam_role.nullplatform_agent_permissions[0].name
-  policy_arn = aws_iam_policy.nullplatform_avp_policy[0].arn
 }
 
 ################################################################################
@@ -167,30 +160,6 @@ resource "aws_iam_policy" "nullplatform_eks_policy" {
           "arn:aws:eks:*:*:nodegroup/*",
           "arn:aws:eks:*:*:addon/*"
         ],
-      }
-    ]
-  })
-}
-
-################################################################################
-# AVP (Amazon Verified Permissions) IAM policy
-################################################################################
-
-resource "aws_iam_policy" "nullplatform_avp_policy" {
-  count = local.iam_create ? 1 : 0
-
-  name        = "${local.policies_name_prefix}_avp_policy"
-  description = "Policy for managing AVP resources"
-  tags        = local.iam_default_tags
-  policy = jsonencode({
-    "Version" : "2012-10-17",
-    "Statement" : [
-      {
-        "Effect" : "Allow",
-        "Action" : [
-          "verifiedpermissions:*"
-        ],
-        "Resource" : "*",
       }
     ]
   })
