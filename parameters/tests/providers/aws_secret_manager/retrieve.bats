@@ -55,12 +55,14 @@ EOF
   assert_equal "$value" "the-real-value"
 }
 
-@test "aws_secret_manager retrieve: ResourceNotFoundException → 'value not found'" {
+@test "aws_secret_manager retrieve: ResourceNotFoundException fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
-  assert_equal "$status" "0"
-  value=$(echo "$output" | jq -r '.value')
-  assert_equal "$value" "value not found"
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Secret"
+  assert_contains "$output" "not found in AWS Secrets Manager"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
 }
 
 @test "aws_secret_manager retrieve: AccessDenied fails with troubleshooting" {

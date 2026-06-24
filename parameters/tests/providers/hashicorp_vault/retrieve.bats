@@ -48,12 +48,13 @@ EOF
   assert_equal "$value" "the-real-secret"
 }
 
-@test "vault retrieve: 404 returns 'value not found'" {
+@test "vault retrieve: 404 fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_HTTP_STATUS=404 source $SCRIPT"
 
-  assert_equal "$status" "0"
-  value=$(echo "$output" | jq -r '.value')
-  assert_equal "$value" "value not found"
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "not found in Vault"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
 }
 
 @test "vault retrieve: 403 fails with auth troubleshooting" {

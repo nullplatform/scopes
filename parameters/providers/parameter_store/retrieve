@@ -31,9 +31,19 @@ else
   err=$(cat "$err_file")
   rm -f "$err_file"
   if echo "$err" | grep -q "ParameterNotFound"; then
-    echo '{
-      "value": "value not found"
-    }'
+    log error "❌ Parameter '$PARAM_NAME' not found in AWS Parameter Store"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • The parameter was manually deleted from AWS SSM"
+    log error "   • The external_id is stale"
+    if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
+      log error "   • Requested version '$EXTERNAL_ID_VERSION' is outside Parameter Store's retention window"
+    fi
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify: aws ssm describe-parameters --filters Key=Name,Values=$PARAM_NAME --region $AWS_REGION"
+    log error "   • If genuinely missing, the parameter value needs to be re-stored"
+    exit 1
   else
     log error "❌ Failed to retrieve parameter '$PARAM_NAME' from AWS Parameter Store"
     log error ""

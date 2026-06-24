@@ -55,12 +55,13 @@ EOF
   assert_equal "$value" "the-real-value"
 }
 
-@test "parameter_store retrieve: ParameterNotFound → 'value not found'" {
+@test "parameter_store retrieve: ParameterNotFound fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
-  assert_equal "$status" "0"
-  value=$(echo "$output" | jq -r '.value')
-  assert_equal "$value" "value not found"
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "not found in AWS Parameter Store"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
 }
 
 @test "parameter_store retrieve: AccessDenied fails with troubleshooting" {

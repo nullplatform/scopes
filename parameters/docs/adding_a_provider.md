@@ -6,6 +6,47 @@ The parameters package is designed so that adding a provider is **strictly addit
 
 ---
 
+## Core principles (read this before anything else)
+
+Every provider in this package follows the same two cross-cutting principles. Your implementation MUST honor them; deviation is not a per-provider choice.
+
+### 1. Naming is human-friendly and hierarchical
+
+The storage path/name for every secret is composed from the parameter's context: account + namespace + application + (scope if present) + (dimensions if present) + parameter name + parameter id + revision. Both the entity slug AND id are included so the name is readable AND stable across renames.
+
+All names are grouped under a `nullplatform` top-level prefix (default — operators can override via provider config). This is the IAM scoping anchor and the visual marker in the backend's console.
+
+The shared helper `parameters/utils/build_external_id` constructs the canonical form. Your `store` calls it once at the top:
+
+```
+nullplatform/organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>/<dim_key>=<dim_value>/<parameter_name>-<parameter_id>
+```
+
+The principle: an operator who opens the backend's UI (AWS Console, Vault UI, Azure Portal) must be able to navigate to any secret by knowing the parameter's nullplatform context, without consulting the platform's database. The path tells the story.
+
+If your backend has naming restrictions (e.g. Azure Key Vault disallows `/` and `=`), transform the canonical form deterministically inside your `store`/`retrieve`/`delete`. The `external_id` returned to nullplatform always uses the canonical (slash) form so it's portable across providers.
+
+### 2. Versioning is mandatory and cost-aware
+
+nullplatform parameter values are **immutable**. Every update to a `(parameter_id, NRN, dimensions)` tuple creates a new revision. nullplatform may ask you to retrieve a specific historical revision (e.g. to display in UI or to support restore — which is implemented as "read old revision + store as new revision").
+
+Your provider MUST keep the version history. Two rules:
+
+- **Don't lose old revisions on update**. If the backend has native versioning (AWS SM, Vault KV v2, AWS Parameter Store, Azure Key Vault all do), use it: append a new version to the same key. If the backend doesn't have native versioning, store revisions inside a single record (e.g. JSON list, append-only structure) — keep them in one logical entity to avoid cost explosion.
+- **Never create a new top-level entity per revision** if the backend charges per entity. AWS Secrets Manager charges $0.40/secret/month regardless of version count; creating one secret per version would multiply cost linearly with update frequency. Native versioning is essentially free.
+
+Version identity is encoded in the `external_id` returned by store:
+
+```
+<canonical_path>#<version_id>
+```
+
+Where `version_id` is the **literal native identifier the backend returns** — not invented, not normalized. AWS SM gives a UUID; Vault gives an integer; Parameter Store gives an integer; AKV gives a 32-char hex. Use whatever the backend hands you, verbatim.
+
+Because nullplatform persists and re-sends `external_id` on every operation, the version reference round-trips automatically without any platform-side state. On `retrieve`, split on `#` to get both pieces; use the version via the backend's native lookup (e.g. `--version-id`, `?version=N`, `:N`, `--version`). On `delete`, ignore the version suffix — delete removes all revisions.
+
+---
+
 ## What you need to know about the backend
 
 Before you start, answer these questions:
@@ -105,38 +146,83 @@ If your backend distinguishes types (like `parameter_store` does with String/Sec
 
 ### `retrieve`
 
-Read the value, return `{value}` or `{value: "value not found"}` on miss.
+Read the value and return `{value}`. On any failure — including "not found" — exit non-zero with troubleshooting. Do NOT return a sentinel value like "value not found" as if it were a real value; that would be a misleading payload (the platform would treat the literal string as the parameter's value).
+
+If the backend distinguishes "not found" from other errors, include that distinction in the troubleshooting message so the platform can categorize. Both still exit non-zero.
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 
-NAME="${MY_PREFIX}${EXTERNAL_ID}"
+NAME="${MY_PREFIX}${EXTERNAL_ID_PATH}"  # use _PATH (canonical, no version suffix)
 
-if VALUE=$(my_cli get --endpoint "$MY_ENDPOINT" --name "$NAME" 2>/dev/null); then
+err_file=$(mktemp)
+if VALUE=$(my_cli get --endpoint "$MY_ENDPOINT" --name "$NAME" 2>"$err_file"); then
+  rm -f "$err_file"
   jq -n --arg value "$VALUE" '{value: $value}'
 else
-  echo '{
-      "value": "value not found"
-    }'
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+  if echo "$err" | grep -q "<backend's not-found error code>"; then
+    log error "❌ Secret '$NAME' not found in <Backend>"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • The secret was manually deleted from the backend"
+    log error "   • The external_id is stale"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify: my_cli describe --name $NAME"
+    exit 1
+  else
+    log error "❌ Failed to retrieve from <Backend>"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • <auth / network / permission causes>"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • <verification commands>"
+    log error "Underlying error: $err"
+    exit 1
+  fi
 fi
 ```
 
 ### `delete`
 
-Always returns `{success: true}`. Suppress errors with `|| true`.
+Idempotent — re-deleting a missing resource is success. But **only "not found" is suppressed**; any other failure (permission denied, network error, server error) MUST propagate as exit 1 with troubleshooting. Reporting success when the work didn't actually happen leads to "client thinks it's deleted but it's still there" bugs.
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 
-NAME="${MY_PREFIX}${EXTERNAL_ID}"
+NAME="${MY_PREFIX}${EXTERNAL_ID_PATH}"  # delete removes ALL versions; ignore version suffix
 
-my_cli delete --endpoint "$MY_ENDPOINT" --name "$NAME" >/dev/null 2>&1 || true
-
-echo '{
+err_file=$(mktemp)
+if my_cli delete --endpoint "$MY_ENDPOINT" --name "$NAME" >/dev/null 2>"$err_file"; then
+  rm -f "$err_file"
+  echo '{
   "success": true
 }'
+else
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+  if echo "$err" | grep -q "<backend's not-found error code>"; then
+    log debug "Resource '$NAME' does not exist, treating delete as idempotent success"
+    echo '{
+  "success": true
+}'
+  else
+    log error "❌ Failed to delete '$NAME' from <Backend>"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • <auth / network / permission causes>"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • <verification commands>"
+    log error "Underlying error: $err"
+    exit 1
+  fi
+fi
 ```
 
 ### `notify` (optional)
@@ -169,9 +255,9 @@ Aim for at least these scenarios per provider:
 | Script    | Required tests                                                              |
 |-----------|-----------------------------------------------------------------------------|
 | setup     | Missing required config fails with troubleshooting; PROVIDER_CONFIG wins over env; defaults applied |
-| store     | Output JSON shape; CLI called with correct args; failure path returns non-zero with troubleshooting |
-| retrieve  | Hit returns value; miss returns "value not found"                           |
-| delete    | Returns `{success: true}`; idempotent on CLI failure                        |
+| store     | Output JSON shape; external_id includes path + #version suffix; first store uses create, subsequent uses native versioning API; failure paths exit non-zero with troubleshooting |
+| retrieve  | Hit returns value; not-found exits non-zero with troubleshooting; with-version targets historical revision; auth/network errors exit non-zero |
+| delete    | Returns `{success: true}` on success; not-found is treated as success (idempotent); other errors propagate as exit 1 with troubleshooting |
 
 ---
 
@@ -201,14 +287,20 @@ Done. The agent receives `provider.specification_id` and `provider.attributes` i
 
 Before considering a new provider complete:
 
+- [ ] Naming follows the human-friendly hierarchical convention (entity slug-id + dimensions + parameter name-id), under the `nullplatform/` prefix
+- [ ] `store` uses `build_external_id` to compose the canonical path
+- [ ] `store` returns `external_id = <canonical_path>#<version_id>` with the native backend version identifier (not invented)
+- [ ] Versioning uses the backend's native mechanism (not new top-level entities per revision)
 - [ ] `setup` validates config and exits with troubleshooting on missing fields
 - [ ] `store` outputs `{external_id, metadata}` JSON
-- [ ] `retrieve` outputs `{value}` (or `{value: "value not found"}`)
-- [ ] `delete` outputs `{success: true}` (always — idempotent)
+- [ ] `retrieve` outputs `{value}` on success; **exits non-zero on not-found with clear troubleshooting** (no "value not found" sentinel)
+- [ ] `retrieve` honors `EXTERNAL_ID_VERSION` to target historical revisions
+- [ ] `delete` outputs `{success: true}` on success and on not-found (idempotent); **exits non-zero on any other error** (no `|| true` blanket suppression)
 - [ ] Scripts use `set -euo pipefail`
 - [ ] Errors go to stderr via `log error "..."`
 - [ ] No stdout output other than the final JSON
 - [ ] Every error has `💡 Possible causes:` and `🔧 How to fix:` blocks
-- [ ] BATS tests cover setup error paths, store output shape, retrieve hit/miss, delete idempotency
-- [ ] `architecture.md` documents storage layout and cost
+- [ ] BATS tests cover setup error paths, store output shape (incl. version suffix), retrieve hit + not-found-error + auth-error, delete success + not-found-idempotent + other-error-propagation
+- [ ] `architecture.md` documents storage layout, versioning behavior, and the native version_id format
 - [ ] If the backend has IAM, `iam-policy.md` shows least-privilege scoping
+- [ ] A `<provider_name>_configuration.json.tpl` exists with the `parameters-storage` category and the schema for the provider's config attributes

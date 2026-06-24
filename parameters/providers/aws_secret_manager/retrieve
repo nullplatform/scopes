@@ -36,9 +36,19 @@ else
   err=$(cat "$err_file")
   rm -f "$err_file"
   if echo "$err" | grep -q "ResourceNotFoundException"; then
-    echo '{
-      "value": "value not found"
-    }'
+    log error "❌ Secret '$SECRET_NAME' not found in AWS Secrets Manager"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • The secret was manually deleted from AWS"
+    log error "   • The external_id is stale (parameter was deleted in nullplatform but referenced elsewhere)"
+    if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
+      log error "   • Requested version '$EXTERNAL_ID_VERSION' was pruned (AWS SM auto-removes oldest unlabeled versions past 100)"
+    fi
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the secret exists: aws secretsmanager describe-secret --secret-id $SECRET_NAME"
+    log error "   • If genuinely missing, the parameter value needs to be re-stored"
+    exit 1
   else
     log error "❌ Failed to retrieve secret '$SECRET_NAME' from AWS Secrets Manager"
     log error ""

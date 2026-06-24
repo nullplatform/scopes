@@ -55,12 +55,13 @@ EOF
   assert_equal "$value" "the-stored-value"
 }
 
-@test "azure_key_vault retrieve: SecretNotFound → 'value not found'" {
+@test "azure_key_vault retrieve: SecretNotFound fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AZ_MODE=not_found source $SCRIPT"
 
-  assert_equal "$status" "0"
-  value=$(echo "$output" | jq -r '.value')
-  assert_equal "$value" "value not found"
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "not found in Azure Key Vault"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
 }
 
 @test "azure_key_vault retrieve: auth_error fails with troubleshooting" {

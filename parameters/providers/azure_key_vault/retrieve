@@ -26,9 +26,19 @@ else
   err=$(cat "$err_file")
   rm -f "$err_file"
   if echo "$err" | grep -qE "(SecretNotFound|secret with .* was not found)"; then
-    echo '{
-      "value": "value not found"
-    }'
+    log error "❌ Secret '$SECRET_NAME' not found in Azure Key Vault '$AZ_VAULT_NAME'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   • The secret was manually deleted (and possibly purged) from AKV"
+    log error "   • The external_id is stale"
+    if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
+      log error "   • Requested version '$EXTERNAL_ID_VERSION' was purged from AKV"
+    fi
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify: az keyvault secret show --vault-name $AZ_VAULT_NAME --name $SECRET_NAME"
+    log error "   • If genuinely missing, the parameter value needs to be re-stored"
+    exit 1
   else
     log error "❌ Failed to retrieve secret '$SECRET_NAME' from Azure Key Vault '$AZ_VAULT_NAME'"
     log error ""
