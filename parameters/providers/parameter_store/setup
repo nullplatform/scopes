@@ -16,6 +16,11 @@ set -euo pipefail
 
 : "${AWS_REGION:?AWS_REGION must be set by the agent runtime}"
 
+# Resolve and assume the platform-configured IAM role (if any). After this,
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN are set in the
+# environment, so every subsequent aws-cli call inherits the assumed identity.
+source "$PARAMETERS_ROOT/utils/assume_role_step"
+
 PS_NAME_PREFIX="/nullplatform/"
 
 PS_KMS_KEY_ID=$(get_config_value \

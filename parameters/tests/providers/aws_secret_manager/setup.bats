@@ -9,6 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
+  export PARAMETERS_ROOT="$PARAMETERS_DIR"
   export SCRIPT="$PARAMETERS_DIR/providers/aws_secret_manager/setup"
   export DEPS="source $PARAMETERS_DIR/utils/log; source $PARAMETERS_DIR/utils/get_config_value"
 }

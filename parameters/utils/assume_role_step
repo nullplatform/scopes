@@ -1,0 +1,95 @@
+#!/bin/bash
+# Dedicated workflow step: resolve the target IAM role and assume it, exporting
+# temporary credentials so every subsequent step inherits them.
+#
+# Runs FIRST in each AWS-touching provider's setup (aws_secret_manager,
+# parameter_store). Both providers share the same identity domain, so they use
+# the same selector (`secret_manager`) and the same env var
+# (SECRET_MANAGER_ASSUME_ROLE_ARN).
+#
+# Unlike the k8s flow — where the platform pre-resolves the IAM provider into
+# CONTEXT.providers["identity-access-control"] using the scope's dimensions —
+# parameter actions don't get the IAM provider in the payload. We fetch it
+# ourselves via `np provider list --categories identity-access-control`, passing
+# `--nrn` and (when present) `--dimensions` so the platform performs the same
+# dimension-aware resolution it would do for k8s scopes.
+#
+# Dimension resolution precedence:
+#   1. $CONTEXT.dimensions, if it's a non-empty object → pass to np
+#   2. else if $CONTEXT.scope.id exists → `np scope read --id ... --query .dimensions`
+#   3. else no `--dimensions` flag (NRN-only lookup)
+#
+# ARN resolution precedence (see resolve_assume_role_arn in assume_role_lib):
+#   $SECRET_MANAGER_ASSUME_ROLE_ARN -> IAM provider by selector
+#     -> $SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT -> agent credentials
+#
+# Requires: aws CLI, jq, np CLI. Expects: CONTEXT (engine-injected),
+# SCOPE_ID (optional).
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/assume_role_lib"
+
+SECRET_MANAGER_ASSUME_ROLE_SELECTOR="${SECRET_MANAGER_ASSUME_ROLE_SELECTOR:-secret_manager}"
+
+# Used by assume_role only for the STS session name (informational).
+if [ -z "${SCOPE_ID:-}" ]; then
+  SCOPE_ID=$(echo "${CONTEXT:-}" | jq -r '.scope.id // empty' 2>/dev/null)
+  export SCOPE_ID
+fi
+
+# --- 1. Resolve NRN from CONTEXT -------------------------------------------
+NRN=$(echo "${CONTEXT:-}" | jq -r '.scope.nrn // .nrn // empty' 2>/dev/null)
+if [ -z "$NRN" ]; then
+  log warn "   ⚠️  No NRN in CONTEXT — skipping IAM provider lookup (agent credentials only)"
+  IAM_ATTRIBUTES=""
+else
+  # --- 2. Resolve dimensions ----------------------------------------------
+  DIMS_JSON=$(echo "${CONTEXT:-}" | jq -c '.dimensions // empty' 2>/dev/null)
+  if [ -z "$DIMS_JSON" ] || [ "$DIMS_JSON" = "null" ] || [ "$DIMS_JSON" = "{}" ]; then
+    SCOPE_ID_FROM_CTX=$(echo "${CONTEXT:-}" | jq -r '.scope.id // empty' 2>/dev/null)
+    if [ -n "$SCOPE_ID_FROM_CTX" ]; then
+      DIMS_JSON=$(np scope read --id "$SCOPE_ID_FROM_CTX" --format json --query '.dimensions' 2>/dev/null || echo "")
+    fi
+  fi
+
+  # Convert {key:val,...} to "key:val,key2:val2" — empty/null → empty string
+  DIMS_ARG=""
+  if [ -n "$DIMS_JSON" ] && [ "$DIMS_JSON" != "null" ] && [ "$DIMS_JSON" != "{}" ]; then
+    DIMS_ARG=$(printf '%s' "$DIMS_JSON" | jq -r '
+      to_entries
+      | map("\(.key):\(.value)")
+      | join(",")' 2>/dev/null)
+  fi
+
+  # --- 3. Fetch the IAM provider (dimension-resolved by the platform) -----
+  log debug "   🔍 Looking up IAM provider (NRN=$NRN${DIMS_ARG:+ dimensions=$DIMS_ARG})"
+  _ar_provider_err=$(mktemp)
+  if [ -n "$DIMS_ARG" ]; then
+    PROVIDER_JSON=$(np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json 2>"$_ar_provider_err") || PROVIDER_JSON=""
+  else
+    PROVIDER_JSON=$(np provider list --categories identity-access-control --nrn "$NRN" --format json 2>"$_ar_provider_err") || PROVIDER_JSON=""
+  fi
+  if [ -z "$PROVIDER_JSON" ]; then
+    log warn "   ⚠️  np provider list failed: $(cat "$_ar_provider_err")"
+  fi
+  rm -f "$_ar_provider_err"
+
+  IAM_ATTRIBUTES=$(echo "${PROVIDER_JSON:-}" | jq -c '.results[0].attributes // {}' 2>/dev/null)
+fi
+
+# --- 4. Resolve and export the ARN -----------------------------------------
+SECRET_MANAGER_ASSUME_ROLE_ARN=$(resolve_assume_role_arn "$IAM_ATTRIBUTES" "$SECRET_MANAGER_ASSUME_ROLE_SELECTOR")
+export SECRET_MANAGER_ASSUME_ROLE_ARN
+
+# --- 5. Perform the assume-role (no-op if ARN is empty) --------------------
+if ! source "$SCRIPT_DIR/assume_role"; then
+  log error "   ❌ assume_role step failed: could not assume $SECRET_MANAGER_ASSUME_ROLE_ARN"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • The agent's role is not allowed to sts:AssumeRole the target role"
+  log error "   • The target role does not exist or does not trust the agent role"
+  log error "   • No role ARN configured for selector=$SECRET_MANAGER_ASSUME_ROLE_SELECTOR"
+  log error "     in the IAM provider for NRN=$NRN"
+  log error ""
+  exit 1
+fi

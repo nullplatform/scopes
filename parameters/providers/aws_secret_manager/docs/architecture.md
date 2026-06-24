@@ -88,6 +88,17 @@ arn:aws:secretsmanager:<region>:<account>:secret:nullplatform/*
 
 A single ARN pattern covers everything this provider creates, without granting account-wide access. See `iam-policy.md`.
 
+### sts:AssumeRole
+
+Before any AWS call, this provider's `setup` sources `utils/assume_role_step`, which:
+
+1. Reads the scope's NRN and dimensions from `CONTEXT` (falling back to `np scope read` when dimensions are not in the payload).
+2. Calls `np provider list --categories identity-access-control --nrn <nrn> [--dimensions ...]` to fetch the IAM provider that the platform has dimension-resolved for this scope.
+3. Picks the ARN from `.iam_role_arns.arns[]` whose `selector` is `secret_manager` (override with `SECRET_MANAGER_ASSUME_ROLE_SELECTOR`).
+4. Calls `sts:AssumeRole` and exports `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`.
+
+Precedence: `SECRET_MANAGER_ASSUME_ROLE_ARN` env override → IAM provider selector → `SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT` env (per-account agent default) → agent credentials. The same step is shared with `parameter_store` since both providers act on the same IAM domain.
+
 ### ARN suffix
 
 AWS SM appends a random 6-character suffix to every secret ARN:
