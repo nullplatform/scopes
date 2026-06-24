@@ -24,10 +24,11 @@ set -euo pipefail
 #   Plus anything the provider's setup exports (VAULT_ADDR, AWS_REGION, etc.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PARAMETERS_ROOT="$SCRIPT_DIR"
+# build_context lives under utils/; PARAMETERS_ROOT is the parent (parameters/)
+export PARAMETERS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$SCRIPT_DIR/utils/log"
-source "$SCRIPT_DIR/utils/get_config_value"
+source "$SCRIPT_DIR/log"
+source "$SCRIPT_DIR/get_config_value"
 
 # --- Notification fields ---
 export EXTERNAL_ID=$(echo "$CONTEXT" | jq -r '.external_id // empty')
@@ -89,9 +90,9 @@ if [ -z "$ACTIVE_PROVIDER" ]; then
   exit 1
 fi
 
-PROVIDER_DIR="$SCRIPT_DIR/providers/$ACTIVE_PROVIDER"
+PROVIDER_DIR="$PARAMETERS_ROOT/providers/$ACTIVE_PROVIDER"
 if [ ! -d "$PROVIDER_DIR" ]; then
-  available=$(ls "$SCRIPT_DIR/providers" 2>/dev/null | grep -v '^README' | tr '\n' ' ' || true)
+  available=$(ls "$PARAMETERS_ROOT/providers" 2>/dev/null | grep -v '^README' | tr '\n' ' ' || true)
   log error "❌ Provider implementation not found for slug '$ACTIVE_PROVIDER'"
   log error ""
   log error "💡 Possible causes:"

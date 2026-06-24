@@ -1,15 +1,15 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/build_context — provider resolution via spec_id
+# Unit tests for parameters/utils/build_context — provider resolution via spec_id
 # =============================================================================
 
 setup() {
-  export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  export PARAMETERS_DIR="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  export PARAMETERS_DIR="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/build_context"
+  export SCRIPT="$PARAMETERS_DIR/utils/build_context"
   export TEST_PROVIDER_DIR="$PARAMETERS_DIR/providers/test_provider"
 
   # Mock the np CLI

@@ -44,7 +44,7 @@ The platform decides which provider handles each parameter and which configurati
                           │
                           ▼
 ┌────────────────────────────────────────────────────────────────┐
-│  parameters/build_context                                      │
+│  parameters/utils/build_context                                │
 │  - Parse CONTEXT → EXTERNAL_ID, PARAMETER_ID, PARAMETER_VALUE  │
 │  - Derive PARAMETER_KIND from $CONTEXT.secret                  │
 │  - Read $CONTEXT.provider.specification_id                     │
@@ -56,8 +56,10 @@ The platform decides which provider handles each parameter and which configurati
                           │
                           ▼
 ┌────────────────────────────────────────────────────────────────┐
-│  parameters/<action>  (dispatch)                               │
-│  - One-liner: source providers/$ACTIVE_PROVIDER/<action>       │
+│  parameters/utils/dispatch  (unified dispatcher)               │
+│  - Reads $ACTION (set by workflow `configuration:` block)      │
+│  - source providers/$ACTIVE_PROVIDER/$ACTION                   │
+│  - Special-case: ACTION=notify with no provider notify → ack   │
 └────────────────────────────────────────────────────────────────┘
                           │
                           ▼
@@ -112,7 +114,7 @@ For each parameter, nullplatform stores which provider should handle it. That ch
 `build_context` resolves this UUID into a slug using the np CLI:
 
 ```
-np provider specification read --id <specification_id> --output json
+np provider specification read --id <specification_id> --format json
 → { "slug": "aws_secret_manager", ... }
 ```
 
@@ -128,18 +130,18 @@ The provider's configuration is registered upfront as a `parameters-storage` pro
 
 ```
 parameters/
-├── entrypoint              # Action router (action → workflow)
-├── build_context           # Resolves ACTIVE_PROVIDER from spec_id, sources setup
-├── store, retrieve,        # Dispatch one-liners
-│   delete, notify
-├── workflows/              # 4 YAMLs (one per action)
-├── utils/
+├── entrypoint              # Action router (the only loose script — entry point)
+├── workflows/              # 4 YAMLs (one per action), each sets ACTION via configuration
+├── utils/                  # All shared scripts live here
+│   ├── build_context       # Resolves ACTIVE_PROVIDER from spec_id, sources setup
+│   ├── build_external_id   # Composes <path>#<version> via parallel np slug fetches
+│   ├── dispatch            # Unified action dispatcher (reads $ACTION)
 │   ├── get_config_value    # Priority: provider config > env > default
 │   └── log                 # All levels route to stderr
 ├── providers/
 │   ├── README.md           # Contract every provider must satisfy
 │   ├── hashicorp_vault/    # HTTP API
-│   ├── aws_secret_manager/     # aws CLI
+│   ├── aws_secret_manager/ # aws CLI
 │   ├── parameter_store/    # aws CLI (only kind-branching provider)
 │   └── azure_key_vault/    # az CLI
 ├── tests/                  # BATS — mirrors source structure
