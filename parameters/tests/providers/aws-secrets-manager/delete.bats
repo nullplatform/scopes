@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/aws_secret_manager/delete
+# Unit tests for parameters/providers/aws-secrets-manager/delete
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/aws_secret_manager/delete"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-secrets-manager/delete"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
@@ -44,7 +44,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "aws_secret_manager delete: success → {success: true}" {
+@test "aws-secrets-manager delete: success → {success: true}" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -52,7 +52,7 @@ EOF
   assert_equal "$success" "true"
 }
 
-@test "aws_secret_manager delete: ResourceNotFoundException is idempotent → success" {
+@test "aws-secrets-manager delete: ResourceNotFoundException is idempotent → success" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -60,7 +60,7 @@ EOF
   assert_equal "$success" "true"
 }
 
-@test "aws_secret_manager delete: AccessDenied fails with troubleshooting" {
+@test "aws-secrets-manager delete: AccessDenied fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -69,7 +69,7 @@ EOF
   assert_contains "$output" "AccessDeniedException"
 }
 
-@test "aws_secret_manager delete: unknown errors fail with troubleshooting" {
+@test "aws-secrets-manager delete: unknown errors fail with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=other source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -77,7 +77,7 @@ EOF
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "aws_secret_manager delete: calls aws with force-delete flag" {
+@test "aws-secrets-manager delete: calls aws with force-delete flag" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")

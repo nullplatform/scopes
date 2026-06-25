@@ -9,10 +9,10 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 | Componente | Estado |
 |---|---|
 | Skeleton (entrypoint, build_context, dispatch, utils, workflows) | ✅ Implementado |
-| Provider `hashicorp_vault` | ✅ Implementado |
-| Provider `aws_secret_manager` | ✅ Implementado |
-| Provider `parameter_store` | ✅ Implementado |
-| Provider `azure_key_vault` | ✅ Implementado |
+| Provider `hashicorp-vault` | ✅ Implementado |
+| Provider `aws-secrets-manager` | ✅ Implementado |
+| Provider `aws-parameter-store` | ✅ Implementado |
+| Provider `azure-key-vault` | ✅ Implementado |
 | Error handling (not_found → idempotent, otros → fail loud) | ✅ Aplicado a deletes y retrieves |
 | Tests BATS | ✅ 151 tests pasando |
 | Docs globales | ✅ architecture.md, configuration.md, adding_a_provider.md |
@@ -21,7 +21,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 | **Resolución de provider via `provider.specification_id`** | **✅ Implementado** (era pendiente, hecho hoy) |
 | **`PROVIDER_CONFIG` desde `provider.attributes`** | **✅ Implementado** (era pendiente como `fetch_configuration`, ahora viene en payload) |
 | Naming NRN+slug-based | ✅ Implementado (utils/build_external_id + 4 providers refactorizados) |
-| Rename `secret_manager` → `aws_secret_manager` | ✅ Implementado |
+| Rename `secret_manager` → `aws-secrets-manager` | ✅ Implementado |
 
 ---
 
@@ -31,7 +31,7 @@ Status snapshot del estado actual del paquete `parameters/` y trabajo pendiente.
 |---|---|---|
 | Estrategia de granularidad | 1:1 mapping (un secret por parámetro) | Review del equipo sobre el decision doc |
 | Naming convention | NRN entities con slugs+ids + dimensiones + parameter_id | Conversación de diseño |
-| Provider AWS Secrets Manager | Nombre futuro: `aws_secret_manager` | Conversación de diseño |
+| Provider AWS Secrets Manager | Nombre futuro: `aws-secrets-manager` | Conversación de diseño |
 | Provider selection | Via `provider.specification_id` → np CLI → slug | Cambio reciente con payload real |
 | Provider config source | `provider.attributes` en el payload (no env vars, no fetch script) | Cambio reciente |
 | Workflow YAMLs | 4 workflows unificados (store, retrieve, delete, notify) | Cleanup arquitectónico |
@@ -109,10 +109,10 @@ bats $(find parameters/tests -name "*.bats")
 Distribución actual (151 tests):
 
 - Skeleton (entrypoint, build_context, dispatch, utils): 56 tests
-- hashicorp_vault: 27 tests
-- aws_secret_manager: 17 tests (renombrado desde `secret_manager`)
-- parameter_store: 23 tests
-- azure_key_vault: 15 tests
+- hashicorp-vault: 27 tests
+- aws-secrets-manager: 17 tests (renombrado desde `secret_manager`)
+- aws-parameter-store: 23 tests
+- azure-key-vault: 15 tests
 - utils/log + utils/get_config_value: 13 tests
 
 ---
@@ -130,10 +130,10 @@ parameters/
 │   └── log                             # todos los niveles a stderr
 ├── providers/
 │   ├── README.md                       # contrato del provider
-│   ├── hashicorp_vault/
-│   ├── aws_secret_manager/
-│   ├── parameter_store/
-│   └── azure_key_vault/
+│   ├── hashicorp-vault/
+│   ├── aws-secrets-manager/
+│   ├── aws-parameter-store/
+│   └── azure-key-vault/
 ├── tests/                              # 151 BATS tests
 └── docs/                               # docs globales del paquete
 ```

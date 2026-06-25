@@ -1,7 +1,7 @@
 {
   "name": "AWS Parameter Store",
   "description": "Stores nullplatform parameter values in AWS SSM Parameter Store with native versioning. Cheapest option (Standard tier is free up to 10,000 parameters)",
-  "slug": "parameter_store",
+  "slug": "aws-parameter-store",
   "category": "parameters-storage",
   "icon": "mdi:aws",
   "visible_to": [

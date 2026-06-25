@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/azure_key_vault/retrieve
+# Unit tests for parameters/providers/azure-key-vault/retrieve
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/azure_key_vault/retrieve"
+  export SCRIPT="$PARAMETERS_DIR/providers/azure-key-vault/retrieve"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AZ_LOG="$BATS_TEST_TMPDIR/az.log"
@@ -47,7 +47,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "azure_key_vault retrieve: success → returns value" {
+@test "azure-key-vault retrieve: success → returns value" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -55,7 +55,7 @@ EOF
   assert_equal "$value" "the-stored-value"
 }
 
-@test "azure_key_vault retrieve: SecretNotFound fails with troubleshooting" {
+@test "azure-key-vault retrieve: SecretNotFound fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AZ_MODE=not_found source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -64,7 +64,7 @@ EOF
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "azure_key_vault retrieve: auth_error fails with troubleshooting" {
+@test "azure-key-vault retrieve: auth_error fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AZ_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -72,14 +72,14 @@ EOF
   assert_contains "$output" "lacks 'Get' permission"
 }
 
-@test "azure_key_vault retrieve: unknown errors fail loud" {
+@test "azure-key-vault retrieve: unknown errors fail loud" {
   run bash -c "$DEPS; MOCK_AZ_MODE=other source $SCRIPT"
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Failed to retrieve secret"
 }
 
-@test "azure_key_vault retrieve: calls az keyvault secret show" {
+@test "azure-key-vault retrieve: calls az keyvault secret show" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AZ_LOG")

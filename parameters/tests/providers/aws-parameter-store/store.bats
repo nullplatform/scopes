@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/parameter_store/store
+# Unit tests for parameters/providers/aws-parameter-store/store
 # =============================================================================
 
 setup() {
@@ -10,7 +10,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/parameter_store/store"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-parameter-store/store"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
 
@@ -63,7 +63,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "parameter_store store: external_id composed from entities + parameter_id + version" {
+@test "aws-parameter-store store: external_id composed from entities + parameter_id + version" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -75,7 +75,7 @@ EOF
   assert_equal "$external_id" "$expected"
 }
 
-@test "parameter_store store: kind=secret uses SecureString" {
+@test "aws-parameter-store store: kind=secret uses SecureString" {
   export PARAMETER_KIND="secret"
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -87,7 +87,7 @@ EOF
   assert_contains "$captured" "--type SecureString"
 }
 
-@test "parameter_store store: kind=parameter uses String" {
+@test "aws-parameter-store store: kind=parameter uses String" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -97,7 +97,7 @@ EOF
   [[ "$captured" != *"SecureString"* ]]
 }
 
-@test "parameter_store store: includes --key-id for SecureString when PS_KMS_KEY_ID set" {
+@test "aws-parameter-store store: includes --key-id for SecureString when PS_KMS_KEY_ID set" {
   export PARAMETER_KIND="secret"
   export PS_KMS_KEY_ID="alias/parameters-secure"
 
@@ -107,7 +107,7 @@ EOF
   assert_contains "$captured" "--key-id alias/parameters-secure"
 }
 
-@test "parameter_store store: parameter_name has PS_NAME_PREFIX + composite" {
+@test "aws-parameter-store store: parameter_name has PS_NAME_PREFIX + composite" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -116,7 +116,7 @@ EOF
   assert_contains "$param_name" "/nullplatform/organization=acme-1255165411"
 }
 
-@test "parameter_store store: passes tier flag" {
+@test "aws-parameter-store store: passes tier flag" {
   export PARAMETER_KIND="parameter"
   export PS_TIER="Advanced"
 
@@ -126,7 +126,7 @@ EOF
   assert_contains "$captured" "--tier Advanced"
 }
 
-@test "parameter_store store: fails with troubleshooting on aws error" {
+@test "aws-parameter-store store: fails with troubleshooting on aws error" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; MOCK_AWS_EXIT=1 source $SCRIPT"

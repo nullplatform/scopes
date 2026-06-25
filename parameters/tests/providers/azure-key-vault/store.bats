@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/azure_key_vault/store
+# Unit tests for parameters/providers/azure-key-vault/store
 # AKV transforms / and = to - in the secret name (canonical form has slashes).
 # =============================================================================
 
@@ -11,7 +11,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/azure_key_vault/store"
+  export SCRIPT="$PARAMETERS_DIR/providers/azure-key-vault/store"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
 
@@ -57,7 +57,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "azure_key_vault store: external_id is canonical slash form + version suffix" {
+@test "azure-key-vault store: external_id is canonical slash form + version suffix" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -67,7 +67,7 @@ EOF
   assert_equal "$external_id" "$expected"
 }
 
-@test "azure_key_vault store: secret_name uses dashes (AKV-safe)" {
+@test "azure-key-vault store: secret_name uses dashes (AKV-safe)" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -80,7 +80,7 @@ EOF
   [[ "$secret_name" != *"="* ]]
 }
 
-@test "azure_key_vault store: calls az with AKV-safe name" {
+@test "azure-key-vault store: calls az with AKV-safe name" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AZ_LOG")
@@ -90,7 +90,7 @@ EOF
   assert_contains "$captured" "--value my-secret"
 }
 
-@test "azure_key_vault store: dimensions sorted alphabetically in external_id" {
+@test "azure-key-vault store: dimensions sorted alphabetically in external_id" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.dimensions = {environment: "prod", country: "arg"}')
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -103,7 +103,7 @@ EOF
   assert_contains "$secret_name" "country-arg-environment-prod-42"
 }
 
-@test "azure_key_vault store: fails with troubleshooting on az error" {
+@test "azure-key-vault store: fails with troubleshooting on az error" {
   run bash -c "$DEPS; MOCK_AZ_EXIT=1 source $SCRIPT"
 
   [ "$status" -ne 0 ]

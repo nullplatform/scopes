@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Kind discrimination (secret vs parameter) is NOT done here. It's derived at
 # the script layer: build_context reads $CONTEXT.secret and exports
-# PARAMETER_KIND; providers that branch on it (e.g. parameter_store choosing
+# PARAMETER_KIND; providers that branch on it (e.g. aws-parameter-store choosing
 # String vs SecureString) read PARAMETER_KIND directly.
 
 if [ -z "${NP_ACTION_CONTEXT:-}" ]; then

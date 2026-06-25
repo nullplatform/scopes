@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/parameter_store/delete
+# Unit tests for parameters/providers/aws-parameter-store/delete
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/parameter_store/delete"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-parameter-store/delete"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
@@ -44,7 +44,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "parameter_store delete: success → {success: true}" {
+@test "aws-parameter-store delete: success → {success: true}" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -52,7 +52,7 @@ EOF
   assert_equal "$success" "true"
 }
 
-@test "parameter_store delete: ParameterNotFound is idempotent → success" {
+@test "aws-parameter-store delete: ParameterNotFound is idempotent → success" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -60,7 +60,7 @@ EOF
   assert_equal "$success" "true"
 }
 
-@test "parameter_store delete: AccessDenied fails with troubleshooting" {
+@test "aws-parameter-store delete: AccessDenied fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -68,14 +68,14 @@ EOF
   assert_contains "$output" "lacks ssm:DeleteParameter"
 }
 
-@test "parameter_store delete: unknown errors fail loud" {
+@test "aws-parameter-store delete: unknown errors fail loud" {
   run bash -c "$DEPS; MOCK_AWS_MODE=other source $SCRIPT"
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Failed to delete parameter"
 }
 
-@test "parameter_store delete: calls aws ssm delete-parameter with name" {
+@test "aws-parameter-store delete: calls aws ssm delete-parameter with name" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")

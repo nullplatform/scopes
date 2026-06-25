@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/parameter_store/retrieve
+# Unit tests for parameters/providers/aws-parameter-store/retrieve
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/parameter_store/retrieve"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-parameter-store/retrieve"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
@@ -47,7 +47,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "parameter_store retrieve: success → returns value" {
+@test "aws-parameter-store retrieve: success → returns value" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -55,7 +55,7 @@ EOF
   assert_equal "$value" "the-real-value"
 }
 
-@test "parameter_store retrieve: ParameterNotFound fails with troubleshooting" {
+@test "aws-parameter-store retrieve: ParameterNotFound fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -64,7 +64,7 @@ EOF
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "parameter_store retrieve: AccessDenied fails with troubleshooting" {
+@test "aws-parameter-store retrieve: AccessDenied fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -72,14 +72,14 @@ EOF
   assert_contains "$output" "lacks ssm:GetParameter"
 }
 
-@test "parameter_store retrieve: unknown errors fail loud" {
+@test "aws-parameter-store retrieve: unknown errors fail loud" {
   run bash -c "$DEPS; MOCK_AWS_MODE=other source $SCRIPT"
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Failed to retrieve parameter"
 }
 
-@test "parameter_store retrieve: calls aws with --with-decryption" {
+@test "aws-parameter-store retrieve: calls aws with --with-decryption" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")

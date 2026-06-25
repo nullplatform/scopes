@@ -21,7 +21,7 @@ providers/<provider_name>/
 └── docs/                 # (recommended) architecture.md, iam-policy.md, etc.
 ```
 
-`<provider_name>` is the string users set in `SECRET_PROVIDER` / `PARAMETER_PROVIDER`. Use `snake_case` (e.g. `hashicorp_vault`, `azure_key_vault`, `parameter_store`).
+`<provider_name>` is the string users set in `SECRET_PROVIDER` / `PARAMETER_PROVIDER`. Use `snake_case` (e.g. `hashicorp-vault`, `azure-key-vault`, `aws-parameter-store`).
 
 ---
 
@@ -109,7 +109,7 @@ Example:
 
 ```bash
 #!/bin/bash
-# providers/hashicorp_vault/setup
+# providers/hashicorp-vault/setup
 VAULT_ADDR=$(get_config_value --env VAULT_ADDR --provider '.address')
 VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN --provider '.token')
 
@@ -148,7 +148,7 @@ Output:
 { "value": "<stored value>" }
 ```
 
-If not found, return `{"value": "value not found"}` rather than erroring (precedent: existing vault/aws_secret_manager impls).
+If not found, return `{"value": "value not found"}` rather than erroring (precedent: existing vault/aws-secrets-manager impls).
 
 ### `delete` — required
 

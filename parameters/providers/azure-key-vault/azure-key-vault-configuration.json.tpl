@@ -1,7 +1,7 @@
 {
   "name": "Azure Key Vault",
   "description": "Stores nullplatform parameter values in Azure Key Vault with native versioning",
-  "slug": "azure_key_vault",
+  "slug": "azure-key-vault",
   "category": "parameters-storage",
   "icon": "mdi:microsoft-azure",
   "visible_to": [

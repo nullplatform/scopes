@@ -8,7 +8,7 @@
 #
 #   ASSUME_ROLE_SELECTOR        — selector key under .iam_role_arns.arns[] in
 #                                 the IAM provider (e.g. "secret_manager",
-#                                 "parameter_store").
+#                                 "aws-parameter-store").
 #   ASSUME_ROLE_OVERRIDE_ENV    — name of the env var that, when set, overrides
 #                                 the IAM-provider lookup
 #                                 (e.g. "SECRET_MANAGER_ASSUME_ROLE_ARN").
@@ -48,7 +48,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/assume_role_lib"
 
 # --- 0. Contract: caller must supply selector + env-var names ---------------
-: "${ASSUME_ROLE_SELECTOR:?ASSUME_ROLE_SELECTOR must be set by the caller (e.g. 'secret_manager' or 'parameter_store')}"
+: "${ASSUME_ROLE_SELECTOR:?ASSUME_ROLE_SELECTOR must be set by the caller (e.g. 'secret_manager' or 'aws-parameter-store')}"
 : "${ASSUME_ROLE_OVERRIDE_ENV:?ASSUME_ROLE_OVERRIDE_ENV must be set by the caller (name of the override env var)}"
 : "${ASSUME_ROLE_DEFAULT_ENV:?ASSUME_ROLE_DEFAULT_ENV must be set by the caller (name of the default-fallback env var)}"
 

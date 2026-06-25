@@ -8,7 +8,7 @@
 # (each provider owns its own config-fetching mechanism). The shape of
 # PROVIDER_CONFIG is defined by each provider.
 #
-# Example (inside providers/hashicorp_vault/setup):
+# Example (inside providers/hashicorp-vault/setup):
 #   VAULT_ADDR=$(get_config_value --env VAULT_ADDR --provider '.address')
 #   VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN --provider '.token')
 

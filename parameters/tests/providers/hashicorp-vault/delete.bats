@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/hashicorp_vault/delete
+# Unit tests for parameters/providers/hashicorp-vault/delete
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/hashicorp_vault/delete"
+  export SCRIPT="$PARAMETERS_DIR/providers/hashicorp-vault/delete"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export CURL_LOG="$BATS_TEST_TMPDIR/curl.log"

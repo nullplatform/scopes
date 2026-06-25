@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/aws_secret_manager/store
+# Unit tests for parameters/providers/aws-secrets-manager/store
 #
 # Verifies:
 #   - external_id composed from entities + dimensions + parameter_name-id
@@ -18,7 +18,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/aws_secret_manager/store"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-secrets-manager/store"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
 
@@ -95,7 +95,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "aws_secret_manager store: external_id includes entities + parameter_name-id + version" {
+@test "aws-secrets-manager store: external_id includes entities + parameter_name-id + version" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -104,7 +104,7 @@ EOF
   assert_equal "$external_id" "$expected"
 }
 
-@test "aws_secret_manager store: secret_name uses nullplatform/ prefix" {
+@test "aws-secrets-manager store: secret_name uses nullplatform/ prefix" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -113,7 +113,7 @@ EOF
   assert_contains "$secret_name" "DB_PASSWORD-42"
 }
 
-@test "aws_secret_manager store: first store uses CreateSecret with managed_by tag" {
+@test "aws-secrets-manager store: first store uses CreateSecret with managed_by tag" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")
@@ -122,7 +122,7 @@ EOF
   [[ "$captured" != *"put-secret-value"* ]]
 }
 
-@test "aws_secret_manager store: version_id is encoded as #suffix in external_id" {
+@test "aws-secrets-manager store: version_id is encoded as #suffix in external_id" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -131,7 +131,7 @@ EOF
   assert_equal "$version" "v1-create-uuid"
 }
 
-@test "aws_secret_manager store: PutSecretValue's version_id replaces create's in external_id" {
+@test "aws-secrets-manager store: PutSecretValue's version_id replaces create's in external_id" {
   run bash -c "$DEPS; MOCK_AWS_MODE=exists source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -140,7 +140,7 @@ EOF
   assert_equal "$version" "v2-put-uuid"
 }
 
-@test "aws_secret_manager store: ResourceExistsException falls through to PutSecretValue" {
+@test "aws-secrets-manager store: ResourceExistsException falls through to PutSecretValue" {
   run bash -c "$DEPS; MOCK_AWS_MODE=exists source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -150,7 +150,7 @@ EOF
   assert_contains "$captured" "--secret-id nullplatform/organization=acme-1255165411"
 }
 
-@test "aws_secret_manager store: PutSecretValue failure propagates with troubleshooting" {
+@test "aws-secrets-manager store: PutSecretValue failure propagates with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=put_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -159,7 +159,7 @@ EOF
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "aws_secret_manager store: non-exists create errors propagate with troubleshooting" {
+@test "aws-secrets-manager store: non-exists create errors propagate with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=create_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -167,7 +167,7 @@ EOF
   assert_contains "$output" "secretsmanager:CreateSecret"
 }
 
-@test "aws_secret_manager store: includes --kms-key-id when SM_KMS_KEY_ID set" {
+@test "aws-secrets-manager store: includes --kms-key-id when SM_KMS_KEY_ID set" {
   export SM_KMS_KEY_ID="alias/my-key"
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -176,7 +176,7 @@ EOF
   assert_contains "$captured" "--kms-key-id alias/my-key"
 }
 
-@test "aws_secret_manager store: dimensions sort alphabetically in external_id" {
+@test "aws-secrets-manager store: dimensions sort alphabetically in external_id" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.dimensions = {environment: "prod", country: "arg"}')
 
   run bash -c "$DEPS; source $SCRIPT"

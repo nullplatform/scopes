@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/hashicorp_vault/setup
+# Unit tests for parameters/providers/hashicorp-vault/setup
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/hashicorp_vault/setup"
+  export SCRIPT="$PARAMETERS_DIR/providers/hashicorp-vault/setup"
   export DEPS="source $PARAMETERS_DIR/utils/log; source $PARAMETERS_DIR/utils/get_config_value"
 }
 

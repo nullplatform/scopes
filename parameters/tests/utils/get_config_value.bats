@@ -82,8 +82,8 @@ teardown() {
 }
 
 @test "get_config_value: nested provider path resolves correctly" {
-  export PROVIDER_CONFIG='{"hashicorp_vault":{"address":"https://vault.example.com"}}'
+  export PROVIDER_CONFIG='{"connection":{"address":"https://vault.example.com"}}'
 
-  result=$(get_config_value --provider '.hashicorp_vault.address')
+  result=$(get_config_value --provider '.connection.address')
   assert_equal "$result" "https://vault.example.com"
 }

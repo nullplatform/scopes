@@ -1,6 +1,6 @@
 # AWS Secrets Manager — Architecture
 
-This document describes how the `parameters/providers/aws_secret_manager/` provider stores, retrieves, and deletes nullplatform parameters using AWS Secrets Manager (SM).
+This document describes how the `parameters/providers/aws-secrets-manager/` provider stores, retrieves, and deletes nullplatform parameters using AWS Secrets Manager (SM).
 
 ---
 
@@ -100,7 +100,7 @@ ASSUME_ROLE_SESSION_PREFIX="np-secret-manager"
 source "$PARAMETERS_ROOT/utils/assume_role_step"
 ```
 
-The step is provider-agnostic — `parameter_store` does the same with its own selector (`parameter_store`) and env-var names (`PARAMETER_STORE_ASSUME_ROLE_ARN[_DEFAULT]`). The step:
+The step is provider-agnostic — `aws-parameter-store` does the same with its own selector (`parameter_store`) and env-var names (`PARAMETER_STORE_ASSUME_ROLE_ARN[_DEFAULT]`). The step:
 
 1. Reads the scope's NRN and dimensions from `CONTEXT` (falling back to `np scope read` when dimensions are not in the payload).
 2. Calls `np provider list --categories identity-access-control --nrn <nrn> [--dimensions ...]` to fetch the IAM provider that the platform has dimension-resolved for this scope.

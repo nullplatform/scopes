@@ -23,7 +23,7 @@ if [ -z "$AZ_VAULT_NAME" ]; then
   log error ""
   log error "💡 Possible causes:"
   log error "   • AZURE_KEY_VAULT_NAME env var is not set"
-  log error "   • .vault_name is missing in the azure_key_vault provider config"
+  log error "   • .vault_name is missing in the azure-key-vault provider config"
   log error ""
   log error "🔧 How to fix:"
   log error "   • Set AZURE_KEY_VAULT_NAME=<your-vault-name>"

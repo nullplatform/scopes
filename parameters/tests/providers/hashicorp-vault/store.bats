@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/hashicorp_vault/store
+# Unit tests for parameters/providers/hashicorp-vault/store
 # external_id is now composed via parameters/utils/build_external_id.
 # =============================================================================
 
@@ -11,7 +11,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/hashicorp_vault/store"
+  export SCRIPT="$PARAMETERS_DIR/providers/hashicorp-vault/store"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
 

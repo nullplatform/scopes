@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/aws_secret_manager/retrieve
+# Unit tests for parameters/providers/aws-secrets-manager/retrieve
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/aws_secret_manager/retrieve"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-secrets-manager/retrieve"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
@@ -47,7 +47,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "aws_secret_manager retrieve: success → extracts .value from envelope" {
+@test "aws-secrets-manager retrieve: success → extracts .value from envelope" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -55,7 +55,7 @@ EOF
   assert_equal "$value" "the-real-value"
 }
 
-@test "aws_secret_manager retrieve: ResourceNotFoundException fails with troubleshooting" {
+@test "aws-secrets-manager retrieve: ResourceNotFoundException fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=not_found source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -65,7 +65,7 @@ EOF
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "aws_secret_manager retrieve: AccessDenied fails with troubleshooting" {
+@test "aws-secrets-manager retrieve: AccessDenied fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_AWS_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -73,14 +73,14 @@ EOF
   assert_contains "$output" "lacks secretsmanager:GetSecretValue"
 }
 
-@test "aws_secret_manager retrieve: unknown errors fail loud" {
+@test "aws-secrets-manager retrieve: unknown errors fail loud" {
   run bash -c "$DEPS; MOCK_AWS_MODE=other source $SCRIPT"
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Failed to retrieve secret"
 }
 
-@test "aws_secret_manager retrieve: calls aws with correct args" {
+@test "aws-secrets-manager retrieve: calls aws with correct args" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/parameter_store/setup
+# Unit tests for parameters/providers/aws-parameter-store/setup
 # =============================================================================
 
 setup() {
@@ -10,7 +10,7 @@ setup() {
   source "$PROJECT_ROOT/testing/assertions.sh"
 
   export PARAMETERS_ROOT="$PARAMETERS_DIR"
-  export SCRIPT="$PARAMETERS_DIR/providers/parameter_store/setup"
+  export SCRIPT="$PARAMETERS_DIR/providers/aws-parameter-store/setup"
   export DEPS="source $PARAMETERS_DIR/utils/log; source $PARAMETERS_DIR/utils/get_config_value"
 }
 
@@ -18,7 +18,7 @@ teardown() {
   unset AWS_REGION PS_NAME_PREFIX PS_KMS_KEY_ID PS_TIER PROVIDER_CONFIG
 }
 
-@test "parameter_store setup: fails fast when AWS_REGION is missing" {
+@test "aws-parameter-store setup: fails fast when AWS_REGION is missing" {
   unset AWS_REGION
 
   run bash -c "$DEPS; source $SCRIPT"
@@ -27,7 +27,7 @@ teardown() {
   assert_contains "$output" "AWS_REGION"
 }
 
-@test "parameter_store setup: name_prefix is hardcoded to '/nullplatform/'" {
+@test "aws-parameter-store setup: name_prefix is hardcoded to '/nullplatform/'" {
   export AWS_REGION="us-east-1"
   export PROVIDER_CONFIG='{"name_prefix":"/custom/"}'
 
@@ -37,7 +37,7 @@ teardown() {
   assert_contains "$output" "PREFIX=/nullplatform/"
 }
 
-@test "parameter_store setup: default tier is Standard" {
+@test "aws-parameter-store setup: default tier is Standard" {
   export AWS_REGION="us-east-1"
 
   run bash -c "$DEPS; source $SCRIPT && echo TIER=\$PS_TIER"
@@ -46,7 +46,7 @@ teardown() {
   assert_contains "$output" "TIER=Standard"
 }
 
-@test "parameter_store setup: accepts Advanced tier from PROVIDER_CONFIG" {
+@test "aws-parameter-store setup: accepts Advanced tier from PROVIDER_CONFIG" {
   export AWS_REGION="us-east-1"
   export PROVIDER_CONFIG='{"tier":"Advanced"}'
 
@@ -56,7 +56,7 @@ teardown() {
   assert_contains "$output" "TIER=Advanced"
 }
 
-@test "parameter_store setup: rejects invalid tier" {
+@test "aws-parameter-store setup: rejects invalid tier" {
   export AWS_REGION="us-east-1"
   export PROVIDER_CONFIG='{"tier":"Bogus"}'
 
@@ -67,7 +67,7 @@ teardown() {
   assert_contains "$output" "Standard, Advanced, Intelligent-Tiering"
 }
 
-@test "parameter_store setup: kms_key_id from PROVIDER_CONFIG" {
+@test "aws-parameter-store setup: kms_key_id from PROVIDER_CONFIG" {
   export AWS_REGION="us-east-1"
   export PROVIDER_CONFIG='{"kms_key_id":"alias/cfg"}'
 

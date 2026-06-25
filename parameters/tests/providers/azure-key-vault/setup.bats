@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/azure_key_vault/setup
+# Unit tests for parameters/providers/azure-key-vault/setup
 # =============================================================================
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/azure_key_vault/setup"
+  export SCRIPT="$PARAMETERS_DIR/providers/azure-key-vault/setup"
   export DEPS="source $PARAMETERS_DIR/utils/log; source $PARAMETERS_DIR/utils/get_config_value"
 }
 
@@ -17,7 +17,7 @@ teardown() {
   unset AZURE_KEY_VAULT_NAME AZ_VAULT_NAME AZ_SECRET_PREFIX PROVIDER_CONFIG
 }
 
-@test "azure_key_vault setup: fails when vault name is missing" {
+@test "azure-key-vault setup: fails when vault name is missing" {
   run bash -c "$DEPS; source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -25,7 +25,7 @@ teardown() {
   assert_contains "$output" "🔧 How to fix:"
 }
 
-@test "azure_key_vault setup: vault name from env" {
+@test "azure-key-vault setup: vault name from env" {
   export AZURE_KEY_VAULT_NAME="my-vault"
 
   run bash -c "$DEPS; source $SCRIPT && echo VAULT=\$AZ_VAULT_NAME PREFIX=\$AZ_SECRET_PREFIX"
@@ -35,7 +35,7 @@ teardown() {
   assert_contains "$output" "PREFIX=nullplatform-"
 }
 
-@test "azure_key_vault setup: secret_prefix is hardcoded to nullplatform-" {
+@test "azure-key-vault setup: secret_prefix is hardcoded to nullplatform-" {
   export AZURE_KEY_VAULT_NAME="my-vault"
   # PROVIDER_CONFIG tries to override; ignored
   export PROVIDER_CONFIG='{"secret_prefix":"app-secret-"}'
@@ -46,7 +46,7 @@ teardown() {
   assert_contains "$output" "PREFIX=nullplatform-"
 }
 
-@test "azure_key_vault setup: vault_name from PROVIDER_CONFIG" {
+@test "azure-key-vault setup: vault_name from PROVIDER_CONFIG" {
   export PROVIDER_CONFIG='{"vault_name":"cfg-vault"}'
 
   run bash -c "$DEPS; source $SCRIPT && echo VAULT=\$AZ_VAULT_NAME"

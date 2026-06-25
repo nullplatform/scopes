@@ -1,6 +1,6 @@
 # AWS Systems Manager Parameter Store — Provider Architecture
 
-This document describes the `parameters/providers/parameter_store/` implementation. It stores nullplatform parameters in AWS SSM Parameter Store, using `String` for plain parameters and `SecureString` (KMS-encrypted) for secrets.
+This document describes the `parameters/providers/aws-parameter-store/` implementation. It stores nullplatform parameters in AWS SSM Parameter Store, using `String` for plain parameters and `SecureString` (KMS-encrypted) for secrets.
 
 Cheapest provider in the package — Standard tier is free up to 10,000 parameters.
 

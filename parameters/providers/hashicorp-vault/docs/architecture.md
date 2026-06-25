@@ -1,6 +1,6 @@
 # HashiCorp Vault — Provider Architecture
 
-This document describes the `parameters/providers/hashicorp_vault/` implementation. It stores nullplatform parameters as Vault KV v2 secrets, exploiting Vault's native versioning.
+This document describes the `parameters/providers/hashicorp-vault/` implementation. It stores nullplatform parameters as Vault KV v2 secrets, exploiting Vault's native versioning.
 
 ---
 

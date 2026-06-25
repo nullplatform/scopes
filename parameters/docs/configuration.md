@@ -40,10 +40,10 @@ The response includes a `slug` field. That slug must match the name of a directo
 
 | Slug returned | Provider directory used |
 |---|---|
-| `hashicorp_vault` | `parameters/providers/hashicorp_vault/` |
-| `aws_secret_manager` | `parameters/providers/aws_secret_manager/` |
-| `parameter_store` | `parameters/providers/parameter_store/` |
-| `azure_key_vault` | `parameters/providers/azure_key_vault/` |
+| `hashicorp-vault` | `parameters/providers/hashicorp-vault/` |
+| `aws-secrets-manager` | `parameters/providers/aws-secrets-manager/` |
+| `aws-parameter-store` | `parameters/providers/aws-parameter-store/` |
+| `azure-key-vault` | `parameters/providers/azure-key-vault/` |
 
 If the slug doesn't match any installed provider, `build_context` fails with a list of available providers and instructions to either rename the spec slug or add the missing provider.
 
@@ -73,7 +73,7 @@ Env vars take precedence ONLY when the provider attribute is missing. This lets 
 
 The shape of `$CONTEXT.provider.attributes` for each provider:
 
-### `hashicorp_vault`
+### `hashicorp-vault`
 
 ```json
 {
@@ -83,7 +83,7 @@ The shape of `$CONTEXT.provider.attributes` for each provider:
 }
 ```
 
-### `aws_secret_manager` (currently named `aws_secret_manager`)
+### `aws-secrets-manager` (currently named `aws-secrets-manager`)
 
 ```json
 {
@@ -95,7 +95,7 @@ The shape of `$CONTEXT.provider.attributes` for each provider:
 
 `kms_key_id` is optional (defaults to AWS-managed key).
 
-### `parameter_store`
+### `aws-parameter-store`
 
 ```json
 {
@@ -108,7 +108,7 @@ The shape of `$CONTEXT.provider.attributes` for each provider:
 
 `kms_key_id` only matters for `kind=secret` (SecureString). `tier` ∈ {`Standard`, `Advanced`, `Intelligent-Tiering`}.
 
-### `azure_key_vault`
+### `azure-key-vault`
 
 ```json
 {
@@ -129,7 +129,7 @@ For local testing without involving the platform, set the relevant env vars and 
 # Stub np in PATH
 cat > /tmp/np << 'EOF'
 #!/bin/bash
-echo '{"slug": "hashicorp_vault"}'
+echo '{"slug": "hashicorp-vault"}'
 EOF
 chmod +x /tmp/np
 export PATH=/tmp:$PATH

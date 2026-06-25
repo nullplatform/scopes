@@ -18,7 +18,7 @@ if [ -z "$VAULT_ADDR" ]; then
   log error ""
   log error "💡 Possible causes:"
   log error "   • VAULT_ADDR env var is not set in the workflow runtime"
-  log error "   • .address is missing in the hashicorp_vault provider config"
+  log error "   • .address is missing in the hashicorp-vault provider config"
   log error ""
   log error "🔧 How to fix:"
   log error "   • Set VAULT_ADDR=https://your-vault-host"

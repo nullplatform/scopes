@@ -1,7 +1,7 @@
 {
   "name": "HashiCorp Vault",
   "description": "Stores nullplatform parameter values in HashiCorp Vault KV v2 with native versioning",
-  "slug": "hashicorp_vault",
+  "slug": "hashicorp-vault",
   "category": "parameters-storage",
   "icon": "mdi:vault",
   "visible_to": [

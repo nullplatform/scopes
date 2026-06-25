@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for parameters/providers/azure_key_vault/delete
+# Unit tests for parameters/providers/azure-key-vault/delete
 # Two-step: soft-delete + purge. Purge failures are warnings, not errors.
 # =============================================================================
 
@@ -12,7 +12,7 @@ setup() {
 
   source "$PROJECT_ROOT/testing/assertions.sh"
 
-  export SCRIPT="$PARAMETERS_DIR/providers/azure_key_vault/delete"
+  export SCRIPT="$PARAMETERS_DIR/providers/azure-key-vault/delete"
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   export AZ_LOG="$BATS_TEST_TMPDIR/az.log"
@@ -67,7 +67,7 @@ EOF
   export DEPS="source $PARAMETERS_DIR/utils/log"
 }
 
-@test "azure_key_vault delete: both delete + purge succeed → {success: true}" {
+@test "azure-key-vault delete: both delete + purge succeed → {success: true}" {
   run bash -c "$DEPS; source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -75,7 +75,7 @@ EOF
   assert_equal "$success" "true"
 }
 
-@test "azure_key_vault delete: SecretNotFound on delete is idempotent → success" {
+@test "azure-key-vault delete: SecretNotFound on delete is idempotent → success" {
   run bash -c "$DEPS; MOCK_DELETE_MODE=not_found source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -83,7 +83,7 @@ EOF
   assert_equal "$success" "true"
 }
 
-@test "azure_key_vault delete: delete auth_error fails with troubleshooting" {
+@test "azure-key-vault delete: delete auth_error fails with troubleshooting" {
   run bash -c "$DEPS; MOCK_DELETE_MODE=auth_error source $SCRIPT"
 
   [ "$status" -ne 0 ]
@@ -91,7 +91,7 @@ EOF
   assert_contains "$output" "lacks 'Delete' permission"
 }
 
-@test "azure_key_vault delete: purge forbidden is downgraded to warning, still returns success" {
+@test "azure-key-vault delete: purge forbidden is downgraded to warning, still returns success" {
   run --separate-stderr bash -c "$DEPS; MOCK_PURGE_MODE=purge_forbidden source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -101,7 +101,7 @@ EOF
   assert_contains "$stderr" "Purge permission missing"
 }
 
-@test "azure_key_vault delete: purge other failure is warning, still success" {
+@test "azure-key-vault delete: purge other failure is warning, still success" {
   run --separate-stderr bash -c "$DEPS; MOCK_PURGE_MODE=other source $SCRIPT"
 
   assert_equal "$status" "0"
@@ -110,7 +110,7 @@ EOF
   assert_contains "$stderr" "⚠️ Purge failed"
 }
 
-@test "azure_key_vault delete: calls both delete and purge sub-commands" {
+@test "azure-key-vault delete: calls both delete and purge sub-commands" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AZ_LOG")
@@ -119,7 +119,7 @@ EOF
   assert_contains "$captured" "--name parameters-abc-123"
 }
 
-@test "azure_key_vault delete: skips purge if delete returned not_found" {
+@test "azure-key-vault delete: skips purge if delete returned not_found" {
   run bash -c "$DEPS; MOCK_DELETE_MODE=not_found source $SCRIPT"
 
   assert_equal "$status" "0"

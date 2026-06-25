@@ -1,6 +1,6 @@
 # IAM Policy
 
-Minimum IAM permissions for `parameters/providers/aws_secret_manager/`. Scoped to the `nullplatform/*` namespace so the agent cannot reach any secret outside this provider's domain.
+Minimum IAM permissions for `parameters/providers/aws-secrets-manager/`. Scoped to the `nullplatform/*` namespace so the agent cannot reach any secret outside this provider's domain.
 
 ---
 

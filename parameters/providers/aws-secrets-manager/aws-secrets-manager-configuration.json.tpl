@@ -1,7 +1,7 @@
 {
   "name": "AWS Secrets Manager",
   "description": "Stores nullplatform parameter values in AWS Secrets Manager using native versioning",
-  "slug": "aws_secret_manager",
+  "slug": "aws-secrets-manager",
   "category": "parameters-storage",
   "icon": "mdi:aws",
   "visible_to": [

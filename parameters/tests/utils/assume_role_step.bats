@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # =============================================================================
 # Unit tests for parameters/utils/assume_role_step — orchestrates:
 #   caller sets ASSUME_ROLE_SELECTOR + ASSUME_ROLE_OVERRIDE_ENV +
@@ -8,7 +9,7 @@
 #   resolve ARN via lib →
 #   source assume_role (sts:AssumeRole).
 #
-# Provider-agnostic — the same step is sourced by aws_secret_manager AND
+# Provider-agnostic — the same step is sourced by aws-secrets-manager AND
 # parameter_store with different selector + env names.
 # =============================================================================
 
@@ -63,7 +64,7 @@ make_ctx() {
     '{scope:{nrn:$nrn, id:$scope_id}, dimensions:$dims}'
 }
 
-# Standard caller config for "aws_secret_manager"-style tests.
+# Standard caller config for "aws-secrets-manager"-style tests.
 SM_CALLER='ASSUME_ROLE_SELECTOR=secret_manager; ASSUME_ROLE_OVERRIDE_ENV=SECRET_MANAGER_ASSUME_ROLE_ARN; ASSUME_ROLE_DEFAULT_ENV=SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT'
 
 # ---- Contract: caller must set the three required vars ---------------------

@@ -9,7 +9,7 @@ set -euo pipefail
 # Flow:
 #   1. Extract notification fields into env vars
 #   2. Derive PARAMETER_KIND from $CONTEXT.secret (still useful for providers
-#      like parameter_store that choose String vs SecureString)
+#      like aws-parameter-store that choose String vs SecureString)
 #   3. Resolve ACTIVE_PROVIDER from $CONTEXT.provider.specification_id via
 #      `np provider specification read` — its `.slug` IS the provider directory name
 #   4. Set PROVIDER_CONFIG from $CONTEXT.provider.attributes (config travels in

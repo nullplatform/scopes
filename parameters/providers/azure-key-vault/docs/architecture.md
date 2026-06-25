@@ -1,6 +1,6 @@
 # Azure Key Vault — Provider Architecture
 
-This document describes the `parameters/providers/azure_key_vault/` implementation. It stores nullplatform parameters as Azure Key Vault (AKV) secrets, exploiting AKV's native versioning.
+This document describes the `parameters/providers/azure-key-vault/` implementation. It stores nullplatform parameters as Azure Key Vault (AKV) secrets, exploiting AKV's native versioning.
 
 ---
 

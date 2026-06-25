@@ -1,6 +1,6 @@
 # IAM Policy — Parameter Store Provider, Least Privilege
 
-Minimum IAM permissions required to operate the `parameters/providers/parameter_store/` provider, scoped to the configured `PS_NAME_PREFIX`.
+Minimum IAM permissions required to operate the `parameters/providers/aws-parameter-store/` provider, scoped to the configured `PS_NAME_PREFIX`.
 
 ---
 

@@ -149,7 +149,7 @@ jq -n \
   '{external_id: $external_id, metadata: {handle: $handle, name: $name}}'
 ```
 
-If your backend distinguishes types (like `parameter_store` does with String/SecureString), branch on `PARAMETER_KIND` here.
+If your backend distinguishes types (like `aws-parameter-store` does with String/SecureString), branch on `PARAMETER_KIND` here.
 
 ### `retrieve`
 
@@ -250,7 +250,7 @@ tests/providers/<provider_name>/
 └── delete.bats      # Always-success, CLI args, idempotency
 ```
 
-Use the patterns from existing providers (`hashicorp_vault`, `aws_secret_manager`, `parameter_store`, `azure_key_vault`):
+Use the patterns from existing providers (`hashicorp-vault`, `aws-secrets-manager`, `aws-parameter-store`, `azure-key-vault`):
 
 - Mock the backend CLI as a script in `$BATS_TEST_TMPDIR/bin/`, export PATH to find it.
 - Capture CLI args to a log file, assert on them.
