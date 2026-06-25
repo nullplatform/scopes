@@ -32,9 +32,13 @@
 # `--nrn` and (when present) `--dimensions` so the platform performs the same
 # dimension-aware resolution it would do for k8s scopes.
 #
+# NRN construction (organization/account/namespace/application are guaranteed):
+#   - value_entities present → NRN includes scope segment (`...:scope=<id>`)
+#   - else                   → NRN is app-level (organization=…:account=…:namespace=…:application=…)
+#
 # Dimension resolution precedence:
 #   1. $CONTEXT.dimensions, if it's a non-empty object → pass to np
-#   2. else if $CONTEXT.scope.id exists → `np scope read --id ... --query .dimensions`
+#   2. else if value_entities.scope is present → `np scope read --id ... --query .dimensions`
 #   3. else no `--dimensions` flag (NRN-only lookup)
 #
 # ARN resolution precedence (see resolve_assume_role_arn in assume_role_lib):
@@ -52,25 +56,44 @@ source "$SCRIPT_DIR/assume_role_lib"
 : "${ASSUME_ROLE_OVERRIDE_ENV:?ASSUME_ROLE_OVERRIDE_ENV must be set by the caller (name of the override env var)}"
 : "${ASSUME_ROLE_DEFAULT_ENV:?ASSUME_ROLE_DEFAULT_ENV must be set by the caller (name of the default-fallback env var)}"
 
-# Used by assume_role for the STS session name (informational).
+# Session prefix for the STS session name (informational).
 export ASSUME_ROLE_SESSION_PREFIX="${ASSUME_ROLE_SESSION_PREFIX:-np-parameters}"
-if [ -z "${SCOPE_ID:-}" ]; then
-  SCOPE_ID=$(echo "${CONTEXT:-}" | jq -r '.scope.id // empty' 2>/dev/null)
-  export SCOPE_ID
-fi
 
-# --- 1. Resolve NRN from CONTEXT -------------------------------------------
-NRN=$(echo "${CONTEXT:-}" | jq -r '.scope.nrn // .nrn // empty' 2>/dev/null)
-if [ -z "$NRN" ]; then
-  log warn "   ⚠️  No NRN in CONTEXT — skipping IAM provider lookup (agent credentials only)"
+# --- 1. Resolve NRN from entities/value_entities ---------------------------
+# Precedence: value_entities (scope-level — includes the scope segment) wins
+# over entities (app/dimension-level). organization/account/namespace/application
+# are guaranteed to be present in both shapes.
+ENTITIES_JSON=$(echo "${CONTEXT:-}" | jq -c '.value_entities // .entities // empty' 2>/dev/null)
+
+if [ -z "$ENTITIES_JSON" ] || [ "$ENTITIES_JSON" = "null" ]; then
+  log warn "   ⚠️  No entities/value_entities in CONTEXT — skipping IAM provider lookup (agent credentials only)"
   IAM_ATTRIBUTES=""
+  NRN=""
 else
+  NRN=$(printf '%s' "$ENTITIES_JSON" | jq -r '
+    [
+      ("organization=" + .organization),
+      ("account=" + .account),
+      ("namespace=" + .namespace),
+      ("application=" + .application)
+    ]
+    + (if .scope then [("scope=" + .scope)] else [] end)
+    | join(":")' 2>/dev/null)
+
+  # SCOPE_ID (used by assume_role for the STS session name) only exists when
+  # the payload is scope-level — i.e. value_entities.scope is present.
+  if [ -z "${SCOPE_ID:-}" ]; then
+    SCOPE_ID=$(printf '%s' "$ENTITIES_JSON" | jq -r '.scope // empty' 2>/dev/null)
+    export SCOPE_ID
+  fi
+
   # --- 2. Resolve dimensions ----------------------------------------------
+  # Top-level .dimensions in the payload (dimension-level store). If absent but
+  # we have a scope_id, ask the platform via `np scope read`.
   DIMS_JSON=$(echo "${CONTEXT:-}" | jq -c '.dimensions // empty' 2>/dev/null)
   if [ -z "$DIMS_JSON" ] || [ "$DIMS_JSON" = "null" ] || [ "$DIMS_JSON" = "{}" ]; then
-    SCOPE_ID_FROM_CTX=$(echo "${CONTEXT:-}" | jq -r '.scope.id // empty' 2>/dev/null)
-    if [ -n "$SCOPE_ID_FROM_CTX" ]; then
-      DIMS_JSON=$(np scope read --id "$SCOPE_ID_FROM_CTX" --format json --query '.dimensions' 2>/dev/null || echo "")
+    if [ -n "${SCOPE_ID:-}" ]; then
+      DIMS_JSON=$(np scope read --id "$SCOPE_ID" --format json --query '.dimensions' 2>/dev/null || echo "")
     fi
   fi
 

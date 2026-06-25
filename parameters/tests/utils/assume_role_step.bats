@@ -4,13 +4,14 @@ bats_require_minimum_version 1.5.0
 # Unit tests for parameters/utils/assume_role_step — orchestrates:
 #   caller sets ASSUME_ROLE_SELECTOR + ASSUME_ROLE_OVERRIDE_ENV +
 #     ASSUME_ROLE_DEFAULT_ENV →
-#   resolve NRN + dimensions from CONTEXT →
+#   build NRN from CONTEXT.entities or CONTEXT.value_entities →
+#   resolve dimensions from CONTEXT.dimensions (fallback: np scope read) →
 #   np provider list (identity-access-control) →
 #   resolve ARN via lib →
 #   source assume_role (sts:AssumeRole).
 #
 # Provider-agnostic — the same step is sourced by aws-secrets-manager AND
-# parameter_store with different selector + env names.
+# aws-parameter-store with different selector + env names.
 # =============================================================================
 
 setup() {
@@ -55,23 +56,38 @@ teardown() {
     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 }
 
+# Build a CONTEXT mimicking the real platform notification body:
+#   make_ctx [dims_json] [scope_id]
+#     dims_json  — '{}' or '{"key":"val",...}'; empty/"" = no .dimensions
+#     scope_id   — when non-empty, payload uses value_entities (with scope)
+#                  instead of entities (so NRN gets the scope segment)
 make_ctx() {
-  local nrn="$1" dims="$2" scope_id="$3"
-  jq -nc \
-    --arg nrn "$nrn" \
-    --argjson dims "${dims:-null}" \
-    --arg scope_id "$scope_id" \
-    '{scope:{nrn:$nrn, id:$scope_id}, dimensions:$dims}'
+  local dims="$1" scope_id="$2"
+  local dims_arg=""
+  if [ -n "$dims" ]; then
+    dims_arg="$dims"
+  else
+    dims_arg="null"
+  fi
+  if [ -n "$scope_id" ]; then
+    jq -nc --arg s "$scope_id" --argjson dims "$dims_arg" \
+      '{value_entities:{organization:"1255165411",account:"95118862",namespace:"1249051863",application:"2132488335",scope:$s}, dimensions:$dims}'
+  else
+    jq -nc --argjson dims "$dims_arg" \
+      '{entities:{organization:"1255165411",account:"95118862",namespace:"1249051863",application:"2132488335"}, dimensions:$dims}'
+  fi
 }
 
-# Standard caller config for "aws-secrets-manager"-style tests.
+# Caller bindings for each AWS provider's setup.
 SM_CALLER='ASSUME_ROLE_SELECTOR=secret_manager; ASSUME_ROLE_OVERRIDE_ENV=SECRET_MANAGER_ASSUME_ROLE_ARN; ASSUME_ROLE_DEFAULT_ENV=SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT'
+PS_CALLER='ASSUME_ROLE_SELECTOR=parameter_store; ASSUME_ROLE_OVERRIDE_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN; ASSUME_ROLE_DEFAULT_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN_DEFAULT'
+
+APP_NRN='organization=1255165411:account=95118862:namespace=1249051863:application=2132488335'
 
 # ---- Contract: caller must set the three required vars ---------------------
 
 @test "step: fails fast when ASSUME_ROLE_SELECTOR is missing" {
   export CONTEXT='{}'
-  unset ASSUME_ROLE_SELECTOR
 
   run -127 bash -c "
     export PATH=$BIN_DIR:\$PATH
@@ -109,10 +125,108 @@ SM_CALLER='ASSUME_ROLE_SELECTOR=secret_manager; ASSUME_ROLE_OVERRIDE_ENV=SECRET_
   assert_contains "$output" "ASSUME_ROLE_DEFAULT_ENV must be set"
 }
 
-# ---- Resolution flow -------------------------------------------------------
+# ---- NRN construction ------------------------------------------------------
+
+@test "step: app-level — NRN from entities (no scope segment)" {
+  cat > "$BIN_DIR/np" << 'EOF'
+#!/bin/bash
+echo "np $*" >> "$NP_INVOKED_LOG"
+echo '{"results":[]}'
+EOF
+  chmod +x "$BIN_DIR/np"
+
+  export CONTEXT="$(make_ctx '' '')"  # entities only, no dimensions, no scope
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  run cat "$NP_INVOKED_LOG"
+  assert_contains "$output" "--nrn $APP_NRN"
+  case "$output" in *"--dimensions"*) return 1 ;; esac
+  case "$output" in *":scope="*) return 1 ;; esac
+}
+
+@test "step: dimension-level — NRN from entities + dimensions passed to np" {
+  cat > "$BIN_DIR/np" << 'EOF'
+#!/bin/bash
+echo "np $*" >> "$NP_INVOKED_LOG"
+echo '{"results":[]}'
+EOF
+  chmod +x "$BIN_DIR/np"
+
+  export CONTEXT="$(make_ctx '{"country":"argentina","site":"aws-main"}' '')"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  run cat "$NP_INVOKED_LOG"
+  assert_contains "$output" "--nrn $APP_NRN"
+  assert_contains "$output" "--dimensions country:argentina,site:aws-main"
+  case "$output" in *":scope="*) return 1 ;; esac
+}
+
+@test "step: scope-level — NRN from value_entities (includes :scope=… segment)" {
+  cat > "$BIN_DIR/np" << 'EOF'
+#!/bin/bash
+echo "np $*" >> "$NP_INVOKED_LOG"
+echo '{"results":[]}'
+EOF
+  chmod +x "$BIN_DIR/np"
+
+  export CONTEXT="$(make_ctx '' '601620319')"  # scope-level, no dimensions
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  run cat "$NP_INVOKED_LOG"
+  assert_contains "$output" "--nrn $APP_NRN:scope=601620319"
+}
+
+@test "step: scope-level without top-level dimensions → np scope read fallback" {
+  cat > "$BIN_DIR/np" << 'EOF'
+#!/bin/bash
+echo "np $*" >> "$NP_INVOKED_LOG"
+if [ "$1" = "scope" ] && [ "$2" = "read" ]; then
+  echo '{"environment":"staging"}'
+else
+  echo '{"results":[]}'
+fi
+EOF
+  chmod +x "$BIN_DIR/np"
+
+  export CONTEXT="$(make_ctx '' '601620319')"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    $SM_CALLER
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  run cat "$NP_INVOKED_LOG"
+  assert_contains "$output" "scope read --id 601620319 --format json --query .dimensions"
+  assert_contains "$output" "--dimensions environment:staging"
+}
+
+# ---- ARN resolution --------------------------------------------------------
 
 @test "step: secret_manager caller — override env wins, np is not called" {
-  export CONTEXT="$(make_ctx "" "" "")"  # no NRN → no np lookup anyway
+  export CONTEXT='{}'  # no entities → no IAM lookup, only env override matters
   export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:from-env-sm"
 
   run bash -c "
@@ -130,16 +244,13 @@ SM_CALLER='ASSUME_ROLE_SELECTOR=secret_manager; ASSUME_ROLE_OVERRIDE_ENV=SECRET_
 }
 
 @test "step: parameter_store caller — uses ITS OWN env var (not secret_manager's)" {
-  export CONTEXT="$(make_ctx "" "" "")"
+  export CONTEXT='{}'
   export PARAMETER_STORE_ASSUME_ROLE_ARN="arn:ps-env"
-  # secret_manager's env is also set — must be IGNORED
   export SECRET_MANAGER_ASSUME_ROLE_ARN="arn:sm-MUST-NOT-BE-USED"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
-    ASSUME_ROLE_SELECTOR=parameter_store
-    ASSUME_ROLE_OVERRIDE_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN
-    ASSUME_ROLE_DEFAULT_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN_DEFAULT
+    $PS_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
     echo ARN=\$ASSUME_ROLE_ARN_RESOLVED
@@ -150,10 +261,9 @@ SM_CALLER='ASSUME_ROLE_SELECTOR=secret_manager; ASSUME_ROLE_OVERRIDE_ENV=SECRET_
   assert_contains "$output" "--role-arn arn:ps-env"
 }
 
-@test "step: NRN-only lookup (no dimensions) — np called without --dimensions" {
+@test "step: provider lookup returns matching selector ARN" {
   cat > "$BIN_DIR/np" << 'EOF'
 #!/bin/bash
-echo "np $*" >> "$NP_INVOKED_LOG"
 cat << 'JSON'
 {"results":[{"id":"prov-1","attributes":{"iam_role_arns":{"arns":[
   {"selector":"secret_manager","arn":"arn:from-provider"}
@@ -162,7 +272,7 @@ JSON
 EOF
   chmod +x "$BIN_DIR/np"
 
-  export CONTEXT="$(make_ctx "organization=acme:account=prod" "" "")"
+  export CONTEXT="$(make_ctx '' '')"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
@@ -173,9 +283,6 @@ EOF
   "
 
   assert_contains "$output" "ARN=arn:from-provider"
-  run cat "$NP_INVOKED_LOG"
-  assert_contains "$output" "provider list --categories identity-access-control --nrn organization=acme:account=prod --format json"
-  case "$output" in *"--dimensions"*) return 1 ;; esac
 }
 
 @test "step: parameter_store selector picks parameter_store ARN from provider" {
@@ -190,13 +297,11 @@ JSON
 EOF
   chmod +x "$BIN_DIR/np"
 
-  export CONTEXT="$(make_ctx "org=acme" "" "")"
+  export CONTEXT="$(make_ctx '' '')"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
-    ASSUME_ROLE_SELECTOR=parameter_store
-    ASSUME_ROLE_OVERRIDE_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN
-    ASSUME_ROLE_DEFAULT_ENV=PARAMETER_STORE_ASSUME_ROLE_ARN_DEFAULT
+    $PS_CALLER
     source $PARAMETERS_DIR/utils/log
     source $SCRIPT
     echo ARN=\$ASSUME_ROLE_ARN_RESOLVED
@@ -205,55 +310,7 @@ EOF
   assert_contains "$output" "ARN=arn:ps"
 }
 
-@test "step: CONTEXT.dimensions are passed as dim1:val1,dim2:val2 to np" {
-  cat > "$BIN_DIR/np" << 'EOF'
-#!/bin/bash
-echo "np $*" >> "$NP_INVOKED_LOG"
-echo '{"results":[]}'
-EOF
-  chmod +x "$BIN_DIR/np"
-
-  export CONTEXT="$(make_ctx "org=acme" '{"environment":"prod","region":"us-east-1"}' "")"
-
-  run bash -c "
-    export PATH=$BIN_DIR:\$PATH
-    $SM_CALLER
-    source $PARAMETERS_DIR/utils/log
-    source $SCRIPT
-  "
-
-  run cat "$NP_INVOKED_LOG"
-  assert_contains "$output" "--dimensions environment:prod,region:us-east-1"
-  assert_contains "$output" "--nrn org=acme"
-}
-
-@test "step: dimensions absent → fall back to np scope read" {
-  cat > "$BIN_DIR/np" << 'EOF'
-#!/bin/bash
-echo "np $*" >> "$NP_INVOKED_LOG"
-if [ "$1" = "scope" ] && [ "$2" = "read" ]; then
-  echo '{"environment":"staging"}'
-else
-  echo '{"results":[]}'
-fi
-EOF
-  chmod +x "$BIN_DIR/np"
-
-  export CONTEXT="$(make_ctx "org=acme" "" "scope-uuid-1")"
-
-  run bash -c "
-    export PATH=$BIN_DIR:\$PATH
-    $SM_CALLER
-    source $PARAMETERS_DIR/utils/log
-    source $SCRIPT
-  "
-
-  run cat "$NP_INVOKED_LOG"
-  assert_contains "$output" "scope read --id scope-uuid-1 --format json --query .dimensions"
-  assert_contains "$output" "--dimensions environment:staging"
-}
-
-@test "step: no NRN → skip np lookup, no ARN, no aws call (agent creds)" {
+@test "step: no entities → skip np lookup, no ARN, no aws call (agent creds)" {
   export CONTEXT='{}'
 
   run bash -c "
@@ -272,7 +329,7 @@ EOF
   [ -z "$output" ]
 }
 
-@test "step: session prefix flows through to assume_role" {
+@test "step: session prefix flows through to assume_role with scope id" {
   cat > "$BIN_DIR/np" << 'EOF'
 #!/bin/bash
 cat << 'JSON'
@@ -283,7 +340,7 @@ JSON
 EOF
   chmod +x "$BIN_DIR/np"
 
-  export CONTEXT="$(make_ctx "org=acme" "" "scope-7")"
+  export CONTEXT="$(make_ctx '' '601620319')"
 
   run bash -c "
     export PATH=$BIN_DIR:\$PATH
@@ -294,5 +351,5 @@ EOF
   "
 
   run cat "$AWS_INVOKED_LOG"
-  assert_contains "$output" "--role-session-name np-secret-manager-scope-7"
+  assert_contains "$output" "--role-session-name np-secret-manager-601620319"
 }
