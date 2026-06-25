@@ -30,6 +30,7 @@ case "$entity_type" in
   account)      echo "\"prod\"" ;;
   namespace)    echo "\"billing\"" ;;
   application)  echo "\"api\"" ;;
+  scope)        echo "\"staging\"" ;;
   *)            echo "\"unknown\"" ;;
 esac
 EOF
@@ -101,6 +102,36 @@ EOF
   assert_equal "$status" "0"
   external_id=$(echo "$output" | jq -r '.external_id')
   expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/DB_PASSWORD-42#v1-create-uuid"
+  assert_equal "$external_id" "$expected"
+}
+
+@test "aws-secrets-manager store: scope-level value uses value_entities and includes scope segment" {
+  # Scope-level payload: value_entities carries the scope id; .entities is the
+  # app-level shape and must be IGNORED when value_entities is present.
+  export CONTEXT='{
+    "parameter_id": 42,
+    "parameter_name": "DB_PASSWORD",
+    "value": "my-secret",
+    "entities": {
+      "organization": "1255165411",
+      "account": "95118862",
+      "namespace": "37094320",
+      "application": "321402625"
+    },
+    "value_entities": {
+      "organization": "1255165411",
+      "account": "95118862",
+      "namespace": "37094320",
+      "application": "321402625",
+      "scope": "601620319"
+    }
+  }'
+
+  run bash -c "$DEPS; source $SCRIPT"
+
+  assert_equal "$status" "0"
+  external_id=$(echo "$output" | jq -r '.external_id')
+  expected="organization=acme-1255165411/account=prod-95118862/namespace=billing-37094320/application=api-321402625/scope=staging-601620319/DB_PASSWORD-42#v1-create-uuid"
   assert_equal "$external_id" "$expected"
 }
 

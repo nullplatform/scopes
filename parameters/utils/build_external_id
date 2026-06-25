@@ -29,8 +29,11 @@ sanitize_for_path() {
 }
 
 build_external_id() {
+  # value_entities is the scope-level shape (carries the scope segment).
+  # entities is the app/dimension-level shape (no scope). Falling back to {}
+  # only matters for tests; in production at least one is always present.
   local entities_json
-  entities_json=$(echo "$CONTEXT" | jq -c '.entities // {}')
+  entities_json=$(echo "$CONTEXT" | jq -c '.value_entities // .entities // {}')
 
   local tmp_dir
   tmp_dir=$(mktemp -d)
