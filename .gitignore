@@ -145,6 +145,22 @@ frontend/deployment/tests/integration/volume/
 # Terraform/OpenTofu
 .terraform/
 .terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+*.tfbackend
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+backend-local.tf
+!*.tfvars.example
+!*.tfbackend.example
+!*_override.tf.example
 
 # Generated test certificates
 testing/docker/certs/
