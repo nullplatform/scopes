@@ -14,6 +14,10 @@ setup() {
   export SCRIPT="$PARAMETERS_DIR/utils/dispatch"
   export PROVIDER_DIR="$BATS_TEST_TMPDIR/fake_provider"
   mkdir -p "$PROVIDER_DIR"
+
+  # dispatch logs a timing line via the log function; it's normally pre-loaded
+  # by the workflow's first step. Mirror that for tests.
+  export DISPATCH_PRELUDE="source $PARAMETERS_DIR/utils/log;"
 }
 
 @test "dispatch: ACTION=store sources provider's store script" {
@@ -21,7 +25,7 @@ setup() {
 echo '{"external_id":"id-1","metadata":{}}'
 EOF
 
-  run bash -c "ACTION=store source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=store source $SCRIPT"
 
   assert_equal "$status" "0"
   assert_equal "$output" '{"external_id":"id-1","metadata":{}}'
@@ -32,7 +36,7 @@ EOF
 echo '{"value":"v"}'
 EOF
 
-  run bash -c "ACTION=retrieve source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=retrieve source $SCRIPT"
 
   assert_equal "$status" "0"
   assert_equal "$output" '{"value":"v"}'
@@ -43,7 +47,7 @@ EOF
 echo '{"success":true}'
 EOF
 
-  run bash -c "ACTION=delete source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=delete source $SCRIPT"
 
   assert_equal "$status" "0"
   assert_equal "$output" '{"success":true}'
@@ -54,7 +58,7 @@ EOF
 echo '{"success":true,"provider":"fake"}'
 EOF
 
-  run bash -c "ACTION=notify source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=notify source $SCRIPT"
 
   assert_equal "$status" "0"
   assert_contains "$output" '"provider":"fake"'
@@ -62,7 +66,7 @@ EOF
 
 @test "dispatch: ACTION=notify falls back to default ack when provider has no notify" {
   # Intentionally do NOT create $PROVIDER_DIR/notify
-  run bash -c "ACTION=notify source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=notify source $SCRIPT"
 
   assert_equal "$status" "0"
   assert_equal "$output" '{"success":true}'
@@ -74,7 +78,7 @@ echo "fatal" >&2
 exit 7
 EOF
 
-  run bash -c "ACTION=store source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=store source $SCRIPT"
 
   assert_equal "$status" "7"
   assert_contains "$output" "fatal"
@@ -85,7 +89,7 @@ EOF
 echo "{\"provider_dir\":\"$PROVIDER_DIR\"}"
 EOF
 
-  run bash -c "ACTION=store source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=store source $SCRIPT"
 
   assert_equal "$status" "0"
   assert_contains "$output" "$PROVIDER_DIR"
@@ -93,7 +97,7 @@ EOF
 
 @test "dispatch: fails when provider's <ACTION> script doesn't exist (non-notify)" {
   # No store script exists
-  run bash -c "ACTION=store source $SCRIPT"
+  run bash -c "$DISPATCH_PRELUDE ACTION=store source $SCRIPT"
 
   [ "$status" -ne 0 ]
 }

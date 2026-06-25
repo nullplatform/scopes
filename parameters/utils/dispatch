@@ -19,4 +19,6 @@ if [ "$ACTION" = "notify" ] && [ ! -f "$PROVIDER_DIR/notify" ]; then
   exit 0
 fi
 
+T_DISPATCH=$(timer_now)
 source "$PROVIDER_DIR/$ACTION"
+log debug "⏱  dispatch($ACTION) total $(timer_elapsed "$T_DISPATCH")"

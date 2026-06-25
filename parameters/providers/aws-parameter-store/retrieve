@@ -19,12 +19,14 @@ LOOKUP_NAME="$PARAM_NAME"
 [ -n "${EXTERNAL_ID_VERSION:-}" ] && LOOKUP_NAME="${PARAM_NAME}:${EXTERNAL_ID_VERSION}"
 
 err_file=$(mktemp)
+T_AWS=$(timer_now)
 if VALUE=$(aws ssm get-parameter \
         --region "$AWS_REGION" \
         --name "$LOOKUP_NAME" \
         --with-decryption \
         --query Parameter.Value \
         --output text 2>"$err_file"); then
+  log debug "   ⏱  aws ssm get-parameter $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
   jq -n --arg value "$VALUE" '{value: $value}'
 else

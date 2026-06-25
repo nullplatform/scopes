@@ -21,6 +21,7 @@ build_external_id
 AKV_SUFFIX=$(echo "$EXTERNAL_ID" | tr '/=' '--')
 SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
 
+T_AZ=$(timer_now)
 if ! AKV_ID=$(az keyvault secret set \
         --vault-name "$AZ_VAULT_NAME" \
         --name "$SECRET_NAME" \
@@ -40,6 +41,7 @@ if ! AKV_ID=$(az keyvault secret set \
   log error "   • Check access policy: az keyvault show --name $AZ_VAULT_NAME --query properties.accessPolicies"
   exit 1
 fi
+log debug "   ⏱  az keyvault secret set $(timer_elapsed "$T_AZ")"
 
 # AKV id URL format: https://<vault>.vault.azure.net/secrets/<name>/<version>
 # The last path component is the version id (hex string).

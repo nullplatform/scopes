@@ -13,9 +13,11 @@ set -euo pipefail
 PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID_PATH}"
 
 err_file=$(mktemp)
+T_AWS=$(timer_now)
 if aws ssm delete-parameter \
         --region "$AWS_REGION" \
         --name "$PARAM_NAME" >/dev/null 2>"$err_file"; then
+  log debug "   ⏱  aws ssm delete-parameter $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
   echo '{
   "success": true
