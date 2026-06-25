@@ -1,0 +1,126 @@
+#!/bin/bash
+# Sourceable. Fires every `np` read this workflow will need, in parallel,
+# into a single tmpdir cache. Downstream scripts (build_context,
+# assume_role_step, build_external_id) read from the cache instead of
+# re-invoking `np`.
+#
+# Why this exists: each `np` CLI invocation is ~1–2s (startup + HTTPS call to
+# the platform). The store/retrieve/delete flow chains 5–9 such calls in
+# series across modules. Running them in parallel turns Σ(t) into max(t) and
+# typically cuts wall time by 3–6×.
+#
+# Inputs:
+#   CONTEXT  — JSON of the notification body (set by entrypoint)
+#   SPEC_ID  — $CONTEXT.provider.specification_id (set by build_context)
+#
+# Escape hatch for tests: if NP_CACHE_DIR is pre-set and exists, prefetch is
+# skipped — tests pre-populate the cache with fixtures and source the rest of
+# the chain normally without touching `np` at all.
+#
+# Output:
+#   NP_CACHE_DIR — exported; contains:
+#     spec.json                 — provider specification
+#     {organization,account,namespace,application}.json — entity records (slug + metadata)
+#     scope.json                — entity record AND dimensions source (when scope-level)
+#     iam.json                  — `np provider list --categories identity-access-control`
+#   NRN          — exported; computed locally from entities/value_entities
+
+: "${CONTEXT:?CONTEXT must be set before sourcing prefetch_np}"
+: "${SPEC_ID:?SPEC_ID must be set before sourcing prefetch_np}"
+
+if [ -n "${NP_CACHE_DIR:-}" ] && [ -d "$NP_CACHE_DIR" ]; then
+  log debug "📦 NP_CACHE_DIR pre-set ($NP_CACHE_DIR) — skipping prefetch"
+  return 0 2>/dev/null || exit 0
+fi
+
+NP_CACHE_DIR=$(mktemp -d)
+export NP_CACHE_DIR
+
+# value_entities (scope-level) wins over entities (app/dimension-level).
+ENTITIES_JSON=$(echo "$CONTEXT" | jq -c '.value_entities // .entities // {}')
+
+NRN=$(printf '%s' "$ENTITIES_JSON" | jq -r '
+  if (.organization // null) == null then "" else
+    [
+      ("organization=" + .organization),
+      ("account=" + .account),
+      ("namespace=" + .namespace),
+      ("application=" + .application)
+    ]
+    + (if .scope then [("scope=" + .scope)] else [] end)
+    | join(":")
+  end')
+export NRN
+
+SCOPE_ID_PREFETCH=$(printf '%s' "$ENTITIES_JSON" | jq -r '.scope // empty')
+
+# Top-level CONTEXT.dimensions: if present, we can fire the IAM lookup in
+# wave 1. If absent and there's a scope, we need to wait for scope.json so we
+# can extract its dimensions, then fire IAM in wave 2.
+TOP_DIMS_JSON=$(echo "$CONTEXT" | jq -c '.dimensions // empty')
+DIMS_ARG=""
+if [ -n "$TOP_DIMS_JSON" ] && [ "$TOP_DIMS_JSON" != "null" ] && [ "$TOP_DIMS_JSON" != "{}" ]; then
+  DIMS_ARG=$(printf '%s' "$TOP_DIMS_JSON" | jq -r '
+    to_entries | map("\(.key):\(.value)") | join(",")')
+fi
+
+CAN_FIRE_IAM_WAVE1="yes"
+if [ -z "$DIMS_ARG" ] && [ -n "$SCOPE_ID_PREFETCH" ]; then
+  # No top-level dims, and we have a scope — defer IAM until scope.json lands.
+  CAN_FIRE_IAM_WAVE1="no"
+fi
+
+# ── Wave 1: spec + entities + (maybe) IAM ───────────────────────────────────
+T_PREFETCH=$(timer_now)
+log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} iam_wave1=$CAN_FIRE_IAM_WAVE1)"
+
+( np provider specification read --id "$SPEC_ID" --format json \
+    > "$NP_CACHE_DIR/spec.json" 2>"$NP_CACHE_DIR/spec.err" ) &
+
+for entity_type in organization account namespace application; do
+  entity_id=$(printf '%s' "$ENTITIES_JSON" | jq -r ".$entity_type // empty")
+  if [ -n "$entity_id" ]; then
+    ( np "$entity_type" read --id "$entity_id" --format json \
+        > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err" ) &
+  fi
+done
+
+if [ -n "$SCOPE_ID_PREFETCH" ]; then
+  ( np scope read --id "$SCOPE_ID_PREFETCH" --format json \
+      > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err" ) &
+fi
+
+if [ "$CAN_FIRE_IAM_WAVE1" = "yes" ] && [ -n "$NRN" ]; then
+  if [ -n "$DIMS_ARG" ]; then
+    ( np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
+        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" ) &
+  else
+    ( np provider list --categories identity-access-control --nrn "$NRN" --format json \
+        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" ) &
+  fi
+fi
+
+wait
+log debug "⏱  Prefetch wave 1 $(timer_elapsed "$T_PREFETCH")"
+
+# ── Wave 2: IAM (only if deferred above) ────────────────────────────────────
+if [ "$CAN_FIRE_IAM_WAVE1" = "no" ] && [ -n "$NRN" ]; then
+  if [ -s "$NP_CACHE_DIR/scope.json" ]; then
+    SCOPE_DIMS_JSON=$(jq -c '.dimensions // empty' < "$NP_CACHE_DIR/scope.json" 2>/dev/null || echo "")
+    if [ -n "$SCOPE_DIMS_JSON" ] && [ "$SCOPE_DIMS_JSON" != "null" ] && [ "$SCOPE_DIMS_JSON" != "{}" ]; then
+      DIMS_ARG=$(printf '%s' "$SCOPE_DIMS_JSON" | jq -r '
+        to_entries | map("\(.key):\(.value)") | join(",")')
+    fi
+  fi
+
+  T_WAVE2=$(timer_now)
+  log debug "🚀 Prefetch wave 2 (iam${DIMS_ARG:+ dims=$DIMS_ARG})"
+  if [ -n "$DIMS_ARG" ]; then
+    np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
+      > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" || true
+  else
+    np provider list --categories identity-access-control --nrn "$NRN" --format json \
+      > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" || true
+  fi
+  log debug "⏱  Prefetch wave 2 $(timer_elapsed "$T_WAVE2")"
+fi

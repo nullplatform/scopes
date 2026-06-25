@@ -22,19 +22,16 @@ setup() {
 
   mkdir -p "$BATS_TEST_TMPDIR/bin"
 
-  cat > "$BATS_TEST_TMPDIR/bin/np" << 'EOF'
-#!/bin/bash
-entity_type="$1"
-case "$entity_type" in
-  organization) echo "\"acme\"" ;;
-  account)      echo "\"prod\"" ;;
-  namespace)    echo "\"billing\"" ;;
-  application)  echo "\"api\"" ;;
-  scope)        echo "\"staging\"" ;;
-  *)            echo "\"unknown\"" ;;
-esac
-EOF
-  chmod +x "$BATS_TEST_TMPDIR/bin/np"
+  # Pre-populate the np cache that utils/prefetch_np would normally produce.
+  # The store path uses utils/build_external_id which reads <entity>.json from
+  # this cache instead of calling np.
+  export NP_CACHE_DIR="$BATS_TEST_TMPDIR/np-cache"
+  mkdir -p "$NP_CACHE_DIR"
+  echo '{"slug":"acme"}'    > "$NP_CACHE_DIR/organization.json"
+  echo '{"slug":"prod"}'    > "$NP_CACHE_DIR/account.json"
+  echo '{"slug":"billing"}' > "$NP_CACHE_DIR/namespace.json"
+  echo '{"slug":"api"}'     > "$NP_CACHE_DIR/application.json"
+  echo '{"slug":"staging"}' > "$NP_CACHE_DIR/scope.json"
 
   export AWS_LOG="$BATS_TEST_TMPDIR/aws.log"
   cat > "$BATS_TEST_TMPDIR/bin/aws" << 'EOF'

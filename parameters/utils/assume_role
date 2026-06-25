@@ -20,6 +20,7 @@ if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   _ar_session_name="${ASSUME_ROLE_SESSION_PREFIX:-np-parameters}-${SCOPE_ID:-workflow}"
 
   _ar_sts_error=$(mktemp)
+  T_STS=$(timer_now 2>/dev/null || echo 0)
   if ! ASSUMED_CREDS=$(aws sts assume-role \
     --role-arn "$ASSUME_ROLE_ARN_RESOLVED" \
     --role-session-name "$_ar_session_name" \
@@ -30,6 +31,7 @@ if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
     return 1
   fi
   rm -f "$_ar_sts_error"
+  log debug "   ⏱  sts:AssumeRole $(timer_elapsed "$T_STS" 2>/dev/null || echo "?")"
 
   _ar_access_key=$(echo "$ASSUMED_CREDS"    | jq -r '.Credentials.AccessKeyId // ""')
   _ar_secret_key=$(echo "$ASSUMED_CREDS"    | jq -r '.Credentials.SecretAccessKey // ""')

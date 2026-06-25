@@ -59,67 +59,22 @@ source "$SCRIPT_DIR/assume_role_lib"
 # Session prefix for the STS session name (informational).
 export ASSUME_ROLE_SESSION_PREFIX="${ASSUME_ROLE_SESSION_PREFIX:-np-parameters}"
 
-# --- 1. Resolve NRN from entities/value_entities ---------------------------
-# Precedence: value_entities (scope-level — includes the scope segment) wins
-# over entities (app/dimension-level). organization/account/namespace/application
-# are guaranteed to be present in both shapes.
-ENTITIES_JSON=$(echo "${CONTEXT:-}" | jq -c '.value_entities // .entities // empty' 2>/dev/null)
+# SCOPE_ID is used by assume_role only for the STS session-name suffix.
+# Pull it from the same source NRN was built from (entities/value_entities).
+if [ -z "${SCOPE_ID:-}" ]; then
+  SCOPE_ID=$(echo "${CONTEXT:-}" | jq -r '(.value_entities // .entities // {}).scope // empty' 2>/dev/null)
+  export SCOPE_ID
+fi
 
-if [ -z "$ENTITIES_JSON" ] || [ "$ENTITIES_JSON" = "null" ]; then
-  log warn "   ⚠️  No entities/value_entities in CONTEXT — skipping IAM provider lookup (agent credentials only)"
-  IAM_ATTRIBUTES=""
-  NRN=""
+# IAM provider data is pre-fetched by utils/prefetch_np into $NP_CACHE_DIR/iam.json.
+# No np call here — just read the cached result.
+if [ -n "${NP_CACHE_DIR:-}" ] && [ -s "$NP_CACHE_DIR/iam.json" ]; then
+  IAM_ATTRIBUTES=$(jq -c '.results[0].attributes // {}' < "$NP_CACHE_DIR/iam.json" 2>/dev/null)
 else
-  NRN=$(printf '%s' "$ENTITIES_JSON" | jq -r '
-    [
-      ("organization=" + .organization),
-      ("account=" + .account),
-      ("namespace=" + .namespace),
-      ("application=" + .application)
-    ]
-    + (if .scope then [("scope=" + .scope)] else [] end)
-    | join(":")' 2>/dev/null)
-
-  # SCOPE_ID (used by assume_role for the STS session name) only exists when
-  # the payload is scope-level — i.e. value_entities.scope is present.
-  if [ -z "${SCOPE_ID:-}" ]; then
-    SCOPE_ID=$(printf '%s' "$ENTITIES_JSON" | jq -r '.scope // empty' 2>/dev/null)
-    export SCOPE_ID
+  if [ -n "${NP_CACHE_DIR:-}" ] && [ -s "$NP_CACHE_DIR/iam.err" ]; then
+    log warn "   ⚠️  IAM provider lookup failed during prefetch: $(cat "$NP_CACHE_DIR/iam.err")"
   fi
-
-  # --- 2. Resolve dimensions ----------------------------------------------
-  # Top-level .dimensions in the payload (dimension-level store). If absent but
-  # we have a scope_id, ask the platform via `np scope read`.
-  DIMS_JSON=$(echo "${CONTEXT:-}" | jq -c '.dimensions // empty' 2>/dev/null)
-  if [ -z "$DIMS_JSON" ] || [ "$DIMS_JSON" = "null" ] || [ "$DIMS_JSON" = "{}" ]; then
-    if [ -n "${SCOPE_ID:-}" ]; then
-      DIMS_JSON=$(np scope read --id "$SCOPE_ID" --format json --query '.dimensions' 2>/dev/null || echo "")
-    fi
-  fi
-
-  # Convert {key:val,...} to "key:val,key2:val2" — empty/null → empty string
-  DIMS_ARG=""
-  if [ -n "$DIMS_JSON" ] && [ "$DIMS_JSON" != "null" ] && [ "$DIMS_JSON" != "{}" ]; then
-    DIMS_ARG=$(printf '%s' "$DIMS_JSON" | jq -r '
-      to_entries
-      | map("\(.key):\(.value)")
-      | join(",")' 2>/dev/null)
-  fi
-
-  # --- 3. Fetch the IAM provider (dimension-resolved by the platform) -----
-  log debug "   🔍 Looking up IAM provider (NRN=$NRN${DIMS_ARG:+ dimensions=$DIMS_ARG})"
-  _ar_provider_err=$(mktemp)
-  if [ -n "$DIMS_ARG" ]; then
-    PROVIDER_JSON=$(np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json 2>"$_ar_provider_err") || PROVIDER_JSON=""
-  else
-    PROVIDER_JSON=$(np provider list --categories identity-access-control --nrn "$NRN" --format json 2>"$_ar_provider_err") || PROVIDER_JSON=""
-  fi
-  if [ -z "$PROVIDER_JSON" ]; then
-    log warn "   ⚠️  np provider list failed: $(cat "$_ar_provider_err")"
-  fi
-  rm -f "$_ar_provider_err"
-
-  IAM_ATTRIBUTES=$(echo "${PROVIDER_JSON:-}" | jq -c '.results[0].attributes // {}' 2>/dev/null)
+  IAM_ATTRIBUTES=""
 fi
 
 # --- 4. Resolve and export the ARN -----------------------------------------

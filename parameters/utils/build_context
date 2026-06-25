@@ -68,7 +68,14 @@ if [ -z "$SPEC_ID" ]; then
   exit 1
 fi
 
-if ! SPEC_JSON=$(np provider specification read --id "$SPEC_ID" --format json 2>&1); then
+# Pre-fetch every `np` read this workflow needs, in parallel. Downstream
+# (assume_role_step, build_external_id) reads from $NP_CACHE_DIR instead of
+# re-invoking np.
+T_BUILD_CTX=$(timer_now)
+export SPEC_ID
+source "$SCRIPT_DIR/prefetch_np"
+
+if [ ! -s "$NP_CACHE_DIR/spec.json" ]; then
   log error "❌ Failed to read provider specification (id=$SPEC_ID)"
   log error ""
   log error "💡 Possible causes:"
@@ -79,9 +86,10 @@ if ! SPEC_JSON=$(np provider specification read --id "$SPEC_ID" --format json 2>
   log error "🔧 How to fix:"
   log error "   • Verify the spec exists: np provider specification read --id $SPEC_ID"
   log error "   • Check np auth: np whoami"
-  log error "Underlying output: $SPEC_JSON"
+  [ -s "$NP_CACHE_DIR/spec.err" ] && log error "Underlying output: $(cat "$NP_CACHE_DIR/spec.err")"
   exit 1
 fi
+SPEC_JSON=$(cat "$NP_CACHE_DIR/spec.json")
 
 ACTIVE_PROVIDER=$(echo "$SPEC_JSON" | jq -r '.slug // empty')
 if [ -z "$ACTIVE_PROVIDER" ]; then
@@ -114,5 +122,9 @@ log debug "📦 active_provider=$ACTIVE_PROVIDER kind=$PARAMETER_KIND spec_id=$S
 # --- Source provider's setup for validation + connection handles ---
 if [ -f "$PROVIDER_DIR/setup" ]; then
   log debug "📡 Sourcing $ACTIVE_PROVIDER/setup"
+  T_SETUP=$(timer_now)
   source "$PROVIDER_DIR/setup"
+  log debug "⏱  Provider setup $(timer_elapsed "$T_SETUP")"
 fi
+
+log debug "⏱  build_context total $(timer_elapsed "$T_BUILD_CTX")"
