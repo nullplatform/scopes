@@ -30,7 +30,8 @@ Replace `<AWS_REGION>` and `<AWS_ACCOUNT_ID>` before applying. The `nullplatform
         "secretsmanager:CreateSecret",
         "secretsmanager:PutSecretValue",
         "secretsmanager:GetSecretValue",
-        "secretsmanager:DeleteSecret"
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:TagResource"
       ],
       "Resource": [
         "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:nullplatform/*"
