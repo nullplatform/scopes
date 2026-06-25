@@ -21,11 +21,12 @@ CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
 export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
 export CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
 
-IFS=':' read -ra ACTION_PARTS <<< "${NOTIFICATION_ACTION:-}"
+NOTIFICATION_ACTION=$(echo "$CONTEXT" | jq -r '.action // empty')
+IFS=':' read -ra ACTION_PARTS <<< "$NOTIFICATION_ACTION"
 ACTION_TO_EXECUTE="${ACTION_PARTS[1]:-}"
 
 if [ -z "$ACTION_TO_EXECUTE" ]; then
-  echo "❌ NOTIFICATION_ACTION is missing the action part (expected 'parameter:<action>')" >&2
+  echo "❌ CONTEXT.action is missing the action part (got '$NOTIFICATION_ACTION', expected 'parameter:<action>')" >&2
   exit 1
 fi
 
