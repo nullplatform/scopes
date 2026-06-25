@@ -1,0 +1,19 @@
+nrn        = "organization=acme-1255165411:account=prod-95118862"
+np_api_key = "REPLACE_ME"
+
+extra_visible_to_nrns = []
+
+instances = {
+  prod-billing = {
+    nrn        = "organization=acme-1255165411:account=prod-95118862:namespace=billing-37094320"
+    dimensions = { environment = "production" }
+    kms_key_id = "alias/parameters-prod-billing"
+    tier       = "Standard"
+  }
+  staging-billing = {
+    nrn        = "organization=acme-1255165411:account=staging-95118863:namespace=billing-37094320"
+    dimensions = { environment = "staging" }
+    kms_key_id = ""
+    tier       = "Standard"
+  }
+}

@@ -1,0 +1,17 @@
+nrn        = "organization=acme-1255165411:account=prod-95118862"
+np_api_key = "REPLACE_ME"
+
+extra_visible_to_nrns = []
+
+instances = {
+  prod-billing = {
+    nrn        = "organization=acme-1255165411:account=prod-95118862:namespace=billing-37094320"
+    dimensions = { environment = "production" }
+    address    = "https://vault.prod.example.com:8200"
+  }
+  staging-billing = {
+    nrn        = "organization=acme-1255165411:account=staging-95118863:namespace=billing-37094320"
+    dimensions = { environment = "staging" }
+    address    = "https://vault.staging.example.com:8200"
+  }
+}
