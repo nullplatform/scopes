@@ -34,10 +34,14 @@ EOF
   # Pre-populate NP_CACHE_DIR so prefetch_np is bypassed (and so is any np call).
   export NP_CACHE_DIR="$BATS_TEST_TMPDIR/np-cache"
   mkdir -p "$NP_CACHE_DIR"
+
+  # assume_role uses $SERVICE_PATH/credentials/ for the sts cache.
+  export SERVICE_PATH="$BATS_TEST_TMPDIR/service"
+  mkdir -p "$SERVICE_PATH"
 }
 
 teardown() {
-  unset CONTEXT SCOPE_ID NP_CACHE_DIR \
+  unset CONTEXT SCOPE_ID NP_CACHE_DIR SERVICE_PATH \
     ASSUME_ROLE_SELECTOR ASSUME_ROLE_OVERRIDE_ENV ASSUME_ROLE_DEFAULT_ENV \
     ASSUME_ROLE_SESSION_PREFIX ASSUME_ROLE_ARN_RESOLVED \
     SECRET_MANAGER_ASSUME_ROLE_ARN SECRET_MANAGER_ASSUME_ROLE_ARN_DEFAULT \

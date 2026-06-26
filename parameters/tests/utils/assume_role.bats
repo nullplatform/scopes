@@ -14,13 +14,16 @@ setup() {
   export BIN_DIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN_DIR"
 
-  # Isolate the sts-creds cache per test so we don't pollute /tmp across runs.
-  export NP_STS_CACHE_DIR="$BATS_TEST_TMPDIR/sts-cache"
+  # Isolate the sts-creds cache per test: cache lives under
+  # $SERVICE_PATH/credentials/, so a fresh SERVICE_PATH per test = fresh cache.
+  export SERVICE_PATH="$BATS_TEST_TMPDIR/service"
+  mkdir -p "$SERVICE_PATH"
+  export STS_CACHE_DIR="$SERVICE_PATH/credentials"
 }
 
 teardown() {
   unset ASSUME_ROLE_ARN_RESOLVED ASSUME_ROLE_SESSION_PREFIX \
-    NP_STS_CACHE_DIR NP_STS_CACHE_DISABLE NP_STS_CACHE_BUFFER_SECS \
+    SERVICE_PATH STS_CACHE_DIR NP_STS_CACHE_BUFFER_SECS \
     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 }
 
@@ -190,10 +193,10 @@ EOF
   export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/cached"
 
   # Pre-populate the cache with creds that expire far in the future.
-  mkdir -p "$NP_STS_CACHE_DIR"
+  mkdir -p "$STS_CACHE_DIR"
   CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
   [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
-  cat > "$NP_STS_CACHE_DIR/$CACHE_KEY.json" << EOF
+  cat > "$STS_CACHE_DIR/$CACHE_KEY.json" << EOF
 {
   "Credentials": {
     "AccessKeyId": "AKIA-CACHED",
@@ -239,11 +242,11 @@ EOF
 
   export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/stale"
 
-  mkdir -p "$NP_STS_CACHE_DIR"
+  mkdir -p "$STS_CACHE_DIR"
   CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
   [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
   # Past expiration — should trigger refresh.
-  cat > "$NP_STS_CACHE_DIR/$CACHE_KEY.json" << EOF
+  cat > "$STS_CACHE_DIR/$CACHE_KEY.json" << EOF
 {
   "Credentials": {
     "AccessKeyId": "AKIA-STALE",
@@ -266,55 +269,8 @@ EOF
   run cat "$AWS_CALL_LOG"
   assert_contains "$output" "sts assume-role"
   # New creds were written to the cache
-  run cat "$NP_STS_CACHE_DIR/$CACHE_KEY.json"
+  run cat "$STS_CACHE_DIR/$CACHE_KEY.json"
   assert_contains "$output" "AKIA-FRESH"
-}
-
-@test "assume_role: cache disabled via NP_STS_CACHE_DISABLE — no read, no write" {
-  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
-  : > "$AWS_CALL_LOG"
-  cat > "$BIN_DIR/aws" << EOF
-#!/bin/bash
-echo "\$*" >> "\$AWS_CALL_LOG"
-cat << JSON
-{
-  "Credentials": {
-    "AccessKeyId": "AKIA-NEW",
-    "SecretAccessKey": "sk-new",
-    "SessionToken": "tok-new",
-    "Expiration": "$(far_future_iso)"
-  }
-}
-JSON
-EOF
-  chmod +x "$BIN_DIR/aws"
-
-  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/disabled"
-  export NP_STS_CACHE_DISABLE=1
-
-  # Pre-populate a fresh cache entry — must be IGNORED.
-  mkdir -p "$NP_STS_CACHE_DIR"
-  CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
-  [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
-  echo '{"Credentials":{"AccessKeyId":"FROM-CACHE","SecretAccessKey":"x","SessionToken":"x","Expiration":"2099-12-31T23:59:59Z"}}' \
-    > "$NP_STS_CACHE_DIR/$CACHE_KEY.json"
-  # Snapshot before
-  before=$(cat "$NP_STS_CACHE_DIR/$CACHE_KEY.json")
-
-  run bash -c "
-    export PATH=$BIN_DIR:\$PATH
-    source $PARAMETERS_DIR/utils/log
-    source $SCRIPT
-    echo AKID=\$AWS_ACCESS_KEY_ID
-  "
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "AKID=AKIA-NEW"
-  run cat "$AWS_CALL_LOG"
-  assert_contains "$output" "sts assume-role"
-  # Cache file should be unchanged (no write)
-  after=$(cat "$NP_STS_CACHE_DIR/$CACHE_KEY.json")
-  assert_equal "$after" "$before"
 }
 
 @test "assume_role: different ARNs use different cache files" {
@@ -357,6 +313,6 @@ EOF
   assert_contains "$output" "arn:aws:iam::1:role/A"
   assert_contains "$output" "arn:aws:iam::1:role/B"
   # Both cache files exist.
-  run ls "$NP_STS_CACHE_DIR"
+  run ls "$STS_CACHE_DIR"
   [ "$(echo "$output" | wc -l | tr -d ' ')" -ge "2" ]
 }

@@ -9,14 +9,12 @@
 #   STS tokens are valid for ~1h (configurable up to 12h via the target role's
 #   MaxSessionDuration). The default sts:AssumeRole call takes ~0.9s — costly
 #   to repeat on every workflow run. We cache the full JSON response per ARN
-#   under $NP_STS_CACHE_DIR (default /tmp/np-sts-cache), keyed by a SHA-256
-#   hash of the ARN. The cache file is reused while AWS's reported Expiration
-#   is more than $NP_STS_CACHE_BUFFER_SECS (default 60s) in the future.
+#   under $SERVICE_PATH/credentials/, keyed by a SHA-256 hash of the ARN. The
+#   cache file is reused while AWS's reported Expiration is more than 60s in
+#   the future (NP_STS_CACHE_BUFFER_SECS env var can tune that buffer).
 #
 #   Files are mode 600 in a 700 dir; writes go through a tmp + atomic rename
 #   so two parallel workflows don't tear a half-written file.
-#
-#   Disable with NP_STS_CACHE_DISABLE=1.
 #
 # Provider-agnostic: the caller's setup goes through utils/assume_role_step,
 # which writes the final ARN to ASSUME_ROLE_ARN_RESOLVED regardless of which
@@ -25,7 +23,8 @@
 # Requires: aws CLI, jq, and the `log` function (loaded by the workflow).
 # Expects:  ASSUME_ROLE_ARN_RESOLVED (set by utils/assume_role_step),
 #           ASSUME_ROLE_SESSION_PREFIX (set by assume_role_step, defaults to
-#           "np-parameters"), SCOPE_ID (optional, used for the session name).
+#           "np-parameters"), SCOPE_ID (optional, used for the session name),
+#           SERVICE_PATH (agent runtime — used for the cache dir).
 
 if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   log info "   🔑 Assuming role: $ASSUME_ROLE_ARN_RESOLVED"
@@ -33,35 +32,33 @@ if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   _ar_session_name="${ASSUME_ROLE_SESSION_PREFIX:-np-parameters}-${SCOPE_ID:-workflow}"
 
   # ---- Cache lookup --------------------------------------------------------
-  ASSUMED_CREDS=""
-  _ar_cache_file=""
-  if [ "${NP_STS_CACHE_DISABLE:-0}" != "1" ]; then
-    _ar_cache_dir="${NP_STS_CACHE_DIR:-/tmp/np-sts-cache}"
-    # SHA-256 of the ARN as cache key. Try GNU coreutils first, fall back to
-    # macOS `shasum -a 256` so this also works in local smoke tests.
-    if command -v sha256sum >/dev/null 2>&1; then
-      _ar_cache_key=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum | cut -c1-16)
-    else
-      _ar_cache_key=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
-    fi
-    _ar_cache_file="$_ar_cache_dir/$_ar_cache_key.json"
+  : "${SERVICE_PATH:?SERVICE_PATH must be set (the agent runtime supplies this)}"
+  _ar_cache_dir="$SERVICE_PATH/credentials"
+  # SHA-256 of the ARN as cache key. Try GNU coreutils first, fall back to
+  # macOS `shasum -a 256` so this also works in local smoke tests.
+  if command -v sha256sum >/dev/null 2>&1; then
+    _ar_cache_key=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum | cut -c1-16)
+  else
+    _ar_cache_key=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
+  fi
+  _ar_cache_file="$_ar_cache_dir/$_ar_cache_key.json"
 
-    if [ -s "$_ar_cache_file" ]; then
-      _ar_exp=$(jq -r '.Credentials.Expiration // empty' < "$_ar_cache_file" 2>/dev/null)
-      if [ -n "$_ar_exp" ]; then
-        _ar_now=$(date -u +%s)
-        # GNU date (Linux containers) parses ISO directly. macOS needs `-j -f`.
-        _ar_exp_epoch=$(date -u -d "$_ar_exp" +%s 2>/dev/null \
-                     || date -u -j -f "%Y-%m-%dT%H:%M:%S%z" "${_ar_exp/Z/+0000}" +%s 2>/dev/null \
-                     || echo 0)
-        _ar_ttl=$(( _ar_exp_epoch - _ar_now ))
-        _ar_buffer="${NP_STS_CACHE_BUFFER_SECS:-60}"
-        if [ "$_ar_ttl" -gt "$_ar_buffer" ]; then
-          ASSUMED_CREDS=$(cat "$_ar_cache_file")
-          log debug "   🎫 sts cache hit (expires in ${_ar_ttl}s)"
-        else
-          log debug "   🎫 sts cache stale (ttl=${_ar_ttl}s, buffer=${_ar_buffer}s)"
-        fi
+  ASSUMED_CREDS=""
+  if [ -s "$_ar_cache_file" ]; then
+    _ar_exp=$(jq -r '.Credentials.Expiration // empty' < "$_ar_cache_file" 2>/dev/null)
+    if [ -n "$_ar_exp" ]; then
+      _ar_now=$(date -u +%s)
+      # GNU date (Linux containers) parses ISO directly. macOS needs `-j -f`.
+      _ar_exp_epoch=$(date -u -d "$_ar_exp" +%s 2>/dev/null \
+                   || date -u -j -f "%Y-%m-%dT%H:%M:%S%z" "${_ar_exp/Z/+0000}" +%s 2>/dev/null \
+                   || echo 0)
+      _ar_ttl=$(( _ar_exp_epoch - _ar_now ))
+      _ar_buffer="${NP_STS_CACHE_BUFFER_SECS:-60}"
+      if [ "$_ar_ttl" -gt "$_ar_buffer" ]; then
+        ASSUMED_CREDS=$(cat "$_ar_cache_file")
+        log debug "   🎫 sts cache hit (expires in ${_ar_ttl}s)"
+      else
+        log debug "   🎫 sts cache stale (ttl=${_ar_ttl}s, buffer=${_ar_buffer}s)"
       fi
     fi
   fi
@@ -84,15 +81,13 @@ if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
 
     # Persist to cache (atomic via tmp + rename so concurrent workflows can't
     # observe a half-written file). Permissions: 600 on file, 700 on dir.
-    if [ "${NP_STS_CACHE_DISABLE:-0}" != "1" ] && [ -n "$_ar_cache_file" ]; then
-      mkdir -p "$_ar_cache_dir"
-      chmod 700 "$_ar_cache_dir" 2>/dev/null || true
-      _ar_cache_tmp="$_ar_cache_file.$$"
-      printf '%s' "$ASSUMED_CREDS" > "$_ar_cache_tmp"
-      chmod 600 "$_ar_cache_tmp" 2>/dev/null || true
-      mv -f "$_ar_cache_tmp" "$_ar_cache_file"
-      log debug "   🎫 sts cached at $_ar_cache_file"
-    fi
+    mkdir -p "$_ar_cache_dir"
+    chmod 700 "$_ar_cache_dir" 2>/dev/null || true
+    _ar_cache_tmp="$_ar_cache_file.$$"
+    printf '%s' "$ASSUMED_CREDS" > "$_ar_cache_tmp"
+    chmod 600 "$_ar_cache_tmp" 2>/dev/null || true
+    mv -f "$_ar_cache_tmp" "$_ar_cache_file"
+    log debug "   🎫 sts cached at $_ar_cache_file"
   fi
 
   # ---- Extract + export ----------------------------------------------------

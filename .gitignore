@@ -142,6 +142,9 @@ np-agent-manifest.yaml
 # Integration test runtime data
 frontend/deployment/tests/integration/volume/
 
+# Local sts:AssumeRole credentials cache (parameters/utils/assume_role)
+credentials/
+
 # Terraform/OpenTofu
 .terraform/
 .terraform.lock.hcl
