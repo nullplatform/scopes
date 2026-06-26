@@ -11,7 +11,7 @@ locals {
 
   # Default tags applied to every IAM resource
   iam_default_tags = merge(var.iam_resource_tags_json, {
-    ManagedBy = "custom-scope-role"
+    ManagedBy = "nullplatform-custom-scope-role"
     Module    = local.iam_module_name
   })
 }
