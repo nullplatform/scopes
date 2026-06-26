@@ -2,8 +2,8 @@
 # IAM permissions role assumed by the nullplatform agent role
 #
 # Holds the actual workload policies (Route53, EKS, ELB). Its trust policy
-# trusts only the agent IRSA role, so the agent's IRSA token cannot exercise
-# these permissions without first assuming this role (sts:AssumeRole).
+# trusts only the agent IRSA role (plus any additional roles), so an agent's IRSA
+# token cannot exercise these permissions without first assuming it (sts:AssumeRole).
 #
 # This is the "permissions role" half of the reference module
 # tofu-modules/infrastructure/aws/iam/agent. The IRSA agent role itself is
@@ -20,7 +20,7 @@ resource "aws_iam_role" "nullplatform_agent_permissions" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { AWS = var.agent_role_arn }
+      Principal = { AWS = concat([local.agent_role_arn], var.additional_agent_role_arns) }
       Action    = "sts:AssumeRole"
     }]
   })

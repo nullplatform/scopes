@@ -1,10 +1,22 @@
 variable "agent_role_arn" {
-  description = "ARN of the nullplatform agent IRSA role allowed to assume this permissions role via sts:AssumeRole. This is the trusted principal of the role's trust policy."
+  description = "ARN of the primary nullplatform agent IRSA role allowed to assume this permissions role via sts:AssumeRole, and always a trusted principal of the role's trust policy. Defaults (when empty) to the conventional agent role for the cluster: arn:aws:iam::<account>:role/nullplatform-<cluster_name>-agent-role."
   type        = string
+  default     = ""
 
   validation {
-    condition     = can(regex("^arn:aws:iam::[0-9]{12}:role/.+", var.agent_role_arn))
-    error_message = "agent_role_arn must match arn:aws:iam::<account-id>:role/<role-name>"
+    condition     = var.agent_role_arn == "" || can(regex("^arn:aws:iam::[0-9]{12}:role/.+", var.agent_role_arn))
+    error_message = "agent_role_arn must be empty (to use the derived default) or match arn:aws:iam::<account-id>:role/<role-name>"
+  }
+}
+
+variable "additional_agent_role_arns" {
+  description = "Extra IAM role ARNs allowed to assume this permissions role, appended to agent_role_arn in the trust policy. Defaults to none."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.additional_agent_role_arns : can(regex("^arn:aws:iam::[0-9]{12}:role/.+", arn))])
+    error_message = "each additional_agent_role_arns entry must match arn:aws:iam::<account-id>:role/<role-name>"
   }
 }
 
