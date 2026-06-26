@@ -27,10 +27,19 @@ teardown() {
     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 }
 
-# Helper: a far-future ISO 8601 timestamp (well past any sane buffer window).
+# Helper: a far-future ISO 8601 timestamp (for the Credentials.Expiration field).
 far_future_iso() {
-  # 2099-12-31T23:59:59Z — works on both GNU and BSD date.
   echo "2099-12-31T23:59:59Z"
+}
+
+# Helper: a far-future Unix epoch (well past any sane buffer window).
+far_future_epoch() {
+  echo "4102444799"  # 2099-12-31T23:59:59Z
+}
+
+# Helper: a past Unix epoch (for cache-stale fixtures).
+past_epoch() {
+  echo "1577836800"  # 2020-01-01T00:00:00Z
 }
 
 @test "assume_role: no-op when ASSUME_ROLE_ARN_RESOLVED is empty" {
@@ -193,6 +202,7 @@ EOF
   export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/cached"
 
   # Pre-populate the cache with creds that expire far in the future.
+  # NOTE: freshness is decided from `_cache_exp_epoch`, not from .Expiration.
   mkdir -p "$STS_CACHE_DIR"
   CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
   [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
@@ -203,7 +213,8 @@ EOF
     "SecretAccessKey": "sk-cached",
     "SessionToken": "tok-cached",
     "Expiration": "$(far_future_iso)"
-  }
+  },
+  "_cache_exp_epoch": $(far_future_epoch)
 }
 EOF
 
@@ -253,7 +264,8 @@ EOF
     "SecretAccessKey": "sk-stale",
     "SessionToken": "tok-stale",
     "Expiration": "2020-01-01T00:00:00Z"
-  }
+  },
+  "_cache_exp_epoch": $(past_epoch)
 }
 EOF
 
@@ -268,9 +280,87 @@ EOF
   assert_contains "$output" "AKID=AKIA-FRESH"
   run cat "$AWS_CALL_LOG"
   assert_contains "$output" "sts assume-role"
-  # New creds were written to the cache
+  # New creds were written to the cache, with a precomputed epoch.
   run cat "$STS_CACHE_DIR/$CACHE_KEY.json"
   assert_contains "$output" "AKIA-FRESH"
+  assert_contains "$output" "_cache_exp_epoch"
+}
+
+@test "assume_role: cache write stores precomputed _cache_exp_epoch" {
+  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALL_LOG"
+  cat > "$BIN_DIR/aws" << EOF
+#!/bin/bash
+echo "\$*" >> "\$AWS_CALL_LOG"
+cat << JSON
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-NEW",
+    "SecretAccessKey": "sk",
+    "SessionToken": "tok",
+    "Expiration": "$(far_future_iso)"
+  }
+}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/write-test"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
+  [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
+
+  # _cache_exp_epoch must be a positive integer well in the future.
+  EPOCH=$(jq -r '._cache_exp_epoch' < "$STS_CACHE_DIR/$CACHE_KEY.json")
+  NOW=$(date -u +%s)
+  [ "$EPOCH" -gt "$NOW" ]
+}
+
+@test "assume_role: unparseable AWS Expiration falls back to now+3540s (cache still works)" {
+  # AWS returns garbage in Expiration — date(1) will fail on it. The fallback
+  # `now + 3540` must kick in so the cache remains usable.
+  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALL_LOG"
+  cat > "$BIN_DIR/aws" << 'EOF'
+#!/bin/bash
+echo "$*" >> "$AWS_CALL_LOG"
+cat << JSON
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-NEW",
+    "SecretAccessKey": "sk",
+    "SessionToken": "tok",
+    "Expiration": "this-is-not-a-date"
+  }
+}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/garbage-exp"
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
+  [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
+
+  EPOCH=$(jq -r '._cache_exp_epoch' < "$STS_CACHE_DIR/$CACHE_KEY.json")
+  NOW=$(date -u +%s)
+  # Fallback should be ~now+3540 (1h - 60s buffer). Allow ±10s slack.
+  DIFF=$(( EPOCH - NOW ))
+  [ "$DIFF" -gt 3500 ] && [ "$DIFF" -lt 3600 ]
 }
 
 @test "assume_role: different ARNs use different cache files" {
