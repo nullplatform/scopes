@@ -102,13 +102,16 @@ EOF
   assert_contains "$captured" "--key-id alias/parameters-secure"
 }
 
-@test "aws-parameter-store store: parameter_name has PS_NAME_PREFIX + composite" {
+@test "aws-parameter-store store: parameter_name has PS_NAME_PREFIX + composite (= sanitized to _)" {
   export PARAMETER_KIND="parameter"
 
   run bash -c "$DEPS; source $SCRIPT"
 
   param_name=$(echo "$output" | jq -r '.metadata.parameter_name')
-  assert_contains "$param_name" "/nullplatform/organization=acme-1255165411"
+  # SSM doesn't allow `=` in path components, so we replace it with `_`.
+  assert_contains "$param_name" "/nullplatform/organization_acme-1255165411"
+  # No `=` should remain anywhere in the parameter_name.
+  case "$param_name" in *"="*) return 1 ;; esac
 }
 
 @test "aws-parameter-store store: passes tier flag" {

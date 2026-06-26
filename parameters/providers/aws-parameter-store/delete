@@ -10,7 +10,9 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, AWS_REGION, PS_NAME_PREFIX
 
-PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID_PATH}"
+# SSM path components only accept [A-Za-z0-9._-]; `=` is replaced with `_`
+# (same transformation as store).
+PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID_PATH//=/_}"
 
 err_file=$(mktemp)
 T_AWS=$(timer_now)
