@@ -71,37 +71,54 @@ if [ -z "$DIMS_ARG" ] && [ -n "$SCOPE_ID_PREFETCH" ]; then
 fi
 
 # ── Wave 1: spec + entities + (maybe) IAM ───────────────────────────────────
+# Each subshell writes its own duration to $NP_CACHE_DIR/timings.<label> so we
+# can identify the slowest call after wait — without serializing.
 T_PREFETCH=$(timer_now)
 log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} iam_wave1=$CAN_FIRE_IAM_WAVE1)"
 
-( np provider specification read --id "$SPEC_ID" --format json \
-    > "$NP_CACHE_DIR/spec.json" 2>"$NP_CACHE_DIR/spec.err" ) &
+( _t=$(timer_now); \
+  np provider specification read --id "$SPEC_ID" --format json \
+    > "$NP_CACHE_DIR/spec.json" 2>"$NP_CACHE_DIR/spec.err"; \
+  printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.spec" ) &
 
 for entity_type in organization account namespace application; do
   entity_id=$(printf '%s' "$ENTITIES_JSON" | jq -r ".$entity_type // empty")
   if [ -n "$entity_id" ]; then
-    ( np "$entity_type" read --id "$entity_id" --format json \
-        > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err" ) &
+    ( _t=$(timer_now); \
+      np "$entity_type" read --id "$entity_id" --format json \
+        > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err"; \
+      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.$entity_type" ) &
   fi
 done
 
 if [ -n "$SCOPE_ID_PREFETCH" ]; then
-  ( np scope read --id "$SCOPE_ID_PREFETCH" --format json \
-      > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err" ) &
+  ( _t=$(timer_now); \
+    np scope read --id "$SCOPE_ID_PREFETCH" --format json \
+      > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err"; \
+    printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.scope" ) &
 fi
 
 if [ "$CAN_FIRE_IAM_WAVE1" = "yes" ] && [ -n "$NRN" ]; then
   if [ -n "$DIMS_ARG" ]; then
-    ( np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
-        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" ) &
+    ( _t=$(timer_now); \
+      np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
+        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err"; \
+      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.iam" ) &
   else
-    ( np provider list --categories identity-access-control --nrn "$NRN" --format json \
-        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" ) &
+    ( _t=$(timer_now); \
+      np provider list --categories identity-access-control --nrn "$NRN" --format json \
+        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err"; \
+      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.iam" ) &
   fi
 fi
 
 wait
 log debug "⏱  Prefetch wave 1 $(timer_elapsed "$T_PREFETCH")"
+# Per-call wall times so the long pole stands out:
+for tfile in "$NP_CACHE_DIR"/timings.*; do
+  [ -f "$tfile" ] || continue
+  log debug "      ↳ $(basename "$tfile" | sed 's/^timings\.//') $(cat "$tfile")"
+done
 
 # ── Wave 2: IAM (only if deferred above) ────────────────────────────────────
 if [ "$CAN_FIRE_IAM_WAVE1" = "no" ] && [ -n "$NRN" ]; then
@@ -123,4 +140,5 @@ if [ "$CAN_FIRE_IAM_WAVE1" = "no" ] && [ -n "$NRN" ]; then
       > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" || true
   fi
   log debug "⏱  Prefetch wave 2 $(timer_elapsed "$T_WAVE2")"
+  log debug "      ↳ iam $(timer_elapsed "$T_WAVE2")"
 fi

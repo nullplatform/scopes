@@ -30,6 +30,9 @@ export PARAMETERS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/log"
 source "$SCRIPT_DIR/get_config_value"
 
+T_BUILD_CTX=$(timer_now)
+T_PARSE=$(timer_now)
+
 # --- Notification fields ---
 export EXTERNAL_ID=$(echo "$CONTEXT" | jq -r '.external_id // empty')
 # external_id format: <canonical_path>#<version_id>
@@ -54,6 +57,8 @@ case "$(echo "$CONTEXT" | jq -r '.secret | tostring')" in
 esac
 export PARAMETER_KIND
 
+log debug "⏱  build_context.notification_parse $(timer_elapsed "$T_PARSE")"
+
 # --- Resolve ACTIVE_PROVIDER from $.provider.specification_id ---
 SPEC_ID=$(echo "$CONTEXT" | jq -r '.provider.specification_id // empty')
 if [ -z "$SPEC_ID" ]; then
@@ -71,7 +76,6 @@ fi
 # Pre-fetch every `np` read this workflow needs, in parallel. Downstream
 # (assume_role_step, build_external_id) reads from $NP_CACHE_DIR instead of
 # re-invoking np.
-T_BUILD_CTX=$(timer_now)
 export SPEC_ID
 source "$SCRIPT_DIR/prefetch_np"
 
