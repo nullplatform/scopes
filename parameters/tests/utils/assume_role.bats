@@ -13,11 +13,21 @@ setup() {
   export SCRIPT="$PARAMETERS_DIR/utils/assume_role"
   export BIN_DIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN_DIR"
+
+  # Isolate the sts-creds cache per test so we don't pollute /tmp across runs.
+  export NP_STS_CACHE_DIR="$BATS_TEST_TMPDIR/sts-cache"
 }
 
 teardown() {
   unset ASSUME_ROLE_ARN_RESOLVED ASSUME_ROLE_SESSION_PREFIX \
+    NP_STS_CACHE_DIR NP_STS_CACHE_DISABLE NP_STS_CACHE_BUFFER_SECS \
     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+}
+
+# Helper: a far-future ISO 8601 timestamp (well past any sane buffer window).
+far_future_iso() {
+  # 2099-12-31T23:59:59Z — works on both GNU and BSD date.
+  echo "2099-12-31T23:59:59Z"
 }
 
 @test "assume_role: no-op when ASSUME_ROLE_ARN_RESOLVED is empty" {
@@ -161,4 +171,192 @@ EOF
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "incomplete credentials"
+}
+
+# ---- STS credentials cache -----------------------------------------------
+
+@test "assume_role: cache hit — skips aws call entirely when cached creds are fresh" {
+  # aws mock that fails if invoked — proves we never called it.
+  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALL_LOG"
+  cat > "$BIN_DIR/aws" << 'EOF'
+#!/bin/bash
+echo "$*" >> "$AWS_CALL_LOG"
+echo "should-not-be-called" >&2
+exit 1
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/cached"
+
+  # Pre-populate the cache with creds that expire far in the future.
+  mkdir -p "$NP_STS_CACHE_DIR"
+  CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
+  [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
+  cat > "$NP_STS_CACHE_DIR/$CACHE_KEY.json" << EOF
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-CACHED",
+    "SecretAccessKey": "sk-cached",
+    "SessionToken": "tok-cached",
+    "Expiration": "$(far_future_iso)"
+  }
+}
+EOF
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+    echo AKID=\$AWS_ACCESS_KEY_ID
+  "
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "AKID=AKIA-CACHED"
+  # aws mock would have written to the log if called
+  run cat "$AWS_CALL_LOG"
+  [ -z "$output" ]
+}
+
+@test "assume_role: cache stale — falls through to aws call and rewrites cache" {
+  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALL_LOG"
+  cat > "$BIN_DIR/aws" << EOF
+#!/bin/bash
+echo "\$*" >> "\$AWS_CALL_LOG"
+cat << JSON
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-FRESH",
+    "SecretAccessKey": "sk-fresh",
+    "SessionToken": "tok-fresh",
+    "Expiration": "$(far_future_iso)"
+  }
+}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/stale"
+
+  mkdir -p "$NP_STS_CACHE_DIR"
+  CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
+  [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
+  # Past expiration — should trigger refresh.
+  cat > "$NP_STS_CACHE_DIR/$CACHE_KEY.json" << EOF
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-STALE",
+    "SecretAccessKey": "sk-stale",
+    "SessionToken": "tok-stale",
+    "Expiration": "2020-01-01T00:00:00Z"
+  }
+}
+EOF
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+    echo AKID=\$AWS_ACCESS_KEY_ID
+  "
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "AKID=AKIA-FRESH"
+  run cat "$AWS_CALL_LOG"
+  assert_contains "$output" "sts assume-role"
+  # New creds were written to the cache
+  run cat "$NP_STS_CACHE_DIR/$CACHE_KEY.json"
+  assert_contains "$output" "AKIA-FRESH"
+}
+
+@test "assume_role: cache disabled via NP_STS_CACHE_DISABLE — no read, no write" {
+  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALL_LOG"
+  cat > "$BIN_DIR/aws" << EOF
+#!/bin/bash
+echo "\$*" >> "\$AWS_CALL_LOG"
+cat << JSON
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-NEW",
+    "SecretAccessKey": "sk-new",
+    "SessionToken": "tok-new",
+    "Expiration": "$(far_future_iso)"
+  }
+}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  export ASSUME_ROLE_ARN_RESOLVED="arn:aws:iam::1:role/disabled"
+  export NP_STS_CACHE_DISABLE=1
+
+  # Pre-populate a fresh cache entry — must be IGNORED.
+  mkdir -p "$NP_STS_CACHE_DIR"
+  CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | sha256sum 2>/dev/null | cut -c1-16)
+  [ -z "$CACHE_KEY" ] && CACHE_KEY=$(printf '%s' "$ASSUME_ROLE_ARN_RESOLVED" | shasum -a 256 | cut -c1-16)
+  echo '{"Credentials":{"AccessKeyId":"FROM-CACHE","SecretAccessKey":"x","SessionToken":"x","Expiration":"2099-12-31T23:59:59Z"}}' \
+    > "$NP_STS_CACHE_DIR/$CACHE_KEY.json"
+  # Snapshot before
+  before=$(cat "$NP_STS_CACHE_DIR/$CACHE_KEY.json")
+
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    source $SCRIPT
+    echo AKID=\$AWS_ACCESS_KEY_ID
+  "
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "AKID=AKIA-NEW"
+  run cat "$AWS_CALL_LOG"
+  assert_contains "$output" "sts assume-role"
+  # Cache file should be unchanged (no write)
+  after=$(cat "$NP_STS_CACHE_DIR/$CACHE_KEY.json")
+  assert_equal "$after" "$before"
+}
+
+@test "assume_role: different ARNs use different cache files" {
+  export AWS_CALL_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALL_LOG"
+  cat > "$BIN_DIR/aws" << EOF
+#!/bin/bash
+echo "\$*" >> "\$AWS_CALL_LOG"
+# Return creds reflecting which ARN was requested (parse --role-arn).
+ARN=""
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = "--role-arn" ]; then ARN="\$2"; shift 2; else shift; fi
+done
+SUFFIX=\$(printf '%s' "\$ARN" | tr '/:' '__')
+cat << JSON
+{
+  "Credentials": {
+    "AccessKeyId": "AKIA-\$SUFFIX",
+    "SecretAccessKey": "sk",
+    "SessionToken": "tok",
+    "Expiration": "$(far_future_iso)"
+  }
+}
+JSON
+EOF
+  chmod +x "$BIN_DIR/aws"
+
+  # Two ARNs in the same cache dir.
+  run bash -c "
+    export PATH=$BIN_DIR:\$PATH
+    source $PARAMETERS_DIR/utils/log
+    ASSUME_ROLE_ARN_RESOLVED='arn:aws:iam::1:role/A' source $SCRIPT
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ASSUMED_CREDS
+    ASSUME_ROLE_ARN_RESOLVED='arn:aws:iam::1:role/B' source $SCRIPT
+  "
+
+  assert_equal "$status" "0"
+  # Both ARNs hit aws (no cross-contamination).
+  run cat "$AWS_CALL_LOG"
+  assert_contains "$output" "arn:aws:iam::1:role/A"
+  assert_contains "$output" "arn:aws:iam::1:role/B"
+  # Both cache files exist.
+  run ls "$NP_STS_CACHE_DIR"
+  [ "$(echo "$output" | wc -l | tr -d ' ')" -ge "2" ]
 }
