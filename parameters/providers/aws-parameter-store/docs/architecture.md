@@ -10,7 +10,7 @@ Cheapest provider in the package — Standard tier is free up to 10,000 paramete
 
 | Step | What happens                                                                |
 |------|-----------------------------------------------------------------------------|
-| `setup`     | Reads `AWS_REGION`, `PS_NAME_PREFIX` (default `/nullplatform/`), `PS_KMS_KEY_ID`, `PS_TIER`. Normalizes prefix to start/end with `/`. |
+| `setup`     | `AWS_REGION` from the agent runtime (IRSA / instance profile). `PS_NAME_PREFIX` hardcoded to `/nullplatform/`. Reads `PS_KMS_KEY_ID` and `PS_TIER` from `PROVIDER_CONFIG`. |
 | `store`     | Composes path via `build_external_id`. Calls `aws ssm put-parameter --overwrite`. Captures `.Version` from response. Returns `external_id = <path>#<version>`. |
 | `retrieve`  | Parses path + version. Calls `aws ssm get-parameter --with-decryption`. If a version is present in external_id, appends `:<N>` to target that specific version. |
 | `delete`    | Calls `aws ssm delete-parameter`. Idempotent (suppresses `ParameterNotFound`). |
@@ -23,12 +23,12 @@ Cheapest provider in the package — Standard tier is free up to 10,000 paramete
 Every parameter name is composed by `parameters/utils/build_external_id`:
 
 ```
-<PS_NAME_PREFIX>organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>[/scope=<slug>-<id>][/<dim_key>=<dim_value>...]/<parameter_name>-<parameter_id>
+/nullplatform/organization=<slug>-<id>/account=<slug>-<id>/namespace=<slug>-<id>/application=<slug>-<id>[/scope=<slug>-<id>][/<dim_key>=<dim_value>...]/<parameter_name>-<parameter_id>
 ```
 
 The `scope` entity is optional (only present when the parameter is bound to a deployment scope). Dimensions are also optional. See `parameters/docs/architecture.md` for the complete naming convention.
 
-Default `PS_NAME_PREFIX` is `/nullplatform/`. SSM requires names to start with `/` for hierarchical organization.
+The `/nullplatform/` prefix is hardcoded — it's the invariant namespace anchor for all platform parameters and the basis for least-privilege IAM scoping (`parameter/nullplatform/*`).
 
 Example:
 
@@ -95,14 +95,12 @@ Switch tiers via provider config `tier` attribute.
 
 ## Configuration
 
-`PROVIDER_CONFIG` shape:
+`PROVIDER_CONFIG` shape (only operator-configurable knobs — `AWS_REGION` comes from the agent runtime, `name_prefix` is hardcoded to `/nullplatform/`):
 
 ```json
 {
-  "region":      "us-east-1",
-  "name_prefix": "/nullplatform/",
-  "kms_key_id":  "alias/parameters-secure",
-  "tier":        "Standard"
+  "kms_key_id": "alias/parameters-secure",
+  "tier":       "Standard"
 }
 ```
 

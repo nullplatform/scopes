@@ -1,6 +1,6 @@
-# IAM Policy — Parameter Store Provider, Least Privilege
+# IAM Policy
 
-Minimum IAM permissions required to operate the `parameters/providers/aws-parameter-store/` provider, scoped to the configured `PS_NAME_PREFIX`.
+Minimum IAM permissions for `parameters/providers/aws-parameter-store/`. Scoped to the `nullplatform/*` namespace so the agent cannot reach any parameter outside this provider's domain.
 
 ---
 
@@ -11,20 +11,13 @@ Minimum IAM permissions required to operate the `parameters/providers/aws-parame
 | `ssm:PutParameter`           | `store`    | Creates the parameter (String or SecureString)         |
 | `ssm:GetParameter`           | `retrieve` | Reads the value back                                   |
 | `ssm:DeleteParameter`        | `delete`   | Removes the parameter                                  |
-| `ssm:DescribeParameters`     | optional   | Useful for diagnostics                                 |
-
-`PutParameterBatch`, `LabelParameterVersion`, `GetParameterHistory`, `AddTagsToResource` are **not** required and should not be granted unless code grows to use them.
+| `ssm:AddTagsToResource`      | `store`    | Best-effort `managed_by=nullplatform` tag              |
 
 ---
 
 ## Recommended policy
 
-Replace placeholders before applying:
-
-- `<AWS_REGION>` — region where parameters are stored.
-- `<AWS_ACCOUNT_ID>` — 12-digit AWS account id.
-- `<PS_NAME_PREFIX>` — the configured prefix (e.g. `nullplatform/parameters`). Strip leading and trailing `/` when placing into the ARN.
-- `<KMS_KEY_ID>` — required if you store any `SecureString` (kind=secret). For default `alias/aws/ssm` you can omit the KMS statement.
+Replace `<AWS_REGION>` and `<AWS_ACCOUNT_ID>` before applying. The `nullplatform/*` resource pattern restricts the agent to parameters created and managed by this provider.
 
 ```json
 {
@@ -37,23 +30,21 @@ Replace placeholders before applying:
         "ssm:PutParameter",
         "ssm:GetParameter",
         "ssm:DeleteParameter",
-        "ssm:DescribeParameters"
+        "ssm:AddTagsToResource"
       ],
       "Resource": [
-        "arn:aws:ssm:<AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/<PS_NAME_PREFIX>/*"
+        "arn:aws:ssm:<AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/nullplatform/*"
       ]
     }
   ]
 }
 ```
 
-Note the ARN format: `parameter/<prefix>/*` — no extra slash between `parameter` and the prefix because the prefix itself starts with `/`. So if `PS_NAME_PREFIX=/nullplatform/parameters/`, the ARN is `arn:aws:ssm:...:parameter/nullplatform/parameters/*`.
-
 ---
 
 ## KMS (only when storing SecureString with a CMK)
 
-If `PS_KMS_KEY_ID` is set to a customer-managed key, both the agent (writer) and any consumer (reader) need KMS permissions. Add this to both policies:
+If the provider's configuration sets `kms_key_id` to a customer-managed key (rather than the default `alias/aws/ssm`), the agent also needs KMS permissions on that key:
 
 ```json
 {
@@ -95,7 +86,7 @@ The writer (this provider's scripts) needs put + get + delete. A runtime consume
     "ssm:GetParametersByPath"
   ],
   "Resource": [
-    "arn:aws:ssm:<AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/<PS_NAME_PREFIX>/*"
+    "arn:aws:ssm:<AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/nullplatform/*"
   ]
 }
 ```
