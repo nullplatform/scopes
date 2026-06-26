@@ -17,6 +17,8 @@ set -euo pipefail
 # Required env: PARAMETER_KIND, PARAMETER_VALUE, AWS_REGION, PS_NAME_PREFIX, PS_TIER
 # Optional env: PS_KMS_KEY_ID
 
+T_PS_STORE=$(timer_now)
+
 source "$PARAMETERS_ROOT/utils/build_external_id"
 build_external_id
 
@@ -25,6 +27,7 @@ build_external_id
 # with `_` to satisfy SSM. EXTERNAL_ID itself (returned to the platform) keeps
 # the canonical form — retrieve/delete apply the same transformation.
 PARAM_NAME="${PS_NAME_PREFIX}${EXTERNAL_ID//=/_}"
+log debug "   ⏱  ps.store.prep $(timer_elapsed "$T_PS_STORE")"
 
 SSM_TYPE="String"
 [ "${PARAMETER_KIND:-}" = "secret" ] && SSM_TYPE="SecureString"
@@ -80,6 +83,7 @@ log debug "   ⏱  aws ssm add-tags-to-resource $(timer_elapsed "$T_TAG")"
 # Encode version into external_id (the canonical handle nullplatform persists).
 [ -n "$VERSION_ID" ] && EXTERNAL_ID="${EXTERNAL_ID}#${VERSION_ID}"
 
+T_PS_OUT=$(timer_now)
 jq -n \
     --arg external_id "$EXTERNAL_ID" \
     --arg parameter_name "$PARAM_NAME" \
@@ -87,3 +91,5 @@ jq -n \
     --arg type "$SSM_TYPE" \
     --arg tier "$PS_TIER" \
     '{external_id: $external_id, metadata: {parameter_name: $parameter_name, region: $region, type: $type, tier: $tier}}'
+log debug "   ⏱  ps.store.output $(timer_elapsed "$T_PS_OUT")"
+log debug "⏱  ps.store total $(timer_elapsed "$T_PS_STORE")"
