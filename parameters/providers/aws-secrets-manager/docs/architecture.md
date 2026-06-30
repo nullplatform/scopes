@@ -173,8 +173,7 @@ The value stored in AWS SM is a JSON envelope, not the raw value:
   "parameter_id": 42,
   "value": "the-actual-secret-value",
   "stored_at": "2026-06-23T12:34:56Z",
-  "external_id": "organization=acme-1255165411/.../DB_PASSWORD-42",
-  "managed_by": "nullplatform"
+  "external_id": "organization=acme-1255165411/.../DB_PASSWORD-42"
 }
 ```
 
@@ -184,11 +183,8 @@ The value stored in AWS SM is a JSON envelope, not the raw value:
 | `value`        | The actual stored value                                      |
 | `stored_at`    | UTC timestamp of this version (audit trail)                  |
 | `external_id`  | Canonical handle nullplatform persists (matches secret name) |
-| `managed_by`   | Always `"nullplatform"` — identifies the secret as platform-owned |
 
 Each version of the secret carries its own `stored_at` and the value that was active at that point in time.
-
-The secret is also tagged at creation time with `managed_by=nullplatform`. This is visible in the AWS console and usable in IAM resource conditions.
 
 ---
 

@@ -5,9 +5,9 @@
 # Verifies:
 #   - external_id composed from entities + dimensions + parameter_name-id
 #   - Path prefix is `nullplatform/`
-#   - First store uses CreateSecret with managed_by tag
+#   - First store uses CreateSecret
 #   - Subsequent stores (ResourceExistsException) fall through to PutSecretValue
-#   - Payload includes managed_by: nullplatform
+#   - Payload envelope shape (parameter_id, value, stored_at, external_id)
 #   - Real errors propagate with troubleshooting
 # =============================================================================
 
@@ -141,13 +141,14 @@ EOF
   assert_contains "$secret_name" "DB_PASSWORD-42"
 }
 
-@test "aws-secrets-manager store: first store uses CreateSecret with managed_by tag" {
+@test "aws-secrets-manager store: first store uses CreateSecret (no put-secret-value)" {
   run bash -c "$DEPS; source $SCRIPT"
 
   captured=$(cat "$AWS_LOG")
   assert_contains "$captured" "secretsmanager create-secret"
-  assert_contains "$captured" "--tags Key=managed_by,Value=nullplatform"
   [[ "$captured" != *"put-secret-value"* ]]
+  # No tagging API call/flag
+  [[ "$captured" != *"--tags"* ]]
 }
 
 @test "aws-secrets-manager store: version_id is encoded as #suffix in external_id" {

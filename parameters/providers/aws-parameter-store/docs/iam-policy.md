@@ -11,7 +11,6 @@ Minimum IAM permissions for `parameters/providers/aws-parameter-store/`. Scoped 
 | `ssm:PutParameter`           | `store`    | Creates the parameter (String or SecureString)         |
 | `ssm:GetParameter`           | `retrieve` | Reads the value back                                   |
 | `ssm:DeleteParameter`        | `delete`   | Removes the parameter                                  |
-| `ssm:AddTagsToResource`      | `store`    | Best-effort `managed_by=nullplatform` tag              |
 
 ---
 
@@ -29,8 +28,7 @@ Replace `<AWS_REGION>` and `<AWS_ACCOUNT_ID>` before applying. The `nullplatform
       "Action": [
         "ssm:PutParameter",
         "ssm:GetParameter",
-        "ssm:DeleteParameter",
-        "ssm:AddTagsToResource"
+        "ssm:DeleteParameter"
       ],
       "Resource": [
         "arn:aws:ssm:<AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/nullplatform/*"

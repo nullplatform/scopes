@@ -37,7 +37,6 @@ create_args=(
   --region "$AWS_REGION"
   --name "$SECRET_NAME"
   --secret-string "$SECRET_PAYLOAD"
-  --tags "Key=managed_by,Value=nullplatform"
   --output json
 )
 if [ -n "${SM_KMS_KEY_ID:-}" ]; then

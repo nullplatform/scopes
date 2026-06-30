@@ -11,8 +11,6 @@ set -euo pipefail
 #   each subsequent store increments the version counter.
 #
 # Type=SecureString for kind=secret, Type=String for kind=parameter.
-# Tagging is done via a separate `add-tags-to-resource` call (put-parameter
-# does not support tags on overwrite to avoid resetting existing ones).
 #
 # Required env: PARAMETER_KIND, PARAMETER_VALUE, AWS_REGION, PS_NAME_PREFIX, PS_TIER
 # Optional env: PS_KMS_KEY_ID
@@ -68,17 +66,6 @@ log debug "   ⏱  aws ssm put-parameter $(timer_elapsed "$T_AWS")"
 rm -f "$err_file"
 
 VERSION_ID=$(echo "$PUT_RESULT" | jq -r '.Version // empty')
-
-# Best-effort tagging — Parameter Store tags survive overwrites; we only need
-# to (re)apply on first creation. Suppress errors here: missing tags don't
-# break correctness.
-T_TAG=$(timer_now)
-aws ssm add-tags-to-resource \
-    --region "$AWS_REGION" \
-    --resource-type Parameter \
-    --resource-id "$PARAM_NAME" \
-    --tags "Key=managed_by,Value=nullplatform" >/dev/null 2>&1 || true
-log debug "   ⏱  aws ssm add-tags-to-resource $(timer_elapsed "$T_TAG")"
 
 # Encode version into external_id (the canonical handle nullplatform persists).
 [ -n "$VERSION_ID" ] && EXTERNAL_ID="${EXTERNAL_ID}#${VERSION_ID}"
