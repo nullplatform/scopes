@@ -28,11 +28,11 @@ source "$PARAMETERS_ROOT/utils/assume_role_step"
 PS_NAME_PREFIX="/nullplatform/"
 
 PS_KMS_KEY_ID=$(get_config_value \
-  --provider '.kms_key_id' \
+  --provider '.setup.kms_key_id' \
   --default '')
 
 PS_TIER=$(get_config_value \
-  --provider '.tier' \
+  --provider '.setup.tier' \
   --default 'Standard')
 
 case "$PS_TIER" in

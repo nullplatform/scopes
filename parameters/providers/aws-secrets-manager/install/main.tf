@@ -57,7 +57,12 @@ module "scope_configuration" {
   dimensions                  = each.value.dimensions
 
   attributes = {
-    kms_key_id = each.value.kms_key_id
+    sensibility = {
+      applies_to = each.value.applies_to
+    }
+    setup = {
+      kms_key_id = each.value.kms_key_id
+    }
   }
 
   depends_on = [nullplatform_provider_specification.this]

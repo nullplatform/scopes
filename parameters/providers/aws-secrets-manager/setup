@@ -26,7 +26,7 @@ source "$PARAMETERS_ROOT/utils/assume_role_step"
 SM_NAME_PREFIX="nullplatform/"
 
 SM_KMS_KEY_ID=$(get_config_value \
-  --provider '.kms_key_id' \
+  --provider '.setup.kms_key_id' \
   --default '')
 
 export AWS_REGION SM_NAME_PREFIX SM_KMS_KEY_ID

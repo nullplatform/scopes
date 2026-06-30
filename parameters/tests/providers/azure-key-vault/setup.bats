@@ -47,7 +47,7 @@ teardown() {
 }
 
 @test "azure-key-vault setup: vault_name from PROVIDER_CONFIG" {
-  export PROVIDER_CONFIG='{"vault_name":"cfg-vault"}'
+  export PROVIDER_CONFIG='{"setup":{"vault_name":"cfg-vault"}}'
 
   run bash -c "$DEPS; source $SCRIPT && echo VAULT=\$AZ_VAULT_NAME"
 

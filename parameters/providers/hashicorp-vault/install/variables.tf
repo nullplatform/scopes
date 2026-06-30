@@ -16,11 +16,12 @@ variable "extra_visible_to_nrns" {
 }
 
 variable "instances" {
-  description = "Provider instances to create. Map key is a stable identifier (used in for_each). Each entry carries its own NRN, dimensions, and Vault HTTP(S) endpoint."
+  description = "Provider instances to create. Map key is a stable identifier (used in for_each). Each entry carries its own NRN, dimensions, Vault HTTP(S) endpoint, and the parameter sensibility set this instance handles (secret / non_secret / both)."
   type = map(object({
     nrn        = string
     dimensions = map(string)
     address    = string
+    applies_to = list(string)
   }))
   default = {}
 }

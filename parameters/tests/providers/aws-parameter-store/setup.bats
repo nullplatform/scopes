@@ -48,7 +48,7 @@ teardown() {
 
 @test "aws-parameter-store setup: accepts Advanced tier from PROVIDER_CONFIG" {
   export AWS_REGION="us-east-1"
-  export PROVIDER_CONFIG='{"tier":"Advanced"}'
+  export PROVIDER_CONFIG='{"setup":{"tier":"Advanced"}}'
 
   run bash -c "$DEPS; source $SCRIPT && echo TIER=\$PS_TIER"
 
@@ -58,7 +58,7 @@ teardown() {
 
 @test "aws-parameter-store setup: rejects invalid tier" {
   export AWS_REGION="us-east-1"
-  export PROVIDER_CONFIG='{"tier":"Bogus"}'
+  export PROVIDER_CONFIG='{"setup":{"tier":"Bogus"}}'
 
   run bash -c "$DEPS; source $SCRIPT"
 
@@ -69,7 +69,7 @@ teardown() {
 
 @test "aws-parameter-store setup: kms_key_id from PROVIDER_CONFIG" {
   export AWS_REGION="us-east-1"
-  export PROVIDER_CONFIG='{"kms_key_id":"alias/cfg"}'
+  export PROVIDER_CONFIG='{"setup":{"kms_key_id":"alias/cfg"}}'
 
   run bash -c "$DEPS; source $SCRIPT && echo KMS=\$PS_KMS_KEY_ID"
 

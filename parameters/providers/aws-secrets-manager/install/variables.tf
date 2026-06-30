@@ -16,11 +16,12 @@ variable "extra_visible_to_nrns" {
 }
 
 variable "instances" {
-  description = "Provider instances to create. Map key is a stable identifier (used in for_each). Each entry carries its own NRN, dimensions, and KMS key — so operators can install Secrets Manager only on selected accounts/environments and use a different KMS key per instance."
+  description = "Provider instances to create. Map key is a stable identifier (used in for_each). Each entry carries its own NRN, dimensions, KMS key, and the parameter sensibility set this instance handles (secret / non_secret / both)."
   type = map(object({
     nrn        = string
     dimensions = map(string)
     kms_key_id = string
+    applies_to = list(string)
   }))
   default = {}
 }

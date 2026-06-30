@@ -50,7 +50,7 @@ teardown() {
 
 @test "vault setup: address from PROVIDER_CONFIG" {
   export VAULT_TOKEN="hvs.xxx"
-  export PROVIDER_CONFIG='{"address":"https://cfg-vault.example.com"}'
+  export PROVIDER_CONFIG='{"setup":{"address":"https://cfg-vault.example.com"}}'
 
   run bash -c "$DEPS; source $SCRIPT && echo ADDR=\$VAULT_ADDR"
 

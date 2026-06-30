@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Exports: VAULT_ADDR, VAULT_TOKEN, VAULT_PATH_PREFIX
 
-VAULT_ADDR=$(get_config_value --env VAULT_ADDR --provider '.address')
+VAULT_ADDR=$(get_config_value --env VAULT_ADDR --provider '.setup.address')
 VAULT_TOKEN=$(get_config_value --env VAULT_TOKEN)
 VAULT_PATH_PREFIX="secret/data/nullplatform"
 

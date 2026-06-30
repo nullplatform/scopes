@@ -14,7 +14,7 @@ set -euo pipefail
 
 AZ_VAULT_NAME=$(get_config_value \
   --env AZURE_KEY_VAULT_NAME \
-  --provider '.vault_name')
+  --provider '.setup.vault_name')
 
 AZ_SECRET_PREFIX="nullplatform-"
 

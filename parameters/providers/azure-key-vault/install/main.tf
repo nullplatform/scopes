@@ -48,7 +48,12 @@ module "scope_configuration" {
   dimensions                  = each.value.dimensions
 
   attributes = {
-    vault_name = each.value.vault_name
+    sensibility = {
+      applies_to = each.value.applies_to
+    }
+    setup = {
+      vault_name = each.value.vault_name
+    }
   }
 
   depends_on = [nullplatform_provider_specification.this]

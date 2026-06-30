@@ -16,11 +16,12 @@ variable "extra_visible_to_nrns" {
 }
 
 variable "instances" {
-  description = "Provider instances to create. Map key is a stable identifier (used in for_each). Each entry carries its own NRN, dimensions, and Azure Key Vault name (without https:// or .vault.azure.net suffix)."
+  description = "Provider instances to create. Map key is a stable identifier (used in for_each). Each entry carries its own NRN, dimensions, Azure Key Vault name, and the parameter sensibility set this instance handles (secret / non_secret / both)."
   type = map(object({
     nrn        = string
     dimensions = map(string)
     vault_name = string
+    applies_to = list(string)
   }))
   default = {}
 }

@@ -49,7 +49,7 @@ teardown() {
 
 @test "aws-secrets-manager setup: kms_key_id from PROVIDER_CONFIG" {
   export AWS_REGION="us-east-1"
-  export PROVIDER_CONFIG='{"kms_key_id":"alias/mykey"}'
+  export PROVIDER_CONFIG='{"setup":{"kms_key_id":"alias/mykey"}}'
 
   run bash -c "$DEPS; source $SCRIPT && echo KMS=\$SM_KMS_KEY_ID"
 

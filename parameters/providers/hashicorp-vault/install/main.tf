@@ -48,7 +48,12 @@ module "scope_configuration" {
   dimensions                  = each.value.dimensions
 
   attributes = {
-    address = each.value.address
+    sensibility = {
+      applies_to = each.value.applies_to
+    }
+    setup = {
+      address = each.value.address
+    }
   }
 
   depends_on = [nullplatform_provider_specification.this]

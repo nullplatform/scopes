@@ -1,19 +1,21 @@
-nrn        = "organization=acme-1255165411:account=prod-95118862"
+nrn        = "organization=1"
 np_api_key = "REPLACE_ME"
 
 extra_visible_to_nrns = []
 
 instances = {
   prod-billing = {
-    nrn        = "organization=acme-1255165411:account=prod-95118862:namespace=billing-37094320"
+    nrn        = "organization=1:account=2:namespace=3"
     dimensions = { environment = "production" }
     kms_key_id = "alias/parameters-prod-billing"
     tier       = "Standard"
+    applies_to = ["non_secret"]
   }
   staging-billing = {
-    nrn        = "organization=acme-1255165411:account=staging-95118863:namespace=billing-37094320"
+    nrn        = "organization=1:account=2:namespace=3"
     dimensions = { environment = "staging" }
     kms_key_id = ""
-    tier       = "Standard"
+    tier       = "Advanced"
+    applies_to = ["non_secret"]
   }
 }

@@ -8,10 +8,12 @@ instances = {
     nrn        = "organization=acme-1255165411:account=prod-95118862:namespace=billing-37094320"
     dimensions = { environment = "production" }
     vault_name = "acme-prod-billing-kv"
+    applies_to = ["secret"]
   }
   staging-billing = {
     nrn        = "organization=acme-1255165411:account=staging-95118863:namespace=billing-37094320"
     dimensions = { environment = "staging" }
     vault_name = "acme-staging-billing-kv"
+    applies_to = ["secret"]
   }
 }
