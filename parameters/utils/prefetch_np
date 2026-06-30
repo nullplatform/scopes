@@ -9,19 +9,29 @@
 # series across modules. Running them in parallel turns Σ(t) into max(t) and
 # typically cuts wall time by 3–6×.
 #
+# Action-aware: retrieve/delete only need the IAM provider (everything else
+# is reconstructible from the payload's external_id). Store additionally needs
+# entity slugs (org/account/namespace/application + scope) to compose the
+# external_id path.
+#
 # Inputs:
 #   CONTEXT  — JSON of the notification body (set by entrypoint)
 #   SPEC_ID  — $CONTEXT.provider.specification_id (set by build_context)
+#
+# Payload optimizations (when the platform provides them):
+#   .provider.specification_slug — used directly, skips `np provider specification read`
+#   .value_dimensions            — used directly for IAM dim-aware lookup; no scope read
+#   .dimensions                  — same as above for dim-level (no scope) payloads
 #
 # Escape hatch for tests: if NP_CACHE_DIR is pre-set and exists, prefetch is
 # skipped — tests pre-populate the cache with fixtures and source the rest of
 # the chain normally without touching `np` at all.
 #
 # Output:
-#   NP_CACHE_DIR — exported; contains:
-#     spec.json                 — provider specification
-#     {organization,account,namespace,application}.json — entity records (slug + metadata)
-#     scope.json                — entity record AND dimensions source (when scope-level)
+#   NP_CACHE_DIR — exported; contains (only the files that were fetched):
+#     spec.json                 — provider specification (only if slug wasn't in payload)
+#     {organization,account,namespace,application}.json — entity records (store only)
+#     scope.json                — entity record (store + scope-level only)
 #     iam.json                  — `np provider list --categories identity-access-control`
 #   NRN          — exported; computed locally from entities/value_entities
 
@@ -54,51 +64,65 @@ export NRN
 
 SCOPE_ID_PREFETCH=$(printf '%s' "$ENTITIES_JSON" | jq -r '.scope // empty')
 
-# Top-level CONTEXT.dimensions: if present, we can fire the IAM lookup in
-# wave 1. If absent and there's a scope, we need to wait for scope.json so we
-# can extract its dimensions, then fire IAM in wave 2.
-TOP_DIMS_JSON=$(echo "$CONTEXT" | jq -c '.dimensions // empty')
+# Dimensions for the IAM lookup. Resolution order:
+#   1. .value_dimensions — scope-level (platform pre-resolved scope dimensions)
+#   2. .dimensions       — dim-level without scope
+#   3. (none)            — app-level
+# With either field present, the IAM call fires in wave 1; no wave 2 needed.
+DIMS_JSON=$(echo "$CONTEXT" | jq -c '.value_dimensions // .dimensions // empty')
 DIMS_ARG=""
-if [ -n "$TOP_DIMS_JSON" ] && [ "$TOP_DIMS_JSON" != "null" ] && [ "$TOP_DIMS_JSON" != "{}" ]; then
-  DIMS_ARG=$(printf '%s' "$TOP_DIMS_JSON" | jq -r '
+if [ -n "$DIMS_JSON" ] && [ "$DIMS_JSON" != "null" ] && [ "$DIMS_JSON" != "{}" ]; then
+  DIMS_ARG=$(printf '%s' "$DIMS_JSON" | jq -r '
     to_entries | map("\(.key):\(.value)") | join(",")')
 fi
 
-CAN_FIRE_IAM_WAVE1="yes"
-if [ -z "$DIMS_ARG" ] && [ -n "$SCOPE_ID_PREFETCH" ]; then
-  # No top-level dims, and we have a scope — defer IAM until scope.json lands.
-  CAN_FIRE_IAM_WAVE1="no"
-fi
+# Skip the spec call if the platform already gave us the slug.
+SLUG_FROM_PAYLOAD=$(echo "$CONTEXT" | jq -r '.provider.specification_slug // empty')
 
-# ── Wave 1: spec + entities + (maybe) IAM ───────────────────────────────────
-# Each subshell writes its own duration to $NP_CACHE_DIR/timings.<label> so we
-# can identify the slowest call after wait — without serializing.
+# Action-aware: only `store` needs entity slugs (build_external_id composes
+# the path from them). retrieve/delete/notify reuse the EXTERNAL_ID that's
+# already in the payload.
+ACTION_NAME=$(echo "$CONTEXT" | jq -r '.action // empty' | awk -F: '{print $2}')
+NEEDS_ENTITIES="no"
+[ "$ACTION_NAME" = "store" ] && NEEDS_ENTITIES="yes"
+
+# ── Single wave (no more wave 2 — IAM has dimensions upfront) ──────────────
 T_PREFETCH=$(timer_now)
-log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} iam_wave1=$CAN_FIRE_IAM_WAVE1)"
+log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} slug=${SLUG_FROM_PAYLOAD:-need-fetch} entities=$NEEDS_ENTITIES)"
 
-( _t=$(timer_now); \
-  np provider specification read --id "$SPEC_ID" --format json \
-    > "$NP_CACHE_DIR/spec.json" 2>"$NP_CACHE_DIR/spec.err"; \
-  printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.spec" ) &
-
-for entity_type in organization account namespace application; do
-  entity_id=$(printf '%s' "$ENTITIES_JSON" | jq -r ".$entity_type // empty")
-  if [ -n "$entity_id" ]; then
-    ( _t=$(timer_now); \
-      np "$entity_type" read --id "$entity_id" --format json \
-        > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err"; \
-      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.$entity_type" ) &
-  fi
-done
-
-if [ -n "$SCOPE_ID_PREFETCH" ]; then
+# Spec — only when the platform didn't ship the slug.
+if [ -z "$SLUG_FROM_PAYLOAD" ]; then
   ( _t=$(timer_now); \
-    np scope read --id "$SCOPE_ID_PREFETCH" --format json \
-      > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err"; \
-    printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.scope" ) &
+    np provider specification read --id "$SPEC_ID" --format json \
+      > "$NP_CACHE_DIR/spec.json" 2>"$NP_CACHE_DIR/spec.err"; \
+    printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.spec" ) &
 fi
 
-if [ "$CAN_FIRE_IAM_WAVE1" = "yes" ] && [ -n "$NRN" ]; then
+# Entity reads — only for `store` (need slugs for the canonical path).
+if [ "$NEEDS_ENTITIES" = "yes" ]; then
+  for entity_type in organization account namespace application; do
+    entity_id=$(printf '%s' "$ENTITIES_JSON" | jq -r ".$entity_type // empty")
+    if [ -n "$entity_id" ]; then
+      ( _t=$(timer_now); \
+        np "$entity_type" read --id "$entity_id" --format json \
+          > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err"; \
+        printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.$entity_type" ) &
+    fi
+  done
+
+  # Scope read — only when scope-level AND store (need the slug for the path).
+  # retrieve/delete don't need it; dimensions for IAM come from .value_dimensions.
+  if [ -n "$SCOPE_ID_PREFETCH" ]; then
+    ( _t=$(timer_now); \
+      np scope read --id "$SCOPE_ID_PREFETCH" --format json \
+        > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err"; \
+      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.scope" ) &
+  fi
+fi
+
+# IAM lookup — always (sts:AssumeRole needs the ARN). Now always in wave 1
+# because dimensions come from the payload (.value_dimensions / .dimensions).
+if [ -n "$NRN" ]; then
   if [ -n "$DIMS_ARG" ]; then
     ( _t=$(timer_now); \
       np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
@@ -119,26 +143,3 @@ for tfile in "$NP_CACHE_DIR"/timings.*; do
   [ -f "$tfile" ] || continue
   log debug "      ↳ $(basename "$tfile" | sed 's/^timings\.//') $(cat "$tfile")"
 done
-
-# ── Wave 2: IAM (only if deferred above) ────────────────────────────────────
-if [ "$CAN_FIRE_IAM_WAVE1" = "no" ] && [ -n "$NRN" ]; then
-  if [ -s "$NP_CACHE_DIR/scope.json" ]; then
-    SCOPE_DIMS_JSON=$(jq -c '.dimensions // empty' < "$NP_CACHE_DIR/scope.json" 2>/dev/null || echo "")
-    if [ -n "$SCOPE_DIMS_JSON" ] && [ "$SCOPE_DIMS_JSON" != "null" ] && [ "$SCOPE_DIMS_JSON" != "{}" ]; then
-      DIMS_ARG=$(printf '%s' "$SCOPE_DIMS_JSON" | jq -r '
-        to_entries | map("\(.key):\(.value)") | join(",")')
-    fi
-  fi
-
-  T_WAVE2=$(timer_now)
-  log debug "🚀 Prefetch wave 2 (iam${DIMS_ARG:+ dims=$DIMS_ARG})"
-  if [ -n "$DIMS_ARG" ]; then
-    np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
-      > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" || true
-  else
-    np provider list --categories identity-access-control --nrn "$NRN" --format json \
-      > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" || true
-  fi
-  log debug "⏱  Prefetch wave 2 $(timer_elapsed "$T_WAVE2")"
-  log debug "      ↳ iam $(timer_elapsed "$T_WAVE2")"
-fi

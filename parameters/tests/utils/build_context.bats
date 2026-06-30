@@ -119,14 +119,25 @@ teardown() {
   assert_contains "$captured" "--format json"
 }
 
-@test "build_context: fails when specification_id is missing" {
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.provider.specification_id)')
+@test "build_context: fails when both specification_id AND specification_slug are missing" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.provider.specification_id) | del(.provider.specification_slug)')
 
   run bash -c "source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Missing .provider.specification_id"
+  assert_contains "$output" "❌ Missing both .provider.specification_slug AND .provider.specification_id"
   assert_contains "$output" "💡 Possible causes:"
+}
+
+@test "build_context: skips spec lookup when specification_slug is in payload" {
+  mkdir -p "$TEST_PROVIDER_DIR"
+  # When slug is in payload, prefetch_np must not fire `np provider specification read`.
+  export CONTEXT=$(echo "$CONTEXT" | jq '.provider.specification_slug = "test_provider"')
+
+  run bash -c "source $SCRIPT && echo ACTIVE=\$ACTIVE_PROVIDER"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "ACTIVE=test_provider"
 }
 
 @test "build_context: fails when np CLI fails to read spec" {
