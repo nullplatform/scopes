@@ -1,5 +1,5 @@
 ################################################################################
-# Azure Key Vault — install module
+# Azure Key Vault — specs module
 #
 # Two responsibilities, one source of truth:
 #
@@ -15,7 +15,7 @@
 ################################################################################
 
 locals {
-  template_path     = "${path.module}/../azure-key-vault-configuration.json.tpl"
+  template_path     = "${path.module}/azure-key-vault-configuration.json.tpl"
   template_raw      = file(local.template_path)
   template_rendered = replace(local.template_raw, "{{ env.Getenv \"NRN\" }}", var.nrn)
   config            = jsondecode(local.template_rendered)

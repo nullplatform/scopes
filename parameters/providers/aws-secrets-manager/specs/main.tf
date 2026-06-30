@@ -1,5 +1,5 @@
 ################################################################################
-# AWS Secrets Manager — install module
+# AWS Secrets Manager — specs module
 #
 # Two responsibilities, one source of truth:
 #
@@ -22,7 +22,7 @@ locals {
   # `visible_to` because it's also consumed by non-tofu install paths. The only
   # token in the file is NRN, so we replace it inline rather than pulling in
   # gomplate as a build dependency.
-  template_path     = "${path.module}/../aws-secrets-manager-configuration.json.tpl"
+  template_path     = "${path.module}/aws-secrets-manager-configuration.json.tpl"
   template_raw      = file(local.template_path)
   template_rendered = replace(local.template_raw, "{{ env.Getenv \"NRN\" }}", var.nrn)
   config            = jsondecode(local.template_rendered)

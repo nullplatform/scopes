@@ -1,21 +1,22 @@
 ################################################################################
-# HashiCorp Vault — install module
+# AWS Parameter Store — specs module
 #
 # Two responsibilities, one source of truth:
 #
 #   1. nullplatform_provider_specification.this
-#      Created from ../hashicorp-vault-configuration.json.tpl. The JSON file
-#      is the canonical declaration of the provider's metadata and its config
-#      schema (address).
+#      Created from ../aws-parameter-store-configuration.json.tpl. The JSON
+#      file is the canonical declaration of the provider's metadata and its
+#      config schema (kms_key_id, tier).
 #
 #   2. module.scope_configuration (for_each = var.instances)
 #      One concrete instance per entry in var.instances, each with its own
-#      NRN, dimensions, and Vault address — so operators can point different
-#      accounts/environments at different Vault clusters.
+#      NRN, dimensions, KMS key, and tier — so operators can mix Standard and
+#      Advanced tiers across accounts, or install Parameter Store only on
+#      selected environments.
 ################################################################################
 
 locals {
-  template_path     = "${path.module}/../hashicorp-vault-configuration.json.tpl"
+  template_path     = "${path.module}/aws-parameter-store-configuration.json.tpl"
   template_raw      = file(local.template_path)
   template_rendered = replace(local.template_raw, "{{ env.Getenv \"NRN\" }}", var.nrn)
   config            = jsondecode(local.template_rendered)
@@ -52,7 +53,8 @@ module "scope_configuration" {
       applies_to = each.value.applies_to
     }
     setup = {
-      address = each.value.address
+      kms_key_id = each.value.kms_key_id
+      tier       = each.value.tier
     }
   }
 
