@@ -120,7 +120,16 @@ locals {
     }
   }
 
-  policy_statements = var.iam_role.mode == "with_kms" ? [local.base_policy_statement, local.kms_policy_statement] : [local.base_policy_statement]
+  # Build the policy JSON conditionally at the string level — Terraform's strict
+  # typing rejects ternaries that return tuples of differently-shaped objects
+  # (base has 4 keys, kms statement adds Condition for the 5th).
+  policy_doc = var.iam_role.mode == "with_kms" ? jsonencode({
+    Version   = "2012-10-17"
+    Statement = [local.base_policy_statement, local.kms_policy_statement]
+    }) : jsonencode({
+    Version   = "2012-10-17"
+    Statement = [local.base_policy_statement]
+  })
 }
 
 resource "aws_iam_role" "this" {
@@ -142,12 +151,8 @@ resource "aws_iam_role" "this" {
 }
 
 resource "aws_iam_role_policy" "this" {
-  count = local.iam_enabled ? 1 : 0
-  name  = "${var.iam_role.name}-policy"
-  role  = aws_iam_role.this[0].name
-
-  policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = local.policy_statements
-  })
+  count  = local.iam_enabled ? 1 : 0
+  name   = "${var.iam_role.name}-policy"
+  role   = aws_iam_role.this[0].name
+  policy = local.policy_doc
 }
