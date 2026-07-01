@@ -26,7 +26,7 @@ variable "cluster_name" {
 }
 
 variable "permissions_role_name" {
-  description = "Override for the permissions IAM role name. Defaults to nullplatform-{cluster_name}-agent-permissions-role."
+  description = "Override for the permissions IAM role name. Defaults to nullplatform_{cluster_name}_k8s_role."
   type        = string
   default     = ""
 }
