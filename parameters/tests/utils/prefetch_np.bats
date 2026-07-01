@@ -140,24 +140,6 @@ teardown() {
   case "$output" in *"provider specification read"*) return 1 ;; esac
 }
 
-@test "prefetch_np: missing specification_slug falls back to spec lookup" {
-  export CONTEXT='{
-    "action":"parameter:retrieve",
-    "entities":{"organization":"O","account":"A","namespace":"N","application":"AP"},
-    "provider":{"specification_id":"spec-123"}
-  }'
-  export SPEC_ID="spec-123"
-
-  run bash -c "
-    export PATH=$BIN_DIR:\$PATH
-    source $PARAMETERS_DIR/utils/log
-    source $SCRIPT
-  "
-
-  run cat "$NP_LOG"
-  assert_contains "$output" "provider specification read --id spec-123"
-}
-
 # ---- Dimensions resolution: from .value_dimensions / .dimensions ----------
 
 @test "prefetch_np: value_dimensions (scope-level) is passed to iam call in wave 1" {

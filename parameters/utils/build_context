@@ -60,13 +60,12 @@ export PARAMETER_KIND
 log debug "⏱  build_context.notification_parse $(timer_elapsed "$T_PARSE")"
 
 # --- Resolve ACTIVE_PROVIDER ---
-# Prefer the slug directly from the payload (.provider.specification_slug).
-# Fall back to a spec lookup (via prefetch) if the platform didn't send it.
-SPEC_ID=$(echo "$CONTEXT" | jq -r '.provider.specification_id // empty')
+# The platform ships .provider.specification_slug in the payload; use it directly.
 ACTIVE_PROVIDER=$(echo "$CONTEXT" | jq -r '.provider.specification_slug // empty')
+SPEC_ID=$(echo "$CONTEXT" | jq -r '.provider.specification_id // empty')
 
-if [ -z "$ACTIVE_PROVIDER" ] && [ -z "$SPEC_ID" ]; then
-  log error "❌ Missing both .provider.specification_slug AND .provider.specification_id in CONTEXT"
+if [ -z "$ACTIVE_PROVIDER" ]; then
+  log error "❌ Missing .provider.specification_slug in CONTEXT"
   log error ""
   log error "💡 Possible causes:"
   log error "   • The notification payload is malformed"
@@ -79,34 +78,8 @@ fi
 
 # Pre-fetch every `np` read this workflow needs, in parallel. Downstream
 # (assume_role_step, build_external_id) reads from $NP_CACHE_DIR instead of
-# re-invoking np. prefetch_np reads .provider.specification_slug from CONTEXT;
-# if absent it fires the spec call so we can populate ACTIVE_PROVIDER below.
-export SPEC_ID
+# re-invoking np.
 source "$SCRIPT_DIR/prefetch_np"
-
-if [ -z "$ACTIVE_PROVIDER" ]; then
-  if [ ! -s "$NP_CACHE_DIR/spec.json" ]; then
-    log error "❌ Failed to read provider specification (id=$SPEC_ID)"
-    log error ""
-    log error "💡 Possible causes:"
-    log error "   • The specification_id does not exist in nullplatform"
-    log error "   • np CLI is not authenticated in this environment"
-    log error "   • Network connectivity to nullplatform API"
-    log error ""
-    log error "🔧 How to fix:"
-    log error "   • Verify the spec exists: np provider specification read --id $SPEC_ID"
-    log error "   • Check np auth: np whoami"
-    [ -s "$NP_CACHE_DIR/spec.err" ] && log error "Underlying output: $(cat "$NP_CACHE_DIR/spec.err")"
-    exit 1
-  fi
-  SPEC_JSON=$(cat "$NP_CACHE_DIR/spec.json")
-  ACTIVE_PROVIDER=$(echo "$SPEC_JSON" | jq -r '.slug // empty')
-  if [ -z "$ACTIVE_PROVIDER" ]; then
-    log error "❌ Provider specification has no slug (id=$SPEC_ID)"
-    log error "Spec response: $SPEC_JSON"
-    exit 1
-  fi
-fi
 
 PROVIDER_DIR="$PARAMETERS_ROOT/providers/$ACTIVE_PROVIDER"
 if [ ! -d "$PROVIDER_DIR" ]; then

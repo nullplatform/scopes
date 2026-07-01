@@ -37,7 +37,7 @@ EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/np"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 
-  # Default CONTEXT: a valid payload with provider.specification_id pointing to test_provider
+  # Default CONTEXT: platform ships specification_slug directly in the payload.
   export CONTEXT='{
     "parameter_id": 42,
     "value": "my-val",
@@ -52,6 +52,7 @@ EOF
     },
     "provider": {
       "specification_id": "ec885dd0-7c38-45b8-af2c-0b9e1deb7d3d",
+      "specification_slug": "test_provider",
       "attributes": {
         "region": "us-east-1",
         "name_prefix": "parameters/"
@@ -108,56 +109,29 @@ teardown() {
   assert_contains "$output" "PROV=test_provider"
 }
 
-@test "build_context: calls np with correct args" {
+@test "build_context: does NOT call np provider specification read (slug comes from payload)" {
   mkdir -p "$TEST_PROVIDER_DIR"
 
   run bash -c "source $SCRIPT"
 
-  captured=$(cat "$NP_LOG")
-  assert_contains "$captured" "provider specification read"
-  assert_contains "$captured" "--id ec885dd0-7c38-45b8-af2c-0b9e1deb7d3d"
-  assert_contains "$captured" "--format json"
+  captured=$(cat "$NP_LOG" 2>/dev/null || echo "")
+  case "$captured" in *"provider specification read"*) return 1 ;; esac
 }
 
-@test "build_context: fails when both specification_id AND specification_slug are missing" {
-  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.provider.specification_id) | del(.provider.specification_slug)')
+@test "build_context: fails when specification_slug is missing" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.provider.specification_slug)')
 
   run bash -c "source $SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Missing both .provider.specification_slug AND .provider.specification_id"
+  assert_contains "$output" "❌ Missing .provider.specification_slug"
   assert_contains "$output" "💡 Possible causes:"
 }
 
-@test "build_context: skips spec lookup when specification_slug is in payload" {
-  mkdir -p "$TEST_PROVIDER_DIR"
-  # When slug is in payload, prefetch_np must not fire `np provider specification read`.
-  export CONTEXT=$(echo "$CONTEXT" | jq '.provider.specification_slug = "test_provider"')
-
-  run bash -c "source $SCRIPT && echo ACTIVE=\$ACTIVE_PROVIDER"
-
-  assert_equal "$status" "0"
-  assert_contains "$output" "ACTIVE=test_provider"
-}
-
-@test "build_context: fails when np CLI fails to read spec" {
-  run bash -c "MOCK_NP_SPEC_MODE=not_found source $SCRIPT"
-
-  [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Failed to read provider specification"
-  assert_contains "$output" "🔧 How to fix:"
-}
-
-@test "build_context: fails when spec has no slug" {
-  run bash -c "MOCK_NP_SPEC_MODE=no_slug source $SCRIPT"
-
-  [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Provider specification has no slug"
-}
-
 @test "build_context: fails when provider directory doesn't exist" {
-  # Resolved slug points to "nonexistent_provider" but no dir
-  run bash -c "MOCK_NP_SPEC_SLUG=nonexistent_provider source $SCRIPT"
+  export CONTEXT=$(echo "$CONTEXT" | jq '.provider.specification_slug = "nonexistent_provider"')
+
+  run bash -c "source $SCRIPT"
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Provider implementation not found for slug 'nonexistent_provider'"

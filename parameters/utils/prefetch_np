@@ -15,13 +15,9 @@
 # external_id path.
 #
 # Inputs:
-#   CONTEXT  — JSON of the notification body (set by entrypoint)
-#   SPEC_ID  — $CONTEXT.provider.specification_id (set by build_context)
-#
-# Payload optimizations (when the platform provides them):
-#   .provider.specification_slug — used directly, skips `np provider specification read`
-#   .value_dimensions            — used directly for IAM dim-aware lookup; no scope read
-#   .dimensions                  — same as above for dim-level (no scope) payloads
+#   CONTEXT — JSON of the notification body (set by entrypoint). Must include
+#             .provider.specification_slug (platform contract) and
+#             .value_dimensions / .dimensions when applicable.
 #
 # Escape hatch for tests: if NP_CACHE_DIR is pre-set and exists, prefetch is
 # skipped — tests pre-populate the cache with fixtures and source the rest of
@@ -29,14 +25,12 @@
 #
 # Output:
 #   NP_CACHE_DIR — exported; contains (only the files that were fetched):
-#     spec.json                 — provider specification (only if slug wasn't in payload)
 #     {organization,account,namespace,application}.json — entity records (store only)
 #     scope.json                — entity record (store + scope-level only)
 #     iam.json                  — `np provider list --categories identity-access-control`
 #   NRN          — exported; computed locally from entities/value_entities
 
 : "${CONTEXT:?CONTEXT must be set before sourcing prefetch_np}"
-: "${SPEC_ID:?SPEC_ID must be set before sourcing prefetch_np}"
 
 if [ -n "${NP_CACHE_DIR:-}" ] && [ -d "$NP_CACHE_DIR" ]; then
   log debug "📦 NP_CACHE_DIR pre-set ($NP_CACHE_DIR) — skipping prefetch"
@@ -68,16 +62,12 @@ SCOPE_ID_PREFETCH=$(printf '%s' "$ENTITIES_JSON" | jq -r '.scope // empty')
 #   1. .value_dimensions — scope-level (platform pre-resolved scope dimensions)
 #   2. .dimensions       — dim-level without scope
 #   3. (none)            — app-level
-# With either field present, the IAM call fires in wave 1; no wave 2 needed.
 DIMS_JSON=$(echo "$CONTEXT" | jq -c '.value_dimensions // .dimensions // empty')
 DIMS_ARG=""
 if [ -n "$DIMS_JSON" ] && [ "$DIMS_JSON" != "null" ] && [ "$DIMS_JSON" != "{}" ]; then
   DIMS_ARG=$(printf '%s' "$DIMS_JSON" | jq -r '
     to_entries | map("\(.key):\(.value)") | join(",")')
 fi
-
-# Skip the spec call if the platform already gave us the slug.
-SLUG_FROM_PAYLOAD=$(echo "$CONTEXT" | jq -r '.provider.specification_slug // empty')
 
 # Action-aware: only `store` needs entity slugs (build_external_id composes
 # the path from them). retrieve/delete/notify reuse the EXTERNAL_ID that's
@@ -86,17 +76,9 @@ ACTION_NAME=$(echo "$CONTEXT" | jq -r '.action // empty' | awk -F: '{print $2}')
 NEEDS_ENTITIES="no"
 [ "$ACTION_NAME" = "store" ] && NEEDS_ENTITIES="yes"
 
-# ── Single wave (no more wave 2 — IAM has dimensions upfront) ──────────────
+# ── Single wave: entities (store only) + IAM, all in parallel ──────────────
 T_PREFETCH=$(timer_now)
-log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} slug=${SLUG_FROM_PAYLOAD:-need-fetch} entities=$NEEDS_ENTITIES)"
-
-# Spec — only when the platform didn't ship the slug.
-if [ -z "$SLUG_FROM_PAYLOAD" ]; then
-  ( _t=$(timer_now); \
-    np provider specification read --id "$SPEC_ID" --format json \
-      > "$NP_CACHE_DIR/spec.json" 2>"$NP_CACHE_DIR/spec.err"; \
-    printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.spec" ) &
-fi
+log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} entities=$NEEDS_ENTITIES)"
 
 # Entity reads — only for `store` (need slugs for the canonical path).
 if [ "$NEEDS_ENTITIES" = "yes" ]; then
@@ -120,8 +102,8 @@ if [ "$NEEDS_ENTITIES" = "yes" ]; then
   fi
 fi
 
-# IAM lookup — always (sts:AssumeRole needs the ARN). Now always in wave 1
-# because dimensions come from the payload (.value_dimensions / .dimensions).
+# IAM lookup — always (sts:AssumeRole needs the ARN). Runs in parallel with
+# the entity reads because dimensions come from the payload up-front.
 if [ -n "$NRN" ]; then
   if [ -n "$DIMS_ARG" ]; then
     ( _t=$(timer_now); \
