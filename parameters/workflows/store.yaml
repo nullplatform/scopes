@@ -3,7 +3,7 @@ configuration:
 steps:
   - name: build_context
     type: script
-    file: "$SERVICE_PATH/parameters/utils/build_context"
+    file: "$SERVICE_PATH/utils/build_context"
     output:
       - { name: ACTIVE_PROVIDER, type: environment }
       - { name: PROVIDER_DIR, type: environment }
@@ -17,4 +17,4 @@ steps:
       - { name: PARAMETER_ENCODING, type: environment }
   - name: store
     type: script
-    file: "$SERVICE_PATH/parameters/utils/dispatch"
+    file: "$SERVICE_PATH/utils/dispatch"

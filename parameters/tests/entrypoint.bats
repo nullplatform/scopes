@@ -15,9 +15,9 @@ setup() {
   export SERVICE_PATH="$BATS_TEST_TMPDIR/service"
 
   # Stage a fake parameters/workflows/ with the expected action workflows.
-  mkdir -p "$SERVICE_PATH/parameters/workflows"
+  mkdir -p "$SERVICE_PATH/workflows"
   for action in store retrieve delete notify; do
-    : > "$SERVICE_PATH/parameters/workflows/$action.yaml"
+    : > "$SERVICE_PATH/workflows/$action.yaml"
   done
 
   # np mock — echo args so we can assert what entrypoint invoked.

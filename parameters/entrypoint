@@ -37,6 +37,10 @@ if [ -z "$ACTION_TO_EXECUTE" ]; then
   exit 1
 fi
 
+SERVICE_PATH=$ENTRYPOINT_DIR
+
+export SERVICE_PATH
+
 WORKFLOW_PATH="$ENTRYPOINT_DIR/workflows/$ACTION_TO_EXECUTE.yaml"
 if [ ! -f "$WORKFLOW_PATH" ]; then
   echo "❌ No workflow found at $WORKFLOW_PATH" >&2
