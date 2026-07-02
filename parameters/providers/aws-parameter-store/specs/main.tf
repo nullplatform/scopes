@@ -1,33 +1,26 @@
 ################################################################################
 # AWS Parameter Store — specs module
 #
-# Two responsibilities, one source of truth:
+# Responsibilities:
 #
 #   1. nullplatform_provider_specification.this
-#      Created from ../aws-parameter-store-configuration.json.tpl. The JSON
-#      file is the canonical declaration of the provider's metadata and its
-#      config schema (kms_key_id, tier).
+#      Created from ./aws-parameter-store-configuration.json.tpl. The JSON file
+#      is the canonical declaration of the provider's metadata and its config
+#      schema (kms_key_id, tier).
 #
 #   2. module.scope_configuration (for_each = var.instances)
-#      One concrete instance per entry in var.instances, each with its own
-#      NRN, dimensions, KMS key, and tier — so operators can mix Standard and
-#      Advanced tiers across accounts, or install Parameter Store only on
-#      selected environments.
+#      One concrete instance per entry in var.instances, each with its own NRN,
+#      dimensions, KMS key, and tier. Delegates to the upstream
+#      `nullplatform/scope_configuration` module.
+#
+#   3. nullplatform_api_key.this + nullplatform_notification_channel.from_template
+#      Per instance (unless notification_channel_enabled=false): an agent API key
+#      and its notification channel, anchored at the instance NRN, that handle
+#      parameter storage and retrieval.
+#
+#   4. aws_iam_role.this (optional, var.iam_role.enable)
+#      Least-privilege role for the provider. See data.tf / locals.tf.
 ################################################################################
-
-locals {
-  template_path     = "${path.module}/aws-parameter-store-configuration.json.tpl"
-  template_raw      = file(local.template_path)
-  template_rendered = replace(local.template_raw, "{{ env.Getenv \"NRN\" }}", var.nrn)
-  config            = jsondecode(local.template_rendered)
-
-  instance_nrns = distinct([for _, inst in var.instances : inst.nrn])
-  spec_visible_to = distinct(concat(
-    [var.nrn],
-    local.instance_nrns,
-    var.extra_visible_to_nrns,
-  ))
-}
 
 resource "nullplatform_provider_specification" "this" {
   name             = local.config.name
@@ -61,71 +54,51 @@ module "scope_configuration" {
   depends_on = [nullplatform_provider_specification.this]
 }
 
-################################################################################
-# Optional: IAM role with least-privilege permissions for this provider.
-# Toggle with var.iam_role.enable. Outputs the role ARN so operators can wire
-# it into the identity-access-control provider config (selector="parameter_store").
-################################################################################
+resource "nullplatform_api_key" "this" {
+  for_each = local.notification_instances
 
-data "aws_caller_identity" "current" {
-  count = var.iam_role.enable ? 1 : 0
-}
-
-data "aws_region" "current" {
-  count = var.iam_role.enable ? 1 : 0
-}
-
-locals {
-  iam_enabled    = var.iam_role.enable
-  aws_account_id = local.iam_enabled ? data.aws_caller_identity.current[0].account_id : ""
-  aws_region     = local.iam_enabled ? data.aws_region.current[0].name : ""
-
-  # If trusted_principals isn't provided, default to the current account root.
-  # That allows IAM principals within the account to assume the role (subject
-  # to their own IAM policies). To lock it down further, pass explicit ARNs.
-  effective_trusted_principals = local.iam_enabled ? (
-    length(var.iam_role.trusted_principals) > 0
-    ? var.iam_role.trusted_principals
-    : ["arn:aws:iam::${local.aws_account_id}:root"]
-  ) : []
-
-  base_policy_statement = {
-    Sid    = "ManageNullplatformParameters"
-    Effect = "Allow"
-    Action = [
-      "ssm:PutParameter",
-      "ssm:GetParameter",
-      "ssm:DeleteParameter",
-    ]
-    Resource = "arn:aws:ssm:${local.aws_region}:${local.aws_account_id}:parameter/nullplatform/*"
-  }
-
-  kms_policy_statement = {
-    Sid    = "UseCustomerManagedKmsKey"
-    Effect = "Allow"
-    Action = [
-      "kms:Encrypt",
-      "kms:Decrypt",
-      "kms:GenerateDataKey",
-    ]
-    Resource = var.iam_role.kms_key_arn
-    Condition = {
-      StringEquals = {
-        "kms:ViaService" = "ssm.${local.aws_region}.amazonaws.com"
-      }
+  name = "parameter-api-key-${each.key}"
+  dynamic "grants" {
+    for_each = toset(local.api_key_grants)
+    content {
+      nrn       = each.value.nrn
+      role_slug = grants.value
     }
   }
 
-  # Build the policy JSON conditionally at the string level — Terraform's strict
-  # typing rejects ternaries that return tuples of differently-shaped objects
-  # (base has 4 keys, kms statement adds Condition for the 5th).
-  policy_doc = var.iam_role.mode == "with_kms" ? jsonencode({
-    Version   = "2012-10-17"
-    Statement = [local.base_policy_statement, local.kms_policy_statement]
-    }) : jsonencode({
-    Version   = "2012-10-17"
-    Statement = [local.base_policy_statement]
-  })
+  tags {
+    key   = "managedBy"
+    value = "IaC"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "nullplatform_notification_channel" "from_template" {
+  for_each = local.notification_instances
+
+  nrn         = each.value.nrn
+  type        = "agent"
+  source      = ["parameters"]
+  description = "Notification channel to handle parameter storage and retrieval"
+  configuration {
+    agent {
+      api_key  = nullplatform_api_key.this[each.key].api_key
+      selector = each.value.tags_selectors
+      command {
+        data = {
+          "cmdline" : local.cmdline_path
+          "environment" : jsonencode({
+            NP_ACTION_CONTEXT = "'$${NOTIFICATION_CONTEXT}'"
+            LOG_LEVEL         = "debug"
+          })
+        }
+        type = "exec"
+      }
+    }
+  }
 }
 
 resource "aws_iam_role" "this" {

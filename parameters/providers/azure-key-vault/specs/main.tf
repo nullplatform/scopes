@@ -1,32 +1,23 @@
 ################################################################################
 # Azure Key Vault — specs module
 #
-# Two responsibilities, one source of truth:
+# Responsibilities:
 #
 #   1. nullplatform_provider_specification.this
-#      Created from ../azure-key-vault-configuration.json.tpl. The JSON file
-#      is the canonical declaration of the provider's metadata and its config
+#      Created from ./azure-key-vault-configuration.json.tpl. The JSON file is
+#      the canonical declaration of the provider's metadata and its config
 #      schema (vault_name).
 #
 #   2. module.scope_configuration (for_each = var.instances)
-#      One concrete instance per entry in var.instances, each with its own
-#      NRN, dimensions, and Key Vault name — so operators can route different
+#      One concrete instance per entry in var.instances, each with its own NRN,
+#      dimensions, and Key Vault name — so operators can route different
 #      accounts/environments to different Key Vaults.
+#
+#   3. nullplatform_api_key.this + nullplatform_notification_channel.from_template
+#      Per instance (unless notification_channel_enabled=false): an agent API key
+#      and its notification channel, anchored at the instance NRN, that handle
+#      secret storage and retrieval.
 ################################################################################
-
-locals {
-  template_path     = "${path.module}/azure-key-vault-configuration.json.tpl"
-  template_raw      = file(local.template_path)
-  template_rendered = replace(local.template_raw, "{{ env.Getenv \"NRN\" }}", var.nrn)
-  config            = jsondecode(local.template_rendered)
-
-  instance_nrns = distinct([for _, inst in var.instances : inst.nrn])
-  spec_visible_to = distinct(concat(
-    [var.nrn],
-    local.instance_nrns,
-    var.extra_visible_to_nrns,
-  ))
-}
 
 resource "nullplatform_provider_specification" "this" {
   name             = local.config.name
@@ -57,4 +48,51 @@ module "scope_configuration" {
   }
 
   depends_on = [nullplatform_provider_specification.this]
+}
+
+resource "nullplatform_api_key" "this" {
+  for_each = local.notification_instances
+
+  name = "azure-key-vault-api-key-${each.key}"
+  dynamic "grants" {
+    for_each = toset(local.api_key_grants)
+    content {
+      nrn       = each.value.nrn
+      role_slug = grants.value
+    }
+  }
+
+  tags {
+    key   = "managedBy"
+    value = "IaC"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "nullplatform_notification_channel" "from_template" {
+  for_each = local.notification_instances
+
+  nrn         = each.value.nrn
+  type        = "agent"
+  source      = ["parameters"]
+  description = "Notification channel to handle parameter storage and retrieval"
+  configuration {
+    agent {
+      api_key  = nullplatform_api_key.this[each.key].api_key
+      selector = each.value.tags_selectors
+      command {
+        data = {
+          "cmdline" : local.cmdline_path
+          "environment" : jsonencode({
+            NP_ACTION_CONTEXT = "'$${NOTIFICATION_CONTEXT}'"
+            LOG_LEVEL         = "debug"
+          })
+        }
+        type = "exec"
+      }
+    }
+  }
 }
