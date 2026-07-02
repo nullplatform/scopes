@@ -78,6 +78,7 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
+*.env
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -176,3 +177,4 @@ testing/docker/certs/
 
 # Superpowers specs and implementation plans (local-only)
 docs/superpowers/
+.DS_Store

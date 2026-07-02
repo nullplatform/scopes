@@ -10,6 +10,9 @@ instances = {
     kms_key_id = "alias/parameters-prod-billing"
     tier       = "Standard"
     applies_to = ["non_secret"]
+
+    # Each instance gets its own agent API key + notification channel anchored at its nrn.
+    tags_selectors = { environment = "production" }
   }
   staging-billing = {
     nrn        = "organization=1:account=2:namespace=3"
@@ -17,6 +20,9 @@ instances = {
     kms_key_id = ""
     tier       = "Advanced"
     applies_to = ["non_secret"]
+
+    # Skip the agent channel + API key for this instance (e.g. managed elsewhere).
+    notification_channel_enabled = false
   }
 }
 

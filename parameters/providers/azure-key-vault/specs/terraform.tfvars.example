@@ -9,11 +9,17 @@ instances = {
     dimensions = { environment = "production" }
     vault_name = "acme-prod-billing-kv"
     applies_to = ["secret"]
+
+    # Each instance gets its own agent API key + notification channel anchored at its nrn.
+    tags_selectors = { environment = "production" }
   }
   staging-billing = {
     nrn        = "organization=acme-1255165411:account=staging-95118863:namespace=billing-37094320"
     dimensions = { environment = "staging" }
     vault_name = "acme-staging-billing-kv"
     applies_to = ["secret"]
+
+    # Skip the agent channel + API key for this instance (e.g. managed elsewhere).
+    notification_channel_enabled = false
   }
 }
