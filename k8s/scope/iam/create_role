@@ -161,7 +161,7 @@ for ((i=0; i<$POLICIES_COUNT; i++)); do
     POLICY_NAME="inline-policy-$((i+1))"
     log debug "📝 Attaching inline policy: $POLICY_NAME"
 
-    TEMP_POLICY_FILE="/tmp/inline-policy-$i.json"
+    TEMP_POLICY_FILE="$OUTPUT_DIR/inline-policy-$i.json"
     echo "$POLICY_VALUE" > "$TEMP_POLICY_FILE"
 
     aws iam put-role-policy \

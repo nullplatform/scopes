@@ -264,6 +264,58 @@ teardown() {
 }
 
 # =============================================================================
+# Test: Inline policy document is written under OUTPUT_DIR, not /tmp
+# (regression: shared /tmp path collided across concurrent create_role runs)
+# =============================================================================
+@test "create_role: inline policy document is written under OUTPUT_DIR" {
+  export IAM='{
+    "ENABLED": "true",
+    "PREFIX": "test-prefix",
+    "ROLE": {
+      "BOUNDARY_ARN": null,
+      "POLICIES": [
+        {"TYPE": "inline", "VALUE": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"}
+      ]
+    }
+  }'
+
+  aws() {
+    case "$*" in
+      *"eks describe-cluster"*)
+        echo "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF1234567890"
+        ;;
+      *"sts get-caller-identity"*)
+        echo "123456789012"
+        ;;
+      *"iam create-role"*)
+        echo '{"Role": {"Arn": "arn:aws:iam::123456789012:role/test-prefix-test-scope-123"}}'
+        ;;
+      *"iam put-role-policy"*)
+        # Emit the args so the test can assert on the --policy-document path
+        echo "PUT_ROLE_POLICY_ARGS: $*"
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "--policy-document file://$OUTPUT_DIR/inline-policy-0.json"
+
+  # Guard against the shared /tmp path regression
+  if echo "$output" | grep -q "file:///tmp/inline-policy"; then
+    uses_tmp="true"
+  else
+    uses_tmp="false"
+  fi
+  assert_false "$uses_tmp" "inline policy document under /tmp"
+}
+
+# =============================================================================
 # Test: Unknown policy type shows warning
 # =============================================================================
 @test "create_role: unknown policy type shows warning message" {
