@@ -23,5 +23,12 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y bats jq
 
+      - name: Install gomplate
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/gomplate \
+            https://github.com/hairyhenderson/gomplate/releases/download/v4.3.3/gomplate_linux-amd64
+          sudo chmod +x /usr/local/bin/gomplate
+          gomplate --version
+
       - name: Run unit tests
         run: make test-unit

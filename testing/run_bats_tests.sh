@@ -82,11 +82,24 @@ run_tests_in_dir() {
   local exit_code=0
   (
     cd "$test_dir"
-    # Use script to force TTY for colored output
-    # Exclude integration directory - those tests are run by run_integration_tests.sh
-    # --print-output-on-failure: only show test output when a test fails
-    script -q /dev/null bats --formatter pretty --print-output-on-failure $(find . -name "*.bats" -not -path "*/integration/*" | sort)
-  ) 2>&1 | tee "$temp_output" || exit_code=$?
+    # Force a TTY so the bats "pretty" formatter renders; --print-output-on-failure
+    # only dumps test output when a test fails. Exclude integration tests (run
+    # separately). `script`'s command syntax differs by platform: BSD/macOS takes a
+    # positional command (script <file> <cmd...>), while util-linux (Linux CI) needs
+    # -c "<cmd>" <file>. Using the wrong one silently runs zero tests.
+    local test_files
+    test_files=$(find . -name "*.bats" -not -path "*/integration/*" | sort | tr '\n' ' ')
+    local bats_cmd="bats --formatter pretty --print-output-on-failure $test_files"
+    # The pretty formatter shells out to `tput`, which needs $TERM. CI runners and
+    # containers often leave it unset - default it so tput can find a terminfo entry.
+    export TERM="${TERM:-xterm}"
+    if [ "$(uname)" = "Darwin" ]; then
+      script -q /dev/null $bats_cmd
+    else
+      script -qec "$bats_cmd" /dev/null
+    fi
+  ) 2>&1 | tee "$temp_output"
+  exit_code=${PIPESTATUS[0]}
 
   # Extract failed tests from output
   # Strip all ANSI escape codes (colors, cursor movements, etc.)
@@ -188,6 +201,14 @@ if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo -e "  ${RED}✗${NC} ${CYAN}[$module_name]${NC} ${RED}$file_name${NC} $test_name"
   done
   echo ""
+  exit 1
+fi
+
+# A non-zero runner exit with no parsed "✗" lines means bats itself failed to run
+# (e.g. a malformed .bats file or a broken `script` invocation) - never report success.
+if [ "$HAS_FAILURES" -ne 0 ]; then
+  echo -e "${RED}BATS runner exited with errors but no individual test failures were parsed.${NC}"
+  echo -e "${RED}This usually means the test harness failed to execute - check the output above.${NC}"
   exit 1
 fi
 

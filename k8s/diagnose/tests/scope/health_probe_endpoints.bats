@@ -180,7 +180,10 @@ EOF
   stripped=$(strip_ansi "$output")
   assert_contains "$stripped" "Readiness Probe on HTTP://8080/health:"
   assert_contains "$stripped" "HTTP 404 - Health check endpoint not found"
-  assert_contains "$stripped" "Update probe path or implement the endpoint in application"
+  # Remediation guidance lives in the structured evidence (suggested_actions),
+  # not in stdout - the check publishes it for the AI summarizer, not operators.
+  actions=$(jq -r '.evidence.suggested_actions[]' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$actions" "Update probe path or implement health endpoint in application"
 }
 
 @test "scope/health_probe_endpoints: updates status to failed on 404" {
@@ -261,7 +264,10 @@ EOF
   stripped=$(strip_ansi "$output")
   assert_contains "$stripped" "Readiness Probe on HTTP://8080/health:"
   assert_contains "$stripped" "HTTP 500 - Application error"
-  assert_contains "$stripped" "Check application logs and fix internal errors or dependencies"
+  # Remediation guidance lives in the structured evidence (suggested_actions),
+  # not in stdout - the check publishes it for the AI summarizer, not operators.
+  actions=$(jq -r '.evidence.suggested_actions[]' "$SCRIPT_OUTPUT_FILE")
+  assert_contains "$actions" "Check application logs for internal errors"
 }
 
 @test "scope/health_probe_endpoints: updates status to warning on 500" {

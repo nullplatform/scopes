@@ -17,11 +17,14 @@ arn_for_selector() {
   local json="$1" selector="$2"
   [ -n "$json" ] || return 0
   [ -n "$selector" ] || return 0
+  # jq exits non-zero (status 5) on malformed JSON; swallow it so the helper
+  # honors its "never crashes, returns empty" contract instead of propagating
+  # jq's failure as the function's return code.
   printf '%s' "$json" | jq -r --arg sel "$selector" '
     [ .iam_role_arns.arns[]?
       | select(.selector == $sel)
       | .arn ]
-    | first // ""' 2>/dev/null
+    | first // ""' 2>/dev/null || true
 }
 
 # resolve_assume_role_arn <iam_provider_json> <selector>
