@@ -1,6 +1,6 @@
 {
   "name": "AWS Parameter Store",
-  "description": "Stores nullplatform parameter values in AWS SSM Parameter Store with native versioning. Cheapest option (Standard tier is free up to 10,000 parameters)",
+  "description": "Stores nullplatform parameter values in AWS SSM Parameter Store",
   "slug": "aws-parameter-store",
   "category": "parameters-storage",
   "icon": "mdi:aws",
@@ -44,7 +44,7 @@
         "properties": {
           "kms_key_id": {
             "type": "string",
-            "title": "KMS Key ID (optional)",
+            "title": "KMS Key ID",
             "description": "Customer-managed KMS key for SecureString parameters. If empty, the default alias/aws/ssm key is used",
             "default": "",
             "order": 1

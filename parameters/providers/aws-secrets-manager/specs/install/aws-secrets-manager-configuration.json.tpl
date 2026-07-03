@@ -1,6 +1,6 @@
 {
   "name": "AWS Secrets Manager",
-  "description": "Stores nullplatform parameter values in AWS Secrets Manager using native versioning",
+  "description": "Stores nullplatform parameter values in AWS Secrets Manager",
   "slug": "aws-secrets-manager",
   "category": "parameters-storage",
   "icon": "mdi:aws",
@@ -44,7 +44,7 @@
         "properties": {
           "kms_key_id": {
             "type": "string",
-            "title": "KMS Key ID (optional)",
+            "title": "KMS Key ID",
             "description": "Customer-managed KMS key ARN or alias. If empty, the default aws/secretsmanager managed key is used",
             "default": "",
             "order": 1
