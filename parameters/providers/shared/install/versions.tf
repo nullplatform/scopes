@@ -6,9 +6,5 @@ terraform {
       source  = "nullplatform/nullplatform"
       version = ">= 0.0.95"
     }
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 5.0"
-    }
   }
 }
