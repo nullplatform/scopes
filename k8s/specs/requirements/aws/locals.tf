@@ -6,7 +6,7 @@ locals {
   iam_create = var.iam_create_role
 
   # Derived names (overridable via variables)
-  permissions_role_name = var.permissions_role_name != "" ? var.permissions_role_name : "nullplatform-${var.cluster_name}-agent-permissions-role"
+  permissions_role_name = var.permissions_role_name != "" ? var.permissions_role_name : "nullplatform_${var.cluster_name}_k8s_role"
   policies_name_prefix  = var.policies_name_prefix != "" ? var.policies_name_prefix : "nullplatform_${var.cluster_name}"
 
   # Primary agent role trusted by the permissions role. Defaults to the
