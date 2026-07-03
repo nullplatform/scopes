@@ -44,16 +44,12 @@ if [ -n "${SM_KMS_KEY_ID:-}" ]; then
 fi
 
 err_file=$(mktemp)
-T_AWS=$(timer_now)
 if RESULT=$(aws secretsmanager create-secret "${create_args[@]}" 2>"$err_file"); then
-  log debug "   ⏱  aws secretsmanager create-secret $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
 elif grep -q "ResourceExistsException" "$err_file"; then
-  log debug "   ⏱  aws secretsmanager create-secret (exists) $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
   log debug "Secret '$SECRET_NAME' exists; adding new version (history preserved by AWS SM)"
   err_file=$(mktemp)
-  T_AWS=$(timer_now)
   if ! RESULT=$(aws secretsmanager put-secret-value \
           --region "$AWS_REGION" \
           --secret-id "$SECRET_NAME" \
@@ -72,7 +68,6 @@ elif grep -q "ResourceExistsException" "$err_file"; then
     log error "Underlying error: $err"
     exit 1
   fi
-  log debug "   ⏱  aws secretsmanager put-secret-value $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
 else
   err=$(cat "$err_file")

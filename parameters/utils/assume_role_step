@@ -59,8 +59,6 @@ source "$SCRIPT_DIR/assume_role_lib"
 # Session prefix for the STS session name (informational).
 export ASSUME_ROLE_SESSION_PREFIX="${ASSUME_ROLE_SESSION_PREFIX:-np-parameters}"
 
-T_AR_PREP=$(timer_now)
-
 # SCOPE_ID is used by assume_role only for the STS session-name suffix.
 # Pull it from the same source NRN was built from (entities/value_entities).
 if [ -z "${SCOPE_ID:-}" ]; then
@@ -86,7 +84,6 @@ ASSUME_ROLE_ARN_RESOLVED=$(resolve_assume_role_arn \
   "$ASSUME_ROLE_OVERRIDE_ENV" \
   "$ASSUME_ROLE_DEFAULT_ENV")
 export ASSUME_ROLE_ARN_RESOLVED
-log debug "   ⏱  assume_role_step.resolve_arn $(timer_elapsed "$T_AR_PREP")"
 
 # --- 5. Perform the assume-role (no-op if ARN is empty) --------------------
 if ! source "$SCRIPT_DIR/assume_role"; then

@@ -14,8 +14,6 @@ set -euo pipefail
 
 ENTRYPOINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$ENTRYPOINT_DIR/utils/log" ] && source "$ENTRYPOINT_DIR/utils/log"
-T_TOTAL=$(timer_now 2>/dev/null || echo 0)
-T_ENTRY_PREP=$(timer_now 2>/dev/null || echo 0)
 
 if [ -z "${NP_ACTION_CONTEXT:-}" ]; then
   echo "❌ NP_ACTION_CONTEXT is not set" >&2
@@ -59,13 +57,6 @@ if [ -n "${OVERRIDES_PATH:-}" ]; then
   done
 fi
 
-type -t log >/dev/null 2>&1 && log debug "⏱  entrypoint.prep $(timer_elapsed "$T_ENTRY_PREP" 2>/dev/null || echo "?")"
-
-T_WF=$(timer_now 2>/dev/null || echo 0)
 WF_RC=0
 eval $CMD || WF_RC=$?
-if type -t log >/dev/null 2>&1; then
-  log debug "⏱  np service workflow exec $(timer_elapsed "$T_WF" 2>/dev/null || echo "?")"
-  log debug "⏱  entrypoint total $(timer_elapsed "$T_TOTAL" 2>/dev/null || echo "?")"
-fi
 exit $WF_RC

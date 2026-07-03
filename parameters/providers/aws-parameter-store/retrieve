@@ -11,8 +11,6 @@ set -euo pipefail
 #
 # Required env: EXTERNAL_ID, AWS_REGION, PS_NAME_PREFIX
 
-T_PS_RETRIEVE=$(timer_now)
-
 # EXTERNAL_ID_PATH and EXTERNAL_ID_VERSION are set by build_context.
 # SSM path components only accept [A-Za-z0-9._-]; `=` is replaced with `_`
 # (same transformation as store).
@@ -23,17 +21,14 @@ LOOKUP_NAME="$PARAM_NAME"
 [ -n "${EXTERNAL_ID_VERSION:-}" ] && LOOKUP_NAME="${PARAM_NAME}:${EXTERNAL_ID_VERSION}"
 
 err_file=$(mktemp)
-T_AWS=$(timer_now)
 if VALUE=$(aws ssm get-parameter \
         --region "$AWS_REGION" \
         --name "$LOOKUP_NAME" \
         --with-decryption \
         --query Parameter.Value \
         --output text 2>"$err_file"); then
-  log debug "   ⏱  aws ssm get-parameter $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
   jq -n --arg value "$VALUE" '{value: $value}'
-  log debug "⏱  ps.retrieve total $(timer_elapsed "$T_PS_RETRIEVE")"
 else
   err=$(cat "$err_file")
   rm -f "$err_file"

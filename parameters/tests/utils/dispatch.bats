@@ -15,8 +15,8 @@ setup() {
   export PROVIDER_DIR="$BATS_TEST_TMPDIR/fake_provider"
   mkdir -p "$PROVIDER_DIR"
 
-  # dispatch logs a timing line via the log function; it's normally pre-loaded
-  # by the workflow's first step. Mirror that for tests.
+  # The log function is normally pre-loaded by the workflow's first step and is
+  # available to any provider script dispatch sources. Mirror that for tests.
   export DISPATCH_PRELUDE="source $PARAMETERS_DIR/utils/log;"
 }
 

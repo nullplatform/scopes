@@ -77,7 +77,6 @@ NEEDS_ENTITIES="no"
 [ "$ACTION_NAME" = "store" ] && NEEDS_ENTITIES="yes"
 
 # ── Single wave: entities (store only) + IAM, all in parallel ──────────────
-T_PREFETCH=$(timer_now)
 log debug "🚀 Prefetch wave 1 (NRN=$NRN${DIMS_ARG:+ dims=$DIMS_ARG} entities=$NEEDS_ENTITIES)"
 
 # Entity reads — only for `store` (need slugs for the canonical path).
@@ -85,20 +84,16 @@ if [ "$NEEDS_ENTITIES" = "yes" ]; then
   for entity_type in organization account namespace application; do
     entity_id=$(printf '%s' "$ENTITIES_JSON" | jq -r ".$entity_type // empty")
     if [ -n "$entity_id" ]; then
-      ( _t=$(timer_now); \
-        np "$entity_type" read --id "$entity_id" --format json \
-          > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err"; \
-        printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.$entity_type" ) &
+      np "$entity_type" read --id "$entity_id" --format json \
+        > "$NP_CACHE_DIR/$entity_type.json" 2>"$NP_CACHE_DIR/$entity_type.err" &
     fi
   done
 
   # Scope read — only when scope-level AND store (need the slug for the path).
   # retrieve/delete don't need it; dimensions for IAM come from .value_dimensions.
   if [ -n "$SCOPE_ID_PREFETCH" ]; then
-    ( _t=$(timer_now); \
-      np scope read --id "$SCOPE_ID_PREFETCH" --format json \
-        > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err"; \
-      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.scope" ) &
+    np scope read --id "$SCOPE_ID_PREFETCH" --format json \
+      > "$NP_CACHE_DIR/scope.json" 2>"$NP_CACHE_DIR/scope.err" &
   fi
 fi
 
@@ -106,22 +101,12 @@ fi
 # the entity reads because dimensions come from the payload up-front.
 if [ -n "$NRN" ]; then
   if [ -n "$DIMS_ARG" ]; then
-    ( _t=$(timer_now); \
-      np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
-        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err"; \
-      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.iam" ) &
+    np provider list --categories identity-access-control --nrn "$NRN" --dimensions "$DIMS_ARG" --format json \
+      > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" &
   else
-    ( _t=$(timer_now); \
-      np provider list --categories identity-access-control --nrn "$NRN" --format json \
-        > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err"; \
-      printf '%s' "$(timer_elapsed "$_t")" > "$NP_CACHE_DIR/timings.iam" ) &
+    np provider list --categories identity-access-control --nrn "$NRN" --format json \
+      > "$NP_CACHE_DIR/iam.json" 2>"$NP_CACHE_DIR/iam.err" &
   fi
 fi
 
 wait
-log debug "⏱  Prefetch wave 1 $(timer_elapsed "$T_PREFETCH")"
-# Per-call wall times so the long pole stands out:
-for tfile in "$NP_CACHE_DIR"/timings.*; do
-  [ -f "$tfile" ] || continue
-  log debug "      ↳ $(basename "$tfile" | sed 's/^timings\.//') $(cat "$tfile")"
-done

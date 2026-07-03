@@ -30,9 +30,6 @@ export PARAMETERS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/log"
 source "$SCRIPT_DIR/get_config_value"
 
-T_BUILD_CTX=$(timer_now)
-T_PARSE=$(timer_now)
-
 # --- Notification fields ---
 export EXTERNAL_ID=$(echo "$CONTEXT" | jq -r '.external_id // empty')
 # external_id format: <canonical_path>#<version_id>
@@ -56,8 +53,6 @@ case "$(echo "$CONTEXT" | jq -r '.secret | tostring')" in
   *)     PARAMETER_KIND="" ;;
 esac
 export PARAMETER_KIND
-
-log debug "⏱  build_context.notification_parse $(timer_elapsed "$T_PARSE")"
 
 # --- Resolve ACTIVE_PROVIDER ---
 # The platform ships .provider.specification_slug in the payload; use it directly.
@@ -105,9 +100,5 @@ log debug "📦 active_provider=$ACTIVE_PROVIDER kind=$PARAMETER_KIND spec_id=$S
 # --- Source provider's setup for validation + connection handles ---
 if [ -f "$PROVIDER_DIR/setup" ]; then
   log debug "📡 Sourcing $ACTIVE_PROVIDER/setup"
-  T_SETUP=$(timer_now)
   source "$PROVIDER_DIR/setup"
-  log debug "⏱  Provider setup $(timer_elapsed "$T_SETUP")"
 fi
-
-log debug "⏱  build_context total $(timer_elapsed "$T_BUILD_CTX")"

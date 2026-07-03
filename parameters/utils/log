@@ -22,31 +22,3 @@ log() {
     *)     echo "$level $msg" >&2 ;;
   esac
 }
-
-# Timer helpers — used to measure where time goes in a workflow run.
-# Precedence at source time:
-#   1. bash 5+ $EPOCHREALTIME       (sub-microsecond, no fork)
-#   2. GNU `date +%s.%N`            (nanosecond, one fork; Linux)
-#   3. integer `date +%s`           (second; macOS bash 3.2 default — coarse)
-# Detection happens once so timer_now stays cheap (no test per call).
-if [ -n "${EPOCHREALTIME:-}" ]; then
-  _NP_TIMER_KIND="bash"
-elif [[ "$(date +%N 2>/dev/null)" =~ ^[0-9]+$ ]]; then
-  _NP_TIMER_KIND="gnudate"
-else
-  _NP_TIMER_KIND="coarse"
-fi
-
-timer_now() {
-  case "$_NP_TIMER_KIND" in
-    bash)    echo "$EPOCHREALTIME" ;;
-    gnudate) date +%s.%N ;;
-    *)       date +%s ;;
-  esac
-}
-
-timer_elapsed() {
-  local start="$1" end
-  end=$(timer_now)
-  awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3fs", e - s }'
-}

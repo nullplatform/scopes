@@ -12,7 +12,6 @@ set -euo pipefail
 
 VAULT_PATH="$VAULT_PATH_PREFIX/$EXTERNAL_ID_PATH"
 
-T_CURL=$(timer_now)
 if ! RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
     -H "X-Vault-Token: $VAULT_TOKEN" \
     "$VAULT_ADDR/v1/$VAULT_PATH" 2>/dev/null); then
@@ -26,7 +25,6 @@ if ! RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
   log error "   • Test connectivity: curl -s $VAULT_ADDR/v1/sys/health"
   exit 1
 fi
-log debug "   ⏱  vault DELETE $VAULT_PATH $(timer_elapsed "$T_CURL")"
 
 HTTP_STATUS="${RESPONSE##*$'\n'}"
 

@@ -27,7 +27,6 @@ PAYLOAD=$(jq -nc \
     --arg external_id "$EXTERNAL_ID" \
     '{data: {parameter_id: $parameter_id, value: $value, stored_at: $stored_at, external_id: $external_id}}')
 
-T_CURL=$(timer_now)
 if ! RESPONSE=$(curl -s -X POST \
     -H "X-Vault-Token: $VAULT_TOKEN" \
     "$VAULT_ADDR/v1/$VAULT_PATH" \
@@ -44,7 +43,6 @@ if ! RESPONSE=$(curl -s -X POST \
   log error "   • Verify token: curl -s -H \"X-Vault-Token: \$VAULT_TOKEN\" $VAULT_ADDR/v1/auth/token/lookup-self"
   exit 1
 fi
-log debug "   ⏱  vault POST $VAULT_PATH $(timer_elapsed "$T_CURL")"
 
 VERSION_ID=$(echo "$RESPONSE" | jq -r '.data.version // empty')
 

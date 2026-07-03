@@ -29,9 +29,6 @@ sanitize_for_path() {
 }
 
 build_external_id() {
-  local t_start
-  t_start=$(timer_now)
-
   # value_entities is the scope-level shape (carries the scope segment).
   # entities is the app/dimension-level shape (no scope). Falling back to {}
   # only matters for tests; in production at least one is always present.
@@ -89,5 +86,4 @@ build_external_id() {
   local IFS=/
   EXTERNAL_ID="${segments[*]}"
   export EXTERNAL_ID
-  log debug "⏱  build_external_id $(timer_elapsed "$t_start")"
 }

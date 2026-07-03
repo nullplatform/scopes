@@ -16,12 +16,10 @@ set -euo pipefail
 SECRET_NAME="${SM_NAME_PREFIX}${EXTERNAL_ID_PATH}"
 
 err_file=$(mktemp)
-T_AWS=$(timer_now)
 if aws secretsmanager delete-secret \
         --region "$AWS_REGION" \
         --secret-id "$SECRET_NAME" \
         --force-delete-without-recovery >/dev/null 2>"$err_file"; then
-  log debug "   ⏱  aws secretsmanager delete-secret $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
   echo '{
   "success": true

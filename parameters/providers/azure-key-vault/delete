@@ -11,11 +11,9 @@ AKV_SUFFIX=$(echo "$EXTERNAL_ID_PATH" | tr '/=' '--')
 SECRET_NAME="${AZ_SECRET_PREFIX}${AKV_SUFFIX}"
 
 err_file=$(mktemp)
-T_AZ=$(timer_now)
 if az keyvault secret delete \
         --vault-name "$AZ_VAULT_NAME" \
         --name "$SECRET_NAME" >/dev/null 2>"$err_file"; then
-  log debug "   ⏱  az keyvault secret delete $(timer_elapsed "$T_AZ")"
   rm -f "$err_file"
 else
   err=$(cat "$err_file")
@@ -42,7 +40,6 @@ fi
 
 # Best-effort purge to release name and stop retention billing.
 purge_err=$(mktemp)
-T_AZ_PURGE=$(timer_now)
 if ! az keyvault secret purge \
         --vault-name "$AZ_VAULT_NAME" \
         --name "$SECRET_NAME" >/dev/null 2>"$purge_err"; then
@@ -53,7 +50,6 @@ if ! az keyvault secret purge \
     log warn "⚠️ Purge failed (secret remains in soft-delete window): $pe"
   fi
 fi
-log debug "   ⏱  az keyvault secret purge $(timer_elapsed "$T_AZ_PURGE")"
 rm -f "$purge_err"
 
 echo '{

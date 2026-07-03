@@ -28,9 +28,7 @@ if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
 fi
 
 err_file=$(mktemp)
-T_AWS=$(timer_now)
 if SECRET_STRING=$(aws secretsmanager get-secret-value "${get_args[@]}" 2>"$err_file"); then
-  log debug "   ⏱  aws secretsmanager get-secret-value $(timer_elapsed "$T_AWS")"
   rm -f "$err_file"
   STORED_VALUE=$(echo "$SECRET_STRING" | jq -r '.value // empty')
   jq -n --arg value "$STORED_VALUE" '{value: $value}'

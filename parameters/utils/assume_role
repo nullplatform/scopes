@@ -69,7 +69,6 @@ if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
   # ---- Cache miss: do the real sts:AssumeRole call -------------------------
   if [ -z "$ASSUMED_CREDS" ]; then
     _ar_sts_error=$(mktemp)
-    T_STS=$(timer_now 2>/dev/null || echo 0)
     if ! ASSUMED_CREDS=$(aws sts assume-role \
       --role-arn "$ASSUME_ROLE_ARN_RESOLVED" \
       --role-session-name "$_ar_session_name" \
@@ -80,7 +79,6 @@ if [ -n "${ASSUME_ROLE_ARN_RESOLVED:-}" ]; then
       return 1
     fi
     rm -f "$_ar_sts_error"
-    log debug "   ⏱  sts:AssumeRole $(timer_elapsed "$T_STS" 2>/dev/null || echo "?")"
 
     # Compute the cache-expiration epoch ONCE at write time. We try multiple
     # date(1) implementations to parse AWS's ISO 8601; if all of them fail

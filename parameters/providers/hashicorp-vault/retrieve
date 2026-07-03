@@ -18,7 +18,6 @@ if [ -n "${EXTERNAL_ID_VERSION:-}" ]; then
   URL="${URL}?version=${EXTERNAL_ID_VERSION}"
 fi
 
-T_CURL=$(timer_now)
 if ! RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "X-Vault-Token: $VAULT_TOKEN" \
     "$URL" 2>/dev/null); then
@@ -31,7 +30,6 @@ if ! RESPONSE=$(curl -s -w "\n%{http_code}" \
   log error "   • Test connectivity: curl -s $VAULT_ADDR/v1/sys/health"
   exit 1
 fi
-log debug "   ⏱  vault GET $URL $(timer_elapsed "$T_CURL")"
 
 HTTP_STATUS="${RESPONSE##*$'\n'}"
 HTTP_BODY="${RESPONSE%$'\n'*}"
