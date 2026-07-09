@@ -124,11 +124,6 @@ spec:
           tolerations:
 {{ data.ToYAML $tolerations | indent 10 }}
             {{- end }}
-            {{- $nodeSelector := index $deployment "nodeselector" }}
-            {{- if $nodeSelector }}
-          nodeSelector:
-{{ data.ToYAML $nodeSelector | indent 10 }}
-            {{- end }}
           {{- end }}
           {{- if .pull_secrets.ENABLED }}
           imagePullSecrets:
