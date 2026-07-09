@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add support to get AWS credentials via assume role
 - Add support to auto-create ALBs on scope create
 - Fix race condition on IAM role creation when multiple scopes are created concurrently
-- Add nodeSelector support for scheduled task scopes
 
 ## [1.12.0] - 2026-06-08
 - Fix: do not inject file parameter as env vars
