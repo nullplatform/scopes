@@ -213,6 +213,8 @@ _render_context() {
     "capabilities": {
       "cpu_millicores": 100,
       "ram_memory": 128,
+      "cpu_millicores_limit": 200,
+      "ram_memory_limit": 256,
       "additional_ports": [],
       "scaling_type": "fixed",
       "autoscaling": {

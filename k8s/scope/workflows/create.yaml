@@ -10,6 +10,16 @@ steps:
         parameters:
           level: string
           message: string
+  - name: assume role
+    type: script
+    file: "$SERVICE_PATH/utils/assume_role_step"
+    output:
+      - name: AWS_ACCESS_KEY_ID
+        type: environment
+      - name: AWS_SECRET_ACCESS_KEY
+        type: environment
+      - name: AWS_SESSION_TOKEN
+        type: environment
   - name: build context
     type: script
     file: "$SERVICE_PATH/scope/build_context"
@@ -22,6 +32,20 @@ steps:
         type: environment
       - name: OUTPUT_DIR
         type: environment
+      - name: ALB_NAME
+        type: environment
+      - name: ALB_AUTOCREATED
+        type: environment
+  - name: apply autocreated ingress
+    type: script
+    file: "$SERVICE_PATH/apply_templates"
+    configuration:
+      ACTION: apply
+      DRY_RUN: false
+    post:
+      name: wait for alb
+      type: script
+      file: "$SERVICE_PATH/scope/networking/wait_for_alb"
   - name: validate alb capacity
     type: script
     file: "$SERVICE_PATH/scope/validate_alb_capacity"

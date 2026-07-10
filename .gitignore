@@ -138,7 +138,7 @@ np-agent-manifest.yaml
 
 # Git worktrees
 .worktrees/
-DS_Store
+.DS_Store
 # Integration test runtime data
 frontend/deployment/tests/integration/volume/
 
@@ -154,3 +154,6 @@ testing/docker/certs/
 
 # Visual Studio Code
 .vscode/
+
+# Superpowers specs and implementation plans (local-only)
+docs/superpowers/
