@@ -16,7 +16,7 @@ if [[ -z "$DEPLOYMENT_ID" ]]; then
   exit 1
 fi
 
-K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-nullplatform}" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 

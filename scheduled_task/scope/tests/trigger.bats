@@ -177,3 +177,42 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
 }
+
+# The trigger-job workflow does not include values.yaml, so K8S_NAMESPACE is
+# unset at runtime. Under `set -u` an unguarded expansion aborts the script;
+# these reproduce that real environment.
+@test "trigger: does not abort under set -u when K8S_NAMESPACE is unset (uses provider namespace)" {
+  unset K8S_NAMESPACE
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
+}
+
+@test "trigger: falls back to the nullplatform default when K8S_NAMESPACE is unset and the provider namespace is absent" {
+  unset K8S_NAMESPACE
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace)')
+
+  kubectl() {
+    case "$*" in
+      "get cronjob -n nullplatform"*)
+        echo "my-cronjob"
+        return 0
+        ;;
+      "create job --from=cronjob/my-cronjob"*"-n nullplatform")
+        return 0
+        ;;
+      *)
+        echo "unexpected namespace: $*" >&2
+        return 1
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
+}
