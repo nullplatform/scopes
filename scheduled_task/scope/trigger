@@ -5,14 +5,14 @@ set -euo pipefail
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
 
 if [[ -z "$DEPLOYMENT_ID" ]]; then
-  echo "❌ The scope has no active deployment, so there is no scheduled job to trigger" >&2
-  echo "" >&2
-  echo "💡 Possible causes:" >&2
-  echo "   The scope has not been deployed yet" >&2
-  echo "" >&2
-  echo "🔧 How to fix:" >&2
-  echo "   • Deploy the scope first, then trigger the job" >&2
-  echo "" >&2
+  log error "❌ The scope has no active deployment, so there is no scheduled job to trigger"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   The scope has not been deployed yet"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Deploy the scope first, then trigger the job"
+  log error ""
   exit 1
 fi
 
@@ -25,20 +25,20 @@ SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 JOB=$(kubectl get cronjob -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
 
 if [[ -z "$JOB" ]]; then
-  echo "❌ No CronJob found for scope '$SCOPE_ID' in namespace '$K8S_NAMESPACE'" >&2
-  echo "" >&2
-  echo "💡 Possible causes:" >&2
-  echo "   The scope's scheduled job may not have been created yet, or the deployment is still in progress" >&2
-  echo "" >&2
-  echo "🔧 How to fix:" >&2
-  echo "   • Verify the CronJob exists: kubectl get cronjob -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID" >&2
-  echo "   • Redeploy the scope if the CronJob is missing" >&2
-  echo "" >&2
+  log error "❌ No CronJob found for scope '$SCOPE_ID' in namespace '$K8S_NAMESPACE'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   The scope's scheduled job may not have been created yet, or the deployment is still in progress"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify the CronJob exists: kubectl get cronjob -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID"
+  log error "   • Redeploy the scope if the CronJob is missing"
+  log error ""
   exit 1
 fi
 
-echo "Triggering job $JOB"
+log info "📝 Triggering job $JOB"
 
 kubectl create job --from="cronjob/$JOB" "$JOB-$(date +%s)" -n "$K8S_NAMESPACE"
 
-echo "The job $JOB was triggered, you can follow the execution from the logs screen"
+log info "✅ The job $JOB was triggered, you can follow the execution from the logs screen"
