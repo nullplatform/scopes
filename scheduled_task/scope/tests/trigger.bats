@@ -178,9 +178,9 @@ teardown() {
   assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
 }
 
-# The trigger-job workflow does not include values.yaml, so K8S_NAMESPACE is
-# unset at runtime. Under `set -u` an unguarded expansion aborts the script;
-# these reproduce that real environment.
+# The workflow includes values.yaml to set K8S_NAMESPACE, but the script also
+# guards the expansion so that a missing include can never abort it under
+# `set -u`. These reproduce that unguarded environment (K8S_NAMESPACE unset).
 @test "trigger: does not abort under set -u when K8S_NAMESPACE is unset (uses provider namespace)" {
   unset K8S_NAMESPACE
 
@@ -215,4 +215,22 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
+}
+
+# =============================================================================
+# Workflow wiring (trigger-job.yaml) — the layer the script tests can't see
+# =============================================================================
+@test "trigger-job workflow includes values.yaml so K8S_NAMESPACE is provided" {
+  run grep -A2 "^include:" "$BATS_TEST_DIRNAME/../workflows/trigger-job.yaml"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "values.yaml"
+}
+
+@test "trigger-job workflow loads the log function before the trigger step" {
+  run cat "$BATS_TEST_DIRNAME/../workflows/trigger-job.yaml"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "name: load logging"
+  assert_contains "$output" "\$OVERRIDES_PATH/logging"
 }
