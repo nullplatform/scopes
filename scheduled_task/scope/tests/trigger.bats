@@ -12,6 +12,11 @@ setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
 
+  # The workflow loads the `log` function via a `load logging` step, so the
+  # script assumes it exists. Mock it here (errors go to stderr, like the real one).
+  log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+  export -f log
+
   export K8S_NAMESPACE="default-namespace"
 
   # Base CONTEXT: deployed scope with an active deployment
@@ -52,7 +57,7 @@ setup() {
 }
 
 teardown() {
-  unset -f kubectl date
+  unset -f kubectl date log
 }
 
 # =============================================================================
@@ -62,8 +67,8 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../trigger"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Triggering job my-cronjob"
-  assert_contains "$output" "The job my-cronjob was triggered, you can follow the execution from the logs screen"
+  assert_contains "$output" "📝 Triggering job my-cronjob"
+  assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
 }
 
 # =============================================================================
@@ -144,7 +149,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../trigger"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "The job my-cronjob was triggered, you can follow the execution from the logs screen"
+  assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
 }
 
 @test "trigger: falls back to the default namespace when the provider namespace is not set" {
@@ -170,5 +175,5 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../trigger"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "The job my-cronjob was triggered, you can follow the execution from the logs screen"
+  assert_contains "$output" "✅ The job my-cronjob was triggered, you can follow the execution from the logs screen"
 }
