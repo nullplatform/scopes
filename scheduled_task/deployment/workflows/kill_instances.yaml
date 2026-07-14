@@ -1,0 +1,17 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: load logging
+    type: script
+    action: replace
+    file: "$OVERRIDES_PATH/logging"
+    output:
+      - name: log
+        type: function
+        parameters:
+          level: string
+          message: string
+  - name: kill instances
+    type: script
+    action: replace
+    file: "$OVERRIDES_PATH/deployment/kill_instances"

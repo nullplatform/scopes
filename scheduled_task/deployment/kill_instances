@@ -1,0 +1,126 @@
+#!/bin/bash
+
+set -euo pipefail
+
+
+log debug "🔍 Starting instance kill operation..."
+
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.parameters.deployment_id // .notification.parameters.deployment_id // empty')
+INSTANCE_NAME=$(echo "$CONTEXT" | jq -r '.parameters.instance_name // .notification.parameters.instance_name // empty')
+
+if [[ -z "$DEPLOYMENT_ID" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
+    DEPLOYMENT_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameters.deployment_id // empty')
+fi
+
+if [[ -z "$INSTANCE_NAME" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
+    INSTANCE_NAME=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameters.instance_name // empty')
+fi
+
+if [[ -z "$DEPLOYMENT_ID" ]]; then
+    log error "❌ deployment_id parameter not found"
+    log error "💡 Possible causes:"
+    log error "   - Parameter not provided in action request"
+    log error "   - Context structure is different than expected"
+    log error "🔧 How to fix:"
+    log error "   - Ensure deployment_id is passed in the action parameters"
+    exit 1
+fi
+
+if [[ -z "$INSTANCE_NAME" ]]; then
+    log error "❌ instance_name parameter not found"
+    log error "💡 Possible causes:"
+    log error "   - Parameter not provided in action request"
+    log error "   - Context structure is different than expected"
+    log error "🔧 How to fix:"
+    log error "   - Ensure instance_name is passed in the action parameters"
+    exit 1
+fi
+
+log debug "📋 Deployment ID: $DEPLOYMENT_ID"
+log debug "📋 Instance name: $INSTANCE_NAME"
+
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.tags.scope_id // .scope.id // .notification.tags.scope_id // empty')
+
+if [[ -z "$SCOPE_ID" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
+    SCOPE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.tags.scope_id // empty')
+fi
+
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
+  .providers["container-orchestration"].cluster.namespace // $default
+' 2>/dev/null || echo "nullplatform")
+
+if [[ -z "$SCOPE_ID" ]]; then
+    log error "❌ scope_id not found in context"
+    log error "💡 Possible causes:"
+    log error "   - Context missing scope information"
+    log error "   - Action invoked outside of scope context"
+    log error "🔧 How to fix:"
+    log error "   - Verify the action is invoked with proper scope context"
+    exit 1
+fi
+
+log debug "📋 Scope ID: $SCOPE_ID"
+log debug "📋 Namespace: $K8S_NAMESPACE"
+
+log debug "🔍 Verifying pod exists..."
+if ! kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    log error "❌ Pod $INSTANCE_NAME not found in namespace $K8S_NAMESPACE"
+    log error "💡 Possible causes:"
+    log error "   - Pod was already terminated"
+    log error "   - Pod name is incorrect"
+    log error "   - Pod exists in a different namespace"
+    log error "🔧 How to fix:"
+    log error "   - List pods: kubectl get pods -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID"
+    exit 1
+fi
+
+log debug "📋 Fetching pod details..."
+POD_STATUS=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
+POD_NODE=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.nodeName}')
+POD_START_TIME=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.startTime}')
+
+log debug "📋 Pod: $INSTANCE_NAME | Status: $POD_STATUS | Node: $POD_NODE | Started: $POD_START_TIME"
+
+CRONJOB_NAME="job-$SCOPE_ID-$DEPLOYMENT_ID"
+
+POD_JOB=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
+if [[ -n "$POD_JOB" ]]; then
+    JOB_CRONJOB=$(kubectl get job "$POD_JOB" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
+    log debug "📋 Pod ownership: Job=$POD_JOB -> CronJob=$JOB_CRONJOB"
+
+    if [[ "$JOB_CRONJOB" != "$CRONJOB_NAME" ]]; then
+        log warn "⚠️  Pod does not belong to expected scheduled task $CRONJOB_NAME (continuing anyway)"
+    fi
+else
+    log warn "⚠️  Could not verify pod ownership"
+fi
+
+log debug "📝 Deleting pod $INSTANCE_NAME with 30s grace period..."
+kubectl delete pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" --grace-period=30
+
+log debug "📝 Waiting for pod termination..."
+kubectl wait --for=delete pod/"$INSTANCE_NAME" -n "$K8S_NAMESPACE" --timeout=60s || log warn "⚠️  Pod deletion timeout reached"
+
+if kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    POD_STATUS_AFTER=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
+    log warn "⚠️  Pod still exists after deletion attempt (status: $POD_STATUS_AFTER)"
+else
+    log info "✅ Pod successfully terminated and removed"
+fi
+
+log debug "📋 Checking job status after pod deletion..."
+if [[ -n "$POD_JOB" ]] && kubectl get job "$POD_JOB" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    JOB_ACTIVE=$(kubectl get job "$POD_JOB" -n "$K8S_NAMESPACE" -o jsonpath='{.status.active}')
+    JOB_SUCCEEDED=$(kubectl get job "$POD_JOB" -n "$K8S_NAMESPACE" -o jsonpath='{.status.succeeded}')
+    JOB_FAILED=$(kubectl get job "$POD_JOB" -n "$K8S_NAMESPACE" -o jsonpath='{.status.failed}')
+
+    log debug "📋 Job $POD_JOB: active=${JOB_ACTIVE:-0}, succeeded=${JOB_SUCCEEDED:-0}, failed=${JOB_FAILED:-0}"
+
+    if [[ "${JOB_ACTIVE:-0}" -gt 0 ]]; then
+        log debug "📋 Job is still active; Kubernetes may start a replacement pod (backoffLimit permitting)"
+    fi
+else
+    log warn "⚠️  Job for pod not found (it may have already completed)"
+fi
+
+log info "✨ Instance kill operation completed for $INSTANCE_NAME"
