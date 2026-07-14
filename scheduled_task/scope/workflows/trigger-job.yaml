@@ -1,3 +1,5 @@
+include:
+  - "$SERVICE_PATH/values.yaml"
 provider_categories:
   - container-orchestration
   - cloud-providers
