@@ -3,7 +3,6 @@ include:
 steps:
   - name: load logging
     type: script
-    action: replace
     file: "$OVERRIDES_PATH/logging"
     output:
       - name: log
@@ -11,7 +10,6 @@ steps:
         parameters:
           level: string
           message: string
-  - name: kill instances
+  - name: kill job execution
     type: script
-    action: replace
-    file: "$OVERRIDES_PATH/deployment/kill_instances"
+    file: "$OVERRIDES_PATH/deployment/kill_job_execution"

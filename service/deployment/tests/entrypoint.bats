@@ -79,6 +79,32 @@ mock_np() {
   assert_contains "$output" "--no-params"
 }
 
+@test "deployment entrypoint: kill-job-execution includes --no-params when CLI supports it" {
+  mock_np
+  export SERVICE_ACTION="kill-job-execution"
+  mkdir -p "$BATS_TEST_TMPDIR/override/deployment/workflows"
+  touch "$BATS_TEST_TMPDIR/override/deployment/workflows/kill_job_execution.yaml"
+  export OVERRIDES_PATH="$BATS_TEST_TMPDIR/override"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--no-params"
+}
+
+@test "deployment entrypoint: kill-job-execution falls back to override workflow when base is missing" {
+  mock_np
+  export SERVICE_ACTION="kill-job-execution"
+  mkdir -p "$BATS_TEST_TMPDIR/override/deployment/workflows"
+  touch "$BATS_TEST_TMPDIR/override/deployment/workflows/kill_job_execution.yaml"
+  export OVERRIDES_PATH="$BATS_TEST_TMPDIR/override"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--workflow $BATS_TEST_TMPDIR/override/deployment/workflows/kill_job_execution.yaml"
+}
+
 # =============================================================================
 # Actions that SHOULD NOT include --no-params
 # =============================================================================

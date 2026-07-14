@@ -1,5 +1,5 @@
 {
-  "name": "Kill instances",
+  "name": "Kill job execution",
   "type": "custom",
   "icon": "material-symbols:delete-outline",
   "results": {

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Fix: triggering a scheduled task job on a scope that is not deployed now fails with a clear "deploy the scope first" message instead of an opaque error
-- Add "Kill instances" action to scheduled task scopes to terminate an individual running job instance
+- Add "Kill job execution" action to scheduled task scopes to terminate an individual running job execution
 
 ## [1.13.0] - 2026-07-10
 - Add support to get AWS credentials via assume role

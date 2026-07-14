@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for scheduled_task deployment/kill_instances - job pod termination
+# Unit tests for scheduled_task deployment/kill_job_execution - job pod termination
 #
 # scheduled_task pods are owned by Job -> CronJob (job-<scope>-<deployment>),
 # unlike the base k8s scope where pods are owned by ReplicaSet -> Deployment.
@@ -96,8 +96,8 @@ teardown() {
 # =============================================================================
 # Success Case
 # =============================================================================
-@test "kill_instances: successfully kills job pod with correct logging" {
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+@test "kill_job_execution: successfully kills job pod with correct logging" {
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
   # Start message
@@ -127,14 +127,14 @@ teardown() {
 # =============================================================================
 # Error Cases
 # =============================================================================
-@test "kill_instances: fails with troubleshooting when deployment_id missing" {
+@test "kill_job_execution: fails with troubleshooting when deployment_id missing" {
   export CONTEXT='{
     "parameters": {
       "instance_name": "my-pod-abc123"
     }
   }'
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ deployment_id parameter not found"
@@ -144,14 +144,14 @@ teardown() {
   assert_contains "$output" "Ensure deployment_id is passed in the action parameters"
 }
 
-@test "kill_instances: fails with troubleshooting when instance_name missing" {
+@test "kill_job_execution: fails with troubleshooting when instance_name missing" {
   export CONTEXT='{
     "parameters": {
       "deployment_id": "deploy-456"
     }
   }'
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ instance_name parameter not found"
@@ -161,7 +161,7 @@ teardown() {
   assert_contains "$output" "Ensure instance_name is passed in the action parameters"
 }
 
-@test "kill_instances: fails with troubleshooting when scope_id missing" {
+@test "kill_job_execution: fails with troubleshooting when scope_id missing" {
   export CONTEXT='{
     "parameters": {
       "deployment_id": "deploy-456",
@@ -169,7 +169,7 @@ teardown() {
     }
   }'
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ scope_id not found in context"
@@ -179,7 +179,7 @@ teardown() {
   assert_contains "$output" "Verify the action is invoked with proper scope context"
 }
 
-@test "kill_instances: fails with troubleshooting when pod not found" {
+@test "kill_job_execution: fails with troubleshooting when pod not found" {
   kubectl() {
     case "$1" in
       get)
@@ -192,7 +192,7 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ Pod my-pod-abc123 not found in namespace test-namespace"
@@ -205,7 +205,7 @@ teardown() {
 # =============================================================================
 # Warning Cases
 # =============================================================================
-@test "kill_instances: warns when pod belongs to a different scheduled task" {
+@test "kill_job_execution: warns when pod belongs to a different scheduled task" {
   kubectl() {
     case "$1" in
       get)
@@ -251,13 +251,13 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Pod does not belong to expected scheduled task job-scope-123-deploy-456 (continuing anyway)"
 }
 
-@test "kill_instances: warns when pod ownership cannot be verified" {
+@test "kill_job_execution: warns when pod ownership cannot be verified" {
   kubectl() {
     case "$1" in
       get)
@@ -296,7 +296,7 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Could not verify pod ownership"
@@ -304,7 +304,7 @@ teardown() {
   assert_contains "$output" "⚠️  Job for pod not found (it may have already completed)"
 }
 
-@test "kill_instances: warns when pod still exists after deletion" {
+@test "kill_job_execution: warns when pod still exists after deletion" {
   kubectl() {
     case "$1" in
       get)
@@ -348,7 +348,7 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Pod deletion timeout reached"
@@ -359,7 +359,7 @@ teardown() {
   assert_contains "$output" "📋 Job is still active; Kubernetes may start a replacement pod (backoffLimit permitting)"
 }
 
-@test "kill_instances: warns when job already completed after pod deletion" {
+@test "kill_job_execution: warns when job already completed after pod deletion" {
   kubectl() {
     case "$1" in
       get)
@@ -405,7 +405,7 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Job for pod not found (it may have already completed)"

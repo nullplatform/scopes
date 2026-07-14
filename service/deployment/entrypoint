@@ -29,6 +29,9 @@ case "$SERVICE_ACTION" in
   "kill-instances")
     ACTION_TO_EXECUTE="kill_instances"
     ;;
+  "kill-job-execution")
+    ACTION_TO_EXECUTE="kill_job_execution"
+    ;;
   *)
     echo "Unknown action: $SERVICE_ACTION"
     exit 1
@@ -37,9 +40,24 @@ esac
 
 WORKFLOW_PATH="$SERVICE_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
 
+# Fall back to an override-provided workflow when the base scope does not define
+# one. This lets an override scope (e.g. scheduled_task) ship a standalone
+# deployment workflow that has no base counterpart.
+if [[ ! -f "$WORKFLOW_PATH" ]]; then
+  IFS=',' read -ra OVERRIDE_PATHS <<< "$OVERRIDES_PATH"
+  for path in "${OVERRIDE_PATHS[@]}"; do
+    path=$(echo "$path" | xargs)
+    CANDIDATE_WORKFLOW_PATH="$path/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
+    if [[ -f "$CANDIDATE_WORKFLOW_PATH" ]]; then
+      WORKFLOW_PATH="$CANDIDATE_WORKFLOW_PATH"
+      break
+    fi
+  done
+fi
+
 NEEDS_PARAMS=true
 case "$SERVICE_ACTION" in
-  "switch-traffic"|"kill-instances"|"diagnose-deployment")
+  "switch-traffic"|"kill-instances"|"kill-job-execution"|"diagnose-deployment")
     NEEDS_PARAMS=false
     ;;
 esac
