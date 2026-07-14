@@ -101,27 +101,27 @@ teardown() {
 
   [ "$status" -eq 0 ]
   # Start message
-  assert_contains "$output" "🔍 Starting instance kill operation..."
+  assert_contains "$output" "🔍 Starting job execution kill operation..."
   # Parameter display
   assert_contains "$output" "📋 Deployment ID: deploy-456"
-  assert_contains "$output" "📋 Instance name: my-pod-abc123"
+  assert_contains "$output" "📋 Job execution: my-pod-abc123"
   assert_contains "$output" "📋 Scope ID: scope-123"
   assert_contains "$output" "📋 Namespace: test-namespace"
-  # Pod verification
-  assert_contains "$output" "🔍 Verifying pod exists..."
-  assert_contains "$output" "📋 Fetching pod details..."
-  assert_contains "$output" "📋 Pod: my-pod-abc123 | Status: Running | Node: node-1 | Started: 2024-01-01T00:00:00Z"
+  # Job execution verification
+  assert_contains "$output" "🔍 Verifying job execution exists..."
+  assert_contains "$output" "📋 Fetching job execution details..."
+  assert_contains "$output" "📋 Status: Running | Node: node-1 | Started: 2024-01-01T00:00:00Z"
   # Ownership (Job -> CronJob)
-  assert_contains "$output" "📋 Pod ownership: Job=job-scope-123-deploy-456-abc -> CronJob=job-scope-123-deploy-456"
+  assert_contains "$output" "📋 Ownership: Job=job-scope-123-deploy-456-abc -> CronJob=job-scope-123-deploy-456"
   # Delete operation
-  assert_contains "$output" "📝 Deleting pod my-pod-abc123 with 30s grace period..."
-  assert_contains "$output" "📝 Waiting for pod termination..."
-  assert_contains "$output" "✅ Pod successfully terminated and removed"
-  # Job status
-  assert_contains "$output" "📋 Checking job status after pod deletion..."
+  assert_contains "$output" "📝 Deleting job execution my-pod-abc123 with 30s grace period..."
+  assert_contains "$output" "📝 Waiting for job execution termination..."
+  assert_contains "$output" "✅ Job execution successfully terminated and removed"
+  # Parent job status
+  assert_contains "$output" "📋 Checking parent job status after execution deletion..."
   assert_contains "$output" "📋 Job job-scope-123-deploy-456-abc: active=0, succeeded=1, failed=0"
   # Completion
-  assert_contains "$output" "✨ Instance kill operation completed for my-pod-abc123"
+  assert_contains "$output" "✨ Job execution kill operation completed for my-pod-abc123"
 }
 
 # =============================================================================
@@ -195,9 +195,9 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Pod my-pod-abc123 not found in namespace test-namespace"
+  assert_contains "$output" "❌ Job execution my-pod-abc123 not found in namespace test-namespace"
   assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Pod was already terminated"
+  assert_contains "$output" "The job execution was already terminated"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "kubectl get pods"
 }
@@ -254,7 +254,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "⚠️  Pod does not belong to expected scheduled task job-scope-123-deploy-456 (continuing anyway)"
+  assert_contains "$output" "⚠️  Job execution does not belong to expected scheduled task job-scope-123-deploy-456 (continuing anyway)"
 }
 
 @test "kill_job_execution: warns when pod ownership cannot be verified" {
@@ -299,9 +299,9 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "⚠️  Could not verify pod ownership"
+  assert_contains "$output" "⚠️  Could not verify job execution ownership"
   # With no owner Job, the post-deletion job lookup cannot resolve one either
-  assert_contains "$output" "⚠️  Job for pod not found (it may have already completed)"
+  assert_contains "$output" "⚠️  Parent job not found (it may have already completed)"
 }
 
 @test "kill_job_execution: warns when pod still exists after deletion" {
@@ -351,12 +351,12 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "⚠️  Pod deletion timeout reached"
-  assert_contains "$output" "⚠️  Pod still exists after deletion attempt (status: Terminating)"
-  # Job still active -> replacement pod may be started
-  assert_contains "$output" "📋 Checking job status after pod deletion..."
+  assert_contains "$output" "⚠️  Job execution deletion timeout reached"
+  assert_contains "$output" "⚠️  Job execution still exists after deletion attempt (status: Terminating)"
+  # Job still active -> replacement execution may be started
+  assert_contains "$output" "📋 Checking parent job status after execution deletion..."
   assert_contains "$output" "📋 Job job-scope-123-deploy-456-abc: active=1, succeeded=0, failed=0"
-  assert_contains "$output" "📋 Job is still active; Kubernetes may start a replacement pod (backoffLimit permitting)"
+  assert_contains "$output" "📋 Job is still active; Kubernetes may start a replacement execution (backoffLimit permitting)"
 }
 
 @test "kill_job_execution: warns when job already completed after pod deletion" {
@@ -408,5 +408,5 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_job_execution"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "⚠️  Job for pod not found (it may have already completed)"
+  assert_contains "$output" "⚠️  Parent job not found (it may have already completed)"
 }
