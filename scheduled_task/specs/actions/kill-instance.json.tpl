@@ -10,9 +10,21 @@
   "parameters": {
     "schema": {
       "type": "object",
-      "required": ["instance_id"],
+      "required": [
+        "instance_id",
+        "scope_id",
+        "deployment_id"
+      ],
       "properties": {
-        "instance_id": { "type": "string" }
+        "scope_id": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        }
       }
     },
     "values": {}
