@@ -1,5 +1,5 @@
 {
-  "name": "Kill instances",
+  "name": "Kill instance",
   "type": "custom",
   "icon": "material-symbols:delete-outline",
   "results": {
@@ -8,7 +8,13 @@
   },
   "service_specification_id": "{{ env.Getenv "SERVICE_SPECIFICATION_ID" }}",
   "parameters": {
-    "schema": { "type": "object", "required": [], "properties": {} },
+    "schema": {
+      "type": "object",
+      "required": ["instance_id"],
+      "properties": {
+        "instance_id": { "type": "string" }
+      }
+    },
     "values": {}
   },
   "annotations": {
