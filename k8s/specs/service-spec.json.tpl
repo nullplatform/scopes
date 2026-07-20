@@ -36,6 +36,14 @@
                }
             },
             {
+               "type":"Control",
+               "label":"Logs provider",
+               "scope":"#/properties/logs_provider_override",
+               "options":{
+                  "format":"radio"
+               }
+            },
+            {
                "type":"Categorization",
                "options":{
                   "collapsable":{
@@ -409,6 +417,29 @@
                 "create"
             ],
             "description":"Define whether the scope is publicly accessible or private to your account"
+         },
+         "logs_provider_override":{
+            "type":"string",
+            "oneOf":[
+               {
+                  "const":"default",
+                  "title":"Account default",
+                  "description":"Use the account/provider-level log provider (logProvider)"
+               },
+               {
+                  "const":"cloudwatch_logs",
+                  "title":"CloudWatch",
+                  "description":"Send this scope's application logs to AWS CloudWatch"
+               },
+               {
+                  "const":"datadoglogs",
+                  "title":"Datadog",
+                  "description":"Send this scope's application logs to Datadog"
+               }
+            ],
+            "title":"Logs provider",
+            "default":"default",
+            "description":"Override where this scope's application logs are sent. 'Account default' delegates to the account-level logProvider."
          },
          "autoscaling":{
             "type":"object",
