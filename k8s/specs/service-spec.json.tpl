@@ -7,6 +7,7 @@
          "ram_memory",
          "ram_memory_limit",
          "visibility",
+         "logs_provider_override",
          "autoscaling",
          "health_check",
          "scaling_type",
