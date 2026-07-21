@@ -37,14 +37,6 @@
                }
             },
             {
-               "type":"Control",
-               "label":"Logs provider",
-               "scope":"#/properties/logs_provider_override",
-               "options":{
-                  "format":"radio"
-               }
-            },
-            {
                "type":"Categorization",
                "options":{
                   "collapsable":{
@@ -53,6 +45,20 @@
                   }
                },
                "elements":[
+                  {
+                     "type":"Category",
+                     "label":"Logs",
+                     "elements":[
+                        {
+                           "type":"Control",
+                           "label":"Logs provider",
+                           "scope":"#/properties/logs_provider_override",
+                           "options":{
+                              "format":"radio"
+                           }
+                        }
+                     ]
+                  },
                   {
                      "type":"Category",
                      "label":"Resources",
