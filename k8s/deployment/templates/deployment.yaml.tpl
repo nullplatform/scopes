@@ -74,12 +74,17 @@ spec:
       {{- end }}
     {{- end }}
       annotations:
+        {{- $logsProvider := .scope.capabilities.logs_provider_override | default "default" }}
+        {{- if eq $logsProvider "datadoglogs" }}
+        nullplatform.logs.datadog: 'true'
+        {{- else }}
         nullplatform.logs.cloudwatch: 'true'
         nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
         nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
         nullplatform.logs.cloudwatch.log_stream_name_pattern: >-
           type=${type};application={{ .application.id }};scope={{ .scope.id }};deploy={{ .deployment.id }};instance=${instance};container=${container}
         nullplatform.logs.cloudwatch.region: {{ .region }}
+        {{- end }}
     {{- $global := index .k8s_modifiers "global" }}
     {{- if $global }}
       {{- $annotations := index $global "annotations" }}
