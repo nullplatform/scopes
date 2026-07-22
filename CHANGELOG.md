@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- k8s scope deployments now report launched and healthy instance counts, so the deployment page shows live "X/Y launched" and "X/Y healthy" progress
 - Fix: triggering a scheduled task job on a scope that is not deployed now fails with a clear "deploy the scope first" message instead of an opaque error
 - Add "Kill instance" action to scheduled task scopes to terminate an individual running job instance
 
