@@ -1,0 +1,69 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Only "run-once" deployments have a Job to wait on. Scheduled (CronJob)
+# deployments have nothing to complete, so this is a no-op for them — which is
+# what keeps the workflow step static across both modes.
+CRON=$(echo "$CONTEXT" | jq -r '.scope.capabilities.cron // empty')
+
+if [[ "$CRON" != "run-once" ]]; then
+  log debug "🔍 Not a run-once deployment (cron='$CRON'), nothing to wait for"
+  exit 0
+fi
+
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-nullplatform}" '
+  .providers["container-orchestration"].cluster.namespace // $default
+')
+
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
+JOB="job-$SCOPE_ID-$DEPLOYMENT_ID"
+
+TIMEOUT="${JOB_WAIT_TIMEOUT:-600}"
+INTERVAL=5
+MAX_ITERATIONS=$(( TIMEOUT / INTERVAL ))
+[ "$MAX_ITERATIONS" -lt 1 ] && MAX_ITERATIONS=1
+
+log info "📝 Waiting for job $JOB to complete (timeout ${TIMEOUT}s)"
+
+iteration=0
+while true; do
+  ((++iteration))
+  if [ "$iteration" -gt "$MAX_ITERATIONS" ]; then
+    log error "❌ Timeout waiting for job $JOB to complete after ${TIMEOUT}s"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The task is taking longer than the configured timeout, or it is stuck"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Inspect the run from the logs screen"
+    log error "   • Raise JOB_WAIT_TIMEOUT in the scope configuration if the task legitimately needs more time"
+    log error ""
+    exit 1
+  fi
+
+  STATUS=$(kubectl get job "$JOB" -n "$K8S_NAMESPACE" -o json 2>/dev/null || echo "")
+
+  if [[ -n "$STATUS" ]]; then
+    COMPLETE=$(echo "$STATUS" | jq -r '[.status.conditions[]? | select(.type=="Complete" and .status=="True")] | length')
+    FAILED=$(echo "$STATUS" | jq -r '[.status.conditions[]? | select(.type=="Failed" and .status=="True")] | length')
+
+    if [[ "$COMPLETE" -gt 0 ]]; then
+      log info "✅ Job $JOB completed successfully"
+      exit 0
+    fi
+
+    if [[ "$FAILED" -gt 0 ]]; then
+      REASON=$(echo "$STATUS" | jq -r '[.status.conditions[]? | select(.type=="Failed" and .status=="True") | .message] | first // "see the logs screen for details"')
+      log error "❌ Job $JOB failed: $REASON"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Inspect the failed run from the logs screen"
+      log error ""
+      exit 1
+    fi
+  fi
+
+  sleep "$INTERVAL"
+done

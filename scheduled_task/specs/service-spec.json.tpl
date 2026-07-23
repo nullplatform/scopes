@@ -123,10 +123,14 @@
               "title": "Every day (midnight)"
             },
             {
+              "const": "run-once",
+              "title": "Run once"
+            },
+            {
               "type": "string"
             }
           ],
-          "description": "Specify how often the task should run. You can select a predefined option or enter a standard cron expression for custom schedules.",
+          "description": "Specify how often the task should run. Pick a predefined schedule, enter a standard cron expression, or choose \"Run once\" to run the task a single time when the scope is deployed.",
           "title": "Task Frequency",
           "type": "string"
         },
