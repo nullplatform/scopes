@@ -176,7 +176,7 @@ spec:
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
           terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
+          terminationMessagePolicy: FallbackToLogsOnError
           imagePullPolicy: Always
 
         {{ if .scope.capabilities.additional_ports }}
@@ -229,7 +229,7 @@ spec:
             successThreshold: 1
             failureThreshold: 90
           terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
+          terminationMessagePolicy: FallbackToLogsOnError
           imagePullPolicy: Always
         {{ else if eq .type "HTTP" }}
         - name: http-{{ .port }}
@@ -358,7 +358,7 @@ spec:
                   - /bin/sleep
                   - '16'
           terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
+          terminationMessagePolicy: FallbackToLogsOnError
           imagePullPolicy: IfNotPresent
           volumeMounts:
     {{- if .parameters.results }}
