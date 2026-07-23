@@ -22,23 +22,48 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-nullplat
 
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 
-JOB=$(kubectl get cronjob -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
+# Scheduled scopes have a CronJob to spawn a Job from. Run-once scopes don't —
+# they leave behind the last Job of the scope, which we clone to re-run.
+CRONJOB=$(kubectl get cronjob -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
 
-if [[ -z "$JOB" ]]; then
-  log error "❌ No CronJob found for scope '$SCOPE_ID' in namespace '$K8S_NAMESPACE'"
+if [[ -n "$CRONJOB" ]]; then
+  log info "📝 Triggering job $CRONJOB"
+  kubectl create job --from="cronjob/$CRONJOB" "$CRONJOB-$(date +%s)" -n "$K8S_NAMESPACE"
+  log info "✅ The job $CRONJOB was triggered, you can follow the execution from the logs screen"
+  exit 0
+fi
+
+# Run-once: clone the most recent Job of the scope into a fresh one. Sorting by
+# creationTimestamp and taking the last item gives the latest run.
+LAST_JOB=$(kubectl get job -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1:].metadata.name}" 2>/dev/null || echo "")
+
+if [[ -z "$LAST_JOB" ]]; then
+  log error "❌ No CronJob or previous Job found for scope '$SCOPE_ID' in namespace '$K8S_NAMESPACE'"
   log error ""
   log error "💡 Possible causes:"
-  log error "   The scope's scheduled job may not have been created yet, or the deployment is still in progress"
+  log error "   The scope's job may not have been created yet, or the deployment is still in progress"
   log error ""
   log error "🔧 How to fix:"
-  log error "   • Verify the CronJob exists: kubectl get cronjob -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID"
-  log error "   • Redeploy the scope if the CronJob is missing"
+  log error "   • Verify a job exists: kubectl get job -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID"
+  log error "   • Redeploy the scope if no job is present"
   log error ""
   exit 1
 fi
 
-log info "📝 Triggering job $JOB"
+NEW_JOB="job-$SCOPE_ID-$(date +%s)"
 
-kubectl create job --from="cronjob/$JOB" "$JOB-$(date +%s)" -n "$K8S_NAMESPACE"
+log info "📝 Re-running job $LAST_JOB as $NEW_JOB"
 
-log info "✅ The job $JOB was triggered, you can follow the execution from the logs screen"
+# Clone the Job: drop server-managed fields and the controller-generated
+# selector/labels, otherwise the API rejects the create.
+kubectl get job "$LAST_JOB" -n "$K8S_NAMESPACE" -o json | jq \
+  --arg name "$NEW_JOB" \
+  --argjson controller_labels '["controller-uid", "batch.kubernetes.io/controller-uid", "job-name", "batch.kubernetes.io/job-name"]' '
+    .metadata |= {name: $name, namespace: .namespace, labels: (.labels // {})}
+    | del(.metadata.labels[$controller_labels[]], .spec.template.metadata.labels[$controller_labels[]])
+    | del(.status)
+    | del(.spec.selector)
+    | del(.spec.template.metadata.creationTimestamp)
+  ' | kubectl create -n "$K8S_NAMESPACE" -f -
+
+log info "✅ The job $NEW_JOB was triggered, you can follow the execution from the logs screen"
