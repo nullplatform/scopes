@@ -1,15 +1,6 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 steps:
-  - name: load logging
-    type: script
-    file: "$OVERRIDES_PATH/logging"
-    output:
-      - name: log
-        type: function
-        parameters:
-          level: string
-          message: string
   - name: route traffic
     action: skip
   - name: create deployment
@@ -36,7 +27,6 @@ steps:
       DRY_RUN: false
     post:
       name: wait deployment active
-      action: skip
-  - name: wait for job
-    type: script
-    file: "$OVERRIDES_PATH/deployment/wait_job"
+      action: replace
+      type: script
+      file: "$OVERRIDES_PATH/deployment/wait_job"

@@ -163,3 +163,38 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "✅ Job job-scope-123-deploy-456 completed successfully"
 }
+
+# =============================================================================
+# Workflow wiring — the deploy workflows must run wait_job in place of the
+# base "wait deployment active" step, on both the initial and blue-green paths.
+# A missing wiring here silently drops the run-once completion wait.
+# =============================================================================
+@test "initial workflow replaces 'wait deployment active' with wait_job after apply" {
+  run python3 - "$BATS_TEST_DIRNAME/../workflows/initial.yaml" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+apply = next(s for s in wf["steps"] if s.get("name") == "apply")
+post = apply["post"]
+assert post["name"] == "wait deployment active", post
+assert post["action"] == "replace", post
+assert post["file"] == "$OVERRIDES_PATH/deployment/wait_job", post
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "ok"
+}
+
+@test "blue_green workflow replaces 'wait deployment active' with wait_job after apply" {
+  run python3 - "$BATS_TEST_DIRNAME/../workflows/blue_green.yaml" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+apply = next(s for s in wf["steps"] if s.get("name") == "apply")
+post = apply["post"]
+assert post["name"] == "wait deployment active", post
+assert post["action"] == "replace", post
+assert post["file"] == "$OVERRIDES_PATH/deployment/wait_job", post
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "ok"
+}

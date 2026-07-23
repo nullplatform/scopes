@@ -234,6 +234,15 @@
                 "elements": [
                   {
                     "label": "Concurrency policy",
+                    "rule": {
+                      "condition": {
+                        "schema": {
+                          "const": "run-once"
+                        },
+                        "scope": "#/properties/cron"
+                      },
+                      "effect": "HIDE"
+                    },
                     "scope": "#/properties/concurrency_policy",
                     "type": "Control"
                   },
@@ -244,6 +253,15 @@
                   },
                   {
                     "label": "History",
+                    "rule": {
+                      "condition": {
+                        "schema": {
+                          "const": "run-once"
+                        },
+                        "scope": "#/properties/cron"
+                      },
+                      "effect": "HIDE"
+                    },
                     "scope": "#/properties/history_limit",
                     "type": "Control"
                   }

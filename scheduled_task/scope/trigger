@@ -57,13 +57,13 @@ log info "📝 Re-running job $LAST_JOB as $NEW_JOB"
 # Clone the Job: drop server-managed fields and the controller-generated
 # selector/labels, otherwise the API rejects the create.
 kubectl get job "$LAST_JOB" -n "$K8S_NAMESPACE" -o json | jq \
-  --arg name "$NEW_JOB" '
+  --arg name "$NEW_JOB" \
+  --argjson controller_labels '["controller-uid", "batch.kubernetes.io/controller-uid", "job-name", "batch.kubernetes.io/job-name"]' '
     .metadata |= {name: $name, namespace: .namespace, labels: (.labels // {})}
-    | del(.metadata.labels["controller-uid"], .metadata.labels["batch.kubernetes.io/controller-uid"], .metadata.labels["job-name"], .metadata.labels["batch.kubernetes.io/job-name"])
+    | del(.metadata.labels[$controller_labels[]], .spec.template.metadata.labels[$controller_labels[]])
     | del(.status)
     | del(.spec.selector)
     | del(.spec.template.metadata.creationTimestamp)
-    | del(.spec.template.metadata.labels["controller-uid"], .spec.template.metadata.labels["batch.kubernetes.io/controller-uid"], .spec.template.metadata.labels["job-name"], .spec.template.metadata.labels["batch.kubernetes.io/job-name"])
   ' | kubectl create -n "$K8S_NAMESPACE" -f -
 
 log info "✅ The job $NEW_JOB was triggered, you can follow the execution from the logs screen"
