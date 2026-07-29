@@ -1,0 +1,2 @@
+[tasks.describe]
+run = "bun src/index.ts --describe"

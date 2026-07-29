@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+# Dockerized bridge for the classic bash `scopes` repo, packaged as a lean gRPC
+# worker for the package-exec / worker-orchestrator model.
+#
+#   stage 1  compiles the SDK worker (the gRPC server the agent dials)
+#   stage 2  ships it on a k8s runtime alongside the scopes repo; the worker
+#            re-exports NP_ACTION_CONTEXT and shells out to the SAME baked
+#            `./entrypoint --service-path=.../k8s` — identical behavior to the
+#            old exec model, just spawned as a container over gRPC/mTLS.
+#
+# Build from the repo root:  docker build -f Dockerfile.worker -t scopes-k8s-worker:dev .
+
+FROM oven/bun:1-alpine AS build
+WORKDIR /w
+COPY worker/ .
+RUN bun install
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then t=bun-linux-arm64-musl; else t=bun-linux-x64-musl; fi; \
+    bun build --compile --target="$t" ./src/index.ts --outfile /w/worker
+
+FROM alpine:3.20
+# bun's musl binary links libstdc++/libgcc; the k8s entrypoint needs
+# bash + jq + gomplate + yq + envsubst(gettext) + aws-cli + kubectl + np CLI.
+RUN apk add --no-cache libstdc++ libgcc bash jq yq gomplate gettext curl ca-certificates openssl aws-cli
+# kubectl (arch-aware)
+RUN ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && \
+    curl -sSLO "https://dl.k8s.io/release/$(curl -sSL https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" && \
+    chmod +x kubectl && mv kubectl /usr/local/bin/
+# np CLI (installs to /root/.local/bin)
+RUN curl -sSL https://cli.nullplatform.com/install.sh | sh
+
+# the scopes repo (context minus .dockerignore) + the compiled worker
+COPY . /app/scopes/
+COPY --from=build /w/worker /app/worker
+
+ENV NODE_CONFIG_DIR=/app/scopes/worker/config \
+    SUPPRESS_NO_CONFIG_WARNING=1 \
+    NP_AGENT_PLUGIN=np-agent-v1 \
+    NP_SERVICE_PATH=/app/scopes/k8s \
+    NP_SCOPE_ENTRYPOINT=/app/scopes/entrypoint \
+    PATH=/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+# DNS_TYPE / NP_SKIP_DNS_WAIT / K8S_NAMESPACE are intentionally NOT baked — they
+# are runtime worker config (route53 by default; set DNS_TYPE=external_dns +
+# NP_SKIP_DNS_WAIT=true via the worker env for a plain/k3d cluster).
+
+EXPOSE 50051
+ENTRYPOINT ["/app/worker"]

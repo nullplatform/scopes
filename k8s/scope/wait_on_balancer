@@ -8,6 +8,12 @@ iteration=0
 
 case "$DNS_TYPE" in
   external_dns)
+    # Plain-cluster escape hatch: on a cluster without an ExternalDNS controller
+    # (e.g. local k3d) no DNSEndpoint is ever reconciled, so this wait can never
+    # succeed. NP_SKIP_DNS_WAIT=true skips it. Default off = unchanged behavior.
+    if [ "${NP_SKIP_DNS_WAIT:-false}" = "true" ]; then
+      log info "   ⏭  NP_SKIP_DNS_WAIT=true — skipping ExternalDNS DNSEndpoint wait (no ExternalDNS controller)"
+    else
     SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
     SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
     SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
@@ -50,6 +56,7 @@ case "$DNS_TYPE" in
 
     log info ""
     log info "✨ ExternalDNS setup completed successfully"
+    fi
     ;;
   route53|azure)
     log debug "📋 DNS Type $DNS_TYPE - DNS should already be configured"

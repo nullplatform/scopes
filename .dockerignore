@@ -1,0 +1,18 @@
+# Keep the worker image lean: exclude git history, other clouds, testing, and
+# the two heavy re-fetchable/log-only trees. k8s scope/deployment/diagnose work
+# without them; add them back (or `terraform init` at runtime) for log:read /
+# terraform-provisioned scopes.
+.git
+.github
+testing
+azure
+azure-aro
+datadog
+scheduled_task
+k8s/log/kube-logger-go
+k8s/terraform/.terraform
+**/.terraform
+worker/node_modules
+worker/dist
+Dockerfile.worker
+*.md

@@ -1,0 +1,23 @@
+{
+  "name": "@nullplatform/plugin-scopes-k8s",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "describe": "bun src/index.ts --describe",
+    "build": "bun build --compile ./src/index.ts --outfile dist/scopes-k8s"
+  },
+  "dependencies": {
+    "@nullplatform/plugin": "0.0.4",
+    "@nullplatform/workflow": "^0.0.5",
+    "@nullplatform/workflow-engine-in-memory": "^0.0.5",
+    "config": "^4.4.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0"
+  },
+  "trustedDependencies": [
+    "@grpc/grpc-js"
+  ]
+}
