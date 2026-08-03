@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # =============================================================================
-# Unit tests for deployment/kill_instances - pod termination
+# Unit tests for deployment/kill_instance - pod termination
 # =============================================================================
 
 setup() {
@@ -15,7 +15,7 @@ setup() {
   export CONTEXT='{
     "parameters": {
       "deployment_id": "deploy-456",
-      "instance_name": "my-pod-abc123"
+      "instance_id": "my-pod-abc123"
     },
     "tags": {
       "scope_id": "scope-123"
@@ -84,8 +84,8 @@ teardown() {
 # =============================================================================
 # Success Case
 # =============================================================================
-@test "kill_instances: successfully kills pod with correct logging" {
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+@test "kill_instance: successfully kills pod with correct logging" {
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 0 ]
   # Start message
@@ -110,14 +110,14 @@ teardown() {
 # =============================================================================
 # Error Cases
 # =============================================================================
-@test "kill_instances: fails with troubleshooting when deployment_id missing" {
+@test "kill_instance: fails with troubleshooting when deployment_id missing" {
   export CONTEXT='{
     "parameters": {
-      "instance_name": "my-pod-abc123"
+      "instance_id": "my-pod-abc123"
     }
   }'
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ deployment_id parameter not found"
@@ -127,32 +127,32 @@ teardown() {
   assert_contains "$output" "Ensure deployment_id is passed in the action parameters"
 }
 
-@test "kill_instances: fails with troubleshooting when instance_name missing" {
+@test "kill_instance: fails with troubleshooting when instance_id missing" {
   export CONTEXT='{
     "parameters": {
       "deployment_id": "deploy-456"
     }
   }'
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ instance_name parameter not found"
+  assert_contains "$output" "❌ instance_id parameter not found"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "Parameter not provided in action request"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Ensure instance_name is passed in the action parameters"
+  assert_contains "$output" "Ensure instance_id is passed in the action parameters"
 }
 
-@test "kill_instances: fails with troubleshooting when scope_id missing" {
+@test "kill_instance: fails with troubleshooting when scope_id missing" {
   export CONTEXT='{
     "parameters": {
       "deployment_id": "deploy-456",
-      "instance_name": "my-pod-abc123"
+      "instance_id": "my-pod-abc123"
     }
   }'
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ scope_id not found in context"
@@ -162,7 +162,7 @@ teardown() {
   assert_contains "$output" "Verify the action is invoked with proper scope context"
 }
 
-@test "kill_instances: fails with troubleshooting when pod not found" {
+@test "kill_instance: fails with troubleshooting when pod not found" {
   kubectl() {
     case "$1" in
       get)
@@ -175,7 +175,7 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ Pod my-pod-abc123 not found in namespace test-namespace"
@@ -188,7 +188,7 @@ teardown() {
 # =============================================================================
 # Warning Cases
 # =============================================================================
-@test "kill_instances: warns when pod belongs to different deployment" {
+@test "kill_instance: warns when pod belongs to different deployment" {
   kubectl() {
     case "$1" in
       get)
@@ -230,13 +230,13 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Pod does not belong to expected deployment d-scope-123-deploy-456"
 }
 
-@test "kill_instances: warns when pod still exists after deletion" {
+@test "kill_instance: warns when pod still exists after deletion" {
   local delete_called=0
   kubectl() {
     case "$1" in
@@ -279,7 +279,7 @@ teardown() {
   }
   export -f kubectl
 
-  run bash "$BATS_TEST_DIRNAME/../kill_instances"
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Pod deletion timeout reached"

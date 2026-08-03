@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-03
+- k8s scope deployments now report launched and healthy instance counts, so the deployment page shows live "X/Y launched" and "X/Y healthy" progress
+- Fix: triggering a scheduled task job on a scope that is not deployed now fails with a clear "deploy the scope first" message instead of an opaque error
+- Add "Kill instance" action to scheduled task scopes to terminate an individual running job instance
+
 ## [1.13.0] - 2026-07-10
 - Add support to get AWS credentials via assume role
 - Add support to auto-create ALBs on scope create

@@ -7,7 +7,8 @@
     "finalize-blue-green",
     "rollback-deployment",
     "delete-deployment",
-    "trigger"
+    "trigger",
+    "kill-instance"
   ],
   "assignable_to": "any",
   "attributes": {

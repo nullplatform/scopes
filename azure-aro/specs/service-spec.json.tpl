@@ -12,7 +12,7 @@
     "pause-autoscaling",
     "resume-autoscaling",
     "restart-pods",
-    "kill-instances"
+    "kill-instance"
   ],
   "assignable_to": "any",
   "attributes": {
