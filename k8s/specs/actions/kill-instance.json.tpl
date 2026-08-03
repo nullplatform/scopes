@@ -1,5 +1,5 @@
 {
-  "name": "Kill instances",
+  "name": "Kill instance",
   "type": "custom",
   "icon": "material-symbols:delete-outline",
   "results": {
