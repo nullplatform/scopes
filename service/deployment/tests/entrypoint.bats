@@ -20,7 +20,7 @@ setup() {
   touch "$SERVICE_PATH/deployment/workflows/finalize.yaml"
   touch "$SERVICE_PATH/deployment/workflows/delete.yaml"
   touch "$SERVICE_PATH/deployment/workflows/diagnose.yaml"
-  touch "$SERVICE_PATH/deployment/workflows/kill_instances.yaml"
+  touch "$SERVICE_PATH/deployment/workflows/kill_instance.yaml"
 
   export NP_EXECUTED_CMD=""
   export NP_HELP_SUPPORTS_NO_PARAMS="true"
@@ -59,9 +59,9 @@ mock_np() {
   assert_contains "$output" "--no-params"
 }
 
-@test "deployment entrypoint: kill-instances includes --no-params when CLI supports it" {
+@test "deployment entrypoint: kill-instance includes --no-params when CLI supports it" {
   mock_np
-  export SERVICE_ACTION="kill-instances"
+  export SERVICE_ACTION="kill-instance"
 
   run bash "$BATS_TEST_DIRNAME/../entrypoint"
 
@@ -148,10 +148,10 @@ mock_np() {
   [[ "$output" != *"--no-params"* ]]
 }
 
-@test "deployment entrypoint: kill-instances omits --no-params when CLI does not support it" {
+@test "deployment entrypoint: kill-instance omits --no-params when CLI does not support it" {
   export NP_HELP_SUPPORTS_NO_PARAMS="false"
   mock_np
-  export SERVICE_ACTION="kill-instances"
+  export SERVICE_ACTION="kill-instance"
 
   run bash "$BATS_TEST_DIRNAME/../entrypoint"
 
