@@ -10,6 +10,6 @@ steps:
         parameters:
           level: string
           message: string
-  - name: kill instances
+  - name: kill instance
     type: script
-    file: "$SERVICE_PATH/deployment/kill_instances"
+    file: "$SERVICE_PATH/deployment/kill_instance"
