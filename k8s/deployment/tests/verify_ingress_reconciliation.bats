@@ -367,6 +367,246 @@ teardown() {
   assert_contains "$output" "❌ Weights mismatch on listener port 443: expected=10/90 actual=10/50/90"
 }
 
+# =============================================================================
+# Single Target Group Mode (finalize / rollback convergence gate)
+# =============================================================================
+@test "verify_ingress_reconciliation: fails while the rule still carries both blue and green target groups" {
+  # Scenario that caused the outage: finalize wrote the single-target-group ingress but
+  # the ALB rule still forwards 90/10 to blue/green. Deleting blue in that state sends
+  # ~90% of requests to a target group with no healthy targets (HTTP 503). The gate must
+  # not report success until the rule collapses to one target group.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "📝 Checking domain: app.example.com"
+  assert_contains "$output" "still has 2 target groups on listener port 443"
+}
+
+@test "verify_ingress_reconciliation: passes when the rule forwards to a single target group" {
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"TargetGroupArn\":\"arn:aws:tg/green\"}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Single target group on listener port 443"
+  assert_contains "$output" "✅ ALB configuration validated successfully"
+}
+
+@test "verify_ingress_reconciliation: fails when any rule on the listener still has two target groups" {
+  # A scope with main + additional HTTP port ingresses produces several rules matching the
+  # same host-header. If the main rule already collapsed but another has not, the ALB has
+  # not converged: the worst rule decides.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"TargetGroupArn\":\"arn:aws:tg/green\"}]}}]},{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "still has 2 target groups on listener port 443"
+}
+
+@test "verify_ingress_reconciliation: skips target group check on additional port listener when blue has no service" {
+  # gRPC (50051) was added to the scope after the blue deployment was created, so the blue
+  # deployment has no service for it and that listener already has a single target group
+  # before the ALB converges. Trusting it would be a false positive: the primary listener
+  # must decide, and here it still carries both target groups.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old","capabilities":{"additional_ports":[{"port":50051,"type":"GRPC"}]}},"alb_name":"k8s-test-alb","blue_additional_port_services":{"grpc-50051":false},"deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/grpc\",\"Port\":50051},{\"ListenerArn\":\"arn:aws:listener/https\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          if [[ \"\$4\" == *\"grpc\"* ]]; then
+            echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"TargetGroupArn\":\"arn:aws:tg/green-grpc\"}]}}]}]}'
+          else
+            echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          fi
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Skipping target group check on listener port 50051"
+  assert_contains "$output" "still has 2 target groups on listener port 443"
+}
+
+@test "verify_ingress_reconciliation: treats a rule without a forward action as not converged" {
+  # A host-header rule answering with a fixed response has no target groups at all. Report
+  # not-converged rather than success: the gate guards an irreversible deletion.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"fixed-response\",\"FixedResponseConfig\":{\"StatusCode\":\"404\"}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "still has 0 target groups on listener port 443"
+}
+
+@test "verify_ingress_reconciliation: a reconciled event does not override a failed ALB check" {
+  # The controller emits SuccessfullyReconciled for the ingress object while the ALB rule
+  # can still be mid-update. When ALB access is available the ALB is the authority: a
+  # cluster event must never short-circuit a failed ALB validation, otherwise the gate is
+  # bypassable and blue gets deleted while the rule still points at it.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+
+  run bash -c "
+    kubectl() {
+      case \"\$2\" in
+        ingress)
+          echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+          ;;
+        events)
+          echo '{\"items\": [{\"type\": \"Normal\", \"reason\": \"SuccessfullyReconciled\", \"message\": \"Ingress reconciled\", \"involvedObject\": {\"resourceVersion\": \"12345\"}, \"lastTimestamp\": \"2024-01-01T00:00:00Z\"}]}'
+          ;;
+      esac
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "still has 2 target groups on listener port 443"
+  assert_contains "$output" "❌ Timeout waiting for ingress reconciliation after 1s"
+  [[ "$output" != *"✅ Ingress successfully reconciled"* ]]
+}
+
 @test "verify_ingress_reconciliation: detects domain not found in ALB rules" {
   run bash -c "
     kubectl() {

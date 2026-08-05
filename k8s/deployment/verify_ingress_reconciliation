@@ -126,21 +126,55 @@ validate_alb_config() {
             ')
 
             if [ -n "$MATCHING_RULE" ]; then
-                if [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
-                    # Determine the listener port to check if this is an additional port
-                    # where the blue deployment has no service (added after initial deploy)
-                    local LISTENER_PORT
-                    LISTENER_PORT=$(echo "$LISTENERS" | jq -r --arg arn "$listener_arn" \
-                        '.Listeners[] | select(.ListenerArn == $arn) | .Port')
+                # Determine the listener port to check if this is an additional port
+                # where the blue deployment has no service (added after initial deploy)
+                local LISTENER_PORT
+                LISTENER_PORT=$(echo "$LISTENERS" | jq -r --arg arn "$listener_arn" \
+                    '.Listeners[] | select(.ListenerArn == $arn) | .Port')
 
-                    local is_blue_missing_port=false
-                    for _mp in $_blue_missing_ports; do
-                        if [ "$LISTENER_PORT" = "$_mp" ]; then
-                            is_blue_missing_port=true
-                            break
-                        fi
-                    done
+                local is_blue_missing_port=false
+                for _mp in $_blue_missing_ports; do
+                    if [ "$LISTENER_PORT" = "$_mp" ]; then
+                        is_blue_missing_port=true
+                        break
+                    fi
+                done
 
+                if [ "${EXPECT_SINGLE_TARGET_GROUP:-false}" = "true" ]; then
+                    # finalize and rollback apply the single-target-group ingress, so the rule
+                    # is converged only once the other deployment is gone from it. Weights
+                    # cannot express this state: a lone target group reports weight 1, never
+                    # 100. Gating on the target group count instead keeps the deletion of the
+                    # previous deployment behind the ALB actually having stopped routing to it.
+                    if [ "$is_blue_missing_port" = "true" ]; then
+                        # This listener already had a single target group before the ingress
+                        # was applied, so it cannot tell converged from not-converged.
+                        # Verify on the primary listener instead.
+                        log debug "   ⏭️  Skipping target group check on listener port $LISTENER_PORT (blue has no service for this port)"
+                        continue
+                    fi
+
+                    log info "   ✅ Found rule for domain: $domain"
+
+                    # -s (slurp): the host-header select emits one object per matching rule
+                    # when a scope has extra ingresses on the same listener. The worst rule
+                    # decides, so compare the highest target group count. A rule with no
+                    # forward action yields 0 and counts as not converged.
+                    local TARGET_GROUP_COUNT
+                    TARGET_GROUP_COUNT=$(echo "$MATCHING_RULE" | jq -s -r '
+                        map([.Actions[]? |
+                             select(.Type == "forward") |
+                             .ForwardConfig.TargetGroups[]?] | length) | max // 0
+                    ' 2>/dev/null)
+
+                    if [ "$TARGET_GROUP_COUNT" = "1" ]; then
+                        log info "   ✅ Single target group on listener port $LISTENER_PORT (100% of traffic on the new deployment)"
+                        domain_found=true
+                    else
+                        log error "   ❌ Rule still has $TARGET_GROUP_COUNT target groups on listener port $LISTENER_PORT: the ALB has not finished reconciling"
+                        domain_found=false
+                    fi
+                elif [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
                     if [ "$is_blue_missing_port" = "true" ]; then
                         # Blue deployment was created before this additional port was added
                         # to the scope config, so there's no blue K8s service for it.
@@ -239,8 +273,16 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         event_message=$(echo "$newest_event" | jq -r '.message')
 
         if [ "$event_reason" == "SuccessfullyReconciled" ]; then
-            log info "✅ Ingress successfully reconciled"
-            return 0
+            if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
+                # ALB validation already failed this round. The controller reporting the
+                # ingress object as reconciled does not mean the ALB rule finished
+                # updating, so it must not stand in for the ALB check. Error events below
+                # are still honoured: only this success shortcut is gated.
+                log debug "📝 Ingress reported as reconciled, but ALB validation has not passed yet"
+            else
+                log info "✅ Ingress successfully reconciled"
+                return 0
+            fi
         fi
 
         if echo "$event_message" | grep -q "no certificate found for host"; then
