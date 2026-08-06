@@ -96,12 +96,20 @@ spec:
               {{- end }}
             {{- end }}
           annotations:
+            {{- /* Same as k8s/deployment/templates/deployment.yaml.tpl — a separate copy
+                   because scheduled_task is the one variant that overrides
+                   DEPLOYMENT_TEMPLATE. It still inherits the shared `build context`
+                   step, so .logs_provider and .region are both present. */}}
+            {{- if eq (index . "logs_provider") "datadog" }}
+            nullplatform.logs.datadog: 'true'
+            {{- else }}
             nullplatform.logs.cloudwatch: 'true'
             nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
             nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
             nullplatform.logs.cloudwatch.log_stream_name_pattern: >-
               type=${type};application={{ .application.id }};scope={{ .scope.id }};deploy={{ .deployment.id }};instance=${instance};container=${container}
-            nullplatform.logs.cloudwatch.region: us-east-1
+            nullplatform.logs.cloudwatch.region: {{ .region }}
+            {{- end }}
         {{- $global := index .k8s_modifiers "global" }}
             {{- if $global }}
               {{- $annotations := index $global "annotations" }}

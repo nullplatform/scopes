@@ -262,6 +262,43 @@ fi
 MAIN_HTTP_PORT=$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')
 log debug "🔍 main_http_port resolved to ${MAIN_HTTP_PORT}"
 
+# Where this scope's application logs are shipped. The deployment template stamps
+# the matching `nullplatform.logs.<provider>` pod annotation, which is what the
+# in-cluster logs controller gates on: its CloudWatch and Datadog outputs each
+# match a rewrite_tag rule keyed on that annotation, so an unannotated pod reaches
+# neither, and the provider name here is exactly the annotation suffix.
+#
+# The whole precedence chain is resolved here rather than in the template. The
+# templates then only interpolate the result, matching how every other optional
+# value in this script is handled (pdb_enabled, main_http_port, ...).
+#
+# Lowest to highest: built-in default < account/dimension config < scope override.
+LOGS_PROVIDER=$(get_config_value \
+  --env LOGS_PROVIDER \
+  --provider '.providers["scope-configurations"].logging.provider' \
+  --default "cloudwatch"
+)
+
+# A scope may override the account default. "default" means "delegate upward"; so
+# does an absent or empty value, which is what scopes predating the capability
+# have. jq's `//` covers absent and null, the -n test covers empty.
+LOGS_PROVIDER_OVERRIDE=$(echo "$CONTEXT" | jq -r '.scope.capabilities.logs_provider_override // "default"')
+if [ -n "$LOGS_PROVIDER_OVERRIDE" ] && [ "$LOGS_PROVIDER_OVERRIDE" != "default" ]; then
+  LOGS_PROVIDER="$LOGS_PROVIDER_OVERRIDE"
+fi
+
+# Say so out loud rather than silently shipping logs somewhere unintended: an
+# unrecognized provider would otherwise fall through to CloudWatch with no signal.
+case "$LOGS_PROVIDER" in
+  cloudwatch|datadog) ;;
+  *)
+    log warn "⚠️ Unknown logs provider '${LOGS_PROVIDER}', falling back to cloudwatch"
+    LOGS_PROVIDER="cloudwatch"
+    ;;
+esac
+
+log debug "🔍 logs_provider resolved to ${LOGS_PROVIDER}"
+
 # Enrich each additional_ports entry with traffic_manager_port = port + 10000.
 # Convention: the traffic-manager sidecar that fronts an additional port binds
 # <port>+10000 inside the pod so the application can bind <port> directly. The
@@ -377,6 +414,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           --arg main_http_port "$MAIN_HTTP_PORT" \
           --arg main_traffic_manager_port "$MAIN_TRAFFIC_MANAGER_PORT" \
+          --arg logs_provider "$LOGS_PROVIDER" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -391,7 +429,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 container_cpu_in_millicores: $container_cpu_in_millicores,
                 blue_additional_port_services: $blue_additional_port_services,
                 main_http_port: ($main_http_port | tonumber),
-                main_traffic_manager_port: ($main_traffic_manager_port | tonumber)
+                main_traffic_manager_port: ($main_traffic_manager_port | tonumber),
+                logs_provider: $logs_provider
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")

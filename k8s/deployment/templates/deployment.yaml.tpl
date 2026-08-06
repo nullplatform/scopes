@@ -74,8 +74,11 @@ spec:
       {{- end }}
     {{- end }}
       annotations:
-        {{- $logsProvider := .scope.capabilities.logs_provider_override | default "default" }}
-        {{- if eq $logsProvider "datadoglogs" }}
+        {{- /* .logs_provider is resolved in deployment/build_context (built-in
+               default < account config < scope override). `index` rather than a
+               field lookup so a context built without build_context still renders,
+               falling back to CloudWatch: gomplate runs with missingKey=error. */}}
+        {{- if eq (index . "logs_provider") "datadog" }}
         nullplatform.logs.datadog: 'true'
         {{- else }}
         nullplatform.logs.cloudwatch: 'true'
