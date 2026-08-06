@@ -238,6 +238,7 @@ _render_context() {
   "container_memory_in_memory": 64,
   "pull_secrets": {"ENABLED": false, "SECRETS": []},
   "region": "us-east-1",
+  "logs_provider": "cloudwatch",
   "component": "app",
   "service_account_name": "",
   "traffic_manager_config_map": "",
@@ -313,4 +314,66 @@ JSON
   # cluster.
   local secret_files_file="$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
   [ ! -f "$secret_files_file" ] || [ ! -s "$secret_files_file" ]
+}
+
+# =============================================================================
+# Application-log routing annotations
+# =============================================================================
+# The pod annotation is the only thing that routes application logs: the logs
+# controller's CloudWatch and Datadog outputs each match a rewrite_tag rule keyed
+# on `nullplatform.logs.<provider>`, so an unannotated pod reaches neither and the
+# two are mutually exclusive by construction.
+#
+# The precedence chain (built-in default < account config < scope override) is
+# resolved in deployment/build_context and covered by build_context.bats. These
+# tests only pin down the rendered annotation block for a given resolved value.
+
+_deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
+
+@test "logs routing: cloudwatch renders the full annotation block" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  local out
+  out="$(_deploy_out)"
+  assert_contains "$out" "nullplatform.logs.cloudwatch: 'true'"
+  assert_contains "$out" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
+  assert_contains "$out" "nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'"
+  assert_contains "$out" "nullplatform.logs.cloudwatch.region: us-east-1"
+  assert_contains "$out" "scope=scope-123;deploy=deploy-456"
+  ! grep -q 'nullplatform.logs.datadog' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+
+@test "logs routing: datadog renders only the datadog annotation" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "datadog"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_contains "$(_deploy_out)" "nullplatform.logs.datadog: 'true'"
+  # Exclusive: the CloudWatch annotations must be gone, or the controller ships
+  # every record to both providers.
+  ! grep -q 'nullplatform.logs.cloudwatch' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+
+@test "logs routing: a context without logs_provider still renders, defaulting to CloudWatch" {
+  unset -f gomplate
+
+  # Safety net. gomplate runs with missingKey=error, so a bare `.logs_provider`
+  # lookup would abort the render instead of yielding empty; the template uses
+  # `index` for exactly this case. build_context always sets the key, so this
+  # guards against a render path that somehow bypasses it.
+  export CONTEXT="$(_render_context | jq 'del(.logs_provider)')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_contains "$(_deploy_out)" "nullplatform.logs.cloudwatch: 'true'"
+  ! grep -q 'nullplatform.logs.datadog' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
 }

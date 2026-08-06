@@ -1229,3 +1229,169 @@ EOF
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
+
+# =============================================================================
+# logs_provider — where application logs are shipped
+# =============================================================================
+# The deployment template stamps a `nullplatform.logs.<provider>` pod annotation
+# that the in-cluster logs controller gates on; the resolved provider name here is
+# exactly the annotation suffix. The template only interpolates this value, so the
+# whole precedence chain is covered here rather than in render tests.
+#
+# Lowest to highest: built-in default < account/dimension config < scope override.
+# "default", absent, null and empty all mean "delegate upward".
+
+# Sets .providers["scope-configurations"].logging.provider on CONTEXT.
+set_logging_provider() {
+  CONTEXT=$(echo "$CONTEXT" | jq --arg v "$1" \
+    '.providers["scope-configurations"].logging.provider = $v')
+}
+
+# Sets the scope's logs_provider_override capability to a raw jq value, so the
+# caller can pass a string, `null`, or omit it entirely.
+set_logs_override() {
+  CONTEXT=$(echo "$CONTEXT" | jq --argjson v "$1" \
+    '.scope.capabilities.logs_provider_override = $v')
+}
+
+_logs_provider() { echo "$CONTEXT" | jq -r '.logs_provider'; }
+
+@test "logs_provider: defaults to cloudwatch when nothing is configured" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "cloudwatch"
+}
+
+@test "logs_provider: reads the scope-configurations provider config" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+}
+
+@test "logs_provider: provider config wins over the LOGS_PROVIDER env var" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+  export LOGS_PROVIDER="cloudwatch"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+  unset LOGS_PROVIDER
+}
+
+@test "logs_provider: LOGS_PROVIDER env var is used when no provider config is set" {
+  setup_full_build_context
+  export LOGS_PROVIDER="datadog"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+  unset LOGS_PROVIDER
+}
+
+# --- the scope override, layered on top of the account default ---------------
+
+@test "logs_provider: the scope override beats the account default" {
+  setup_full_build_context
+  set_logging_provider "cloudwatch"
+  set_logs_override '"datadog"'
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+}
+
+@test "logs_provider: the scope override beats the account default in both directions" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+  set_logs_override '"cloudwatch"'
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "cloudwatch"
+}
+
+@test "logs_provider: an override of 'default' delegates to the account default" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+  set_logs_override '"default"'
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+}
+
+@test "logs_provider: an absent override delegates to the account default" {
+  # A scope created before the capability existed.
+  setup_full_build_context
+  set_logging_provider "datadog"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+}
+
+@test "logs_provider: a null override delegates to the account default" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+  set_logs_override 'null'
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+}
+
+@test "logs_provider: an empty override delegates to the account default" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+  set_logs_override '""'
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+}
+
+# --- unrecognized values ------------------------------------------------------
+# Falling through to CloudWatch silently is how a misconfiguration turns into
+# lost logs, so the fallback has to be loud.
+
+@test "logs_provider: an unknown provider config warns and falls back to cloudwatch" {
+  setup_full_build_context
+  set_logging_provider "splunk"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "cloudwatch"
+}
+
+@test "logs_provider: an unknown scope override warns and falls back to cloudwatch" {
+  setup_full_build_context
+  set_logs_override '"splunk"'
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "cloudwatch"
+}
+
+@test "logs_provider: the unknown-provider fallback is logged as a warning" {
+  setup_full_build_context
+  set_logging_provider "splunk"
+
+  # `log` is stubbed in setup() to echo, so the warning lands on stdout.
+  run bash -c "source '$SCRIPT'"
+
+  assert_contains "$output" "Unknown logs provider 'splunk'"
+}
+
+@test "logs_provider: emitted as a string for Go template consumption" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.logs_provider | type')" "string"
+}

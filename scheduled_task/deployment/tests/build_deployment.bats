@@ -101,6 +101,8 @@ _render_context() {
   "asset": {"url": "example.com/app:latest"},
   "component": "app",
   "service_account_name": "",
+  "region": "us-east-1",
+  "logs_provider": "cloudwatch",
   "pull_secrets": {"ENABLED": false, "SECRETS": []},
   "parameters": {
     "results": [
@@ -163,4 +165,66 @@ JSON
   # apply_templates handles missing/empty files gracefully.
   local secret_files_file="$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
   [ ! -f "$secret_files_file" ] || [ ! -s "$secret_files_file" ]
+}
+
+# =============================================================================
+# Application-log routing annotations
+# =============================================================================
+# scheduled_task keeps its own copy of deployment.yaml.tpl (it is the one variant
+# that overrides DEPLOYMENT_TEMPLATE in values.yaml), so the rendered block needs
+# its own coverage. The precedence chain itself is shared — it is resolved in
+# k8s/deployment/build_context and covered by that script's own tests.
+
+_deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
+
+@test "logs routing: cloudwatch renders the full annotation block" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  local out
+  out="$(_deploy_out)"
+  assert_contains "$out" "nullplatform.logs.cloudwatch: 'true'"
+  assert_contains "$out" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
+  ! grep -q 'nullplatform.logs.datadog' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+
+@test "logs routing: datadog renders only the datadog annotation" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "datadog"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_contains "$(_deploy_out)" "nullplatform.logs.datadog: 'true'"
+  ! grep -q 'nullplatform.logs.cloudwatch' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+
+@test "logs routing: a context without logs_provider still renders, defaulting to CloudWatch" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq 'del(.logs_provider)')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_contains "$(_deploy_out)" "nullplatform.logs.cloudwatch: 'true'"
+}
+
+@test "logs routing: cloudwatch region comes from context, not a hardcoded value" {
+  unset -f gomplate
+
+  # This template used to hardcode `region: us-east-1`, which silently pointed
+  # every non-us-east-1 scheduled task at the wrong CloudWatch region.
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch", region: "eu-west-1"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_contains "$(_deploy_out)" "nullplatform.logs.cloudwatch.region: eu-west-1"
+  ! grep -q 'nullplatform.logs.cloudwatch.region: us-east-1' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
 }
