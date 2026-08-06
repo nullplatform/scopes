@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Application logs can now be routed to CloudWatch or Datadog through the new `logging.provider` scope configuration (or the `LOGS_PROVIDER` env var), set organization-wide or per environment. A scope may override it with a `logs_provider_override` capability where a service specification declares one. Only application logs are affected; CloudWatch metrics, access logs and the nullplatform log viewer are unchanged
+- Fix: scheduled task scopes sent their CloudWatch logs to a hardcoded `us-east-1` instead of the scope's own region
 
 ## [1.15.0] - 2026-08-10
 - Fix: **finalize** and **rollback** on blue/green k8s scopes now wait until the load balancer sends all traffic to the surviving deployment before deleting the other one, preventing the 5xx window that happened when it was deleted mid-switch (these actions may take slightly longer as a result)

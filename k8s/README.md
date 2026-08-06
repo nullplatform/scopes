@@ -112,6 +112,41 @@ Configuration for backing up Kubernetes manifests.
 | **MANIFEST_BACKUP_BUCKET** | S3 bucket name for storing backups | `deployment.manifest_backup_bucket` |
 | **MANIFEST_BACKUP_PREFIX** | Prefix path within the bucket | `deployment.manifest_backup_prefix` |
 
+### Logging
+
+Where application logs are shipped.
+
+| Variable | Description | Scope Configuration Property |
+|----------|-------------|------------------------------|
+| **LOGS_PROVIDER** | Default application-log destination: `cloudwatch` or `datadog` (default `cloudwatch`) | `logging.provider` |
+
+The deployment stamps a `nullplatform.logs.<provider>` annotation on the pod — the
+provider name is exactly the annotation suffix. The in-cluster logs controller gates
+on that annotation: its CloudWatch and Datadog outputs each match a rewrite rule
+keyed on it, so the annotation is what actually routes the logs, and the two
+destinations are mutually exclusive.
+
+Any other value falls back to `cloudwatch` and logs a warning during the deployment.
+
+Because the `scope-configurations` provider is resolved for the scope's
+dimensions, this can be set account-wide or per environment.
+
+A scope can override this per-scope through a `logs_provider_override` capability,
+honoured here when present. That capability is **not declared by this repository's
+scope specifications** — a service specification that wants to expose the choice
+declares it itself, with `cloudwatch` / `datadog` as its values plus a `default`
+sentinel meaning "delegate to the setting above". A scope without the capability,
+or with it set to `default`, follows the value above.
+
+Two things this does *not* affect: CloudWatch performance metrics and access logs
+(they are routed by a different mechanism and keep flowing regardless of this
+setting), and the nullplatform log viewer (it reads pod logs through the
+Kubernetes API, not from the provider).
+
+Requires a logs controller with per-pod annotation routing for the chosen
+provider, and that provider enabled on the controller. Setting `datadog`
+while the controller has Datadog disabled means those logs go nowhere.
+
 ### Security
 
 #### Image Pull Secrets
