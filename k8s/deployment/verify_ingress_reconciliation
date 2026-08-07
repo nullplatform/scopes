@@ -168,7 +168,7 @@ validate_alb_config() {
                     ' 2>/dev/null)
 
                     if [ "$TARGET_GROUP_COUNT" = "1" ]; then
-                        log info "   ✅ Single target group on listener port $LISTENER_PORT (100% of traffic on the new deployment)"
+                        log info "   ✅ Single target group on listener port $LISTENER_PORT (traffic is no longer split between deployments)"
                         domain_found=true
                     else
                         log error "   ❌ Rule still has $TARGET_GROUP_COUNT target groups on listener port $LISTENER_PORT: the ALB has not finished reconciling"
