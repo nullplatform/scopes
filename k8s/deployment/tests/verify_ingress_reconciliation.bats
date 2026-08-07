@@ -470,10 +470,10 @@ teardown() {
         describe-rules)
           echo x >> '$counter'
           if [ \"\$(wc -l < '$counter')\" -le 1 ]; then
-            # Primera lectura: el ALB todavía reparte entre blue y green.
+            # First read: the ALB still splits traffic between blue and green.
             echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
           else
-            # El controller terminó de reconciliar.
+            # The controller has finished reconciling.
             echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"TargetGroupArn\":\"arn:aws:tg/green\"}]}}]}]}'
           fi
           ;;
@@ -489,11 +489,11 @@ teardown() {
   "
 
   [ "$status" -eq 0 ]
-  # Ambos mensajes tienen que aparecer: primero el que frena, después el que habilita.
+  # Both messages must appear: the one that holds, then the one that releases.
   assert_contains "$output" "still has 2 target groups on listener port 443"
   assert_contains "$output" "✅ Single target group on listener port 443"
   assert_contains "$output" "✅ ALB configuration validated successfully"
-  # Más de una lectura prueba que hubo reintento y no un único acierto.
+  # More than one read proves it retried instead of getting a single lucky hit.
   [ "$(wc -l < "$counter")" -gt 1 ]
 }
 
