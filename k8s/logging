@@ -38,4 +38,96 @@ log() {
       echo "$message"
     fi
   fi
+
+  # Every `log error`, anywhere in any script, also lands on the TRACE — as a
+  # tracing.error facet on the workflow step it happened in. This is what makes
+  # a failed custom scope read like a failed native one: not just "step exited
+  # 1", but the actual message. A no-op unless the platform launched this
+  # workflow traced (see the tracing section below).
+  if [ "$msg_num" -ge 3 ]; then
+    _np_scopes_trace_error "$message" || true
+  fi
 }
+
+# =============================================================================
+# Tracing — best-effort, structural
+#
+# When the platform launches a workflow, NP_TRACE carries the trace context of
+# the step each fragment runs inside (the np CLI re-points it per step). With
+# the vendored shell SDK sourced:
+#
+#   • every `log error` lands as a tracing.error facet ON that step
+#   • an uncaught command failure surfaces the failing command itself
+#   • long waits report live progress (np_scope_wait_heartbeat)
+#
+# All of it is best-effort: no SDK file, no NP_API_KEY, or no NP_TRACE means
+# plain logging, byte-identical to before. A down tracing API never blocks the
+# workflow: every emit is a local file write, and flushes are hard-bounded.
+# =============================================================================
+
+# Record an observed failure on the step this fragment runs inside. Adoption is
+# per-call on purpose: NP_TRACE changes as the CLI moves between steps, so the
+# error must attach to the step CURRENT at the moment it happened.
+_np_scopes_trace_error() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 0
+  [ -n "${NP_TRACE:-}" ] || return 0
+  local _lt_node
+  _lt_node=$(np_trace_adopt 2>/dev/null) || return 0
+  [ -n "$_lt_node" ] || return 0
+  np_trace_error "$_lt_node" --message "$1" ${2:+--code "$2"}
+  # Remember which step already carries a real message, so the exit trap does
+  # not shadow it with a generic one.
+  _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  return 0
+}
+
+# np_scope_wait_heartbeat <what> <elapsed_s> <timeout_s> [state]
+#
+# Mark the current step `waiting` and record progress, flushed immediately so
+# the wait is visible LIVE, not after the workflow ends. The flush is bounded
+# to 2s per beat: with the API down, a 30s-cadence wait loses at most ~6% of
+# its poll budget — the deadline is wall-clock, so the timeout is never
+# extended. Always defined; a no-op when the workflow is untraced.
+np_scope_wait_heartbeat() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 0
+  [ -n "${NP_TRACE:-}" ] || return 0
+  local _hb_node
+  _hb_node=$(np_trace_adopt 2>/dev/null) || return 0
+  [ -n "$_hb_node" ] || return 0
+  np_trace_labels "$_hb_node" \
+    "wait.what=${1:-}" "wait.elapsed_s=${2:-0}" "wait.timeout_s=${3:-0}" \
+    ${4:+"wait.state=$4"}
+  np_trace_waiting "$_hb_node"
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# A silent failure (no `log error` on the way down) must still be clear: the
+# ERR trap remembers the last failing top-level command, and the EXIT trap
+# reports it against the step that was current when the shell died.
+_np_scopes_on_err() {
+  _NP_SCOPES_LAST_ERR="$BASH_COMMAND (exit ${1:-1})"
+}
+
+_np_scopes_on_exit() {
+  local _ex_rc="${1:-0}"
+  if [ "$_ex_rc" -ne 0 ] && [ "${_NP_SCOPES_ERRED_ON:-}" != "${NP_TRACE:-}" ]; then
+    _np_scopes_trace_error \
+      "${_NP_SCOPES_LAST_ERR:-workflow shell exited with status $_ex_rc}" || true
+  fi
+  np_trace_flush
+}
+
+_NP_SCOPES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -z "${NP_TRACE_LOADED:-}" ] \
+  && [ -f "$_NP_SCOPES_ROOT/nptrace.sh" ] \
+  && [ -n "${NP_API_KEY:-}" ] \
+  && [ -n "${NP_TRACE:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$_NP_SCOPES_ROOT/nptrace.sh"
+  # --no-trap: the exit flush is ours, so the uncaught-failure report and the
+  # flush share ONE trap in a defined order.
+  np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" --no-trap
+  trap '_np_scopes_on_err $?' ERR
+  trap '_np_scopes_on_exit $?' EXIT
+fi

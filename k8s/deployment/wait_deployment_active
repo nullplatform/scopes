@@ -150,6 +150,9 @@ while true; do
     if [ "$iteration" -eq 1 ] || [ $(( iteration % HEARTBEAT_INTERVAL )) -eq 0 ]; then
         elapsed_s=$(( iteration * 10 ))
         log info "⏳ Still waiting — Ready: $ready/$desired, Available: $current/$desired (attempt $iteration/$MAX_ITERATIONS, ${elapsed_s}s elapsed)"
+        if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+            np_scope_wait_heartbeat "deployment-active" "$elapsed_s" "$TIMEOUT" "ready-$ready-of-$desired"
+        fi
     fi
 
     POD_SELECTOR="deployment_id=${DEPLOYMENT_ID}"

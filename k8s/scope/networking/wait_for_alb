@@ -49,6 +49,12 @@ polls_since_heartbeat=0
 heartbeats_emitted=0
 
 log info "⏳ Waiting up to ${TIMEOUT_SECONDS}s for ALB '$ALB_NAME' to become active..."
+# Flip the step to `waiting` in the trace right away — an operator watching the
+# provision sees WHAT it is blocked on, live, not after the workflow ends.
+# (Guarded: overrides may reuse this script without k8s/logging loaded.)
+if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+	np_scope_wait_heartbeat "alb-active" 0 "$TIMEOUT_SECONDS" "pending"
+fi
 
 state=""
 alb_arn=""
@@ -80,6 +86,9 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 		heartbeats_emitted=$((heartbeats_emitted + 1))
 		elapsed=$((heartbeats_emitted * polls_per_heartbeat * poll_interval))
 		log info "⏳ Still waiting for ALB '$ALB_NAME' to become active (${state:-pending}, ~${elapsed}s elapsed)"
+		if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+			np_scope_wait_heartbeat "alb-active" "$elapsed" "$TIMEOUT_SECONDS" "${state:-pending}"
+		fi
 		polls_since_heartbeat=0
 	fi
 
