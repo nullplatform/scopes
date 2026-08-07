@@ -78,6 +78,14 @@ steps:
       - name: SERVICE_TEMPLATE_PATH
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  # Diagnose BEFORE deleting: the hints read the failed deployment's pods
+  # (kubectl get pods -l deployment_id=$DEPLOYMENT_ID). Running this after the
+  # delete step below always found nothing, so every rollback fell through to
+  # the generic "Application Startup Issue Detected" text regardless of why the
+  # rollback happened — or whether anything had failed at all.
+  - name: print_deployment_error_hints
+    type: script
+    file: "$SERVICE_PATH/deployment/print_failed_deployment_hints"
   - name: delete deployment
     type: script
     file: "$SERVICE_PATH/apply_templates"
@@ -90,6 +98,3 @@ steps:
       file: "$SERVICE_PATH/deployment/delete_cluster_objects"
       configuration:
         DEPLOYMENT: green
-  - name: print_deployment_error_hints
-    type: script
-    file: "$SERVICE_PATH/deployment/print_failed_deployment_hints"
