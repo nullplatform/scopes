@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: a rollback now diagnoses the failed deployment before deleting it. The hints step ran after the deletion, so it never found the pods it inspects and every rollback ended with the same generic "Application Startup Issue Detected" text, even when nothing had failed to start. Rollbacks now surface the actual reason (image pull error, crash loop, OOM, failed health check) when there is one.
 
 ## [1.14.0] - 2026-08-03
 - k8s scope deployments now report launched and healthy instance counts, so the deployment page shows live "X/Y launched" and "X/Y healthy" progress
