@@ -444,6 +444,59 @@ teardown() {
   assert_contains "$output" "✅ ALB configuration validated successfully"
 }
 
+@test "verify_ingress_reconciliation: waits for the ALB to collapse the rule and then succeeds" {
+  # The point of the gate: when the check runs before the AWS Load Balancer
+  # Controller has finished reconciling, it must keep polling rather than let
+  # the workflow delete the other deployment. Measured on a real ALB the
+  # controller took 1.5s with 12 rules and 16.8s with 82, so the first poll
+  # legitimately sees the pre-reconciliation state under load.
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}}}'
+  local counter="$BATS_TEST_TMPDIR/describe_rules_calls"
+  : > "$counter"
+
+  run bash -c "
+    kubectl() {
+      echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo x >> '$counter'
+          if [ \"\$(wc -l < '$counter')\" -le 1 ]; then
+            # Primera lectura: el ALB todavía reparte entre blue y green.
+            echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          else
+            # El controller terminó de reconciliar.
+            echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"TargetGroupArn\":\"arn:aws:tg/green\"}]}}]}]}'
+          fi
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='10' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  # Ambos mensajes tienen que aparecer: primero el que frena, después el que habilita.
+  assert_contains "$output" "still has 2 target groups on listener port 443"
+  assert_contains "$output" "✅ Single target group on listener port 443"
+  assert_contains "$output" "✅ ALB configuration validated successfully"
+  # Más de una lectura prueba que hubo reintento y no un único acierto.
+  [ "$(wc -l < "$counter")" -gt 1 ]
+}
+
 @test "verify_ingress_reconciliation: fails when any rule on the listener still has two target groups" {
   # A scope with main + additional HTTP port ingresses produces several rules matching the
   # same host-header. If the main rule already collapsed but another has not, the ALB has
