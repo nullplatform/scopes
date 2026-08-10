@@ -90,14 +90,14 @@ run_script() {
   export CONTEXT='{"region":"us-east-1"}'
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: ALB name not found in context"
+  assert_equal "$output" "⚠️ ALB metrics: ALB name not found in context"
 }
 
 @test "warns when ALB name is null in context" {
   export CONTEXT='{"alb_name":null,"region":"us-east-1"}'
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: ALB name not found in context"
+  assert_equal "$output" "⚠️ ALB metrics: ALB name not found in context"
 }
 
 @test "warns when ALB not found in AWS" {
@@ -110,7 +110,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: could not find ALB"
+  assert_equal "$output" "⚠️ ALB metrics: could not find ALB [k8s-nullplatform-internet-facing]"
 }
 
 @test "warns when describe-load-balancers fails" {
@@ -123,7 +123,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: could not find ALB"
+  assert_equal "$output" "⚠️ ALB metrics: could not find ALB [k8s-nullplatform-internet-facing]"
 }
 
 @test "warns when describe-listeners fails" {
@@ -137,7 +137,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: could not retrieve listeners"
+  assert_equal "$output" "⚠️ ALB metrics: could not retrieve listeners"
 }
 
 # =============================================================================
@@ -147,7 +147,7 @@ run_script() {
 @test "publishes to CloudWatch with correct rule and target group counts" {
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics published to CloudWatch (rules: 3, target_groups: 5)"
+  assert_equal "$output" "✅ ALB metrics published to CloudWatch (rules: 3, target_groups: 5)"
 }
 
 @test "CloudWatch put-metric-data uses correct namespace and dimensions" {
@@ -174,7 +174,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: failed to publish to CloudWatch"
+  assert_equal "$output" "❌ ALB metrics: failed to publish to CloudWatch"
 }
 
 # =============================================================================
@@ -188,7 +188,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics published to Datadog (rules: 3, target_groups: 5)"
+  assert_equal "$output" "✅ ALB metrics published to Datadog (rules: 3, target_groups: 5)"
 }
 
 @test "Datadog request uses correct endpoint and metric names" {
@@ -210,7 +210,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: DATADOG_API_KEY not set"
+  assert_equal "$output" "⚠️ ALB metrics: DATADOG_API_KEY not set"
 }
 
 @test "warns when Datadog returns non-202" {
@@ -224,7 +224,7 @@ run_script() {
 
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: failed to publish to Datadog (HTTP 403)"
+  assert_equal "$output" "❌ ALB metrics: failed to publish to Datadog (HTTP 403)"
 }
 
 # =============================================================================
@@ -235,7 +235,7 @@ run_script() {
   export ALB_METRICS_PUBLISH_TARGET="prometheus"
   run_script
   assert_equal "$status" "0"
-  assert_contains "$output" "ALB metrics: unknown target 'prometheus'"
+  assert_equal "$output" "⚠️ ALB metrics: unknown target 'prometheus'"
 }
 
 # =============================================================================
@@ -256,7 +256,7 @@ run_script() {
   export -f aws
 
   run_script
-  assert_contains "$output" "rules: 1, target_groups: 1"
+  assert_equal "$output" "✅ ALB metrics published to CloudWatch (rules: 1, target_groups: 1)"
 }
 
 @test "counts rules across multiple listeners" {
@@ -275,5 +275,5 @@ run_script() {
   export -f aws
 
   run_script
-  assert_contains "$output" "rules: 3, target_groups: 2"
+  assert_equal "$output" "✅ ALB metrics published to CloudWatch (rules: 3, target_groups: 2)"
 }
