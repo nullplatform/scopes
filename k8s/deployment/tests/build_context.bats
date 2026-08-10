@@ -1099,7 +1099,15 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "must be a numeric value"
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT must be a numeric value, got: 'not-a-port'
+
+🔧 How to fix:
+   • Set a numeric value in values.yaml, the scope-configurations provider, or the container-orchestration provider
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "main_traffic_manager_port: accepts a privileged port other than 80" {
@@ -1118,7 +1126,15 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "must be in the range 1-65535"
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT must be in the range 1-65535, got: '70000'
+
+🔧 How to fix:
+   • Set a valid TCP port; 10080 is the recommended value when moving off the default 80
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "main_traffic_manager_port: rejects port 0" {
@@ -1128,7 +1144,15 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "must be in the range 1-65535"
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT must be in the range 1-65535, got: '0'
+
+🔧 How to fix:
+   • Set a valid TCP port; 10080 is the recommended value when moving off the default 80
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "main_traffic_manager_port: rejects collision with main_http_port" {
@@ -1141,7 +1165,17 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "collides with main_http_port"
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT (10080) collides with main_http_port (10080)
+
+💡 Possible causes:
+   - The sidecar and the application share the pod network namespace and cannot both bind the same port
+🔧 How to fix:
+   • Choose a different MAIN_TRAFFIC_MANAGER_PORT, or change the main_http_port capability
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "main_traffic_manager_port: rejects collision with an additional port" {
@@ -1152,7 +1186,17 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "collides with additional port 10080"
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT (10080) collides with additional port 10080
+
+💡 Possible causes:
+   - Additional port 10080 occupies both 10080 (application) and 20080 (its sidecar)
+🔧 How to fix:
+   • Choose a MAIN_TRAFFIC_MANAGER_PORT that matches neither value, or remove the additional port
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "main_traffic_manager_port: rejects collision with an additional port's sidecar port" {
@@ -1163,7 +1207,17 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "collides with additional port 8081"
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT (18081) collides with additional port 8081
+
+💡 Possible causes:
+   - Additional port 8081 occupies both 8081 (application) and 18081 (its sidecar)
+🔧 How to fix:
+   • Choose a MAIN_TRAFFIC_MANAGER_PORT that matches neither value, or remove the additional port
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "main_traffic_manager_port: accepts 10080 alongside unrelated additional ports" {
