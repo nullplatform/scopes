@@ -44,8 +44,17 @@ setup() {
               elif [[ "$*" == *"ownerReferences"* ]]; then
                 echo "my-replicaset-abc"
               fi
+              return 0
             fi
-            return 0
+            # Bare existence check (no -o jsonpath): the script calls this
+            # with identical args once before the delete (pod must exist)
+            # and once after (pod must be gone, since delete+wait succeed
+            # below). Count calls so the second one reflects a real kubectl
+            # after a successful deletion instead of pretending the pod is
+            # still there.
+            KUBECTL_GET_POD_CALLS=$((${KUBECTL_GET_POD_CALLS:-0} + 1))
+            [ "$KUBECTL_GET_POD_CALLS" -eq 1 ]
+            return $?
             ;;
           replicaset)
             echo "d-scope-123-deploy-456"
@@ -88,23 +97,28 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 0 ]
-  # Start message
-  assert_contains "$output" "🔍 Starting instance kill operation..."
-  # Parameter display
-  assert_contains "$output" "📋 Deployment ID: deploy-456"
-  assert_contains "$output" "📋 Instance name: my-pod-abc123"
-  assert_contains "$output" "📋 Scope ID: scope-123"
-  assert_contains "$output" "📋 Namespace: test-namespace"
-  # Pod verification
-  assert_contains "$output" "🔍 Verifying pod exists..."
-  assert_contains "$output" "📋 Fetching pod details..."
-  # Delete operation
-  assert_contains "$output" "📝 Deleting pod my-pod-abc123 with 30s grace period..."
-  assert_contains "$output" "📝 Waiting for pod termination..."
-  # Deployment status
-  assert_contains "$output" "📋 Checking deployment status after pod deletion..."
-  # Completion
-  assert_contains "$output" "✨ Instance kill operation completed for my-pod-abc123"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Starting instance kill operation...
+📋 Deployment ID: deploy-456
+📋 Instance name: my-pod-abc123
+📋 Scope ID: scope-123
+📋 Namespace: test-namespace
+🔍 Verifying pod exists...
+📋 Fetching pod details...
+📋 Pod: my-pod-abc123 | Status: Running | Node: node-1 | Started: 2024-01-01T00:00:00Z
+📋 Pod ownership: ReplicaSet=my-replicaset-abc -> Deployment=d-scope-123-deploy-456
+📝 Deleting pod my-pod-abc123 with 30s grace period...
+pod deleted
+📝 Waiting for pod termination...
+✅ Pod successfully terminated and removed
+📋 Checking deployment status after pod deletion...
+📋 Deployment d-scope-123-deploy-456: desired=3, ready=2, available=2
+📋 Kubernetes will automatically create a replacement pod
+✨ Instance kill operation completed for my-pod-abc123
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -120,11 +134,18 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ deployment_id parameter not found"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Parameter not provided in action request"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Ensure deployment_id is passed in the action parameters"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Starting instance kill operation...
+❌ deployment_id parameter not found
+💡 Possible causes:
+   - Parameter not provided in action request
+   - Context structure is different than expected
+🔧 How to fix:
+   - Ensure deployment_id is passed in the action parameters
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "kill_instance: fails with troubleshooting when instance_id missing" {
@@ -137,11 +158,18 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ instance_id parameter not found"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Parameter not provided in action request"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Ensure instance_id is passed in the action parameters"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Starting instance kill operation...
+❌ instance_id parameter not found
+💡 Possible causes:
+   - Parameter not provided in action request
+   - Context structure is different than expected
+🔧 How to fix:
+   - Ensure instance_id is passed in the action parameters
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "kill_instance: fails with troubleshooting when scope_id missing" {
@@ -155,11 +183,20 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ scope_id not found in context"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Context missing scope information"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Verify the action is invoked with proper scope context"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Starting instance kill operation...
+📋 Deployment ID: deploy-456
+📋 Instance name: my-pod-abc123
+❌ scope_id not found in context
+💡 Possible causes:
+   - Context missing scope information
+   - Action invoked outside of scope context
+🔧 How to fix:
+   - Verify the action is invoked with proper scope context
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "kill_instance: fails with troubleshooting when pod not found" {
@@ -178,11 +215,24 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Pod my-pod-abc123 not found in namespace test-namespace"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Pod was already terminated"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "kubectl get pods"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Starting instance kill operation...
+📋 Deployment ID: deploy-456
+📋 Instance name: my-pod-abc123
+📋 Scope ID: scope-123
+📋 Namespace: test-namespace
+🔍 Verifying pod exists...
+❌ Pod my-pod-abc123 not found in namespace test-namespace
+💡 Possible causes:
+   - Pod was already terminated
+   - Pod name is incorrect
+   - Pod exists in a different namespace
+🔧 How to fix:
+   - List pods: kubectl get pods -n test-namespace -l scope_id=scope-123
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -204,8 +254,16 @@ teardown() {
               elif [[ "$*" == *"ownerReferences"* ]]; then
                 echo "my-replicaset-abc"
               fi
+              return 0
             fi
-            return 0
+            # Bare existence check (no -o jsonpath): called once before the
+            # delete (pod must exist) and once after (pod must be gone,
+            # since delete+wait both succeed below). Count calls so the
+            # second one reflects a real kubectl after a successful
+            # deletion instead of pretending the pod is still there.
+            KUBECTL_GET_POD_CALLS=$((${KUBECTL_GET_POD_CALLS:-0} + 1))
+            [ "$KUBECTL_GET_POD_CALLS" -eq 1 ]
+            return $?
             ;;
           replicaset)
             echo "d-scope-123-different-deploy"  # Different deployment
@@ -233,7 +291,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../kill_instance"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "⚠️  Pod does not belong to expected deployment d-scope-123-deploy-456"
+  assert_contains "$output" "⚠️  Pod does not belong to expected deployment d-scope-123-deploy-456 (continuing anyway)"
 }
 
 @test "kill_instance: warns when pod still exists after deletion" {
@@ -283,5 +341,5 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Pod deletion timeout reached"
-  assert_contains "$output" "⚠️  Pod still exists after deletion attempt"
+  assert_contains "$output" "⚠️  Pod still exists after deletion attempt (status: Terminating)"
 }
