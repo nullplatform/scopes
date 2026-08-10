@@ -232,6 +232,7 @@ _render_context() {
   "k8s_modifiers": {},
   "asset": {"url": "example.com/app:latest"},
   "main_http_port": 8080,
+  "main_traffic_manager_port": 80,
   "traffic_image": "example.com/traffic:latest",
   "container_cpu_in_millicores": 50,
   "container_memory_in_memory": 64,
