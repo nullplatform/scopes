@@ -76,6 +76,7 @@ ACTION_DIR="$SERVICE_PATH/specs/actions"
 SCOPE_TYPE_DEFINITION_PATH="$SERVICE_PATH/specs/scope-type-definition.json"
 
 gomplate --file "$SERVICE_SPEC_PATH.tpl" --out "$SERVICE_SPEC_PATH"
+jq 'del(.available_actions)' "$SERVICE_SPEC_PATH" > "$SERVICE_SPEC_PATH.tmp" && mv "$SERVICE_SPEC_PATH.tmp" "$SERVICE_SPEC_PATH"
 
 start_spinner "Creating the service specification in the platform."
 {

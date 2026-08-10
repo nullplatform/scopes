@@ -1,4 +1,19 @@
 {
+  "available_actions": [
+    "create-scope",
+    "delete-scope",
+    "start-initial",
+    "start-blue-green",
+    "finalize-blue-green",
+    "rollback-deployment",
+    "delete-deployment",
+    "switch-traffic",
+    "set-desired-instance-count",
+    "pause-autoscaling",
+    "resume-autoscaling",
+    "restart-pods",
+    "kill-instance"
+  ],
   "assignable_to": "any",
   "attributes": {
    "schema":{

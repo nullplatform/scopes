@@ -1,4 +1,15 @@
 {
+  "available_actions": [
+    "create-scope",
+    "delete-scope",
+    "start-initial",
+    "start-blue-green",
+    "finalize-blue-green",
+    "rollback-deployment",
+    "delete-deployment",
+    "trigger",
+    "kill-instance"
+  ],
   "assignable_to": "any",
   "attributes": {
     "schema": {
