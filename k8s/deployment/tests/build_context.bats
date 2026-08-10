@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT 2>/dev/null || true
 }
 
 # =============================================================================
@@ -1037,4 +1037,132 @@ set_capabilities() {
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+# =============================================================================
+# main_traffic_manager_port resolution and validation
+# The main traffic-manager sidecar's listener port. Default 80; operators move
+# it to a non-privileged port when their cluster does not allow pod-to-pod
+# traffic on 80.
+# =============================================================================
+
+@test "main_traffic_manager_port: defaults to 80 when nothing is configured" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "80"
+}
+
+@test "main_traffic_manager_port: emitted as JSON number for Go template consumption" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port | type')" "number"
+}
+
+@test "main_traffic_manager_port: read from container-orchestration provider" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 10080')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
+}
+
+@test "main_traffic_manager_port: scope-configurations takes priority over container-orchestration" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["container-orchestration"].cluster.main_traffic_manager_port = 10080
+    | .providers["scope-configurations"].deployment.main_traffic_manager_port = 11080
+  ')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "11080"
+}
+
+@test "main_traffic_manager_port: MAIN_TRAFFIC_MANAGER_PORT env var honoured when no provider set" {
+  setup_full_build_context
+  export MAIN_TRAFFIC_MANAGER_PORT=10080
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
+}
+
+@test "main_traffic_manager_port: rejects non-numeric value" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = "not-a-port"')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "must be a numeric value"
+}
+
+@test "main_traffic_manager_port: rejects privileged port other than 80" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 443')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "must be 80 or in the range 1024-65535"
+}
+
+@test "main_traffic_manager_port: rejects port above 65535" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 70000')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "must be 80 or in the range 1024-65535"
+}
+
+@test "main_traffic_manager_port: rejects collision with main_http_port" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '
+    .scope.capabilities.main_http_port = 10080
+    | .providers["container-orchestration"].cluster.main_traffic_manager_port = 10080
+  ')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "collides with main_http_port"
+}
+
+@test "main_traffic_manager_port: rejects collision with an additional port" {
+  setup_full_build_context
+  set_additional_ports '[{"port":10080,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 10080')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "collides with additional port 10080"
+}
+
+@test "main_traffic_manager_port: rejects collision with an additional port's sidecar port" {
+  setup_full_build_context
+  set_additional_ports '[{"port":8081,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 18081')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "collides with additional port 8081"
+}
+
+@test "main_traffic_manager_port: accepts 10080 alongside unrelated additional ports" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9090,"type":"HTTP"},{"port":9014,"type":"GRPC"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 10080')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
