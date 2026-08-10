@@ -1102,14 +1102,13 @@ set_capabilities() {
   assert_contains "$output" "must be a numeric value"
 }
 
-@test "main_traffic_manager_port: rejects privileged port other than 80" {
+@test "main_traffic_manager_port: accepts a privileged port other than 80" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 443')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 90')
 
-  run source "$SCRIPT"
+  source "$SCRIPT"
 
-  [ "$status" -ne 0 ]
-  assert_contains "$output" "must be 80 or in the range 1024-65535"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "90"
 }
 
 @test "main_traffic_manager_port: rejects port above 65535" {
@@ -1119,7 +1118,17 @@ set_capabilities() {
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "must be 80 or in the range 1024-65535"
+  assert_contains "$output" "must be in the range 1-65535"
+}
+
+@test "main_traffic_manager_port: rejects port 0" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 0')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "must be in the range 1-65535"
 }
 
 @test "main_traffic_manager_port: rejects collision with main_http_port" {

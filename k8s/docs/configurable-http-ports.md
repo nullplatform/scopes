@@ -32,7 +32,7 @@ The port your application binds to inside the container. When set, the following
 
 - **Type:** integer
 - **Default:** `80`
-- **Valid values:** `80`, or `1024`–`65535`
+- **Valid values:** `1`–`65535`
 - **Configured via:** `container-orchestration` provider at
   `.cluster.main_traffic_manager_port`, the `scope-configurations` provider at
   `.deployment.main_traffic_manager_port`, or the `MAIN_TRAFFIC_MANAGER_PORT`

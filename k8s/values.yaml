@@ -43,7 +43,7 @@ configuration:
 #  TRAFFIC_CONTAINER_IMAGE: "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
 #  TRAFFIC_MANAGER_CONFIG_MAP: traffic-manager-configuration
 # Port the main traffic-manager sidecar binds inside the pod. Defaults to 80.
-# Set to a non-privileged port (10080 recommended) when the cluster's security
+# Set to a different port (10080 recommended) when the cluster's security
 # groups or network policies do not allow pod-to-pod traffic on 80. Open the
 # port for pod-to-pod traffic BEFORE setting this — with VPC CNI custom
 # networking that is the security group in the ENIConfig CRD, not the node's.
