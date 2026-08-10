@@ -22,8 +22,77 @@ The port your application binds to inside the container. When set, the following
 | `Service` | `port` (cluster-public) | `main_http_port` |
 | `Ingress` (initial and blue-green) | backend service port | `main_http_port` |
 | Istio `Service` and `HTTPRoute` | port | `main_http_port` |
+| `Service` | `targetPort` | `main_traffic_manager_port` (NOT `main_http_port`) |
 
-`Service.targetPort` stays `80` because that is the sidecar's port, not the app's.
+`Service.targetPort` is the sidecar's port, not the app's — it tracks
+`main_traffic_manager_port` (default `80`), not `main_http_port`. See
+[Moving the sidecar off port 80](#moving-the-sidecar-off-port-80).
+
+### `main_traffic_manager_port`
+
+- **Type:** integer
+- **Default:** `80`
+- **Valid values:** `80`, or `1024`–`65535`
+- **Configured via:** `container-orchestration` provider at
+  `.cluster.main_traffic_manager_port`, the `scope-configurations` provider at
+  `.deployment.main_traffic_manager_port`, or the `MAIN_TRAFFIC_MANAGER_PORT`
+  env var in `values.yaml`. Precedence follows the usual order —
+  `scope-configurations`, then `container-orchestration`, then env, then default.
+
+The port the main traffic-manager sidecar binds inside the pod. It sets the
+sidecar's `containerPort`, its `LISTENER_PORT` env var, all three of its probes,
+and `Service.targetPort` on the main Service and on the Istio and ARO routes.
+
+#### Moving the sidecar off port 80
+
+Port 80 is privileged, and hardened clusters routinely do not allow pod-to-pod
+traffic on it. When that happens the symptom is deceptive: the pod reports
+`Ready` and requests time out. Kubelet probes are node-local and never leave the
+ENI, so they reach the sidecar while cross-node traffic from the gateway is
+dropped.
+
+The diagnostic is a three-way comparison against the same `podIP:80`:
+
+```bash
+POD_IP=$(kubectl -n nullplatform get pod -l deployment_id=<id> -o jsonpath='{.items[0].status.podIP}')
+NODE=$(kubectl -n nullplatform get pod -l deployment_id=<id> -o jsonpath='{.items[0].spec.nodeName}')
+
+kubectl -n gateways exec deploy/gateway-private-istio -- \
+  curl -s -m 5 -o /dev/null -w "cross-node 80 -> %{http_code}\n" "http://$POD_IP:80/"
+kubectl debug node/$NODE -it --image=curlimages/curl -- \
+  curl -s -m 5 -o /dev/null -w "same-node 80 -> %{http_code}\n" "http://$POD_IP:80/"
+```
+
+Same-node succeeding while cross-node times out means the filter is at the
+network layer, not in the manifest. With AWS VPC CNI, pod IPs are real VPC IPs,
+so cross-node pod-to-pod traffic is evaluated by security groups. Under custom
+networking (pods on a secondary CIDR) the relevant security group is the one in
+the `ENIConfig` CRD, not the node's:
+
+```bash
+kubectl get eniconfig -A -o custom-columns=NAME:.metadata.name,SUBNET:.spec.subnet,SG:.spec.securityGroups
+```
+
+To adopt a different port, in this order:
+
+1. Allow the port (`10080` recommended) inbound on the security group attached
+   to the pod ENIs.
+2. Set `main_traffic_manager_port` in the `container-orchestration` provider.
+3. Deploy.
+
+The order matters. Setting the knob before opening the port yields a green
+deployment that receives no traffic, so blue/green never promotes — blue keeps
+serving, so it stalls rather than breaking.
+
+`10080` is the recommended value because it is `80 + 10000`, the same offset
+`additional_ports` sidecars already use, and it is clear of Istio's
+`15000`–`15090` range and of common application defaults.
+
+Do not work around the filtering by pointing `Service.targetPort` at the
+application port. That takes nginx out of the request path — losing
+`client_max_body_size 75M`, graceful shutdown, and request metrics — and the
+next deployment re-renders `targetPort` from the template, so the change does
+not survive.
 
 ### `additional_ports[].type = "HTTP"`
 
