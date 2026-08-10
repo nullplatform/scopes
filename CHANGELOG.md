@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: **finalize** and **rollback** on blue/green k8s scopes now wait until the load balancer sends all traffic to the surviving deployment before deleting the other one, preventing the 5xx window that happened when it was deleted mid-switch (these actions may take slightly longer as a result)
 
 ## [1.14.0] - 2026-08-03
 - k8s scope deployments now report launched and healthy instance counts, so the deployment page shows live "X/Y launched" and "X/Y healthy" progress
