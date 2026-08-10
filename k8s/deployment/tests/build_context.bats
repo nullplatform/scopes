@@ -33,7 +33,7 @@ teardown() {
 @test "validate_status: accepts valid statuses for start-initial and start-blue-green" {
   run validate_status "start-initial" "creating"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action 'start-initial' (current status: 'creating', expected: creating, waiting_for_instances or running)"
+  assert_equal "$output" "📝 Running action 'start-initial' (current status: 'creating', expected: creating, waiting_for_instances or running)"
 
   run validate_status "start-initial" "waiting_for_instances"
   [ "$status" -eq 0 ]
@@ -43,7 +43,7 @@ teardown() {
 
   run validate_status "start-blue-green" "creating"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action 'start-blue-green' (current status: 'creating', expected: creating, waiting_for_instances or running)"
+  assert_equal "$output" "📝 Running action 'start-blue-green' (current status: 'creating', expected: creating, waiting_for_instances or running)"
 }
 
 @test "validate_status: rejects invalid statuses for start-initial" {
@@ -57,7 +57,7 @@ teardown() {
 @test "validate_status: accepts valid statuses for switch-traffic" {
   run validate_status "switch-traffic" "running"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action 'switch-traffic' (current status: 'running', expected: running or waiting_for_instances)"
+  assert_equal "$output" "📝 Running action 'switch-traffic' (current status: 'running', expected: running or waiting_for_instances)"
 
   run validate_status "switch-traffic" "waiting_for_instances"
   [ "$status" -eq 0 ]
@@ -71,7 +71,7 @@ teardown() {
 @test "validate_status: accepts valid statuses for rollback-deployment" {
   run validate_status "rollback-deployment" "rolling_back"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action 'rollback-deployment' (current status: 'rolling_back', expected: rolling_back or cancelling)"
+  assert_equal "$output" "📝 Running action 'rollback-deployment' (current status: 'rolling_back', expected: rolling_back or cancelling)"
 
   run validate_status "rollback-deployment" "cancelling"
   [ "$status" -eq 0 ]
@@ -98,7 +98,7 @@ teardown() {
 @test "validate_status: accepts valid statuses for delete-deployment" {
   run validate_status "delete-deployment" "deleting"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action 'delete-deployment' (current status: 'deleting', expected: deleting, rolling_back or cancelling)"
+  assert_equal "$output" "📝 Running action 'delete-deployment' (current status: 'deleting', expected: deleting, rolling_back or cancelling)"
 
   run validate_status "delete-deployment" "cancelling"
   [ "$status" -eq 0 ]
@@ -115,11 +115,11 @@ teardown() {
 @test "validate_status: accepts any status for unknown or empty action" {
   run validate_status "custom-action" "any_status"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action 'custom-action', any deployment status is accepted"
+  assert_equal "$output" "📝 Running action 'custom-action', any deployment status is accepted"
 
   run validate_status "" "running"
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Running action '', any deployment status is accepted"
+  assert_equal "$output" "📝 Running action '', any deployment status is accepted"
 }
 
 # =============================================================================
@@ -560,15 +560,21 @@ SCRIPT
   run "$test_script" "$mock_service"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ Invalid deployment status 'failed' for action 'start-initial'"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Deployment status changed during workflow execution"
-  assert_contains "$output" "Another action is already running on this deployment"
-  assert_contains "$output" "Deployment was modified externally"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Wait for any in-progress actions to complete"
-  assert_contains "$output" "Check the deployment status in the nullplatform dashboard"
-  assert_contains "$output" "Retry the action once the deployment is in the expected state"
+  local expected
+  expected=$(cat <<'EOF'
+📝 Running action 'start-initial' (current status: 'failed', expected: creating, waiting_for_instances or running)
+❌ Invalid deployment status 'failed' for action 'start-initial'
+💡 Possible causes:
+   - Deployment status changed during workflow execution
+   - Another action is already running on this deployment
+   - Deployment was modified externally
+🔧 How to fix:
+   - Wait for any in-progress actions to complete
+   - Check the deployment status in the nullplatform dashboard
+   - Retry the action once the deployment is in the expected state
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "error: ConfigMap not found shows full troubleshooting info" {
@@ -608,15 +614,21 @@ SCRIPT
   run "$test_script" "$mock_service"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "🔍 Validating ConfigMap 'test-config' in namespace 'test-ns'"
-  assert_contains "$output" "❌ ConfigMap 'test-config' does not exist in namespace 'test-ns'"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "ConfigMap was not created before deployment"
-  assert_contains "$output" "ConfigMap name is misspelled in values.yaml"
-  assert_contains "$output" "ConfigMap was deleted or exists in a different namespace"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Create the ConfigMap: kubectl create configmap test-config -n test-ns --from-file=nginx.conf --from-file=default.conf"
-  assert_contains "$output" "Verify the ConfigMap name in your scope configuration"
+  local expected
+  expected=$(cat <<'EOF'
+📝 Running action 'start-initial' (current status: 'creating', expected: creating, waiting_for_instances or running)
+🔍 Validating ConfigMap 'test-config' in namespace 'test-ns'
+❌ ConfigMap 'test-config' does not exist in namespace 'test-ns'
+💡 Possible causes:
+   - ConfigMap was not created before deployment
+   - ConfigMap name is misspelled in values.yaml
+   - ConfigMap was deleted or exists in a different namespace
+🔧 How to fix:
+   - Create the ConfigMap: kubectl create configmap test-config -n test-ns --from-file=nginx.conf --from-file=default.conf
+   - Verify the ConfigMap name in your scope configuration
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
