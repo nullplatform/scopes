@@ -193,12 +193,16 @@ This means deleting a deployment (which deletes its Ingresses) is sufficient to 
 - JSON Schema and UI Schema: `k8s/specs/service-spec.json.tpl`
 - Build context extraction: `k8s/deployment/build_context` (look for `MAIN_HTTP_PORT`)
 - Templates that consume `main_http_port`: `k8s/deployment/templates/{service,deployment,initial-ingress,blue-green-ingress}.yaml.tpl` and `k8s/deployment/templates/istio/*.tpl`
+- `main_traffic_manager_port` resolution and validation: `k8s/deployment/build_context` (look for `MAIN_TRAFFIC_MANAGER_PORT`)
+- Templates that consume `main_traffic_manager_port`: `k8s/deployment/templates/{deployment,service}.yaml.tpl`, `k8s/deployment/templates/istio/service.yaml.tpl`, and `k8s/deployment/templates/aro/{initial,blue-green}-httproute.yaml.tpl`
 - HTTP additional_ports sidecar: `k8s/deployment/templates/deployment.yaml.tpl` (look for `else if eq .type "HTTP"`)
-- traffic-manager image: `nullplatform/k8s-tools/traffic-manager` — `UPSTREAM_PORT` env handled in `start.sh`
+- traffic-manager image: `nullplatform/k8s-tools/traffic-manager` — `UPSTREAM_PORT` and `LISTENER_PORT` envs handled in `start.sh`
 
 ## Tests
 
 - `k8s/deployment/tests/build_context.bats` covers `main_http_port` extraction with present, absent, and `null` cases, and verifies the `tonumber` cast.
+- `k8s/deployment/tests/build_context.bats` also covers `main_traffic_manager_port` resolution: the provider precedence order, the env-var override, and the numeric, range and port-collision rejections.
+- `k8s/deployment/tests/traffic_manager_port_shape.bats` pins the main sidecar's `containerPort`, its `LISTENER_PORT` env var, its three probes and every `targetPort` to the same value, so they cannot drift apart — a drift would leave the pod reporting `Ready` while traffic never reaches it.
 - `k8s/deployment/tests/ingress_template_shape.bats` verifies the per-port HTTPS listener annotation on each ingress branch and pins the absence of `ssl-redirect` on additional-port ingresses.
 - `k8s/deployment/tests/verify_ingress_reconciliation.bats` covers the weight-dedupe behavior introduced because a shared ALB listener used to surface multiple matching rules (the multi-rule scenario is no longer reachable now that each additional port has its own listener, but the dedupe is kept defensively).
 - `k8s/deployment/tests/validate_alb_target_group_capacity.bats` covers both target-group capacity and the listener-capacity validation (`ALB_MAX_LISTENERS`).
