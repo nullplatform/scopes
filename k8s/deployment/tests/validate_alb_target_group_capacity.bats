@@ -89,15 +89,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 98/98
+
+💡 Possible causes:
+   Too many services or deployments are attached to this ALB
+
+🔧 How to fix:
+   • Remove unused deployments or services from the ALB
+   • Increase ALB_MAX_TARGET_GROUPS in values.yaml or scope-configurations provider (AWS limit is 100)
+   • Request an AWS service quota increase for target groups per ALB
+   • Consider using a separate ALB for additional deployments
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 98/98"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Too many services or deployments are attached to this ALB"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Remove unused deployments or services from the ALB"
-  assert_contains "$output" "Increase ALB_MAX_TARGET_GROUPS in values.yaml or scope-configurations provider (AWS limit is 100)"
-  assert_contains "$output" "Request an AWS service quota increase for target groups per ALB"
-  assert_contains "$output" "Consider using a separate ALB for additional deployments"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when over capacity" {
@@ -117,8 +125,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 100/98
+
+💡 Possible causes:
+   Too many services or deployments are attached to this ALB
+
+🔧 How to fix:
+   • Remove unused deployments or services from the ALB
+   • Increase ALB_MAX_TARGET_GROUPS in values.yaml or scope-configurations provider (AWS limit is 100)
+   • Request an AWS service quota increase for target groups per ALB
+   • Consider using a separate ALB for additional deployments
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 100/98"
+  assert_contains "$output" "$expected"
 }
 
 # =============================================================================
@@ -138,8 +161,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30
+
+💡 Possible causes:
+   Too many services or deployments are attached to this ALB
+
+🔧 How to fix:
+   • Remove unused deployments or services from the ALB
+   • Increase ALB_MAX_TARGET_GROUPS in values.yaml or scope-configurations provider (AWS limit is 100)
+   • Request an AWS service quota increase for target groups per ALB
+   • Consider using a separate ALB for additional deployments
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_TARGET_GROUPS from scope-configurations provider" {
@@ -148,8 +186,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30
+
+💡 Possible causes:
+   Too many services or deployments are attached to this ALB
+
+🔧 How to fix:
+   • Remove unused deployments or services from the ALB
+   • Increase ALB_MAX_TARGET_GROUPS in values.yaml or scope-configurations provider (AWS limit is 100)
+   • Request an AWS service quota increase for target groups per ALB
+   • Consider using a separate ALB for additional deployments
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_TARGET_GROUPS from container-orchestration provider" {
@@ -158,8 +211,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30
+
+💡 Possible causes:
+   Too many services or deployments are attached to this ALB
+
+🔧 How to fix:
+   • Remove unused deployments or services from the ALB
+   • Increase ALB_MAX_TARGET_GROUPS in values.yaml or scope-configurations provider (AWS limit is 100)
+   • Request an AWS service quota increase for target groups per ALB
+   • Consider using a separate ALB for additional deployments
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached target group capacity: 40/30"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: scope-configurations takes priority over container-orchestration" {
@@ -198,13 +266,21 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Failed to find load balancer 'k8s-nullplatform-internet-facing' in region 'us-east-1'
+
+💡 Possible causes:
+   The load balancer may not exist or the agent lacks permissions
+
+🔧 How to fix:
+   • Verify the ALB exists: aws elbv2 describe-load-balancers --names k8s-nullplatform-internet-facing --region us-east-1
+   • Check IAM permissions for elbv2:DescribeLoadBalancers
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Failed to find load balancer 'k8s-nullplatform-internet-facing' in region 'us-east-1'"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The load balancer may not exist or the agent lacks permissions"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Verify the ALB exists: aws elbv2 describe-load-balancers --names k8s-nullplatform-internet-facing --region us-east-1"
-  assert_contains "$output" "Check IAM permissions for elbv2:DescribeLoadBalancers"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when ALB ARN is None" {
@@ -220,8 +296,21 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'
+
+💡 Possible causes:
+   The load balancer name may be incorrect or it was deleted
+
+🔧 How to fix:
+   • List available ALBs: aws elbv2 describe-load-balancers --region us-east-1
+   • Check the balancer name in values.yaml or scope-configurations provider
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when describe-target-groups fails" {
@@ -241,12 +330,20 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Failed to describe target groups for ALB 'k8s-nullplatform-internet-facing'
+
+💡 Possible causes:
+   The agent may lack permissions to describe target groups
+
+🔧 How to fix:
+   • Check IAM permissions for elbv2:DescribeTargetGroups
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Failed to describe target groups for ALB 'k8s-nullplatform-internet-facing'"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The agent may lack permissions to describe target groups"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Check IAM permissions for elbv2:DescribeTargetGroups"
+  assert_contains "$output" "$expected"
 }
 
 # =============================================================================
@@ -320,12 +417,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Unexpected non-numeric target group count from ALB
+📋 ALB ARN: arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123
+📋 Received value: WARNING: something unexpected
+
+💡 Possible causes:
+   The AWS CLI returned an unexpected response format
+
+🔧 How to fix:
+   • Verify AWS CLI version and credentials are correct
+   • Run manually: aws elbv2 describe-target-groups --load-balancer-arn arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123 --region us-east-1 --query 'length(TargetGroups)'
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Unexpected non-numeric target group count from ALB"
-  assert_contains "$output" "📋 ALB ARN: arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123"
-  assert_contains "$output" "📋 Received value: WARNING: something unexpected"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The AWS CLI returned an unexpected response format"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when ALB_MAX_TARGET_GROUPS is non-numeric" {
@@ -333,10 +441,17 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB_MAX_TARGET_GROUPS must be a numeric value, got: 'abc'
+
+🔧 How to fix:
+   • Set a numeric value in values.yaml or scope-configurations provider
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB_MAX_TARGET_GROUPS must be a numeric value, got: 'abc'"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Set a numeric value in values.yaml or scope-configurations provider"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: empty ALB ARN response triggers error" {
@@ -352,8 +467,21 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'
+
+💡 Possible causes:
+   The load balancer name may be incorrect or it was deleted
+
+🔧 How to fix:
+   • List available ALBs: aws elbv2 describe-load-balancers --region us-east-1
+   • Check the balancer name in values.yaml or scope-configurations provider
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Load balancer 'k8s-nullplatform-internet-facing' not found in region 'us-east-1'"
+  assert_contains "$output" "$expected"
 }
 
 # =============================================================================
@@ -384,7 +512,7 @@ teardown() {
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "DNS type is 'external_dns', ALB target group validation only applies to route53, skipping"
+  assert_contains "$output" "📋 DNS type is 'external_dns', ALB target group validation only applies to route53, skipping"
 }
 
 @test "validate_alb_target_group_capacity: runs when DNS_TYPE is route53" {
@@ -428,14 +556,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 48/48
+
+💡 Possible causes:
+   Too many scopes with additional_ports are attached to this ALB. Each HTTP/GRPC additional port opens its own listener.
+
+🔧 How to fix:
+   • Reduce additional_ports across scopes sharing this ALB
+   • Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)
+   • Request an AWS service quota increase for listeners per ALB
+   • Consider using a separate ALB for additional scopes
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 48/48"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Too many scopes with additional_ports are attached to this ALB"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Reduce additional_ports across scopes sharing this ALB"
-  assert_contains "$output" "Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)"
-  assert_contains "$output" "Request an AWS service quota increase for listeners per ALB"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when listener count is over capacity" {
@@ -459,8 +596,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 50/48
+
+💡 Possible causes:
+   Too many scopes with additional_ports are attached to this ALB. Each HTTP/GRPC additional port opens its own listener.
+
+🔧 How to fix:
+   • Reduce additional_ports across scopes sharing this ALB
+   • Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)
+   • Request an AWS service quota increase for listeners per ALB
+   • Consider using a separate ALB for additional scopes
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 50/48"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: passes at exactly one below listener capacity" {
@@ -528,8 +680,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5
+
+💡 Possible causes:
+   Too many scopes with additional_ports are attached to this ALB. Each HTTP/GRPC additional port opens its own listener.
+
+🔧 How to fix:
+   • Reduce additional_ports across scopes sharing this ALB
+   • Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)
+   • Request an AWS service quota increase for listeners per ALB
+   • Consider using a separate ALB for additional scopes
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_LISTENERS from scope-configurations provider" {
@@ -538,8 +705,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5
+
+💡 Possible causes:
+   Too many scopes with additional_ports are attached to this ALB. Each HTTP/GRPC additional port opens its own listener.
+
+🔧 How to fix:
+   • Reduce additional_ports across scopes sharing this ALB
+   • Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)
+   • Request an AWS service quota increase for listeners per ALB
+   • Consider using a separate ALB for additional scopes
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: ALB_MAX_LISTENERS from container-orchestration provider" {
@@ -548,8 +730,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5
+
+💡 Possible causes:
+   Too many scopes with additional_ports are attached to this ALB. Each HTTP/GRPC additional port opens its own listener.
+
+🔧 How to fix:
+   • Reduce additional_ports across scopes sharing this ALB
+   • Increase ALB_MAX_LISTENERS in values.yaml or scope-configurations provider (AWS limit is 50)
+   • Request an AWS service quota increase for listeners per ALB
+   • Consider using a separate ALB for additional scopes
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB 'k8s-nullplatform-internet-facing' has reached listener capacity: 10/5"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when describe-listeners fails" {
@@ -573,9 +770,20 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Failed to describe listeners for ALB 'k8s-nullplatform-internet-facing'
+
+💡 Possible causes:
+   The agent may lack permissions to describe listeners
+
+🔧 How to fix:
+   • Check IAM permissions for elbv2:DescribeListeners
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Failed to describe listeners for ALB 'k8s-nullplatform-internet-facing'"
-  assert_contains "$output" "Check IAM permissions for elbv2:DescribeListeners"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when listener count is non-numeric" {
@@ -599,9 +807,23 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ Unexpected non-numeric listener count from ALB
+📋 ALB ARN: arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123
+📋 Received value: WARNING: unexpected
+
+💡 Possible causes:
+   The AWS CLI returned an unexpected response format
+
+🔧 How to fix:
+   • Verify AWS CLI version and credentials are correct
+   • Run manually: aws elbv2 describe-listeners --load-balancer-arn arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/alb/abc123 --region us-east-1 --query 'length(Listeners)'
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ Unexpected non-numeric listener count from ALB"
-  assert_contains "$output" "📋 Received value: WARNING: unexpected"
+  assert_contains "$output" "$expected"
 }
 
 @test "validate_alb_target_group_capacity: fails when ALB_MAX_LISTENERS is non-numeric" {
@@ -609,6 +831,15 @@ teardown() {
 
   run bash -c 'source "$SCRIPT"'
 
+  local expected
+  expected=$(cat <<'EOF'
+❌ ALB_MAX_LISTENERS must be a numeric value, got: 'abc'
+
+🔧 How to fix:
+   • Set a numeric value in values.yaml or scope-configurations provider
+EOF
+)
+
   assert_equal "$status" "1"
-  assert_contains "$output" "❌ ALB_MAX_LISTENERS must be a numeric value, got: 'abc'"
+  assert_contains "$output" "$expected"
 }

@@ -46,20 +46,25 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  # Main header
-  assert_contains "$output" "⚠️  Application Startup Issue Detected"
-  # Possible causes
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Your application was unable to start"
-  # How to fix section
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "port 8080"
-  assert_contains "$output" "/health"
-  assert_contains "$output" "Application Logs"
-  assert_contains "$output" "512Mi"
-  assert_contains "$output" "Environment Variables"
-  assert_contains "$output" "my-app"
-  assert_contains "$output" "production"
+  local expected
+  expected=$(cat <<'EOF'
+
+⚠️  Application Startup Issue Detected
+
+💡 Possible causes:
+   Your application was unable to start within the expected timeframe
+
+🔧 How to fix:
+   1. Port Configuration: Ensure your application listens on port 8080
+   2. Health Check Endpoint: Verify your app responds to: /health
+   3. Application Logs: Review logs for startup errors (database connections,
+      missing dependencies, or initialization errors)
+   4. Memory Allocation: Current allocation is 512Mi - increase if needed
+   5. Environment Variables: Verify all required variables are configured in
+      parameters for scope 'my-app' or dimensions: production
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -80,10 +85,16 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: The container exceeded its memory limit (512Mi)"
-  assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
-  assert_contains "$output" "📋 Details: out of memory"
-  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container exceeded its memory limit (512Mi) and was terminated.
+📋 Detected: OOMKilled on container app (exit 137)
+📋 Details: out of memory
+💡 Suggested fix: Increase ram_memory for scope 'my-app' or reduce application memory usage.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -102,11 +113,17 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: The container image could not be pulled."
-  assert_contains "$output" "📋 Detected: ImagePullBackOff on container web"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container image could not be pulled.
+📋 Detected: ImagePullBackOff on container web
+📋 Details: manifest unknown
+💡 Suggested fix: Verify the image name, tag, and registry credentials are correct.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "exit "
-  assert_contains "$output" "📋 Details: manifest unknown"
-  assert_contains "$output" "💡 Suggested fix: Verify the image name, tag, and registry credentials"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -125,9 +142,16 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: The container started and crashed repeatedly."
-  assert_contains "$output" "📋 Detected: CrashLoopBackOff on container worker"
-  assert_contains "$output" "💡 Suggested fix: Review application logs for startup errors"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container started and crashed repeatedly.
+📋 Detected: CrashLoopBackOff on container worker
+📋 Details: back-off 5m0s restarting failed container
+💡 Suggested fix: Review application logs for startup errors (failed dependencies, bad config, panics).
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -146,8 +170,16 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: The container configuration is invalid."
-  assert_contains "$output" "💡 Suggested fix: Check for missing secrets or configmaps"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container configuration is invalid.
+📋 Detected: CreateContainerConfigError on container api
+📋 Details: secret "db-creds" not found
+💡 Suggested fix: Check for missing secrets or configmaps referenced by the deployment.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -166,8 +198,15 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: The container failed to run its entrypoint."
-  assert_contains "$output" "💡 Suggested fix: Verify the start command"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container failed to run its entrypoint.
+📋 Detected: RunContainerError on container app
+💡 Suggested fix: Verify the start command and that required binaries exist in the image.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -186,9 +225,16 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: The startup binary is missing or not executable"
-  assert_contains "$output" "📋 Detected: ContainerCannotRun on container app (exit 127)"
-  assert_contains "$output" "💡 Suggested fix: Rebuild the image"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The startup binary is missing or not executable inside the image.
+📋 Detected: ContainerCannotRun on container app (exit 127)
+📋 Details: exec: "/app": no such file
+💡 Suggested fix: Rebuild the image ensuring the entrypoint exists and has execute permissions.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -198,8 +244,17 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: A volume could not be mounted onto the pod."
-  assert_contains "$output" "💡 Suggested fix: Check that the referenced PVC, secret, or configmap exists"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: A volume could not be mounted onto the pod.
+📋 Detected: FailedMount
+📋 Recent warnings:
+  • FailedMount (×1)
+💡 Suggested fix: Check that the referenced PVC, secret, or configmap exists and is accessible.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -209,8 +264,17 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: Kubernetes could not create the pod sandbox."
-  assert_contains "$output" "💡 Suggested fix: Check node health, CNI configuration"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: Kubernetes could not create the pod sandbox.
+📋 Detected: FailedCreatePodSandBox
+📋 Recent warnings:
+  • FailedCreatePodSandBox (×1)
+💡 Suggested fix: Check node health, CNI configuration, and pod security policies.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -229,8 +293,15 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "did not pass its health check at /health"
-  assert_contains "$output" "💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /health.
+📋 Detected: Unhealthy on container api
+💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health within the readiness window.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -250,12 +321,19 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  # HUMAN_MESSAGE retains the base sentence and appends the translated probe failure
-  assert_contains "$output" "did not pass its health check at /health"
-  assert_contains "$output" "Detected: Startup probe"
-  assert_contains "$output" "not yet listening"
-  # SUGGESTED_FIX is targeted: tells the user the app is not binding the port
-  assert_contains "$output" "not listening on port 8080"
+  # HUMAN_MESSAGE retains the base sentence and appends the translated probe failure;
+  # SUGGESTED_FIX is targeted: tells the user the app is not binding the port.
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — app is not yet listening on /health.
+📋 Detected: Unhealthy on container api
+📋 Recent warnings:
+  • Unhealthy (×1)
+💡 Suggested fix: The container is not listening on port 8080 — verify the start command runs, the process binds to 0.0.0.0:8080, and nothing is crashing before it accepts connections.
+EOF
+)
+  assert_equal "$output" "$expected"
   # Generic fallback fix must NOT appear
   assert_not_contains "$output" "returns 2xx on /health within the readiness window"
 }
@@ -276,11 +354,18 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Detected: Startup probe"
-  assert_contains "$output" "HTTP 502"
   # SUGGESTED_FIX cites the status code and points to app logs
-  assert_contains "$output" "responded with HTTP 502"
-  assert_contains "$output" "inspect application logs"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — app responded with HTTP 502 (expected 2xx).
+📋 Detected: Unhealthy on container api
+📋 Recent warnings:
+  • Unhealthy (×1)
+💡 Suggested fix: The app responded with HTTP 502 on /health — inspect application logs for startup errors; the process is running but /health is not returning 2xx.
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "print_failed_deployment_hints: enriches Unhealthy with timeout detail and targeted fix" {
@@ -299,10 +384,18 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Detected: Startup probe"
-  assert_contains "$output" "timed out"
   # SUGGESTED_FIX mentions timing knobs
-  assert_contains "$output" "initialDelaySeconds"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — request timed out on /health.
+📋 Detected: Unhealthy on container api
+📋 Recent warnings:
+  • Unhealthy (×1)
+💡 Suggested fix: The probe timed out — the app may be slow to start or /health is blocking. Consider increasing startup probe initialDelaySeconds/timeoutSeconds, or making /health lighter.
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "print_failed_deployment_hints: falls back to raw Unhealthy message when translation is impossible" {
@@ -323,10 +416,18 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  # Raw message appears verbatim in the reason line
-  assert_contains "$output" "completely unknown probe failure format from a future K8s"
-  # Base sentence is still there
-  assert_contains "$output" "did not pass its health check at /health"
+  # Raw message appears verbatim, appended to the base sentence
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /health. Detected: completely unknown probe failure format from a future K8s
+📋 Detected: Unhealthy on container api
+📋 Recent warnings:
+  • Unhealthy (×1)
+💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health within the readiness window.
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "print_failed_deployment_hints: Unhealthy picks the latest event when multiple are present" {
@@ -350,7 +451,17 @@ assert_not_contains() {
 
   [ "$status" -eq 0 ]
   # Latest event wins → connection-refused remediation, not the older HTTP 502 one
-  assert_contains "$output" "not listening on port 8080"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — app is not yet listening on /health.
+📋 Detected: Unhealthy on container api
+📋 Recent warnings:
+  • Unhealthy (×2)
+💡 Suggested fix: The container is not listening on port 8080 — verify the start command runs, the process binds to 0.0.0.0:8080, and nothing is crashing before it accepts connections.
+EOF
+)
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "responded with HTTP 502"
 }
 
@@ -374,7 +485,15 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "exceeded its memory limit"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container exceeded its memory limit and was terminated.
+📋 Detected: OOMKilled on container app (exit 137)
+💡 Suggested fix: Increase ram_memory for scope 'my-app' or reduce application memory usage.
+EOF
+)
+  assert_equal "$output" "$expected"
   # The (Mi) parenthetical must not appear empty when ram_memory is missing.
   assert_not_contains "$output" "(Mi)"
 }
@@ -396,9 +515,16 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  # health_check_path default "/" must apply when CONTEXT is unset.
-  assert_contains "$output" "health check at /."
-  assert_contains "$output" "returns 2xx on /"
+  # health_check_path default "/" applies when CONTEXT is unset.
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The application did not pass its health check at /.
+📋 Detected: Unhealthy on container api
+💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on / within the readiness window.
+EOF
+)
+  assert_equal "$output" "$expected"
   # Guard against the previous escape bug: a literal backslash in the message
   # would indicate jq received {\} instead of {} and silently failed.
   assert_not_contains "$output" "{\\"
@@ -422,12 +548,31 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: Pods are failing with reason: WeirdNewError"
-  assert_contains "$output" "📋 Detected: WeirdNewError on container app"
+  # No suggested fix → fall through to generic checklist, printed alongside the specific reason.
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: Pods are failing with reason: WeirdNewError
+📋 Detected: WeirdNewError on container app
+
+⚠️  Application Startup Issue Detected
+
+💡 Possible causes:
+   Your application was unable to start within the expected timeframe
+
+🔧 How to fix:
+   1. Port Configuration: Ensure your application listens on port 8080
+   2. Health Check Endpoint: Verify your app responds to: /health
+   3. Application Logs: Review logs for startup errors (database connections,
+      missing dependencies, or initialization errors)
+   4. Memory Allocation: Current allocation is 512Mi - increase if needed
+   5. Environment Variables: Verify all required variables are configured in
+      parameters for scope 'my-app' or dimensions: production
+EOF
+)
+  assert_equal "$output" "$expected"
   # No suggested fix → fall through to generic checklist.
   assert_not_contains "$output" "💡 Suggested fix:"
-  assert_contains "$output" "⚠️  Application Startup Issue Detected"
-  assert_contains "$output" "🔧 How to fix:"
 }
 
 # =============================================================================
@@ -439,9 +584,20 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Reason: No node has enough resources"
-  assert_contains "$output" "📋 Detected: FailedScheduling"
-  assert_contains "$output" "💡 Suggested fix: Reduce requested resources"
+  # A lone apostrophe ("pod's") inside a heredoc nested in $(...) trips a bash
+  # command-substitution parsing quirk, so this one assertion is built with
+  # `read` instead of `cat` to sidestep it.
+  local expected
+  IFS= read -r -d '' expected <<'EOF' || true
+
+📋 Reason: No node has enough resources or matches the pod's scheduling constraints.
+📋 Detected: FailedScheduling
+📋 Recent warnings:
+  • FailedScheduling (×2)
+💡 Suggested fix: Reduce requested resources, free cluster capacity, or review nodeSelector/affinity rules.
+EOF
+  expected="${expected%$'\n'}"
+  assert_equal "$output" "$expected"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -459,10 +615,20 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Recent warnings:"
-  assert_contains "$output" "BackOff (×3)"
-  assert_contains "$output" "FailedMount (×2)"
-  assert_contains "$output" "Unhealthy (×1)"
+  # Normal events are not summarized; only the top 3 Warning reasons appear, most frequent first.
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container started and crashed repeatedly.
+📋 Detected: BackOff
+📋 Recent warnings:
+  • BackOff (×3)
+  • FailedMount (×2)
+  • Unhealthy (×1)
+💡 Suggested fix: Review application logs for startup errors (failed dependencies, bad config, panics).
+EOF
+)
+  assert_equal "$output" "$expected"
   # Normal events should not be summarized
   assert_not_contains "$output" "Pulled (×"
 }
@@ -486,5 +652,14 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📊 Progress at failure: 1/3 ready, 2/3 available"
+  local expected
+  expected=$(cat <<'EOF'
+
+📋 Reason: The container started and crashed repeatedly.
+📋 Detected: CrashLoopBackOff on container app
+📊 Progress at failure: 1/3 ready, 2/3 available
+💡 Suggested fix: Review application logs for startup errors (failed dependencies, bad config, panics).
+EOF
+)
+  assert_equal "$output" "$expected"
 }
