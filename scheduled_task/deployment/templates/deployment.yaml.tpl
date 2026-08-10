@@ -100,10 +100,9 @@ spec:
                    because scheduled_task is the one variant that overrides
                    DEPLOYMENT_TEMPLATE. It still inherits the shared `build context`
                    step, so .logs_provider and .region are both present. */}}
-            {{- if eq (index . "logs_provider") "datadog" }}
-            nullplatform.logs.datadog: 'true'
-            {{- else }}
-            nullplatform.logs.cloudwatch: 'true'
+            {{- $logsProvider := index . "logs_provider" | default "cloudwatch" }}
+            nullplatform.logs.provider: {{ $logsProvider }}
+            {{- if eq $logsProvider "cloudwatch" }}
             nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
             nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
             nullplatform.logs.cloudwatch.log_stream_name_pattern: >-

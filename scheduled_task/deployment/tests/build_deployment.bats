@@ -168,16 +168,20 @@ JSON
 }
 
 # =============================================================================
-# Application-log routing annotations
+# Application-log routing annotation
 # =============================================================================
 # scheduled_task keeps its own copy of deployment.yaml.tpl (it is the one variant
-# that overrides DEPLOYMENT_TEMPLATE in values.yaml), so the rendered block needs
-# its own coverage. The precedence chain itself is shared — it is resolved in
-# k8s/deployment/build_context and covered by that script's own tests.
+# that overrides DEPLOYMENT_TEMPLATE in values.yaml), so the rendered annotations
+# need their own coverage. The precedence chain that produces .logs_provider is
+# shared and covered by k8s/deployment/tests/build_context.bats.
 
-_deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
+_annotations() {
+  yq eval '.spec.jobTemplate.spec.template.metadata.annotations' \
+    "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+_ann_keys() { _annotations | yq eval 'keys | .[]' -; }
 
-@test "logs routing: cloudwatch renders the full annotation block" {
+@test "logs routing: cloudwatch emits the provider annotation plus the naming keys" {
   unset -f gomplate
 
   export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch"}')"
@@ -185,14 +189,13 @@ _deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  local out
-  out="$(_deploy_out)"
-  assert_contains "$out" "nullplatform.logs.cloudwatch: 'true'"
-  assert_contains "$out" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
-  ! grep -q 'nullplatform.logs.datadog' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  local ann
+  ann="$(_annotations)"
+  assert_contains "$ann" "nullplatform.logs.provider: cloudwatch"
+  assert_contains "$ann" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
 }
 
-@test "logs routing: datadog renders only the datadog annotation" {
+@test "logs routing: datadog emits the provider annotation and no cloudwatch keys" {
   unset -f gomplate
 
   export CONTEXT="$(_render_context | jq '. + {logs_provider: "datadog"}')"
@@ -200,8 +203,21 @@ _deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_deploy_out)" "nullplatform.logs.datadog: 'true'"
-  ! grep -q 'nullplatform.logs.cloudwatch' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  assert_contains "$(_annotations)" "nullplatform.logs.provider: datadog"
+  assert_equal "$(_ann_keys | grep -c 'nullplatform.logs.cloudwatch')" "0"
+}
+
+@test "logs routing: the deprecated boolean annotations are gone" {
+  unset -f gomplate
+
+  for provider in cloudwatch datadog; do
+    export CONTEXT="$(_render_context | jq --arg p "$provider" '. + {logs_provider: $p}')"
+
+    run bash "$BATS_TEST_DIRNAME/../build_deployment"
+    [ "$status" -eq 0 ]
+
+    assert_equal "$(_ann_keys | grep -cE '^nullplatform\.logs\.(cloudwatch|datadog)$')" "0"
+  done
 }
 
 @test "logs routing: a context without logs_provider still renders, defaulting to CloudWatch" {
@@ -212,7 +228,7 @@ _deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_deploy_out)" "nullplatform.logs.cloudwatch: 'true'"
+  assert_contains "$(_annotations)" "nullplatform.logs.provider: cloudwatch"
 }
 
 @test "logs routing: cloudwatch region comes from context, not a hardcoded value" {
@@ -225,6 +241,5 @@ _deploy_out() { cat "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_deploy_out)" "nullplatform.logs.cloudwatch.region: eu-west-1"
-  ! grep -q 'nullplatform.logs.cloudwatch.region: us-east-1' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  assert_contains "$(_annotations)" "nullplatform.logs.cloudwatch.region: eu-west-1"
 }

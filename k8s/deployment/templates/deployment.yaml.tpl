@@ -74,14 +74,20 @@ spec:
       {{- end }}
     {{- end }}
       annotations:
-        {{- /* .logs_provider is resolved in deployment/build_context (built-in
-               default < account config < scope override). `index` rather than a
-               field lookup so a context built without build_context still renders,
-               falling back to CloudWatch: gomplate runs with missingKey=error. */}}
-        {{- if eq (index . "logs_provider") "datadog" }}
-        nullplatform.logs.datadog: 'true'
-        {{- else }}
-        nullplatform.logs.cloudwatch: 'true'
+        {{- /* Where this scope's application logs go. One annotation carries the
+               whole choice, so a pod cannot name two destinations at once — the
+               logs controller gates each output on this single value.
+
+               .logs_provider is resolved in deployment/build_context (built-in
+               default < organization config < the scope's own capability).
+               `index` rather than a field lookup because gomplate runs with
+               missingKey=error: a bare lookup of an absent key aborts the whole
+               render instead of yielding empty. */}}
+        {{- $logsProvider := index . "logs_provider" | default "cloudwatch" }}
+        nullplatform.logs.provider: {{ $logsProvider }}
+        {{- if eq $logsProvider "cloudwatch" }}
+        {{- /* Naming config, not a gate: the controller's Lua reads these to build
+               the log group and stream. Only meaningful for CloudWatch. */}}
         nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
         nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
         nullplatform.logs.cloudwatch.log_stream_name_pattern: >-

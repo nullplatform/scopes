@@ -120,11 +120,21 @@ Where application logs are shipped.
 |----------|-------------|------------------------------|
 | **LOGS_PROVIDER** | Default application-log destination: `cloudwatch` or `datadog` (default `cloudwatch`) | `logging.provider` |
 
-The deployment stamps a `nullplatform.logs.<provider>` annotation on the pod — the
-provider name is exactly the annotation suffix. The in-cluster logs controller gates
-on that annotation: its CloudWatch and Datadog outputs each match a rewrite rule
-keyed on it, so the annotation is what actually routes the logs, and the two
-destinations are mutually exclusive.
+The deployment stamps a single annotation on the pod carrying the whole choice:
+
+```yaml
+nullplatform.logs.provider: cloudwatch | datadog
+```
+
+The in-cluster logs controller gates each of its outputs on that one value, so a pod
+cannot name two destinations at once — exclusivity is structural rather than
+something the writer has to maintain. The annotation is what actually routes the
+logs; enabling a provider on the controller only makes its output exist.
+
+When the provider is `cloudwatch`, four `nullplatform.logs.cloudwatch.*` annotations
+are stamped alongside it (log group, stream pattern, retention, region). Those are
+**naming config, not a gate** — the controller reads them to build the log group and
+stream — so they are omitted for any other provider.
 
 Any other value falls back to `cloudwatch` and logs a warning during the deployment.
 
@@ -143,9 +153,18 @@ Two things this does *not* affect: CloudWatch performance metrics and access log
 setting), and the nullplatform log viewer (it reads pod logs through the
 Kubernetes API, not from the provider).
 
-Requires a logs controller with per-pod annotation routing for the chosen
-provider, and that provider enabled on the controller. Setting `datadog`
-while the controller has Datadog disabled means those logs go nowhere.
+Requires a logs controller that gates on `nullplatform.logs.provider`, and that
+provider enabled on the controller. Setting `datadog` while the controller has
+Datadog disabled means those logs go nowhere.
+
+The previous scheme used one boolean annotation per provider
+(`nullplatform.logs.cloudwatch: 'true'`). The controller still honours those so pods
+deployed before this change keep shipping until they are redeployed, but nothing
+emits them any more. **A pod carrying both schemes is double-shipped**: the old
+boolean for a different provider crosses destinations, and the old boolean for the
+*same* provider duplicates the record, because two matching rewrite rules emit twice.
+Anything that injects the new annotation onto a manifest rendered by an older scopes
+version has to pin both booleans to `"false"`.
 
 ### Security
 

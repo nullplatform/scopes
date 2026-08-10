@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Application logs can now be routed to CloudWatch or Datadog through the new `logging.provider` scope configuration (or the `LOGS_PROVIDER` env var), set organization-wide or per environment. A scope may override it with a `logs_provider_override` capability where a service specification declares one. Only application logs are affected; CloudWatch metrics, access logs and the nullplatform log viewer are unchanged
+- **Requires a logs controller that gates on `nullplatform.logs.provider`.** Pods now carry that single annotation instead of one boolean per provider, so a pod can no longer name two destinations. Deploy the controller before this change: pods rendered with the new annotation are ignored by controllers that only know the old booleans, and their logs go nowhere
 - Fix: scheduled task scopes sent their CloudWatch logs to a hardcoded `us-east-1` instead of the scope's own region
 
 ## [1.15.0] - 2026-08-10
