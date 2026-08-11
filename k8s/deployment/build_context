@@ -275,6 +275,71 @@ CONTEXT=$(echo "$CONTEXT" | jq '
   else . end
 ')
 
+# Port the main traffic-manager sidecar binds inside the pod. Default 80
+# preserves historical behaviour. Operators can move it to another port
+# (10080 recommended — the same +10000 convention used for additional_ports
+# sidecars, applied to 80) when their cluster's security groups or network
+# policies do not allow pod-to-pod traffic on 80.
+#
+# That failure is worth spelling out because it is invisible from inside
+# Kubernetes: kubelet probes are node-local and bypass the filtering, so the
+# pod reports Ready while every request from the gateway times out.
+MAIN_TRAFFIC_MANAGER_PORT=$(get_config_value \
+  --env MAIN_TRAFFIC_MANAGER_PORT \
+  --provider '.providers["scope-configurations"].deployment.main_traffic_manager_port' \
+  --provider '.providers["container-orchestration"].cluster.main_traffic_manager_port' \
+  --default "80"
+)
+
+if ! [[ "$MAIN_TRAFFIC_MANAGER_PORT" =~ ^[0-9]+$ ]]; then
+    log error "❌ MAIN_TRAFFIC_MANAGER_PORT must be a numeric value, got: '$MAIN_TRAFFIC_MANAGER_PORT'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set a numeric value in values.yaml, the scope-configurations provider, or the container-orchestration provider"
+    log error ""
+    exit 1
+fi
+
+if [[ "$MAIN_TRAFFIC_MANAGER_PORT" -lt 1 ]] || [[ "$MAIN_TRAFFIC_MANAGER_PORT" -gt 65535 ]]; then
+    log error "❌ MAIN_TRAFFIC_MANAGER_PORT must be in the range 1-65535, got: '$MAIN_TRAFFIC_MANAGER_PORT'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set a valid TCP port; 10080 is the recommended value when moving off the default 80"
+    log error ""
+    exit 1
+fi
+
+if [[ "$MAIN_TRAFFIC_MANAGER_PORT" == "$MAIN_HTTP_PORT" ]]; then
+    log error "❌ MAIN_TRAFFIC_MANAGER_PORT ($MAIN_TRAFFIC_MANAGER_PORT) collides with main_http_port ($MAIN_HTTP_PORT)"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - The sidecar and the application share the pod network namespace and cannot both bind the same port"
+    log error "🔧 How to fix:"
+    log error "   • Choose a different MAIN_TRAFFIC_MANAGER_PORT, or change the main_http_port capability"
+    log error ""
+    exit 1
+fi
+
+COLLIDING_ADDITIONAL_PORT=$(echo "$CONTEXT" | jq -r --argjson p "$MAIN_TRAFFIC_MANAGER_PORT" '
+  [ (.scope.capabilities.additional_ports // [])[]
+    | select(.port == $p or .traffic_manager_port == $p)
+    | .port
+  ] | first // empty
+')
+
+if [[ -n "$COLLIDING_ADDITIONAL_PORT" ]]; then
+    log error "❌ MAIN_TRAFFIC_MANAGER_PORT ($MAIN_TRAFFIC_MANAGER_PORT) collides with additional port $COLLIDING_ADDITIONAL_PORT"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - Additional port $COLLIDING_ADDITIONAL_PORT occupies both $COLLIDING_ADDITIONAL_PORT (application) and $((COLLIDING_ADDITIONAL_PORT + 10000)) (its sidecar)"
+    log error "🔧 How to fix:"
+    log error "   • Choose a MAIN_TRAFFIC_MANAGER_PORT that matches neither value, or remove the additional port"
+    log error ""
+    exit 1
+fi
+
+log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
+
 # Check if blue deployment has K8s services for additional ports
 BLUE_ADDITIONAL_PORT_SERVICES="{}"
 if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
@@ -311,6 +376,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg container_cpu_in_millicores "$CONTAINER_CPU_IN_MILLICORES" \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           --arg main_http_port "$MAIN_HTTP_PORT" \
+          --arg main_traffic_manager_port "$MAIN_TRAFFIC_MANAGER_PORT" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -324,7 +390,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 container_memory_in_memory: $container_memory_in_memory,
                 container_cpu_in_millicores: $container_cpu_in_millicores,
                 blue_additional_port_services: $blue_additional_port_services,
-                main_http_port: ($main_http_port | tonumber)
+                main_http_port: ($main_http_port | tonumber),
+                main_traffic_manager_port: ($main_traffic_manager_port | tonumber)
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")
