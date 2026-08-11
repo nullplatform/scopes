@@ -287,7 +287,7 @@ CONTEXT=$(echo "$CONTEXT" | jq '
 MAIN_TRAFFIC_MANAGER_PORT=$(get_config_value \
   --env MAIN_TRAFFIC_MANAGER_PORT \
   --provider '.providers["scope-configurations"].deployment.main_traffic_manager_port' \
-  --provider '.providers["container-orchestration"].cluster.main_traffic_manager_port' \
+  --provider '.providers["container-orchestration"].traffic_manager.port' \
   --default "80"
 )
 

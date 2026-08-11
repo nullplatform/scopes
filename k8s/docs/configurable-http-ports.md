@@ -34,7 +34,9 @@ The port your application binds to inside the container. When set, the following
 - **Default:** `80`
 - **Valid values:** `1`–`65535`
 - **Configured via:** `container-orchestration` provider at
-  `.cluster.main_traffic_manager_port`, the `scope-configurations` provider at
+  `.traffic_manager.port` (exposed in the EKS provider spec as the
+  `Traffic Manager Port` field, mapped to the NRN key
+  `k8s.mainTrafficManagerPort`), the `scope-configurations` provider at
   `.deployment.main_traffic_manager_port`, or the `MAIN_TRAFFIC_MANAGER_PORT`
   env var in `values.yaml`. Precedence follows the usual order —
   `scope-configurations`, then `container-orchestration`, then env, then default.
@@ -77,7 +79,8 @@ To adopt a different port, in this order:
 
 1. Allow the port (`10080` recommended) inbound on the security group attached
    to the pod ENIs.
-2. Set `main_traffic_manager_port` in the `container-orchestration` provider.
+2. Set `traffic_manager.port` in the `container-orchestration` provider (the
+   `Traffic Manager Port` field on the EKS provider).
 3. Deploy.
 
 The order matters. Setting the knob before opening the port yields a green
