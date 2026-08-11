@@ -103,6 +103,7 @@ _render_context() {
   "service_account_name": "",
   "region": "us-east-1",
   "logs_provider": "cloudwatch",
+  "logs_annotation_prefix": "nullplatform.logs",
   "pull_secrets": {"ENABLED": false, "SECRETS": []},
   "parameters": {
     "results": [
@@ -172,16 +173,23 @@ JSON
 # =============================================================================
 # scheduled_task keeps its own copy of deployment.yaml.tpl (it is the one variant
 # that overrides DEPLOYMENT_TEMPLATE in values.yaml), so the rendered annotations
-# need their own coverage. The precedence chain that produces .logs_provider is
-# shared and covered by k8s/deployment/tests/build_context.bats.
+# need their own coverage. The precedence chain that produces .logs_provider and
+# .logs_annotation_prefix is shared and covered by
+# k8s/deployment/tests/build_context.bats; the gate/dual-emit scheme itself is
+# explained in k8s/deployment/tests/build_deployment.bats.
 
 _annotations() {
   yq eval '.spec.jobTemplate.spec.template.metadata.annotations' \
     "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
 }
 _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
+_ann() {
+  yq eval ".spec.jobTemplate.spec.template.metadata.annotations.\"$1\"" \
+    "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+_gate_keys() { _ann_keys | grep -E '\.(cloudwatch|datadog)$'; }
 
-@test "logs routing: cloudwatch emits the provider annotation plus the naming keys" {
+@test "logs routing: cloudwatch emits its gate annotation plus the naming keys" {
   unset -f gomplate
 
   export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch"}')"
@@ -189,13 +197,11 @@ _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  local ann
-  ann="$(_annotations)"
-  assert_contains "$ann" "nullplatform.logs.provider: cloudwatch"
-  assert_contains "$ann" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
+  assert_equal "$(_ann 'nullplatform.logs.cloudwatch')" "true"
+  assert_contains "$(_annotations)" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
 }
 
-@test "logs routing: datadog emits the provider annotation and no cloudwatch keys" {
+@test "logs routing: datadog emits its gate annotation and no cloudwatch keys" {
   unset -f gomplate
 
   export CONTEXT="$(_render_context | jq '. + {logs_provider: "datadog"}')"
@@ -203,11 +209,11 @@ _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_annotations)" "nullplatform.logs.provider: datadog"
+  assert_equal "$(_ann 'nullplatform.logs.datadog')" "true"
   assert_equal "$(_ann_keys | grep -c 'nullplatform.logs.cloudwatch')" "0"
 }
 
-@test "logs routing: the deprecated boolean annotations are gone" {
+@test "logs routing: exactly one gate annotation on the default prefix" {
   unset -f gomplate
 
   for provider in cloudwatch datadog; do
@@ -216,19 +222,48 @@ _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
     run bash "$BATS_TEST_DIRNAME/../build_deployment"
     [ "$status" -eq 0 ]
 
-    assert_equal "$(_ann_keys | grep -cE '^nullplatform\.logs\.(cloudwatch|datadog)$')" "0"
+    assert_equal "$(_gate_keys)" "nullplatform.logs.$provider"
   done
 }
 
-@test "logs routing: a context without logs_provider still renders, defaulting to CloudWatch" {
+@test "logs routing: a custom prefix dual-emits, same as the k8s template" {
   unset -f gomplate
 
-  export CONTEXT="$(_render_context | jq 'del(.logs_provider)')"
+  # scheduled_task inherits the shared build context, so it gets the same prefix as
+  # every other scope in the account. If it did not dual-emit, a cluster mid-migration
+  # would keep shipping web-scope logs while silently dropping scheduled-task ones.
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch",
+                                               logs_annotation_prefix: "nullplatform.logs.spin"}')"
 
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_annotations)" "nullplatform.logs.provider: cloudwatch"
+  assert_equal "$(_ann 'nullplatform.logs.spin.cloudwatch')" "true"
+  assert_equal "$(_ann 'nullplatform.logs.cloudwatch')" "true"
+}
+
+@test "logs routing: the provider annotation of the previous scheme is gone" {
+  unset -f gomplate
+
+  for provider in cloudwatch datadog; do
+    export CONTEXT="$(_render_context | jq --arg p "$provider" '. + {logs_provider: $p}')"
+
+    run bash "$BATS_TEST_DIRNAME/../build_deployment"
+    [ "$status" -eq 0 ]
+
+    assert_equal "$(_ann_keys | grep -c '^nullplatform\.logs\.provider$')" "0"
+  done
+}
+
+@test "logs routing: a context missing either key still renders, defaulting to CloudWatch" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq 'del(.logs_provider) | del(.logs_annotation_prefix)')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_equal "$(_gate_keys)" "nullplatform.logs.cloudwatch"
 }
 
 @test "logs routing: cloudwatch region comes from context, not a hardcoded value" {

@@ -99,9 +99,15 @@ spec:
             {{- /* Same as k8s/deployment/templates/deployment.yaml.tpl — a separate copy
                    because scheduled_task is the one variant that overrides
                    DEPLOYMENT_TEMPLATE. It still inherits the shared `build context`
-                   step, so .logs_provider and .region are both present. */}}
+                   step, so .logs_provider, .logs_annotation_prefix and .region are all
+                   present. See that file for why the prefix is configurable and why the
+                   default key is emitted alongside it. */}}
             {{- $logsProvider := index . "logs_provider" | default "cloudwatch" }}
-            nullplatform.logs.provider: {{ $logsProvider }}
+            {{- $logsPrefix := index . "logs_annotation_prefix" | default "nullplatform.logs" }}
+            {{ $logsPrefix }}.{{ $logsProvider }}: 'true'
+            {{- if ne $logsPrefix "nullplatform.logs" }}
+            nullplatform.logs.{{ $logsProvider }}: 'true'
+            {{- end }}
             {{- if eq $logsProvider "cloudwatch" }}
             nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
             nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'

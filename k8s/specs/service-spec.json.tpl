@@ -220,6 +220,19 @@
                     ]
                   },
                   {
+                    "type": "Category",
+                    "label": "Logs",
+                    "elements": [
+                      {
+                        "type": "Control",
+                        "scope": "#/properties/logs_provider_override",
+                        "options": {
+                          "format": "radio"
+                        }
+                      }
+                    ]
+                  },
+                  {
                      "type":"Category",
                      "label":"Continuous deployment",
                      "elements":[
@@ -426,6 +439,29 @@
                 "create"
             ],
             "description":"Define whether the scope is publicly accessible or private to your account"
+         },
+         "logs_provider_override":{
+            "type":"string",
+            "oneOf":[
+               {
+                  "const":"default",
+                  "title":"Account default",
+                  "description":"Use whatever the account is configured to send to"
+               },
+               {
+                  "const":"cloudwatch",
+                  "title":"Amazon CloudWatch",
+                  "description":"Send this scope's application logs to CloudWatch"
+               },
+               {
+                  "const":"datadog",
+                  "title":"Datadog",
+                  "description":"Send this scope's application logs to Datadog"
+               }
+            ],
+            "title":"Logs provider",
+            "default":"default",
+            "description":"Where this scope's application logs are shipped. Takes effect on the next deployment, and requires the chosen provider to be enabled on the cluster."
          },
          "autoscaling":{
             "type":"object",

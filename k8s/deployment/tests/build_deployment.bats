@@ -239,6 +239,7 @@ _render_context() {
   "pull_secrets": {"ENABLED": false, "SECRETS": []},
   "region": "us-east-1",
   "logs_provider": "cloudwatch",
+  "logs_annotation_prefix": "nullplatform.logs",
   "component": "app",
   "service_account_name": "",
   "traffic_manager_config_map": "",
@@ -319,27 +320,41 @@ JSON
 # =============================================================================
 # Application-log routing annotation
 # =============================================================================
-# One annotation carries the whole choice:
+# A pod reaches a provider only when it carries that provider's gate annotation
+# set to "true":
 #
-#     nullplatform.logs.provider: cloudwatch | datadog
+#     <prefix>.cloudwatch: 'true'   |   <prefix>.datadog: 'true'
 #
-# The logs controller gates each output on that single value, so a pod cannot
-# name two destinations at once — exclusivity is structural rather than something
-# the writer has to maintain across two independent booleans.
+# The prefix comes from .logs_annotation_prefix and must name the same annotation
+# family the cluster's logs controller is configured to read
+# (CLOUDWATCH_LOGS_ANNOTATION / DATADOG_LOGS_ANNOTATION). It defaults to
+# `nullplatform.logs`, which reproduces the historical keys.
+#
+# Emitting exactly one gate is what keeps a pod on exactly one destination: the
+# controller has one rule per provider and they are additive, so two gates set to
+# true means the record is delivered twice.
 #
 # The four nullplatform.logs.cloudwatch.* keys are naming config, not a gate: the
-# controller's Lua reads them to build the log group and stream. They are only
-# meaningful for CloudWatch and are emitted only then.
+# controller's Lua reads them to build the log group and stream, always under the
+# fixed prefix. They are only meaningful for CloudWatch and emitted only then.
 #
-# The precedence chain that produces .logs_provider is resolved in
-# deployment/build_context and covered by build_context.bats.
+# The precedence chain that produces .logs_provider and .logs_annotation_prefix is
+# resolved in deployment/build_context and covered by build_context.bats.
 
 _annotations() {
   yq eval '.spec.template.metadata.annotations' "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
 }
 _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
+# Read one annotation by exact key, so assertions do not depend on how yq chooses
+# to quote a string value.
+_ann() {
+  yq eval ".spec.template.metadata.annotations.\"$1\"" \
+    "$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+}
+# Every gate annotation currently set, i.e. the keys that route logs somewhere.
+_gate_keys() { _ann_keys | grep -E '\.(cloudwatch|datadog)$'; }
 
-@test "logs routing: cloudwatch emits the provider annotation plus the naming keys" {
+@test "logs routing: cloudwatch emits its gate annotation plus the naming keys" {
   unset -f gomplate
 
   export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch"}')"
@@ -347,16 +362,17 @@ _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
+  assert_equal "$(_ann 'nullplatform.logs.cloudwatch')" "true"
+
   local ann
   ann="$(_annotations)"
-  assert_contains "$ann" "nullplatform.logs.provider: cloudwatch"
   assert_contains "$ann" "nullplatform.logs.cloudwatch.log_group_name: nsps.appslug"
   assert_contains "$ann" "nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'"
   assert_contains "$ann" "nullplatform.logs.cloudwatch.region: us-east-1"
   assert_contains "$ann" "scope=scope-123;deploy=deploy-456"
 }
 
-@test "logs routing: datadog emits the provider annotation and no cloudwatch keys" {
+@test "logs routing: datadog emits its gate annotation and no cloudwatch keys" {
   unset -f gomplate
 
   export CONTEXT="$(_render_context | jq '. + {logs_provider: "datadog"}')"
@@ -364,12 +380,12 @@ _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_annotations)" "nullplatform.logs.provider: datadog"
+  assert_equal "$(_ann 'nullplatform.logs.datadog')" "true"
   # The naming keys are CloudWatch-only; carrying them would be dead weight.
   assert_equal "$(_ann_keys | grep -c 'nullplatform.logs.cloudwatch')" "0"
 }
 
-@test "logs routing: exactly one provider annotation, whatever the value" {
+@test "logs routing: exactly one gate annotation, whatever the provider" {
   unset -f gomplate
 
   for provider in cloudwatch datadog; do
@@ -378,38 +394,95 @@ _ann_keys() { _annotations | yq eval 'keys | .[]' -; }
     run bash "$BATS_TEST_DIRNAME/../build_deployment"
     [ "$status" -eq 0 ]
 
-    assert_equal "$(_ann_keys | grep -c '^nullplatform.logs.provider$')" "1"
+    assert_equal "$(_gate_keys | wc -l | tr -d ' ')" "1"
+    assert_equal "$(_gate_keys)" "nullplatform.logs.$provider"
   done
 }
 
-@test "logs routing: the deprecated boolean annotations are gone" {
+@test "logs routing: the default prefix reproduces the historical annotation key" {
   unset -f gomplate
 
-  # nullplatform.logs.cloudwatch / .datadog as booleans are the old scheme. The
-  # controller still honours them for pods deployed before this change, but the
-  # template must not emit them any more: a pod carrying the new annotation for
-  # one provider and the old boolean for another reaches BOTH outputs.
-  for provider in cloudwatch datadog; do
-    export CONTEXT="$(_render_context | jq --arg p "$provider" '. + {logs_provider: $p}')"
-
-    run bash "$BATS_TEST_DIRNAME/../build_deployment"
-    [ "$status" -eq 0 ]
-
-    assert_equal "$(_ann_keys | grep -cE '^nullplatform\.logs\.(cloudwatch|datadog)$')" "0"
-  done
-}
-
-@test "logs routing: a context without logs_provider still renders, defaulting to CloudWatch" {
-  unset -f gomplate
-
-  # Safety net. gomplate runs with missingKey=error, so a bare `.logs_provider`
-  # lookup would abort the render instead of yielding empty; the template uses
-  # `index` for exactly this case. build_context always sets the key, so this
-  # guards against a render path that somehow bypasses it.
-  export CONTEXT="$(_render_context | jq 'del(.logs_provider)')"
+  # The whole no-op guarantee of this change rests here: an account that configures
+  # nothing must render the key the logs controller has always gated on.
+  export CONTEXT="$(_render_context | jq 'del(.logs_annotation_prefix) + {logs_provider: "cloudwatch"}')"
 
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
   [ "$status" -eq 0 ]
 
-  assert_contains "$(_annotations)" "nullplatform.logs.provider: cloudwatch"
+  assert_equal "$(_gate_keys)" "nullplatform.logs.cloudwatch"
+}
+
+@test "logs routing: a custom prefix emits the prefixed gate and the default one" {
+  unset -f gomplate
+
+  # Transitional dual-emit. The template and the controller's env var cannot change
+  # at the same instant, so both keys are emitted and the controller reads whichever
+  # one it is configured for. Either intermediate state still delivers one copy.
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch",
+                                               logs_annotation_prefix: "nullplatform.logs.spin"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_equal "$(_ann 'nullplatform.logs.spin.cloudwatch')" "true"
+  assert_equal "$(_ann 'nullplatform.logs.cloudwatch')" "true"
+  # Both name the same provider, so no cluster can route this pod to two places.
+  assert_equal "$(_gate_keys | grep -c 'datadog')" "0"
+}
+
+@test "logs routing: a custom prefix with datadog gates only datadog" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "datadog",
+                                               logs_annotation_prefix: "nullplatform.logs.spin"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_equal "$(_ann 'nullplatform.logs.spin.datadog')" "true"
+  assert_equal "$(_ann 'nullplatform.logs.datadog')" "true"
+  assert_equal "$(_gate_keys | grep -c 'cloudwatch')" "0"
+}
+
+@test "logs routing: the default prefix does not dual-emit" {
+  unset -f gomplate
+
+  # Only a migrating account pays for the extra key.
+  export CONTEXT="$(_render_context | jq '. + {logs_provider: "cloudwatch",
+                                               logs_annotation_prefix: "nullplatform.logs"}')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_equal "$(_gate_keys | wc -l | tr -d ' ')" "1"
+}
+
+@test "logs routing: the provider annotation of the previous scheme is gone" {
+  unset -f gomplate
+
+  # nullplatform.logs.provider was the single-value scheme. No controller reads it
+  # any more, so emitting it would only mislead whoever inspects a pod.
+  for provider in cloudwatch datadog; do
+    export CONTEXT="$(_render_context | jq --arg p "$provider" '. + {logs_provider: $p}')"
+
+    run bash "$BATS_TEST_DIRNAME/../build_deployment"
+    [ "$status" -eq 0 ]
+
+    assert_equal "$(_ann_keys | grep -c '^nullplatform\.logs\.provider$')" "0"
+  done
+}
+
+@test "logs routing: a context missing either key still renders, defaulting to CloudWatch" {
+  unset -f gomplate
+
+  # Safety net. gomplate runs with missingKey=error, so a bare `.logs_provider`
+  # lookup would abort the render instead of yielding empty; the template uses
+  # `index` for exactly this case. build_context always sets both keys, so this
+  # guards against a render path that somehow bypasses it.
+  export CONTEXT="$(_render_context | jq 'del(.logs_provider) | del(.logs_annotation_prefix)')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  assert_equal "$(_gate_keys)" "nullplatform.logs.cloudwatch"
 }

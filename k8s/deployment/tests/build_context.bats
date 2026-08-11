@@ -1395,3 +1395,76 @@ _logs_provider() { echo "$CONTEXT" | jq -r '.logs_provider'; }
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.logs_provider | type')" "string"
 }
+
+# =============================================================================
+# logs_annotation_prefix — which annotation family gates the logs
+# =============================================================================
+# The template stamps `<prefix>.<provider>: 'true'`, and the cluster's logs
+# controller is configured to read the matching key. The two have to agree, so the
+# prefix is an account-level setting rather than a per-scope one.
+#
+# The default reproduces the historical `nullplatform.logs.*` keys, which is what
+# makes this change inert for every account that configures nothing.
+
+# Sets .providers["scope-configurations"].logging.annotation_prefix on CONTEXT.
+set_logging_annotation_prefix() {
+  CONTEXT=$(echo "$CONTEXT" | jq --arg v "$1" \
+    '.providers["scope-configurations"].logging.annotation_prefix = $v')
+}
+
+_logs_prefix() { echo "$CONTEXT" | jq -r '.logs_annotation_prefix'; }
+
+@test "logs_annotation_prefix: defaults to nullplatform.logs when nothing is configured" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_prefix)" "nullplatform.logs"
+}
+
+@test "logs_annotation_prefix: reads the scope-configurations annotation_prefix config" {
+  setup_full_build_context
+  set_logging_annotation_prefix "nullplatform.logs.spin"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_prefix)" "nullplatform.logs.spin"
+}
+
+@test "logs_annotation_prefix: the provider config wins over the env var" {
+  setup_full_build_context
+  set_logging_annotation_prefix "nullplatform.logs.spin"
+  export LOGS_ANNOTATION_PREFIX="nullplatform.logs.other"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_prefix)" "nullplatform.logs.spin"
+}
+
+@test "logs_annotation_prefix: the env var is used when no provider config is set" {
+  setup_full_build_context
+  export LOGS_ANNOTATION_PREFIX="nullplatform.logs.spin"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_prefix)" "nullplatform.logs.spin"
+}
+
+@test "logs_annotation_prefix: is independent of the resolved provider" {
+  setup_full_build_context
+  set_logging_provider "datadog"
+  set_logging_annotation_prefix "nullplatform.logs.spin"
+
+  source "$SCRIPT"
+
+  assert_equal "$(_logs_provider)" "datadog"
+  assert_equal "$(_logs_prefix)" "nullplatform.logs.spin"
+}
+
+@test "logs_annotation_prefix: emitted as a string for Go template consumption" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.logs_annotation_prefix | type')" "string"
+}

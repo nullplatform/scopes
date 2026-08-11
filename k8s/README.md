@@ -119,52 +119,70 @@ Where application logs are shipped.
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
 | **LOGS_PROVIDER** | Default application-log destination: `cloudwatch` or `datadog` (default `cloudwatch`) | `logging.provider` |
+| **LOGS_ANNOTATION_PREFIX** | Prefix of the annotation that gates the logs (default `nullplatform.logs`) | `logging.annotation_prefix` |
 
-The deployment stamps a single annotation on the pod carrying the whole choice:
+The deployment stamps one gate annotation on the pod, naming the resolved provider:
 
 ```yaml
-nullplatform.logs.provider: cloudwatch | datadog
+nullplatform.logs.cloudwatch: 'true'    # or nullplatform.logs.datadog: 'true'
 ```
 
-The in-cluster logs controller gates each of its outputs on that one value, so a pod
-cannot name two destinations at once — exclusivity is structural rather than
-something the writer has to maintain. The annotation is what actually routes the
-logs; enabling a provider on the controller only makes its output exist.
+The in-cluster logs controller has one routing rule per provider and they are
+additive, so emitting exactly one gate is what keeps a pod on exactly one
+destination. The annotation is what actually routes the logs; enabling a provider on
+the controller only makes its output exist.
 
 When the provider is `cloudwatch`, four `nullplatform.logs.cloudwatch.*` annotations
 are stamped alongside it (log group, stream pattern, retention, region). Those are
 **naming config, not a gate** — the controller reads them to build the log group and
-stream — so they are omitted for any other provider.
+stream, always under that fixed prefix regardless of `LOGS_ANNOTATION_PREFIX` — so
+they are omitted for any other provider.
 
-Any other value falls back to `cloudwatch` and logs a warning during the deployment.
+Any other provider value falls back to `cloudwatch` and logs a warning during the
+deployment.
 
 Because the `scope-configurations` provider is resolved for the scope's
-dimensions, this can be set account-wide or per environment.
+dimensions, both settings can be set account-wide or per environment.
 
-A scope can override this per-scope through a `logs_provider_override` capability,
-honoured here when present. That capability is **not declared by this repository's
-scope specifications** — a service specification that wants to expose the choice
-declares it itself, with `cloudwatch` / `datadog` as its values plus a `default`
-sentinel meaning "delegate to the setting above". A scope without the capability,
-or with it set to `default`, follows the value above.
+A scope can override the *provider* per-scope through the `logs_provider_override`
+capability, declared in `specs/service-spec.json.tpl` and surfaced in the UI as
+**Logs provider**. Its values are `cloudwatch` / `datadog` plus a `default` sentinel
+meaning "delegate to the setting above". A scope without the capability, or with it
+set to `default`, follows the account setting. The annotation *prefix* is not
+per-scope: it has to match the cluster's logs controller, which is account-wide.
+
+#### Choosing a different annotation prefix
+
+A cluster may already carry `nullplatform.logs.cloudwatch: 'true'` on every
+deployment, which leaves that key unable to distinguish workloads that should ship
+from ones that should not. Setting `logging.annotation_prefix` to something like
+`nullplatform.logs.acme` gives the account a key only these templates emit, so the
+blanket one stops gating there.
+
+This has to be done in **two places that must agree**: this setting, and
+`CLOUDWATCH_LOGS_ANNOTATION` / `DATADOG_LOGS_ANNOTATION` on that cluster's logs
+controller. They cannot change at the same instant, so while the prefix is not the
+default the template emits **both** the prefixed key and the default one. The
+controller reads whichever it is configured for and never both, so every intermediate
+state still delivers one copy to one destination — which makes the rollout order
+irrelevant. Once the account's clusters are settled, the dual-emit can be dropped
+from the templates.
 
 Two things this does *not* affect: CloudWatch performance metrics and access logs
 (they are routed by a different mechanism and keep flowing regardless of this
 setting), and the nullplatform log viewer (it reads pod logs through the
 Kubernetes API, not from the provider).
 
-Requires a logs controller that gates on `nullplatform.logs.provider`, and that
-provider enabled on the controller. Setting `datadog` while the controller has
-Datadog disabled means those logs go nowhere.
+Requires the chosen provider to be enabled on the controller. Setting `datadog` while
+the controller has Datadog disabled means those logs go nowhere — the routing rule and
+the output only exist when `DATADOG_LOGS_ENABLED` is `"true"`.
 
-The previous scheme used one boolean annotation per provider
-(`nullplatform.logs.cloudwatch: 'true'`). The controller still honours those so pods
-deployed before this change keep shipping until they are redeployed, but nothing
-emits them any more. **A pod carrying both schemes is double-shipped**: the old
-boolean for a different provider crosses destinations, and the old boolean for the
-*same* provider duplicates the record, because two matching rewrite rules emit twice.
-Anything that injects the new annotation onto a manifest rendered by an older scopes
-version has to pin both booleans to `"false"`.
+An earlier revision routed on a single `nullplatform.logs.provider: cloudwatch | datadog`
+annotation. Nothing reads it any more and nothing emits it. Note that the gate scheme
+is additive: a pod carrying **both** `nullplatform.logs.cloudwatch: 'true'` and
+`nullplatform.logs.datadog: 'true'` is delivered to both destinations and billed twice.
+These templates derive the gate from one resolved provider, so they never emit both;
+anything hand-annotating pods has to maintain that itself.
 
 ### Security
 

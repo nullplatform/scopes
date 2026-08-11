@@ -74,17 +74,31 @@ spec:
       {{- end }}
     {{- end }}
       annotations:
-        {{- /* Where this scope's application logs go. One annotation carries the
-               whole choice, so a pod cannot name two destinations at once — the
-               logs controller gates each output on this single value.
+        {{- /* Where this scope's application logs go. The logs controller gates each
+               of its outputs on one annotation per provider, so emitting exactly one
+               of them is what makes a pod reach exactly one destination.
 
                .logs_provider is resolved in deployment/build_context (built-in
-               default < organization config < the scope's own capability).
-               `index` rather than a field lookup because gomplate runs with
-               missingKey=error: a bare lookup of an absent key aborts the whole
-               render instead of yielding empty. */}}
+               default < organization config < the scope's own capability), and
+               .logs_annotation_prefix names which annotation family this account's
+               cluster gates on. `index` rather than a field lookup because gomplate
+               runs with missingKey=error: a bare lookup of an absent key aborts the
+               whole render instead of yielding empty. */}}
         {{- $logsProvider := index . "logs_provider" | default "cloudwatch" }}
-        nullplatform.logs.provider: {{ $logsProvider }}
+        {{- $logsPrefix := index . "logs_annotation_prefix" | default "nullplatform.logs" }}
+        {{ $logsPrefix }}.{{ $logsProvider }}: 'true'
+        {{- if ne $logsPrefix "nullplatform.logs" }}
+        {{- /* Transitional. An account moving to its own prefix has to change two
+               things that cannot land at the same instant: this template, and
+               CLOUDWATCH_LOGS_ANNOTATION / DATADOG_LOGS_ANNOTATION on its cluster's
+               logs controller. Emitting the default key as well makes the order
+               irrelevant — the controller reads one key or the other, never both, so
+               every intermediate state still delivers exactly one copy to exactly one
+               destination. Verified against Fluent Bit.
+
+               Drop this once the account's clusters are settled on the new prefix. */}}
+        nullplatform.logs.{{ $logsProvider }}: 'true'
+        {{- end }}
         {{- if eq $logsProvider "cloudwatch" }}
         {{- /* Naming config, not a gate: the controller's Lua reads these to build
                the log group and stream. Only meaningful for CloudWatch. */}}

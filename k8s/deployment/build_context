@@ -299,6 +299,25 @@ esac
 
 log debug "🔍 logs_provider resolved to ${LOGS_PROVIDER}"
 
+# The prefix of the annotation that gates logs into the resolved provider. The logs
+# controller reads a configurable key per provider (CLOUDWATCH_LOGS_ANNOTATION /
+# DATADOG_LOGS_ANNOTATION); this has to name the same one its cluster is set to.
+#
+# Why it exists: a cluster may already carry `nullplatform.logs.cloudwatch: 'true'` on
+# every deployment, so that key cannot distinguish workloads that should ship from
+# ones that should not. An account that moves to its own prefix gets a key only these
+# templates emit, and the blanket one stops gating there.
+#
+# The default reproduces the historical keys exactly, so accounts that set nothing
+# render byte-identical annotations.
+LOGS_ANNOTATION_PREFIX=$(get_config_value \
+  --env LOGS_ANNOTATION_PREFIX \
+  --provider '.providers["scope-configurations"].logging.annotation_prefix' \
+  --default "nullplatform.logs"
+)
+
+log debug "🔍 logs_annotation_prefix resolved to ${LOGS_ANNOTATION_PREFIX}"
+
 # Enrich each additional_ports entry with traffic_manager_port = port + 10000.
 # Convention: the traffic-manager sidecar that fronts an additional port binds
 # <port>+10000 inside the pod so the application can bind <port> directly. The
@@ -415,6 +434,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg main_http_port "$MAIN_HTTP_PORT" \
           --arg main_traffic_manager_port "$MAIN_TRAFFIC_MANAGER_PORT" \
           --arg logs_provider "$LOGS_PROVIDER" \
+          --arg logs_annotation_prefix "$LOGS_ANNOTATION_PREFIX" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -430,7 +450,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 blue_additional_port_services: $blue_additional_port_services,
                 main_http_port: ($main_http_port | tonumber),
                 main_traffic_manager_port: ($main_traffic_manager_port | tonumber),
-                logs_provider: $logs_provider
+                logs_provider: $logs_provider,
+                logs_annotation_prefix: $logs_annotation_prefix
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")
