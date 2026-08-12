@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-08-12
+- Fix: gRPC additional ports on k8s scopes now leave the declared port free for the application, so a gRPC server can bind the port configured in the scope instead of failing to start with "address already in use". gRPC ports now work the same way HTTP ones already did
+- k8s scopes now reject an additional port above 55535 at deploy time, with a message explaining the limit, instead of starting a deployment whose traffic sidecar could never come up
+- k8s scopes with gRPC additional ports now require traffic-manager image `1.7.0` or newer; on older images the gRPC sidecar never starts and the deployment stays unhealthy
+
 ## [1.15.0] - 2026-08-10
 - Fix: **finalize** and **rollback** on blue/green k8s scopes now wait until the load balancer sends all traffic to the surviving deployment before deleting the other one, preventing the 5xx window that happened when it was deleted mid-switch (these actions may take slightly longer as a result)
 - k8s scope: the main traffic-manager sidecar's listener port is now configurable via `main_traffic_manager_port` (default `80`), for clusters that do not allow pod-to-pod traffic on port 80

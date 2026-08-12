@@ -269,11 +269,40 @@ log debug "🔍 main_http_port resolved to ${MAIN_HTTP_PORT}"
 # which application port at a glance (e.g. app 8081 -> sidecar 18081). Keeping
 # the math here (instead of in every template) means consumers just read
 # .traffic_manager_port and never re-derive it.
+#
+# The offset applies to GRPC as well as HTTP: nginx terminates the protocol on
+# the sidecar port and proxies to the application on <port>, so the application
+# binds exactly the port it declared, whatever the type.
 CONTEXT=$(echo "$CONTEXT" | jq '
   if (.scope.capabilities.additional_ports | type) == "array" then
     .scope.capabilities.additional_ports |= map(. + {traffic_manager_port: (.port + 10000)})
   else . end
 ')
+
+# The +10000 offset has to land on a valid TCP port, so anything above 55535 is
+# unusable. Without this check nginx renders `listen 70000;` and refuses to
+# start — and because start.sh does not check nginx's exit code, the sidecar
+# stays Running with no proxy inside it. Catching it here turns a silent
+# dead-sidecar into a deploy-time error.
+OVERFLOWING_PORT=$(echo "$CONTEXT" | jq -r '
+  [ (.scope.capabilities.additional_ports // [])[]
+    | select(.traffic_manager_port > 65535)
+    | .port
+  ] | first // empty
+')
+
+if [[ -n "$OVERFLOWING_PORT" ]]; then
+    log error "❌ Additional port $OVERFLOWING_PORT is too high: its traffic-manager sidecar would need port $((OVERFLOWING_PORT + 10000))"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - Every additional port reserves both <port> (application) and <port>+10000 (its sidecar)"
+    log error "   - Ports above 55535 push the sidecar past the maximum TCP port 65535"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Choose an additional port of 55535 or lower"
+    log error ""
+    exit 1
+fi
 
 # Port the main traffic-manager sidecar binds inside the pod. Default 80
 # preserves historical behaviour. Operators can move it to another port
