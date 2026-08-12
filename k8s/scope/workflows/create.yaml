@@ -6,6 +6,7 @@ include:
 # anchor on them.
 trace:
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  job: k8s-scope-create
 steps:
   - name: load logging
     type: script
