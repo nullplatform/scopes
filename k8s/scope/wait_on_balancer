@@ -72,9 +72,15 @@ case "$DNS_TYPE" in
   route53|azure)
     log debug "📋 DNS Type $DNS_TYPE - DNS should already be configured"
     log debug "📋 Skipping DNS wait check"
+    if command -v np_step_skip >/dev/null 2>&1; then
+      np_step_skip "DNS already configured for type '$DNS_TYPE'"
+    fi
     ;;
   *)
     log debug "📋 Unknown DNS type: $DNS_TYPE"
     log debug "📋 Skipping DNS wait check"
+    if command -v np_step_skip >/dev/null 2>&1; then
+      np_step_skip "no DNS wait for type '$DNS_TYPE'"
+    fi
     ;;
 esac
