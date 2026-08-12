@@ -49,10 +49,12 @@ polls_since_heartbeat=0
 heartbeats_emitted=0
 
 log info "⏳ Waiting up to ${TIMEOUT_SECONDS}s for ALB '$ALB_NAME' to become active..."
-# Flip the step to `waiting` in the trace right away — an operator watching the
-# provision sees WHAT it is blocked on, live, not after the workflow ends.
-# (Guarded: overrides may reuse this script without k8s/logging loaded.)
-if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+# The wait is its own SUB-STEP in the trace, flipped to `waiting` right away —
+# an operator watching the provision sees WHAT it is blocked on, live, not
+# after the workflow ends. (Guarded: overrides may reuse this script without
+# k8s/logging loaded.)
+if command -v np_scope_step_begin >/dev/null 2>&1; then
+	np_scope_step_begin wait-alb-active --title "Wait for ALB '$ALB_NAME' to become active"
 	np_scope_wait_heartbeat "alb-active" 0 "$TIMEOUT_SECONDS" "pending"
 fi
 
@@ -102,7 +104,16 @@ if [ "$state" != "active" ]; then
 	log error "🔧 How to fix:"
 	log error "   • Check controller logs: kubectl -n kube-system logs deploy/aws-load-balancer-controller"
 	log error "   • Verify ALB quota: aws service-quotas get-service-quota --service-code elasticloadbalancing --quota-code L-53DA6B97"
+	if command -v np_scope_step_timeout >/dev/null 2>&1; then
+		np_scope_step_timeout "ALB '$ALB_NAME' not active after ${TIMEOUT_SECONDS}s (last state: ${state:-pending})"
+	fi
 	exit 1
+fi
+
+# The wait phase is over and the ALB is active — close its sub-step; the audit
+# tagging below is not part of the wait.
+if command -v np_scope_step_end >/dev/null 2>&1; then
+	np_scope_step_end 0
 fi
 
 # Audit tags — only on the scope that triggered the autocreate, so the cloud

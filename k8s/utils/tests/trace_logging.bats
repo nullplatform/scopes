@@ -141,3 +141,105 @@ hello" ]
 	run "$BASH" -c "source '$LOGGING'; log error 'to-stderr' 2>&1 >/dev/null"
 	[[ "$output" == *"to-stderr"* ]]
 }
+
+# --- sub-steps --------------------------------------------------------------
+
+@test "step_begin opens a keyed sub-step under the platform step" {
+	# The title rides the next lifecycle emit (own-node enrichment is bagged,
+	# not emitted eagerly), so close the step to see it on the wire.
+	run_logged 'np_scope_step_begin wait-alb-active --title "Wait for the ALB"; np_scope_step_end 0'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"run_id":"scope-provision-42~apply-manifests@0.0~wait-alb-active@0.0"'
+	echo "$output" | grep -q '"status":"started"'
+	echo "$output" | grep -q 'Wait for the ALB'
+}
+
+@test "step_end 0 completes the sub-step" {
+	run_logged 'np_scope_step_begin wait-alb-active; np_scope_step_end 0'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"status":"completed"' | grep -q 'wait-alb-active@0.0'
+}
+
+@test "step_end with a non-zero rc fails the sub-step with the message" {
+	run_logged 'np_scope_step_begin wait-alb-active; np_scope_step_end 1 "ALB never came up"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"status":"failed"' | grep -q 'wait-alb-active@0.0'
+	echo "$output" | grep -q 'ALB never came up'
+}
+
+@test "step_timeout closes the sub-step as timed_out, not failed" {
+	run_logged 'np_scope_step_begin wait-alb-active; np_scope_step_timeout "deadline hit"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"status":"timed_out"' | grep -q 'wait-alb-active@0.0'
+	echo "$output" | grep -q 'deadline hit'
+	! echo "$output" | grep '"status":"failed"' | grep -q 'wait-alb-active@0.0'
+}
+
+@test "while a sub-step is open, log error attaches to IT, not the platform step" {
+	# The facet rides the step's closing emit — and because a real message was
+	# already recorded, the close adds no generic shadow next to it.
+	run_logged 'np_scope_step_begin wait-alb-active; log error "quota exceeded"; np_scope_step_end 1'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"quota exceeded"' | grep -q 'wait-alb-active@0.0'
+	! echo "$output" | grep -q 'phase exited with status'
+}
+
+@test "while a sub-step is open, heartbeats attach to it" {
+	run_logged 'np_scope_step_begin wait-alb-active; np_scope_wait_heartbeat "alb-active" 30 300 "pending"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"status":"waiting"' | grep -q 'wait-alb-active@0.0'
+}
+
+@test "heartbeat extra k=v pairs land as labels" {
+	run_logged 'np_scope_wait_heartbeat "deployment-active" 20 600 "progressing" "wait.ready=2" "wait.desired=5"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"wait.ready":"2"'
+	echo "$output" | grep -q '"wait.desired":"5"'
+}
+
+@test "a sub-step left open when the platform moves on is forgotten, not reused" {
+	run_logged '
+		np_scope_step_begin wait-alb-active
+		export NP_TRACE="1|trace-9|scope-provision-42~wait-for-alb@0.0"
+		log error "late failure"
+	'
+	[ "$status" -eq 0 ]
+	# the error lands on the NEW platform step, not the stale sub-step
+	echo "$output" | grep '"late failure"' | grep -q 'scope-provision-42~wait-for-alb@0.0"'
+}
+
+@test "a sub-step still open when the shell dies inherits the failure" {
+	run "$BASH" -c "
+		( source '$LOGGING'; np_scope_step_begin wait-alb-active; log error 'the real reason'; exit 3 ) || true
+		source '$LOGGING'; trap - EXIT ERR
+		for f in \"\$NP_TRACE_DIR\"/spool/*.json \"\$NP_TRACE_DIR\"/failed/*.json; do
+			[ -f \"\$f\" ] && cat \"\$f\" && echo
+		done
+		true
+	"
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"status":"failed"' | grep -q 'wait-alb-active@0.0'
+	echo "$output" | grep '"the real reason"' | grep -q 'wait-alb-active@0.0'
+	# no generic 'phase exited' shadow next to the real message
+	! echo "$output" | grep -q 'phase exited with status'
+}
+
+@test "opening a second sub-step completes the first — phases are sequential" {
+	run_logged 'np_scope_step_begin phase-one; np_scope_step_begin phase-two; np_scope_step_end 0'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"status":"completed"' | grep -q 'phase-one@0.0'
+	echo "$output" | grep '"status":"completed"' | grep -q 'phase-two@0.0'
+}
+
+@test "step functions are defined no-ops when the workflow is untraced" {
+	unset NP_TRACE
+	run "$BASH" -c "source '$LOGGING'; np_scope_step_begin x; np_scope_step_end 1; np_scope_step_timeout; echo rc=\$?"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"rc=0"* ]]
+}
+
+@test "step_end without an open sub-step is a no-op" {
+	run_logged 'np_scope_step_end 1 "nothing open"'
+	[ "$status" -eq 0 ]
+	! echo "$output" | grep -q 'nothing open'
+}
