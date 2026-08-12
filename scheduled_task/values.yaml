@@ -1,2 +1,5 @@
 configuration:
   DEPLOYMENT_TEMPLATE: "$OVERRIDES_PATH/deployment/templates/deployment.yaml.tpl"
+  # Max seconds a "run-once" deployment waits for its Job to complete before
+  # marking the deployment failed. Also set as the Job's activeDeadlineSeconds.
+  JOB_WAIT_TIMEOUT: "600"
