@@ -5,7 +5,7 @@ include:
 # reads identically in the timeline. Step NAMES never change — overrides
 # anchor on them.
 trace:
-  flavor: "$DNS_TYPE"
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
 steps:
   - name: load logging
     type: script
