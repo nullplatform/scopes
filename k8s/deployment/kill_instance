@@ -6,14 +6,14 @@ set -euo pipefail
 log debug "🔍 Starting instance kill operation..."
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.parameters.deployment_id // .notification.parameters.deployment_id // empty')
-INSTANCE_NAME=$(echo "$CONTEXT" | jq -r '.parameters.instance_name // .notification.parameters.instance_name // empty')
+INSTANCE_ID=$(echo "$CONTEXT" | jq -r '.parameters.instance_id // .notification.parameters.instance_id // empty')
 
 if [[ -z "$DEPLOYMENT_ID" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
     DEPLOYMENT_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameters.deployment_id // empty')
 fi
 
-if [[ -z "$INSTANCE_NAME" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
-    INSTANCE_NAME=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameters.instance_name // empty')
+if [[ -z "$INSTANCE_ID" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
+    INSTANCE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.parameters.instance_id // empty')
 fi
 
 if [[ -z "$DEPLOYMENT_ID" ]]; then
@@ -26,18 +26,18 @@ if [[ -z "$DEPLOYMENT_ID" ]]; then
     exit 1
 fi
 
-if [[ -z "$INSTANCE_NAME" ]]; then
-    log error "❌ instance_name parameter not found"
+if [[ -z "$INSTANCE_ID" ]]; then
+    log error "❌ instance_id parameter not found"
     log error "💡 Possible causes:"
     log error "   - Parameter not provided in action request"
     log error "   - Context structure is different than expected"
     log error "🔧 How to fix:"
-    log error "   - Ensure instance_name is passed in the action parameters"
+    log error "   - Ensure instance_id is passed in the action parameters"
     exit 1
 fi
 
 log debug "📋 Deployment ID: $DEPLOYMENT_ID"
-log debug "📋 Instance name: $INSTANCE_NAME"
+log debug "📋 Instance name: $INSTANCE_ID"
 
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.tags.scope_id // .scope.id // .notification.tags.scope_id // empty')
 
@@ -63,8 +63,8 @@ log debug "📋 Scope ID: $SCOPE_ID"
 log debug "📋 Namespace: $K8S_NAMESPACE"
 
 log debug "🔍 Verifying pod exists..."
-if ! kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
-    log error "❌ Pod $INSTANCE_NAME not found in namespace $K8S_NAMESPACE"
+if ! kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    log error "❌ Pod $INSTANCE_ID not found in namespace $K8S_NAMESPACE"
     log error "💡 Possible causes:"
     log error "   - Pod was already terminated"
     log error "   - Pod name is incorrect"
@@ -75,15 +75,15 @@ if ! kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
 fi
 
 log debug "📋 Fetching pod details..."
-POD_STATUS=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
-POD_NODE=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.nodeName}')
-POD_START_TIME=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.startTime}')
+POD_STATUS=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
+POD_NODE=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.nodeName}')
+POD_START_TIME=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.status.startTime}')
 
-log debug "📋 Pod: $INSTANCE_NAME | Status: $POD_STATUS | Node: $POD_NODE | Started: $POD_START_TIME"
+log debug "📋 Pod: $INSTANCE_ID | Status: $POD_STATUS | Node: $POD_NODE | Started: $POD_START_TIME"
 
 DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 
-POD_DEPLOYMENT=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
+POD_DEPLOYMENT=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
 if [[ -n "$POD_DEPLOYMENT" ]]; then
     REPLICASET_DEPLOYMENT=$(kubectl get replicaset "$POD_DEPLOYMENT" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
     log debug "📋 Pod ownership: ReplicaSet=$POD_DEPLOYMENT -> Deployment=$REPLICASET_DEPLOYMENT"
@@ -95,14 +95,14 @@ else
     log warn "⚠️  Could not verify pod ownership"
 fi
 
-log debug "📝 Deleting pod $INSTANCE_NAME with 30s grace period..."
-kubectl delete pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" --grace-period=30
+log debug "📝 Deleting pod $INSTANCE_ID with 30s grace period..."
+kubectl delete pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" --grace-period=30
 
 log debug "📝 Waiting for pod termination..."
-kubectl wait --for=delete pod/"$INSTANCE_NAME" -n "$K8S_NAMESPACE" --timeout=60s || log warn "⚠️  Pod deletion timeout reached"
+kubectl wait --for=delete pod/"$INSTANCE_ID" -n "$K8S_NAMESPACE" --timeout=60s || log warn "⚠️  Pod deletion timeout reached"
 
-if kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
-    POD_STATUS_AFTER=$(kubectl get pod "$INSTANCE_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
+if kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+    POD_STATUS_AFTER=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.status.phase}')
     log warn "⚠️  Pod still exists after deletion attempt (status: $POD_STATUS_AFTER)"
 else
     log info "✅ Pod successfully terminated and removed"
@@ -123,4 +123,4 @@ else
     log warn "⚠️  Deployment $DEPLOYMENT_NAME not found"
 fi
 
-log info "✨ Instance kill operation completed for $INSTANCE_NAME"
+log info "✨ Instance kill operation completed for $INSTANCE_ID"

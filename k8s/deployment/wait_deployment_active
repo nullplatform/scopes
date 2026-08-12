@@ -54,6 +54,38 @@ K8S_DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
 iteration=0
 LATEST_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
+LAST_REPORTED_COUNTS=""
+
+# Report the instance counters onto the deployment's strategy_data
+# (amount_instances_to_wait / launched_instances / healthy_instances) so the
+# platform can show launched/healthy progress. A partial strategy_data body
+# MERGES server-side (the deployment strategies fold the update over the
+# current data), so only the counters travel — switched_traffic and friends are
+# untouched. Same contract the scope-workflow-manager uses for its scopes.
+# Best-effort telemetry: a failed report must never fail the deployment.
+report_instance_counts() {
+    local desired="$1" launched="$2" healthy="$3"
+
+    if ! [[ "$desired" =~ ^[0-9]+$ ]] || [ "$desired" -eq 0 ]; then
+        return 0
+    fi
+    [[ "$launched" =~ ^[0-9]+$ ]] || launched=0
+    [[ "$healthy" =~ ^[0-9]+$ ]] || healthy=0
+
+    local counts="$desired/$launched/$healthy"
+    if [ "$counts" = "$LAST_REPORTED_COUNTS" ]; then
+        return 0
+    fi
+
+    local body="{\"strategy_data\": {\"amount_instances_to_wait\": $desired, \"launched_instances\": $launched, \"healthy_instances\": $healthy}}"
+    if np deployment patch --id "$DEPLOYMENT_ID" --api-key "$NP_API_KEY" --no-output --body "$body" 2>/dev/null; then
+        LAST_REPORTED_COUNTS="$counts"
+        log debug "📡 Reported instance counts — launched: $launched/$desired, healthy: $healthy/$desired"
+    else
+        log debug "Could not report instance counts (will retry on next change)"
+    fi
+    return 0
+}
 
 HEARTBEAT_INTERVAL=$(( MAX_ITERATIONS / 10 ))
 [ "$HEARTBEAT_INTERVAL" -lt 1 ] && HEARTBEAT_INTERVAL=1
@@ -104,7 +136,10 @@ while true; do
     current=$(echo "$deployment_status" | jq '.status.availableReplicas // 0')
     updated=$(echo "$deployment_status" | jq '.status.updatedReplicas // 0')
     ready=$(echo "$deployment_status" | jq '.status.readyReplicas // 0')
+    launched=$(echo "$deployment_status" | jq '.status.replicas // 0')
     log debug "🔍 $(date): Iteration $iteration - Deployment status - Available: $current/$desired, Updated: $updated/$desired, Ready: $ready/$desired"
+
+    report_instance_counts "$desired" "$launched" "$ready"
 
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
         log debug ""

@@ -61,7 +61,9 @@ steps:
       type: script
       file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
       configuration:
-        VERIFY_WEIGHTS: false
+        # Wait until the ALB routes exclusively to the deployment being restored before
+        # the failed deployment is deleted below. Weights cannot express this state.
+        EXPECT_SINGLE_TARGET_GROUP: true
   - name: build deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"

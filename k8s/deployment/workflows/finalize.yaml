@@ -71,7 +71,9 @@ steps:
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
           configuration:
-            VERIFY_WEIGHTS: false
+            # Wait until the ALB routes exclusively to the new deployment before the
+            # blue deployment is deleted below. Weights cannot express this state.
+            EXPECT_SINGLE_TARGET_GROUP: true
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"

@@ -26,8 +26,8 @@ case "$SERVICE_ACTION" in
   "diagnose-deployment")
     ACTION_TO_EXECUTE="diagnose"
     ;;
-  "kill-instances")
-    ACTION_TO_EXECUTE="kill_instances"
+  "kill-instance")
+    ACTION_TO_EXECUTE="kill_instance"
     ;;
   *)
     echo "Unknown action: $SERVICE_ACTION"
@@ -39,7 +39,7 @@ WORKFLOW_PATH="$SERVICE_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
 
 NEEDS_PARAMS=true
 case "$SERVICE_ACTION" in
-  "switch-traffic"|"kill-instances"|"diagnose-deployment")
+  "switch-traffic"|"kill-instance"|"diagnose-deployment")
     NEEDS_PARAMS=false
     ;;
 esac

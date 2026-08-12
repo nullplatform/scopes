@@ -703,3 +703,157 @@ teardown() {
     return 1
   fi
 }
+
+# =============================================================================
+# Instance Count Reporting Tests
+# =============================================================================
+@test "wait_deployment_active: reports the instance counters as a partial strategy_data patch" {
+  export PATCH_LOG="$BATS_TEST_TMPDIR/patches.log"
+
+  kubectl() {
+    case "$*" in
+      "get deployment"*"-o json"*)
+        echo '{
+          "spec": {"replicas": 3},
+          "status": {
+            "replicas": 3,
+            "availableReplicas": 3,
+            "updatedReplicas": 3,
+            "readyReplicas": 3
+          }
+        }'
+        ;;
+      "get pods"*)
+        echo ""
+        ;;
+      "get events"*)
+        echo '{"items":[]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  np() {
+    case "$*" in
+      *"deployment patch"*)
+        echo "$*" >> "$PATCH_LOG"
+        ;;
+      *)
+        echo "running"
+        ;;
+    esac
+  }
+  export -f np
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📡 Reported instance counts — launched: 3/3, healthy: 3/3"
+  [ "$(wc -l < "$PATCH_LOG")" -eq 1 ]
+  assert_contains "$(cat "$PATCH_LOG")" '"amount_instances_to_wait": 3'
+  assert_contains "$(cat "$PATCH_LOG")" '"launched_instances": 3'
+  assert_contains "$(cat "$PATCH_LOG")" '"healthy_instances": 3'
+  # ONLY the counters travel — the server merges them over the current
+  # strategy_data, so nothing else may ride (or wipe) the body.
+  if grep -q "switched_traffic" "$PATCH_LOG"; then
+    echo "Expected the patch body to carry only the counters"
+    cat "$PATCH_LOG"
+    return 1
+  fi
+}
+
+@test "wait_deployment_active: re-reports only when the counts change" {
+  export PATCH_LOG="$BATS_TEST_TMPDIR/patches.log"
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl.calls"
+
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo x >> \"\$KUBECTL_CALLS\"
+          if [ \"\$(wc -l < \"\$KUBECTL_CALLS\")\" -lt 3 ]; then
+            echo '{\"spec\": {\"replicas\": 3}, \"status\": {\"replicas\": 3, \"availableReplicas\": 1, \"updatedReplicas\": 3, \"readyReplicas\": 1}}'
+          else
+            echo '{\"spec\": {\"replicas\": 3}, \"status\": {\"replicas\": 3, \"availableReplicas\": 3, \"updatedReplicas\": 3, \"readyReplicas\": 3}}'
+          fi
+          ;;
+        \"get pods\"*)
+          echo ''
+          ;;
+        \"get events\"*)
+          echo '{\"items\":[]}'
+          ;;
+      esac
+    }
+    export -f kubectl
+
+    np() {
+      case \"\$*\" in
+        *'deployment patch'*)
+          echo \"\$*\" >> \"\$PATCH_LOG\"
+          ;;
+        *)
+          echo 'running'
+          ;;
+      esac
+    }
+    export -f np
+
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=30 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 0 ]
+  # Three iterations (1/3, 1/3, 3/3) but only two distinct counts — two patches.
+  [ "$(wc -l < "$PATCH_LOG")" -eq 2 ]
+  assert_contains "$(sed -n 1p "$PATCH_LOG")" '"healthy_instances": 1'
+  assert_contains "$(sed -n 2p "$PATCH_LOG")" '"healthy_instances": 3'
+}
+
+@test "wait_deployment_active: a failed count report never fails the deployment" {
+  kubectl() {
+    case "$*" in
+      "get deployment"*"-o json"*)
+        echo '{
+          "spec": {"replicas": 3},
+          "status": {
+            "replicas": 3,
+            "availableReplicas": 3,
+            "updatedReplicas": 3,
+            "readyReplicas": 3
+          }
+        }'
+        ;;
+      "get pods"*)
+        echo ""
+        ;;
+      "get events"*)
+        echo '{"items":[]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  np() {
+    case "$*" in
+      *"deployment patch"*)
+        return 1
+        ;;
+      *)
+        echo "running"
+        ;;
+    esac
+  }
+  export -f np
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Could not report instance counts"
+  assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
+}

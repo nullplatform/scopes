@@ -1,11 +1,9 @@
 include:
   - "$SERVICE_PATH/values.yaml"
-provider_categories:
-  - container-orchestration
-  - cloud-providers
 steps:
   - name: load logging
     type: script
+    action: replace
     file: "$OVERRIDES_PATH/logging"
     output:
       - name: log
@@ -13,6 +11,7 @@ steps:
         parameters:
           level: string
           message: string
-  - name: trigger
+  - name: kill instance
     type: script
-    file: "$OVERRIDES_PATH/scope/trigger"
+    action: replace
+    file: "$OVERRIDES_PATH/deployment/kill_instance"

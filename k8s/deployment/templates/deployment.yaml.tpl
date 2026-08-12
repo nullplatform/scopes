@@ -132,9 +132,11 @@ spec:
                 subPath: default.conf
           {{- end }}
           ports:
-            - containerPort: 80
+            - containerPort: {{ .main_traffic_manager_port }}
               protocol: TCP
           env:
+            - name: LISTENER_PORT
+              value: '{{ .main_traffic_manager_port }}'
             - name: UPSTREAM_PORT
               value: '{{ .main_http_port }}'
             - name: HEALTH_CHECK_TYPE
@@ -153,25 +155,25 @@ spec:
               cpu: 31m
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" .main_traffic_manager_port "app_port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_traffic_manager_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 9
           readinessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" .main_traffic_manager_port "app_port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_traffic_manager_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 3
           startupProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
-            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" 80 "app_port" .main_http_port }}
+            {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" .main_traffic_manager_port "app_port" .main_http_port }}
             {{- else }}
-            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" 80 }}
+            {{- template "probe.http" dict "healthCheck" .scope.capabilities.health_check "port" .main_traffic_manager_port }}
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90

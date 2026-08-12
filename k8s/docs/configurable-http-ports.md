@@ -22,8 +22,80 @@ The port your application binds to inside the container. When set, the following
 | `Service` | `port` (cluster-public) | `main_http_port` |
 | `Ingress` (initial and blue-green) | backend service port | `main_http_port` |
 | Istio `Service` and `HTTPRoute` | port | `main_http_port` |
+| `Service` | `targetPort` | `main_traffic_manager_port` (NOT `main_http_port`) |
 
-`Service.targetPort` stays `80` because that is the sidecar's port, not the app's.
+`Service.targetPort` is the sidecar's port, not the app's — it tracks
+`main_traffic_manager_port` (default `80`), not `main_http_port`. See
+[Moving the sidecar off port 80](#moving-the-sidecar-off-port-80).
+
+### `main_traffic_manager_port`
+
+- **Type:** integer
+- **Default:** `80`
+- **Valid values:** `1`–`65535`
+- **Configured via:** `container-orchestration` provider at
+  `.traffic_manager.port` (exposed in the EKS provider spec as the
+  `Traffic Manager Port` field, mapped to the NRN key
+  `k8s.mainTrafficManagerPort`), the `scope-configurations` provider at
+  `.deployment.main_traffic_manager_port`, or the `MAIN_TRAFFIC_MANAGER_PORT`
+  env var in `values.yaml`. Precedence follows the usual order —
+  `scope-configurations`, then `container-orchestration`, then env, then default.
+
+The port the main traffic-manager sidecar binds inside the pod. It sets the
+sidecar's `containerPort`, its `LISTENER_PORT` env var, all three of its probes,
+and `Service.targetPort` on the main Service and on the Istio and ARO routes.
+
+#### Moving the sidecar off port 80
+
+Port 80 is privileged, and hardened clusters routinely do not allow pod-to-pod
+traffic on it. When that happens the symptom is deceptive: the pod reports
+`Ready` and requests time out. Kubelet probes are node-local and never leave the
+ENI, so they reach the sidecar while cross-node traffic from the gateway is
+dropped.
+
+The diagnostic is a three-way comparison against the same `podIP:80`:
+
+```bash
+POD_IP=$(kubectl -n nullplatform get pod -l deployment_id=<id> -o jsonpath='{.items[0].status.podIP}')
+NODE=$(kubectl -n nullplatform get pod -l deployment_id=<id> -o jsonpath='{.items[0].spec.nodeName}')
+
+kubectl -n gateways exec deploy/gateway-private-istio -- \
+  curl -s -m 5 -o /dev/null -w "cross-node 80 -> %{http_code}\n" "http://$POD_IP:80/"
+kubectl debug node/$NODE -it --image=curlimages/curl -- \
+  curl -s -m 5 -o /dev/null -w "same-node 80 -> %{http_code}\n" "http://$POD_IP:80/"
+```
+
+Same-node succeeding while cross-node times out means the filter is at the
+network layer, not in the manifest. With AWS VPC CNI, pod IPs are real VPC IPs,
+so cross-node pod-to-pod traffic is evaluated by security groups. Under custom
+networking (pods on a secondary CIDR) the relevant security group is the one in
+the `ENIConfig` CRD, not the node's:
+
+```bash
+kubectl get eniconfig -A -o custom-columns=NAME:.metadata.name,SUBNET:.spec.subnet,SG:.spec.securityGroups
+```
+
+To adopt a different port, in this order:
+
+1. Allow the port (`10080` recommended) inbound on the security group attached
+   to the pod ENIs.
+2. Set `traffic_manager.port` in the `container-orchestration` provider (the
+   `Traffic Manager Port` field on the EKS provider).
+3. Deploy.
+
+The order matters. Setting the knob before opening the port yields a green
+deployment that receives no traffic, so blue/green never promotes — blue keeps
+serving, so it stalls rather than breaking.
+
+`10080` is the recommended value because it is `80 + 10000`, the same offset
+`additional_ports` sidecars already use, and it is clear of Istio's
+`15000`–`15090` range and of common application defaults.
+
+Do not work around the filtering by pointing `Service.targetPort` at the
+application port. That takes nginx out of the request path — losing
+`client_max_body_size 75M`, graceful shutdown, and request metrics — and the
+next deployment re-renders `targetPort` from the template, so the change does
+not survive.
 
 ### `additional_ports[].type = "HTTP"`
 
@@ -124,12 +196,16 @@ This means deleting a deployment (which deletes its Ingresses) is sufficient to 
 - JSON Schema and UI Schema: `k8s/specs/service-spec.json.tpl`
 - Build context extraction: `k8s/deployment/build_context` (look for `MAIN_HTTP_PORT`)
 - Templates that consume `main_http_port`: `k8s/deployment/templates/{service,deployment,initial-ingress,blue-green-ingress}.yaml.tpl` and `k8s/deployment/templates/istio/*.tpl`
+- `main_traffic_manager_port` resolution and validation: `k8s/deployment/build_context` (look for `MAIN_TRAFFIC_MANAGER_PORT`)
+- Templates that consume `main_traffic_manager_port`: `k8s/deployment/templates/{deployment,service}.yaml.tpl`, `k8s/deployment/templates/istio/service.yaml.tpl`, and `k8s/deployment/templates/aro/{initial,blue-green}-httproute.yaml.tpl`
 - HTTP additional_ports sidecar: `k8s/deployment/templates/deployment.yaml.tpl` (look for `else if eq .type "HTTP"`)
-- traffic-manager image: `nullplatform/k8s-tools/traffic-manager` — `UPSTREAM_PORT` env handled in `start.sh`
+- traffic-manager image: `nullplatform/k8s-tools/traffic-manager` — `UPSTREAM_PORT` and `LISTENER_PORT` envs handled in `start.sh`
 
 ## Tests
 
 - `k8s/deployment/tests/build_context.bats` covers `main_http_port` extraction with present, absent, and `null` cases, and verifies the `tonumber` cast.
+- `k8s/deployment/tests/build_context.bats` also covers `main_traffic_manager_port` resolution: the provider precedence order, the env-var override, and the numeric, range and port-collision rejections.
+- `k8s/deployment/tests/traffic_manager_port_shape.bats` pins the main sidecar's `containerPort`, its `LISTENER_PORT` env var, its three probes and every `targetPort` to the same value, so they cannot drift apart — a drift would leave the pod reporting `Ready` while traffic never reaches it.
 - `k8s/deployment/tests/ingress_template_shape.bats` verifies the per-port HTTPS listener annotation on each ingress branch and pins the absence of `ssl-redirect` on additional-port ingresses.
 - `k8s/deployment/tests/verify_ingress_reconciliation.bats` covers the weight-dedupe behavior introduced because a shared ALB listener used to surface multiple matching rules (the multi-rule scenario is no longer reachable now that each additional port has its own listener, but the dedupe is kept defensively).
 - `k8s/deployment/tests/validate_alb_target_group_capacity.bats` covers both target-group capacity and the listener-capacity validation (`ALB_MAX_LISTENERS`).
