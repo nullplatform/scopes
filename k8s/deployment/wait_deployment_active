@@ -71,11 +71,18 @@ report_wait_narrative() {
     command -v np_scope_explain >/dev/null 2>&1 || return 0
     local ready_now="$1" desired_now="$2" launched_now="$3" all_healthy="${4:-false}"
 
-    local restarted restart_total
+    local restarted restart_total restart_reasons restart_clause
     restarted=$(kubectl get pods -n "$K8S_NAMESPACE" -l "deployment_id=${DEPLOYMENT_ID}" -o json 2>/dev/null \
-        | jq -c '[.items[] | {name: .metadata.name, restarts: ([.status.containerStatuses[]?.restartCount] | add // 0)} | select(.restarts > 0)]' 2>/dev/null) || restarted="[]"
+        | jq -c '[.items[] | {name: .metadata.name,
+                              restarts: ([.status.containerStatuses[]?.restartCount] | add // 0),
+                              reason: ([.status.containerStatuses[]?.lastState.terminated.reason // empty] | first // empty)}
+                  | select(.restarts > 0) | with_entries(select(.value != "" and .value != null))]' 2>/dev/null) || restarted="[]"
     [ -n "$restarted" ] || restarted="[]"
     restart_total=$(echo "$restarted" | jq 'map(.restarts) | add // 0' 2>/dev/null) || restart_total=0
+    # WHY they restarted (OOMKilled, Error, ...) — the clause that turns
+    # "4 restarts" into a diagnosis.
+    restart_reasons=$(echo "$restarted" | jq -r '[.[].reason // empty] | unique | join(", ")' 2>/dev/null) || restart_reasons=""
+    restart_clause="${restart_reasons:+ ($restart_reasons)}"
 
     local instances meter
     instances=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
@@ -85,9 +92,11 @@ report_wait_narrative() {
 
     meter=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
         --argjson u "$UNHEALTHY_POD_COUNT" --arg reasons "$UNHEALTHY_POD_REASONS" --argjson t "$restart_total" \
+        --arg rreasons "$restart_reasons" \
         '{kind: "instances-health", healthy: $h, launched: $l, desired: $d}
          + (if $u > 0 then {unhealthy: $u, reasons: ($reasons | split(", ") | map(select(. != "")))} else {} end)
-         + (if $t > 0 then {restarts: $t} else {} end)')
+         + (if $t > 0 then {restarts: $t} else {} end)
+         + (if $rreasons != "" then {restart_reasons: ($rreasons | split(", "))} else {} end)')
     np_scope_affordance "$meter"
 
     local restarts_label="restarts"
@@ -99,11 +108,11 @@ report_wait_narrative() {
     elif [ "$restart_total" -gt 0 ]; then
         if [ "$all_healthy" = "true" ]; then
             np_scope_explain --title "$WAIT_TITLE" --severity warn \
-                --what "All $desired_now instances healthy — after $restart_total $restarts_label" \
+                --what "All $desired_now instances healthy — after $restart_total $restarts_label$restart_clause" \
                 --impact "Repeated restarts during startup usually mean crashes or out-of-memory kills; check the instance logs and memory limits."
         else
             np_scope_explain --title "$WAIT_TITLE" --severity warn \
-                --what "Waiting for $ready_now/$desired_now instances to be healthy — $restart_total $restarts_label so far" \
+                --what "Waiting for $ready_now/$desired_now instances to be healthy — $restart_total $restarts_label so far$restart_clause" \
                 --impact "Repeated restarts during startup usually mean crashes or out-of-memory kills; check the instance logs and memory limits."
         fi
     elif [ "$all_healthy" = "true" ]; then

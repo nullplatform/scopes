@@ -53,17 +53,18 @@ while IFS= read -r TEMPLATE_FILE; do
        [[ -n "$TRACE_STEP_KEY" ]] && np_scope_step_begin "$TRACE_STEP_KEY"
      fi
 
-     # Captured (and re-echoed) so applied resources can be recorded as
-     # lineage on the trace; the console output is unchanged.
-     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND); then
+     # Captured with stderr (and re-echoed) so applied resources can be
+     # recorded as lineage — and so a FAILURE carries kubectl's actual reason
+     # onto the trace, not a bare "failed to apply".
+     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND 2>&1); then
        [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
        if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
          np_scope_k8s_applied "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
        fi
        [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
      else
-       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
-       log error "   ❌ Failed to apply"
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT" >&2
+       log error "   ❌ Failed to apply $FILENAME${KUBECTL_OUT:+: $KUBECTL_OUT}"
        [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 1
      fi
      TRACE_STEP_KEY=""
