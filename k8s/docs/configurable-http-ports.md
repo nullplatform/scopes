@@ -212,7 +212,11 @@ GRPC additional ports used to give the declared port to the *sidecar*, leaving t
 
 Aligning GRPC with the `port + 10000` convention restores what those applications were already doing — binding the port they declared — and puts a working sidecar in front of them for the first time.
 
-Two cases need attention when rolling this out:
+**Minimum image: traffic-manager `1.7.0`.** The sidecar only binds `port + 10000` on an image that honours `LISTENER_PORT`, and the gRPC nginx config shipped an invalid buffer combination (`proxy_busy_buffers_size 8m` against `proxy_buffers 8 1m`, which violates nginx's `busy < (N-1) × buffer_size`) until [`5430906`](https://github.com/nullplatform/k8s-tools/commit/5430906) landed in `1.7.0`. On an older image nginx exits with `[emerg]` and never listens — and because `start.sh` does not check nginx's exit code, the container stays `Running` with no proxy inside it, so the only symptom is `Startup probe failed: ... failed to connect service`.
+
+Note that `TRAFFIC_CONTAINER_VERSION` still defaults to `latest`, which is not a released tag. Scopes with gRPC additional ports should pin `traffic_container_image` explicitly.
+
+Two more cases need attention when rolling this out:
 
 - **Applications that moved their gRPC server to `main_http_port`** to work around the collision must move it back to the declared port. This is the only breaking case, and it can only exist on scopes already running a `LISTENER_PORT`-aware image.
 - **gRPC ports above 55535** are no longer valid, because the sidecar's `port + 10000` would overflow the TCP range. `build_context` now rejects them at deploy time instead of rendering an nginx config that cannot start.
