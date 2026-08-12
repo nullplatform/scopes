@@ -49,10 +49,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 Applying templates..."
-  assert_contains "$output" "📋 Directory:"
-  assert_contains "$output" "📋 Action: apply"
-  assert_contains "$output" "📋 Dry run: false"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: false
+
+📝 kubectl apply valid.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -65,7 +73,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Skipping empty template: empty.yaml"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: false
+
+📋 Skipping empty template: empty.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -79,7 +98,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Skipping empty template: whitespace.yaml"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: false
+
+📋 Skipping empty template: whitespace.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -92,7 +122,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Skipping empty template: newlines.yaml"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: false
+
+📋 Skipping empty template: newlines.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -104,7 +145,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📝 kubectl apply valid.yaml"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: false
+
+📝 kubectl apply valid.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -129,7 +181,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Skipping empty template: empty.yaml"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: false
+
+📋 Skipping empty template: empty.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -142,7 +205,18 @@ teardown() {
   run bash "$SERVICE_PATH/apply_templates"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📋 Skipping empty template"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: delete
+📋 Dry run: false
+
+📋 Skipping empty template: empty.yaml
+📋 Manifest backup is disabled, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -157,6 +231,18 @@ teardown() {
 
   # Dry run exits with 1
   [ "$status" -eq 1 ]
-  assert_contains "$output" "📋 Skipping empty template: empty.yaml"
-  assert_contains "$output" "📋 Dry run mode - no changes were made"
+  local expected
+  expected=$(cat <<EOF
+📝 Applying templates...
+📋 Directory: $OUTPUT_DIR
+📋 Action: apply
+📋 Dry run: true
+
+📋 Skipping empty template: empty.yaml
+📝 kubectl apply valid.yaml
+
+📋 Dry run mode - no changes were made
+EOF
+)
+  assert_equal "$output" "$expected"
 }

@@ -66,9 +66,14 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Waiting for deployment 'd-scope-123-deploy-456' to become active..."
-  assert_contains "$output" "📋 Namespace: test-namespace"
-  assert_contains "$output" "📋 Timeout: 30s (max 3 iterations)"
+  local expected_intro
+  expected_intro=$(cat <<'EOF'
+🔍 Waiting for deployment 'd-scope-123-deploy-456' to become active...
+📋 Namespace: test-namespace
+📋 Timeout: 30s (max 3 iterations)
+EOF
+)
+  assert_contains "$output" "$expected_intro"
   assert_contains "$output" "📡 Checking deployment status (attempt 1/3)..."
   assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
 }
@@ -109,11 +114,23 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Waiting for deployment 'd-scope-123-deploy-456' to become active..."
-  assert_contains "$output" "📋 Namespace: test-namespace"
-  assert_contains "$output" "📋 Timeout: 5s (max 0 iterations)"
-  assert_contains "$output" "❌ Timeout waiting for deployment"
-  assert_contains "$output" "📋 Maximum iterations (0) reached"
+  local expected_intro
+  expected_intro=$(cat <<'EOF'
+🔍 Waiting for deployment 'd-scope-123-deploy-456' to become active...
+📋 Namespace: test-namespace
+📋 Timeout: 5s (max 0 iterations)
+EOF
+)
+  assert_contains "$output" "$expected_intro"
+
+  local expected_timeout
+  expected_timeout=$(cat <<'EOF'
+
+❌ Timeout waiting for deployment
+📋 Maximum iterations (0) reached
+EOF
+)
+  assert_contains "$output" "$expected_timeout"
   # Timeout path must source print_failed_deployment_hints; with no pod info
   # and no events, it falls through to the generic checklist.
   assert_contains "$output" "⚠️  Application Startup Issue Detected"
@@ -145,11 +162,21 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Timeout waiting for deployment"
-  # The hint script must read pod state and surface the user-friendly reason
-  assert_contains "$output" "📋 Reason: The container exceeded its memory limit"
-  assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
-  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
+  # The hint script must read pod state and surface the user-friendly reason,
+  # contiguous with the timeout header that precedes it.
+  local expected
+  expected=$(cat <<'EOF'
+
+❌ Timeout waiting for deployment
+📋 Maximum iterations (0) reached
+
+📋 Reason: The container exceeded its memory limit (512Mi) and was terminated.
+📋 Detected: OOMKilled on container app (exit 137)
+📋 Details: out of memory
+💡 Suggested fix: Increase ram_memory for scope 'my-app' or reduce application memory usage.
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 # =============================================================================
@@ -166,9 +193,14 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "🔍 Waiting for deployment 'd-scope-123-deploy-456' to become active..."
-  assert_contains "$output" "📡 Checking deployment status (attempt 1/"
-  assert_contains "$output" "❌ Failed to read deployment status"
-  assert_contains "$output" "📋 NP CLI error:"
+  assert_contains "$output" "📡 Checking deployment status (attempt 1/3)..."
+  local expected
+  expected=$(cat <<'EOF'
+   ❌ Failed to read deployment status
+📋 NP CLI error: Error connecting to API
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "wait_deployment_active: fails when deployment status is null" {
@@ -180,7 +212,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Deployment status not found for ID deploy-456"
+  assert_contains "$output" "   ❌ Deployment status not found for ID deploy-456"
 }
 
 @test "wait_deployment_active: fails when NP deployment status is not running" {
@@ -194,7 +226,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Deployment is no longer running (status: failed)"
+  assert_contains "$output" "   ❌ Deployment is no longer running (status: failed)"
   # Non-running status path must also source print_failed_deployment_hints
   assert_contains "$output" "⚠️  Application Startup Issue Detected"
 }
@@ -215,7 +247,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Deployment 'd-scope-123-deploy-456' not found in namespace 'test-namespace'"
+  assert_contains "$output" "   ❌ Deployment 'd-scope-123-deploy-456' not found in namespace 'test-namespace'"
 }
 
 # =============================================================================
@@ -258,9 +290,17 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Deployment status - Available: 3/5, Updated: 4/5, Ready: 3/5"
+  # Leading "🔍 $(date): " is non-deterministic; assert everything after it verbatim.
+  assert_contains "$output" "Iteration 1 - Deployment status - Available: 3/5, Updated: 4/5, Ready: 3/5"
   assert_contains "$output" "⏳ Still waiting — Ready: 3/5, Available: 3/5 (attempt 1/1, 10s elapsed)"
-  assert_contains "$output" "❌ Timeout waiting for deployment"
+  local expected_timeout
+  expected_timeout=$(cat <<'EOF'
+
+❌ Timeout waiting for deployment
+📋 Maximum iterations (1) reached
+EOF
+)
+  assert_contains "$output" "$expected_timeout"
 }
 
 @test "wait_deployment_active: handles missing status fields defaults to 0" {
@@ -296,7 +336,7 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Available: 0/3"
+  assert_contains "$output" "Iteration 1 - Deployment status - Available: 0/3, Updated: 0/3, Ready: 0/3"
 }
 
 # =============================================================================
@@ -332,7 +372,14 @@ teardown() {
 
   # Should timeout because desired > 0 check fails
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Timeout waiting for deployment"
+  local expected_timeout
+  expected_timeout=$(cat <<'EOF'
+
+❌ Timeout waiting for deployment
+📋 Maximum iterations (0) reached
+EOF
+)
+  assert_contains "$output" "$expected_timeout"
 }
 
 # =============================================================================
@@ -505,10 +552,8 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  # Translated form must appear
-  assert_contains "$output" "Startup probe"
-  assert_contains "$output" "not yet listening"
-  assert_contains "$output" "/health"
+  # Translated form must appear as the complete consolidated warning line
+  assert_contains "$output" "9999-12-31T23:59:59Z [Warning] Pod/...abc Startup probe failing on /health — not yet listening"
   # Raw connection-refused text must NOT leak through
   if [[ "$output" == *"connection refused"* ]]; then
     echo "Expected output to NOT contain raw 'connection refused' (should be translated)"
@@ -554,10 +599,9 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  # One consolidated line with both modes joined by ', ' for natural reading
-  assert_contains "$output" "Startup probe failing on /health — not yet listening, responded HTTP 502 (expected 2xx)"
-  # Pod name must be the short form with '...' prefix marking truncation
-  assert_contains "$output" "Pod/...abc-hhshq"
+  # One consolidated line with both modes joined by ', ' for natural reading,
+  # using the short pod name ('...' prefix marks truncation).
+  assert_contains "$output" "9999-12-31T23:59:59Z [Warning] Pod/...abc-hhshq Startup probe failing on /health — not yet listening, responded HTTP 502 (expected 2xx)"
   # The long prefix must NOT appear in any logged event line
   if [[ "$output" == *"Pod/d-scope-123-deploy-456-abc-hhshq"* ]]; then
     echo "Expected output to use short pod name, not the full prefix"
@@ -610,9 +654,9 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  # Both original messages must appear verbatim
-  assert_contains "$output" "some brand-new K8s probe format we cannot parse 1"
-  assert_contains "$output" "another unknown probe format 2"
+  # Both original messages must appear verbatim, each as its own complete raw warning line
+  assert_contains "$output" "9999-12-31T23:59:59Z [Warning] Pod/d-scope-123-deploy-456-abc-hhshq: Unhealthy - some brand-new K8s probe format we cannot parse 1"
+  assert_contains "$output" "9999-12-31T23:59:59Z [Warning] Pod/d-scope-123-deploy-456-abc-hhshq: Unhealthy - another unknown probe format 2"
   # The consolidated header must NOT appear because parsing failed
   if [[ "$output" == *"probe failing"* ]]; then
     echo "Expected fallback path to NOT emit the 'probe failing' header"
@@ -652,8 +696,7 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Startup probe"
-  assert_contains "$output" "HTTP 502"
+  assert_contains "$output" "9999-12-31T23:59:59Z [Warning] Pod/...abc Startup probe failing — responded HTTP 502 (expected 2xx)"
 }
 
 # =============================================================================
@@ -854,6 +897,6 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Could not report instance counts"
+  assert_contains "$output" "Could not report instance counts (will retry on next change)"
   assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
 }

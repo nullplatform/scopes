@@ -56,12 +56,22 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/rollback_traffic"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Rolling back traffic to previous deployment..."
-  assert_contains "$output" "📋 Current deployment: deploy-new-123"
-  assert_contains "$output" "📋 Rollback target: deploy-old-456"
-  assert_contains "$output" "📝 Creating ingress for rollback deployment..."
-  assert_contains "$output" "🔍 Creating internet-facing ingress..."
-  assert_contains "$output" "✅ Traffic rollback configuration created"
+  local expected
+  expected=$(cat <<EOF
+🔍 Rolling back traffic to previous deployment...
+📋 Current deployment: deploy-new-123
+📋 Rollback target: deploy-old-456
+📝 Creating ingress for rollback deployment...
+🔍 Creating internet-facing ingress...
+📋 Scope: scope-123 | Deployment: deploy-old-456
+📋 Template: $TEMPLATE
+📋 Output: $OUTPUT_DIR/ingress-scope-123-deploy-old-456.yaml
+📝 Building ingress template...
+✅ Ingress template created: $OUTPUT_DIR/ingress-scope-123-deploy-old-456.yaml
+✅ Traffic rollback configuration created
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "rollback_traffic: creates ingress for old deployment" {
@@ -83,11 +93,27 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/rollback_traffic"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Rolling back traffic to previous deployment..."
-  assert_contains "$output" "📝 Creating ingress for rollback deployment..."
-  assert_contains "$output" "❌ Failed to build ingress template"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "🔧 How to fix:"
+  local expected
+  expected=$(cat <<EOF
+🔍 Rolling back traffic to previous deployment...
+📋 Current deployment: deploy-new-123
+📋 Rollback target: deploy-old-456
+📝 Creating ingress for rollback deployment...
+🔍 Creating internet-facing ingress...
+📋 Scope: scope-123 | Deployment: deploy-old-456
+📋 Template: $TEMPLATE
+📋 Output: $OUTPUT_DIR/ingress-scope-123-deploy-old-456.yaml
+📝 Building ingress template...
+❌ Failed to build ingress template
+💡 Possible causes:
+   - Template file does not exist or is invalid
+   - Scope attributes may be missing
+🔧 How to fix:
+   - Verify template exists: ls -la $TEMPLATE
+   - Verify that your scope has all required attributes
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================

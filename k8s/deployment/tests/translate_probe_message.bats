@@ -18,18 +18,14 @@ setup() {
   run translate_probe_message 'Startup probe failed: Get "http://10.15.28.102:8080/health": dial tcp 10.15.28.102:8080: connect: connection refused'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Startup probe"
-  assert_contains "$output" "not yet listening"
-  assert_contains "$output" "/health"
+  assert_equal "$output" "Startup probe — app is not yet listening on /health"
 }
 
 @test "translate_probe_message: liveness probe connection refused" {
   run translate_probe_message 'Liveness probe failed: Get "http://10.0.0.5:8080/ping": dial tcp: connect: connection refused'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Liveness probe"
-  assert_contains "$output" "not yet listening"
-  assert_contains "$output" "/ping"
+  assert_equal "$output" "Liveness probe — app is not yet listening on /ping"
 }
 
 # -----------------------------------------------------------------------------
@@ -39,16 +35,14 @@ setup() {
   run translate_probe_message 'Startup probe failed: HTTP probe failed with statuscode: 502'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Startup probe"
-  assert_contains "$output" "HTTP 502"
+  assert_equal "$output" "Startup probe — app responded with HTTP 502 (expected 2xx)"
 }
 
 @test "translate_probe_message: readiness probe HTTP 404" {
   run translate_probe_message 'Readiness probe failed: HTTP probe failed with statuscode: 404'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Readiness probe"
-  assert_contains "$output" "HTTP 404"
+  assert_equal "$output" "Readiness probe — app responded with HTTP 404 (expected 2xx)"
 }
 
 # -----------------------------------------------------------------------------
@@ -58,9 +52,7 @@ setup() {
   run translate_probe_message 'Startup probe failed: Get "http://10.0.0.5:8080/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Startup probe"
-  assert_contains "$output" "timed out"
-  assert_contains "$output" "/health"
+  assert_equal "$output" "Startup probe — request timed out on /health"
 }
 
 # -----------------------------------------------------------------------------
@@ -86,7 +78,7 @@ setup() {
   run translate_probe_message 'Startup probe failed: some weird new error format'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Startup probe"
+  assert_equal "$output" "Startup probe failed"
 }
 
 # -----------------------------------------------------------------------------

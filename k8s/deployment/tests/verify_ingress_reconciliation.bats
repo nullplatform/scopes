@@ -112,14 +112,19 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Certificate error detected"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Ingress hostname does not match any SSL/TLS certificate in ACM"
-  assert_contains "$output" "- Certificate does not cover the hostname (check wildcards)"
-  assert_contains "$output" "- Message: no certificate found for host app.example.com"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Verify hostname matches certificate in ACM"
-  assert_contains "$output" "- Ensure certificate includes exact hostname or matching wildcard"
+  local expected
+  expected=$(cat <<'EOF'
+❌ Certificate error detected
+💡 Possible causes:
+   - Ingress hostname does not match any SSL/TLS certificate in ACM
+   - Certificate does not cover the hostname (check wildcards)
+   - Message: no certificate found for host app.example.com
+🔧 How to fix:
+   - Verify hostname matches certificate in ACM
+   - Ensure certificate includes exact hostname or matching wildcard
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "verify_ingress_reconciliation: fails with full troubleshooting when ingress not found" {
@@ -142,12 +147,17 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Failed to get ingress k-8-s-my-app-scope-123-internet-facing"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Ingress does not exist yet"
-  assert_contains "$output" "- Namespace test-namespace is incorrect"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- List ingresses: kubectl get ingress -n test-namespace"
+  local expected
+  expected=$(cat <<'EOF'
+❌ Failed to get ingress k-8-s-my-app-scope-123-internet-facing
+💡 Possible causes:
+   - Ingress does not exist yet
+   - Namespace test-namespace is incorrect
+🔧 How to fix:
+   - List ingresses: kubectl get ingress -n test-namespace
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "verify_ingress_reconciliation: fails when ALB not found" {
@@ -286,8 +296,8 @@ teardown() {
   "
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Skipping weight check on listener port 50051"
-  assert_contains "$output" "✅ Weights match on listener port 443"
+  assert_contains "$output" "⏭️  Skipping weight check on listener port 50051 (blue has no service for this port)"
+  assert_contains "$output" "✅ Weights match on listener port 443 (GREEN: 10, BLUE: 90)"
   assert_contains "$output" "✅ ALB configuration validated successfully"
 }
 
@@ -326,7 +336,7 @@ teardown() {
   "
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "✅ Weights match on listener port 443"
+  assert_contains "$output" "✅ Weights match on listener port 443 (GREEN: 10, BLUE: 90)"
   assert_contains "$output" "✅ ALB configuration validated successfully"
 }
 
@@ -406,7 +416,7 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "📝 Checking domain: app.example.com"
-  assert_contains "$output" "still has 2 target groups on listener port 443"
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
 }
 
 @test "verify_ingress_reconciliation: passes when the rule forwards to a single target group" {
@@ -440,7 +450,7 @@ teardown() {
   "
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "✅ Single target group on listener port 443"
+  assert_contains "$output" "✅ Single target group on listener port 443 (traffic is no longer split between deployments)"
   assert_contains "$output" "✅ ALB configuration validated successfully"
 }
 
@@ -490,8 +500,8 @@ teardown() {
 
   [ "$status" -eq 0 ]
   # Both messages must appear: the one that holds, then the one that releases.
-  assert_contains "$output" "still has 2 target groups on listener port 443"
-  assert_contains "$output" "✅ Single target group on listener port 443"
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
+  assert_contains "$output" "✅ Single target group on listener port 443 (traffic is no longer split between deployments)"
   assert_contains "$output" "✅ ALB configuration validated successfully"
   # More than one read proves it retried instead of getting a single lucky hit.
   [ "$(wc -l < "$counter")" -gt 1 ]
@@ -531,7 +541,7 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "still has 2 target groups on listener port 443"
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
 }
 
 @test "verify_ingress_reconciliation: skips target group check on additional port listener when blue has no service" {
@@ -573,8 +583,8 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Skipping target group check on listener port 50051"
-  assert_contains "$output" "still has 2 target groups on listener port 443"
+  assert_contains "$output" "⏭️  Skipping target group check on listener port 50051 (blue has no service for this port)"
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
 }
 
 @test "verify_ingress_reconciliation: treats a rule without a forward action as not converged" {
@@ -610,7 +620,7 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "still has 0 target groups on listener port 443"
+  assert_contains "$output" "❌ Rule still has 0 target groups on listener port 443: the ALB has not finished reconciling"
 }
 
 @test "verify_ingress_reconciliation: a reconciled event does not override a failed ALB check" {
@@ -655,7 +665,7 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "still has 2 target groups on listener port 443"
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
   assert_contains "$output" "❌ Timeout waiting for ingress reconciliation after 1s"
   [[ "$output" != *"✅ Ingress successfully reconciled"* ]]
 }
@@ -716,14 +726,19 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Timeout waiting for ingress reconciliation after 1s"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- ALB Ingress Controller not running or unhealthy"
-  assert_contains "$output" "- Network connectivity issues"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Check controller: kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller"
-  assert_contains "$output" "- Check ingress: kubectl describe ingress k-8-s-my-app-scope-123-internet-facing -n test-namespace"
-  assert_contains "$output" "📋 Recent events:"
+  local expected
+  expected=$(cat <<'EOF'
+❌ Timeout waiting for ingress reconciliation after 1s
+💡 Possible causes:
+   - ALB Ingress Controller not running or unhealthy
+   - Network connectivity issues
+🔧 How to fix:
+   - Check controller: kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+   - Check ingress: kubectl describe ingress k-8-s-my-app-scope-123-internet-facing -n test-namespace
+📋 Recent events:
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "verify_ingress_reconciliation: fails on Error event type with error messages" {
@@ -749,7 +764,12 @@ teardown() {
   [ "$status" -eq 1 ]
   assert_contains "$output" "🔍 Verifying ingress reconciliation..."
   assert_contains "$output" "📋 ALB reconciliation disabled, checking cluster events only"
-  assert_contains "$output" "❌ Ingress reconciliation failed"
-  assert_contains "$output" "💡 Error messages:"
-  assert_contains "$output" "- Failed to sync ALB"
+  local expected
+  expected=$(cat <<'EOF'
+❌ Ingress reconciliation failed
+💡 Error messages:
+   - Failed to sync ALB
+EOF
+)
+  assert_contains "$output" "$expected"
 }

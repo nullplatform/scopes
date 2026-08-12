@@ -39,9 +39,15 @@ teardown() {
   "
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Verifying networking reconciliation for DNS type: route53"
-  assert_contains "$output" "🔍 Verifying ingress reconciliation..."
-  assert_contains "$output" "⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying networking reconciliation for DNS type: route53
+🔍 Verifying ingress reconciliation...
+📋 Ingress: k-8-s-my-app-- | Namespace:  | Timeout: 120s
+⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "verify_networking_reconciliation: verifies HTTPRoute for external_dns without managing DNS" {
@@ -65,9 +71,15 @@ teardown() {
   "
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Verifying networking reconciliation for DNS type: external_dns"
-  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
-  assert_contains "$output" "✅ HTTPRoute successfully reconciled"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying networking reconciliation for DNS type: external_dns
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-123-public | Namespace: nullplatform | Timeout: 10s
+✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "verify_networking_reconciliation: skips for unsupported DNS types" {
@@ -77,6 +89,11 @@ teardown() {
 
   [ "$status" -eq 0 ]
 
-  assert_contains "$output" "🔍 Verifying networking reconciliation for DNS type: unknown"
-  assert_contains "$output" "⚠️ Ingress reconciliation not available for DNS type: unknown, skipping"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying networking reconciliation for DNS type: unknown
+⚠️ Ingress reconciliation not available for DNS type: unknown, skipping
+EOF
+)
+  assert_equal "$output" "$expected"
 }
