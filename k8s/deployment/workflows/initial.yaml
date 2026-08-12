@@ -104,6 +104,7 @@ steps:
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
           trace:
             group: setting-up
+            flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: false
         - name: publish_alb_metrics
