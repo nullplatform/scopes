@@ -201,6 +201,84 @@ np_scope_wait_heartbeat() {
   return 0
 }
 
+# np_scope_produces <dataset-id> [<name> <uri>]
+# np_scope_consumes <dataset-id> [<name> <uri>]
+#
+# Data lineage: declare what the current step (or open sub-step) WROTE or
+# READ, by CANONICAL dataset id — the exact grammar the scope-workflow-manager
+# uses, so a custom scope's lineage joins the platform's by value:
+#
+#   k8s-namespace:<ns>            k8s-deployment:<ns>/<name>
+#   k8s-service:<ns>/<name>       k8s-ingress:<ns>/<name>
+#   dns-record:<fqdn>             load-balancer:<arn>
+#   docker-image:<url>            deployment-log:<app>/<scope>/<deploy>
+#
+# Always defined; a no-op when the workflow is untraced.
+np_scope_produces() {
+  command -v np_trace_produces >/dev/null 2>&1 || return 0
+  local _pd_node
+  _pd_node=$(_np_scopes_node) || return 0
+  np_trace_produces "$_pd_node" "$1" ${2:+--name "$2"} ${3:+--uri "$3"}
+  return 0
+}
+
+np_scope_consumes() {
+  command -v np_trace_consumes >/dev/null 2>&1 || return 0
+  local _cd_node
+  _cd_node=$(_np_scopes_node) || return 0
+  np_trace_consumes "$_cd_node" "$1" ${2:+--name "$2"} ${3:+--uri "$3"}
+  return 0
+}
+
+# np_scope_affordance <json-object-or-array>
+#
+# What the current step OFFERS a human to do — the UI renders it as a control
+# (e.g. '{"kind":"deploy-log","application_id":"7","scope_id":"42",...}').
+np_scope_affordance() {
+  command -v np_trace_affordances >/dev/null 2>&1 || return 0
+  local _ad_node
+  _ad_node=$(_np_scopes_node) || return 0
+  np_trace_affordances "$_ad_node" "$1"
+  return 0
+}
+
+# np_scope_progress <current> <target> [unit]
+#
+# A converging phase's advance toward its target (instances 3 of 10).
+np_scope_progress() {
+  command -v np_trace_progress >/dev/null 2>&1 || return 0
+  local _pg_node
+  _pg_node=$(_np_scopes_node) || return 0
+  np_trace_progress "$_pg_node" "$1" "$2" "${3:-}"
+  return 0
+}
+
+# np_scope_k8s_applied <namespace> <kubectl-apply-output>
+#
+# Turn `kubectl apply` output lines (`deployment.apps/name created`) into
+# lineage on the current step, for the resource kinds the platform's lineage
+# model knows. One chokepoint (apply_templates) covers every workflow.
+np_scope_k8s_applied() {
+  command -v np_trace_produces >/dev/null 2>&1 || return 0
+  local _ka_ns="$1" _ka_line _ka_kind _ka_name
+  [ -n "$_ka_ns" ] || return 0
+  while IFS= read -r _ka_line; do
+    [ -n "$_ka_line" ] || continue
+    _ka_kind="${_ka_line%%/*}"
+    _ka_name="${_ka_line#*/}"
+    _ka_name="${_ka_name%% *}"
+    case "$_ka_kind" in
+      deployment.apps|deployment)
+        np_scope_produces "k8s-deployment:$_ka_ns/$_ka_name" workload "$_ka_name" ;;
+      service)
+        np_scope_produces "k8s-service:$_ka_ns/$_ka_name" service "$_ka_name" ;;
+      ingress.networking.k8s.io|ingress)
+        np_scope_produces "k8s-ingress:$_ka_ns/$_ka_name" ingress "$_ka_name" ;;
+    esac
+  done <<< "$2"
+  return 0
+}
+
 # A silent failure (no `log error` on the way down) must still be clear: the
 # ERR trap remembers the last failing top-level command, and the EXIT trap
 # reports it against the step that was current when the shell died.

@@ -31,7 +31,15 @@ while IFS= read -r TEMPLATE_FILE; do
        IGNORE_NOT_FOUND="--ignore-not-found=true"
      fi
 
-     if ! kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
+     # Captured (and re-echoed) so applied resources can be recorded as
+     # lineage on the trace; the console output is unchanged.
+     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND); then
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
+       if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
+         np_scope_k8s_applied "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
+       fi
+     else
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
        log error "   ❌ Failed to apply"
      fi
    fi

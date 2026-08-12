@@ -70,3 +70,10 @@ case "$DNS_TYPE" in
 esac
 
 log info "✅ DNS records managed successfully"
+
+# The DNS record joins the lineage under its real-world address, so any other
+# operation naming the same FQDN links to it. Only a CREATE writes the record.
+if [ "${ACTION:-}" = "CREATE" ] && [ -n "${SCOPE_DOMAIN:-}" ] \
+  && command -v np_scope_produces >/dev/null 2>&1; then
+	np_scope_produces "dns-record:$SCOPE_DOMAIN" dns_record "$SCOPE_DOMAIN"
+fi

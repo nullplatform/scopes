@@ -156,6 +156,32 @@ while true; do
         log debug ""
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
         if command -v np_scope_step_end >/dev/null 2>&1; then
+            np_scope_progress "$ready" "$desired" instances
+
+            # Lineage, by the same canonical ids the platform's own scopes use,
+            # so a custom scope's graph joins by value:
+            #  • the deployment CONSUMED the build's asset — the cross-flow
+            #    edge that links this deploy back to the build that made it
+            #  • it PRODUCED this deploy's logs; the pointer is the concrete
+            #    log query, and the affordance is the UI's "view logs" control
+            _wda_asset_url=$(echo "$CONTEXT" | jq -r '.asset.url // empty')
+            _wda_asset_type=$(echo "$CONTEXT" | jq -r '.asset.type // "docker-image"')
+            if [ -n "$_wda_asset_url" ]; then
+                np_scope_consumes "$_wda_asset_type:$_wda_asset_url" image "$_wda_asset_url"
+            fi
+            _wda_app_id=$(echo "$CONTEXT" | jq -r '.application.id // empty')
+            _wda_scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // empty')
+            _wda_created=$(echo "$CONTEXT" | jq -r '.deployment.created_at // empty')
+            _wda_start_ms=$(date -d "$_wda_created" +%s000 2>/dev/null || echo "")
+            if [ -n "$_wda_app_id" ] && [ -n "$_wda_scope_id" ]; then
+                _wda_log_uri="application/$_wda_app_id/log?scope=$_wda_scope_id&type=application"
+                [ -n "$_wda_start_ms" ] && _wda_log_uri="$_wda_log_uri&start_time=$_wda_start_ms"
+                np_scope_produces \
+                    "deployment-log:$_wda_app_id/$_wda_scope_id/$DEPLOYMENT_ID" \
+                    log "$_wda_log_uri"
+                np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"$_wda_app_id\",\"scope_id\":\"$_wda_scope_id\",\"type\":\"application\"${_wda_start_ms:+,\"start_time\":$_wda_start_ms}}"
+            fi
+
             np_scope_step_end 0
         fi
         break
@@ -168,6 +194,7 @@ while true; do
             np_scope_wait_heartbeat "deployment-active" "$elapsed_s" "$TIMEOUT" "progressing" \
                 "wait.desired=$desired" "wait.launched=$launched" \
                 "wait.ready=$ready" "wait.available=$current" "wait.updated=$updated"
+            np_scope_progress "$ready" "$desired" instances
         fi
     fi
 
