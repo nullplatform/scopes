@@ -55,6 +55,64 @@ iteration=0
 LATEST_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 LAST_REPORTED_COUNTS=""
+# The wait's memory for the trace narrative: how many pods the LAST event
+# sweep saw failing health checks (and why), and the pods' restart history —
+# a crash-loop that heals mid-wait must not read as an uneventful wait.
+UNHEALTHY_POD_COUNT=0
+UNHEALTHY_POD_REASONS=""
+WAIT_TITLE="Instance health check"
+
+# Report the wait's live narrative onto the trace — the counted io, the
+# instances-health meter a host renders as pips, and the plain-language
+# explain with the severity an operator should read it at. Re-emitted per
+# heartbeat: facets fold last-writer-wins, so the latest state (and a
+# recovered warning) always wins. Best-effort, like every trace call.
+report_wait_narrative() {
+    command -v np_scope_explain >/dev/null 2>&1 || return 0
+    local ready_now="$1" desired_now="$2" launched_now="$3" all_healthy="${4:-false}"
+
+    local restarted restart_total
+    restarted=$(kubectl get pods -n "$K8S_NAMESPACE" -l "deployment_id=${DEPLOYMENT_ID}" -o json 2>/dev/null \
+        | jq -c '[.items[] | {name: .metadata.name, restarts: ([.status.containerStatuses[]?.restartCount] | add // 0)} | select(.restarts > 0)]' 2>/dev/null) || restarted="[]"
+    [ -n "$restarted" ] || restarted="[]"
+    restart_total=$(echo "$restarted" | jq 'map(.restarts) | add // 0' 2>/dev/null) || restart_total=0
+
+    local instances meter
+    instances=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
+        --argjson u "$UNHEALTHY_POD_COUNT" --argjson r "$restarted" \
+        '{healthy: $h, launched: $l, desired: $d} + (if $u > 0 then {unhealthy: $u} else {} end) + (if ($r | length) > 0 then {restarted: $r} else {} end)')
+    np_scope_output instances "$instances"
+
+    meter=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
+        --argjson u "$UNHEALTHY_POD_COUNT" --arg reasons "$UNHEALTHY_POD_REASONS" --argjson t "$restart_total" \
+        '{kind: "instances-health", healthy: $h, launched: $l, desired: $d}
+         + (if $u > 0 then {unhealthy: $u, reasons: ($reasons | split(", ") | map(select(. != "")))} else {} end)
+         + (if $t > 0 then {restarts: $t} else {} end)')
+    np_scope_affordance "$meter"
+
+    local restarts_label="restarts"
+    [ "$restart_total" -eq 1 ] && restarts_label="restart"
+    if [ "$UNHEALTHY_POD_COUNT" -gt 0 ]; then
+        np_scope_explain --title "$WAIT_TITLE" --severity warn \
+            --what "Waiting for $ready_now/$desired_now instances to be healthy — $UNHEALTHY_POD_COUNT failing health checks${UNHEALTHY_POD_REASONS:+ ($UNHEALTHY_POD_REASONS)}" \
+            --impact "The deployment fails if the instances don't become healthy before the health-check timeout."
+    elif [ "$restart_total" -gt 0 ]; then
+        if [ "$all_healthy" = "true" ]; then
+            np_scope_explain --title "$WAIT_TITLE" --severity warn \
+                --what "All $desired_now instances healthy — after $restart_total $restarts_label" \
+                --impact "Repeated restarts during startup usually mean crashes or out-of-memory kills; check the instance logs and memory limits."
+        else
+            np_scope_explain --title "$WAIT_TITLE" --severity warn \
+                --what "Waiting for $ready_now/$desired_now instances to be healthy — $restart_total $restarts_label so far" \
+                --impact "Repeated restarts during startup usually mean crashes or out-of-memory kills; check the instance logs and memory limits."
+        fi
+    elif [ "$all_healthy" = "true" ]; then
+        np_scope_explain --title "$WAIT_TITLE" --what "All $desired_now instances healthy"
+    else
+        np_scope_explain --title "$WAIT_TITLE" --what "Waiting for $ready_now/$desired_now instances to be healthy"
+    fi
+    return 0
+}
 
 # Report the instance counters onto the deployment's strategy_data
 # (amount_instances_to_wait / launched_instances / healthy_instances) so the
@@ -113,6 +171,13 @@ while true; do
         source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 
         if command -v np_scope_step_timeout >/dev/null 2>&1; then
+            # The terminal narrative replaces the polling one: what it gave up
+            # with, at ERROR severity, with the structured counts as evidence.
+            np_scope_explain --title "$WAIT_TITLE" --severity error \
+                --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${UNHEALTHY_POD_REASONS:+ ($UNHEALTHY_POD_REASONS)}"
+            np_scope_error "deployment '$K8S_DEPLOYMENT_NAME' not active after ${TIMEOUT}s" \
+                "$(jq -nc --argjson h "${ready:-0}" --argjson l "${launched:-0}" --argjson d "${desired:-0}" \
+                    '{instances: {healthy: $h, launched: $l, desired: $d}}')"
             np_scope_step_timeout "deployment '$K8S_DEPLOYMENT_NAME' not active after ${TIMEOUT}s"
         fi
         exit 1
@@ -157,6 +222,12 @@ while true; do
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
         if command -v np_scope_step_end >/dev/null 2>&1; then
             np_scope_progress "$ready" "$desired" instances
+            # Every pod is ready: any earlier probe warning has recovered, and
+            # the terminal narrative must say so (a crash-loop on the way here
+            # stays visible as "healthy — after N restarts").
+            UNHEALTHY_POD_COUNT=0
+            UNHEALTHY_POD_REASONS=""
+            report_wait_narrative "$ready" "$desired" "$launched" true
 
             # Lineage, by the same canonical ids the platform's own scopes use,
             # so a custom scope's graph joins by value:
@@ -195,6 +266,7 @@ while true; do
                 "wait.desired=$desired" "wait.launched=$launched" \
                 "wait.ready=$ready" "wait.available=$current" "wait.updated=$updated"
             np_scope_progress "$ready" "$desired" instances
+            report_wait_narrative "$ready" "$desired" "$launched"
         fi
     fi
 
@@ -262,8 +334,24 @@ while true; do
     ')
 
     if [ -n "$UNHEALTHY_GROUPS" ]; then
+        UNHEALTHY_POD_COUNT=0
         while IFS=$'\t' read -r ts pod_name messages_concat; do
             [ -z "$pod_name" ] && continue
+            ((UNHEALTHY_POD_COUNT++))
+            # Remember WHY for the trace narrative — the probe kind when the
+            # message parses, a generic reason when it doesn't.
+            first_msg=$(printf '%s' "$messages_concat" | tr '\001' '\n' | head -1)
+            parsed=$(parse_probe_message "$first_msg" 2>/dev/null) || parsed=""
+            probe_kind="${parsed%%|*}"
+            if [ -n "$probe_kind" ]; then
+                unhealthy_reason="$probe_kind probe failing"
+            else
+                unhealthy_reason="failing health checks"
+            fi
+            case ", $UNHEALTHY_POD_REASONS," in
+                *", $unhealthy_reason,"*) ;;
+                *) UNHEALTHY_POD_REASONS="${UNHEALTHY_POD_REASONS:+$UNHEALTHY_POD_REASONS, }$unhealthy_reason" ;;
+            esac
             log_unhealthy_group "$ts" "$pod_name" "$messages_concat" \
                 || log_unhealthy_raw "$ts" "$pod_name" "$messages_concat"
         done <<< "$UNHEALTHY_GROUPS"

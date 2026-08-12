@@ -302,3 +302,57 @@ secret/sec-1 created"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=0"* ]]
 }
+
+# --- narrative: inline io, explain, structured errors ------------------------
+
+@test "inline output and explain land on the open sub-step" {
+	run_logged '
+		np_scope_step_begin wait-deployment-active
+		np_scope_output instances "{\"healthy\":2,\"desired\":3}"
+		np_scope_explain --title "Instance health check" --severity warn --what "Waiting for 2/3 instances to be healthy"
+		np_scope_step_end 0
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"tracing.output"' | grep -q 'wait-deployment-active@0.0'
+	echo "$output" | grep -q '"value":{"healthy":2,"desired":3}'
+	echo "$output" | grep -q '"severity":"warn"'
+	echo "$output" | grep -q 'Waiting for 2/3 instances to be healthy'
+}
+
+@test "the traffic switch set lands whole on the current step" {
+	run_logged '
+		np_scope_labels "deployment.id=777" "action=traffic-switch"
+		np_scope_explain --title "Switch traffic for deployment 777" --what "Switching blue/green traffic for deployment 777 from 0% to 100%"
+		np_scope_affordance "{\"kind\":\"traffic-switch\",\"deployment_id\":\"777\",\"current_traffic\":100,\"new_traffic\":100,\"old_traffic\":0,\"target_traffic\":100}"
+		np_scope_input traffic "{\"from\":0,\"desired\":100}"
+		np_scope_output traffic "{\"switched\":100}"
+		np_scope_progress 100 100 percent
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"kind":"traffic-switch"'
+	echo "$output" | grep -q '"tracing.input":\[{"kind":"inline","name":"traffic","value":{"from":0,"desired":100}}\]'
+	echo "$output" | grep -q '"tracing.output":\[{"kind":"inline","name":"traffic","value":{"switched":100}}\]'
+	echo "$output" | grep -q '"tracing.progress":{"current":100,"target":100,"unit":"percent"}'
+	echo "$output" | grep -q '"action":"traffic-switch"'
+}
+
+@test "np_scope_error carries structured details and stands down the exit trap" {
+	run "$BASH" -c "
+		( source '$LOGGING'; np_scope_error 'gave up' '{\"instances\":{\"healthy\":1,\"desired\":3}}'; exit 3 ) || true
+		source '$LOGGING'; trap - EXIT ERR
+		for f in \"\$NP_TRACE_DIR\"/spool/*.json \"\$NP_TRACE_DIR\"/failed/*.json; do
+			[ -f \"\$f\" ] && cat \"\$f\" && echo
+		done
+		true
+	"
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"details":{"instances":{"healthy":1,"desired":3}}'
+	[ "$(echo "$output" | grep -c 'tracing.error')" -eq 1 ]
+}
+
+@test "narrative helpers are defined no-ops when untraced" {
+	unset NP_TRACE
+	run "$BASH" -c "source '$LOGGING'; np_scope_output x '{}'; np_scope_input x '{}'; np_scope_explain --title t; np_scope_error m; np_scope_labels a=b; echo rc=\$?"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"rc=0"* ]]
+}
