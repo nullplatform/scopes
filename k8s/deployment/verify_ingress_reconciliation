@@ -18,6 +18,9 @@ DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r ".deployment.strategy")
 
 if [ "$ALB_RECONCILIATION_ENABLED" = "false" ] && [ "$DEPLOYMENT_STRATEGY" = "blue_green" ]; then
     log warn "⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)"
+    if command -v np_step_skip >/dev/null 2>&1; then
+        np_step_skip "ALB verification disabled for blue-green"
+    fi
     return 0
 fi
 
