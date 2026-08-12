@@ -95,6 +95,14 @@ log debug "📋 Namespace: $K8S_NAMESPACE"
 log debug "📋 Timeout: ${TIMEOUT}s (max $MAX_ITERATIONS iterations)"
 log debug ""
 
+# The rollout wait is its own SUB-STEP in the trace; heartbeats carry the live
+# replica counts. (Guarded: overrides may reuse this script without k8s/logging
+# loaded.)
+if command -v np_scope_step_begin >/dev/null 2>&1; then
+    np_scope_step_begin wait-deployment-active --title "Wait for deployment rollout ($K8S_DEPLOYMENT_NAME)"
+    np_scope_wait_heartbeat "deployment-active" 0 "$TIMEOUT" "starting"
+fi
+
 while true; do
     ((++iteration))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
@@ -104,6 +112,9 @@ while true; do
 
         source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 
+        if command -v np_scope_step_timeout >/dev/null 2>&1; then
+            np_scope_step_timeout "deployment '$K8S_DEPLOYMENT_NAME' not active after ${TIMEOUT}s"
+        fi
         exit 1
     fi
 
@@ -144,6 +155,9 @@ while true; do
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
         log debug ""
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
+        if command -v np_scope_step_end >/dev/null 2>&1; then
+            np_scope_step_end 0
+        fi
         break
     fi
 
@@ -151,7 +165,9 @@ while true; do
         elapsed_s=$(( iteration * 10 ))
         log info "⏳ Still waiting — Ready: $ready/$desired, Available: $current/$desired (attempt $iteration/$MAX_ITERATIONS, ${elapsed_s}s elapsed)"
         if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
-            np_scope_wait_heartbeat "deployment-active" "$elapsed_s" "$TIMEOUT" "ready-$ready-of-$desired"
+            np_scope_wait_heartbeat "deployment-active" "$elapsed_s" "$TIMEOUT" "progressing" \
+                "wait.desired=$desired" "wait.launched=$launched" \
+                "wait.ready=$ready" "wait.available=$current" "wait.updated=$updated"
         fi
     fi
 

@@ -11,6 +11,13 @@ elapsed=0
 log debug "🔍 Verifying HTTPRoute reconciliation..."
 log debug "📋 HTTPRoute: $HTTPROUTE_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
 
+# The reconciliation wait is its own SUB-STEP in the trace. (Guarded:
+# overrides may reuse this script without k8s/logging loaded.)
+if command -v np_scope_step_begin >/dev/null 2>&1; then
+    np_scope_step_begin verify-httproute --title "Verify HTTPRoute reconciliation ($HTTPROUTE_NAME)"
+    np_scope_wait_heartbeat "httproute-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
+fi
+
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     sleep $CHECK_INTERVAL
 
@@ -43,6 +50,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
 
     if [ "$accepted_status" == "True" ] && [ "$resolved_status" == "True" ]; then
         log info "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
+        if command -v np_scope_step_end >/dev/null 2>&1; then
+            np_scope_step_end 0
+        fi
         return 0
     fi
 
@@ -106,6 +116,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
 
     log debug "📝 HTTPRoute reconciling... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
     echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason))"'
+    if [ $((elapsed % 30)) -eq 0 ] && command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+        np_scope_wait_heartbeat "httproute-reconciliation" "$elapsed" "$MAX_WAIT_SECONDS" "reconciling"
+    fi
     elapsed=$((elapsed + CHECK_INTERVAL))
 done
 
@@ -120,4 +133,7 @@ echo "$httproute_json" | jq -r '.status.parents[0].conditions[] | "   - \(.type)
 log error "🔧 How to fix:"
 log error "   - Check Gateway controller logs"
 log error "   - Verify Gateway and Istio configuration"
+if command -v np_scope_step_timeout >/dev/null 2>&1; then
+    np_scope_step_timeout "HTTPRoute $HTTPROUTE_NAME not reconciled after ${MAX_WAIT_SECONDS}s"
+fi
 exit 1
