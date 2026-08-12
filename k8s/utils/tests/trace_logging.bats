@@ -243,3 +243,62 @@ hello" ]
 	[ "$status" -eq 0 ]
 	! echo "$output" | grep -q 'nothing open'
 }
+
+# --- lineage ----------------------------------------------------------------
+
+@test "produces records the edge and the pointer on the current step" {
+	run_logged 'np_scope_produces "dns-record:api.example.com" dns_record "api.example.com"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"edge.produces"' | grep -q '"id":"dns-record:api.example.com"'
+	echo "$output" | grep -q '"tracing.binding":{"kind":"pointer","name":"dns_record","uri":"api.example.com"}'
+	# foreign re-emit carries the io facet on the adopted step
+	echo "$output" | grep '"tracing.output"' | grep -q 'apply-manifests@0.0'
+}
+
+@test "consumes records the cross-flow image edge" {
+	run_logged 'np_scope_consumes "docker-image:registry.example.com/app:1.2" image "registry.example.com/app:1.2"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"edge.consumes"' | grep -q '"id":"docker-image:registry.example.com/app:1.2"'
+}
+
+@test "lineage inside an open sub-step attaches to the sub-step" {
+	run_logged '
+		np_scope_step_begin wait-alb-active
+		np_scope_consumes "load-balancer:arn:aws:elb:demo" load_balancer "arn:aws:elb:demo"
+		np_scope_step_end 0
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep '"edge.consumes"' | grep -q 'wait-alb-active@0.0'
+}
+
+@test "kubectl apply output becomes workload/service/ingress lineage" {
+	run_logged '
+		np_scope_k8s_applied "ns-42" "deployment.apps/d-1-2 created
+service/s-1-2 configured
+ingress.networking.k8s.io/i-1-2 created
+secret/sec-1 created"
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"id":"k8s-deployment:ns-42/d-1-2"'
+	echo "$output" | grep -q '"id":"k8s-service:ns-42/s-1-2"'
+	echo "$output" | grep -q '"id":"k8s-ingress:ns-42/i-1-2"'
+	# kinds outside the platform lineage model are not datasets
+	! echo "$output" | grep -q 'sec-1'
+}
+
+@test "affordance and progress land as their core facets" {
+	run_logged '
+		np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"7\"}"
+		np_scope_progress 3 10 instances
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"tracing.affordances":\[{"kind":"deploy-log","application_id":"7"}\]'
+	echo "$output" | grep -q '"tracing.progress":{"current":3,"target":10,"unit":"instances"}'
+}
+
+@test "lineage helpers are defined no-ops when untraced" {
+	unset NP_TRACE
+	run "$BASH" -c "source '$LOGGING'; np_scope_produces d:1 n u; np_scope_consumes d:2; np_scope_affordance '{\"kind\":\"x\"}'; np_scope_progress 1 2; np_scope_k8s_applied ns 'deployment.apps/x created'; echo rc=\$?"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"rc=0"* ]]
+}

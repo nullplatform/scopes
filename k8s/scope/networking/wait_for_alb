@@ -110,6 +110,12 @@ if [ "$state" != "active" ]; then
 	exit 1
 fi
 
+# The scope depends on this ALB: record the lineage under its ARN — the same
+# address the platform's own scopes name — before closing the wait sub-step.
+if [ -n "$alb_arn" ] && command -v np_scope_consumes >/dev/null 2>&1; then
+	np_scope_consumes "load-balancer:$alb_arn" load_balancer "$alb_arn"
+fi
+
 # The wait phase is over and the ALB is active — close its sub-step; the audit
 # tagging below is not part of the wait.
 if command -v np_scope_step_end >/dev/null 2>&1; then

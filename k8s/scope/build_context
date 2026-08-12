@@ -126,6 +126,9 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
       kubectl apply -f -
 
     log info "   ✅ Namespace '$K8S_NAMESPACE' created successfully"
+    if command -v np_scope_produces >/dev/null 2>&1; then
+      np_scope_produces "k8s-namespace:$K8S_NAMESPACE" namespace "$K8S_NAMESPACE"
+    fi
   else
     log error ""
     log error "💡 Possible causes:"
