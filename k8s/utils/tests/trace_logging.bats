@@ -98,8 +98,9 @@ run_logged() {
 	"
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q 'the real reason'
-	# exactly one error facet: the generic exit report stood down
-	[ "$(echo "$output" | grep -c 'tracing.error')" -eq 1 ]
+	# exactly one error facet ON THE STEP: the generic exit report stood down
+	# (the run-level mirror is a separate node and is asserted elsewhere)
+	[ "$(echo "$output" | grep 'apply-manifests@0.0"' | grep -c 'tracing.error')" -eq 1 ]
 }
 
 @test "wait heartbeat marks the step waiting with progress labels" {
@@ -347,7 +348,7 @@ secret/sec-1 created"
 	"
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"details":{"instances":{"healthy":1,"desired":3}}'
-	[ "$(echo "$output" | grep -c 'tracing.error')" -eq 1 ]
+	[ "$(echo "$output" | grep 'apply-manifests@0.0"' | grep -c 'tracing.error')" -eq 1 ]
 }
 
 @test "narrative helpers are defined no-ops when untraced" {
@@ -355,4 +356,34 @@ secret/sec-1 created"
 	run "$BASH" -c "source '$LOGGING'; np_scope_output x '{}'; np_scope_input x '{}'; np_scope_explain --title t; np_scope_error m; np_scope_labels a=b; echo rc=\$?"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=0"* ]]
+}
+
+@test "a fatal exit mirrors the real reason onto the RUN, one level up" {
+	run "$BASH" -c "
+		( source '$LOGGING'; log error 'the real reason'; exit 3 ) || true
+		source '$LOGGING'; trap - EXIT ERR
+		for f in \"\$NP_TRACE_DIR\"/spool/*.json \"\$NP_TRACE_DIR\"/failed/*.json; do
+			[ -f \"\$f\" ] && cat \"\$f\" && echo
+		done
+		true
+	"
+	[ "$status" -eq 0 ]
+	# the step carries it...
+	echo "$output" | grep '"the real reason"' | grep -q 'scope-provision-42~apply-manifests@0.0"'
+	# ...and so does the run (the step path minus its last segment)
+	echo "$output" | grep '"the real reason"' | grep -q '"run_id":"scope-provision-42"'
+}
+
+@test "a run-level NP_TRACE (no step segment) mirrors nowhere extra" {
+	run "$BASH" -c "
+		export NP_TRACE='1|trace-9|scope-provision-42'
+		( source '$LOGGING'; log error 'root failure'; exit 3 ) || true
+		source '$LOGGING'; trap - EXIT ERR
+		for f in \"\$NP_TRACE_DIR\"/spool/*.json \"\$NP_TRACE_DIR\"/failed/*.json; do
+			[ -f \"\$f\" ] && cat \"\$f\" && echo
+		done
+		true
+	"
+	[ "$status" -eq 0 ]
+	[ "$(echo "$output" | grep -c '"root failure"')" -eq 1 ]
 }

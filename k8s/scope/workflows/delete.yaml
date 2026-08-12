@@ -1,9 +1,13 @@
 include:
   - "$SERVICE_PATH/values.yaml"
+trace:
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  job: k8s-scope-delete
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -13,6 +17,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
