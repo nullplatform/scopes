@@ -85,4 +85,24 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 1
 fi
 
+# When this apply IS the blue/green traffic switch (switch_traffic.yaml sets
+# TRACE_TRAFFIC_SWITCH on the step), report the switch the way the platform's
+# own scopes do: the request as input, what landed as output, the resulting
+# traffic split as the affordance a host renders, and the phase's convergence
+# toward 100%.
+if [[ "${TRACE_TRAFFIC_SWITCH:-false}" == "true" ]] && [[ -n "${CONTEXT:-}" ]] \
+  && command -v np_scope_explain >/dev/null 2>&1; then
+  TRAFFIC_TO=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 100')
+  TRAFFIC_FROM=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.switched_traffic // 0')
+  if [[ "$TRAFFIC_TO" =~ ^[0-9]+$ ]] && [[ "$TRAFFIC_FROM" =~ ^[0-9]+$ ]]; then
+    np_scope_labels "deployment.id=${DEPLOYMENT_ID:-}" "scope.id=${SCOPE_ID:-}" "action=traffic-switch"
+    np_scope_explain --title "Switch traffic for deployment ${DEPLOYMENT_ID:-}" \
+      --what "Switching blue/green traffic for deployment ${DEPLOYMENT_ID:-} from ${TRAFFIC_FROM}% to ${TRAFFIC_TO}%"
+    np_scope_affordance "{\"kind\":\"traffic-switch\",\"deployment_id\":\"${DEPLOYMENT_ID:-}\",\"current_traffic\":$TRAFFIC_TO,\"new_traffic\":$TRAFFIC_TO,\"old_traffic\":$((100 - TRAFFIC_TO)),\"target_traffic\":100}"
+    np_scope_input traffic "{\"from\":$TRAFFIC_FROM,\"desired\":$TRAFFIC_TO}"
+    np_scope_output traffic "{\"switched\":$TRAFFIC_TO}"
+    np_scope_progress "$TRAFFIC_TO" 100 percent
+  fi
+fi
+
 source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"

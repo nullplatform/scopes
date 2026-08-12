@@ -110,6 +110,8 @@ if [ "$state" != "active" ]; then
 	log error "   • Check controller logs: kubectl -n kube-system logs deploy/aws-load-balancer-controller"
 	log error "   • Verify ALB quota: aws service-quotas get-service-quota --service-code elasticloadbalancing --quota-code L-53DA6B97"
 	if command -v np_scope_step_timeout >/dev/null 2>&1; then
+		np_scope_explain --title "Wait for ingress" --severity error \
+			--what "Gave up waiting for ALB '$ALB_NAME' to become active (last state: ${state:-pending})"
 		np_scope_step_timeout "ALB '$ALB_NAME' not active after ${TIMEOUT_SECONDS}s (last state: ${state:-pending})"
 	fi
 	exit 1
