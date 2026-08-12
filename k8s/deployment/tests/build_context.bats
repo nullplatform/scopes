@@ -947,6 +947,51 @@ set_additional_ports() {
   assert_equal "$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports')" "[]"
 }
 
+# -----------------------------------------------------------------------------
+# Additional port ceiling: port + 10000 has to stay a valid TCP port.
+# -----------------------------------------------------------------------------
+
+@test "additional port ceiling: rejects a port whose sidecar would exceed 65535" {
+  setup_full_build_context
+  set_additional_ports '[{"port":60000,"type":"HTTP"}]'
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ Additional port 60000 is too high: its traffic-manager sidecar would need port 70000
+
+💡 Possible causes:
+   - Every additional port reserves both <port> (application) and <port>+10000 (its sidecar)
+   - Ports above 55535 push the sidecar past the maximum TCP port 65535
+
+🔧 How to fix:
+   • Choose an additional port of 55535 or lower
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "additional port ceiling: applies to GRPC entries too" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9090,"type":"HTTP"},{"port":60001,"type":"GRPC"}]'
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Additional port 60001 is too high: its traffic-manager sidecar would need port 70001"
+}
+
+@test "additional port ceiling: accepts the boundary value 55535" {
+  setup_full_build_context
+  set_additional_ports '[{"port":55535,"type":"GRPC"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].traffic_manager_port')" "65535"
+}
+
 # =============================================================================
 # Capability limits normalization
 # These tests source the real deployment/build_context and assert on the

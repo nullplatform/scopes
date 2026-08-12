@@ -189,9 +189,11 @@ spec:
             runAsUser: 0
           image: {{ $.traffic_image }}
           ports:
-            - containerPort: {{ .port }}
+            - containerPort: {{ .traffic_manager_port }}
               protocol: TCP
           env:
+            - name: UPSTREAM_PORT
+              value: '{{ .port }}'
             - name: HEALTH_CHECK_TYPE
               value: grpc
             - name: GRACE_PERIOD
@@ -199,7 +201,7 @@ spec:
             - name: LISTENER_PROTOCOL
               value: grpc
             - name: LISTENER_PORT
-              value: '{{ .port }}'
+              value: '{{ .traffic_manager_port }}'
           resources:
             limits:
               cpu: {{ $.container_cpu_in_millicores }}m
@@ -208,7 +210,7 @@ spec:
               cpu: 31m
           livenessProbe:
             grpc:
-              port: {{ .port }}
+              port: {{ .traffic_manager_port }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -216,7 +218,7 @@ spec:
             failureThreshold: 9
           readinessProbe:
             grpc:
-              port: {{ .port }}
+              port: {{ .traffic_manager_port }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -224,7 +226,7 @@ spec:
             failureThreshold: 3
           startupProbe:
             grpc:
-              port: {{ .port }}
+              port: {{ .traffic_manager_port }}
             timeoutSeconds: 5
             periodSeconds: 10
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
@@ -316,10 +318,8 @@ spec:
               protocol: TCP
             {{ if .scope.capabilities.additional_ports }}
             {{ range .scope.capabilities.additional_ports }}
-            {{ if eq .type "HTTP" }}
             - containerPort: {{ .port }}
               protocol: TCP
-            {{ end }}
             {{ end }}
             {{ end }}
           resources:
