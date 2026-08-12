@@ -92,15 +92,36 @@ _np_scopes_node() {
 }
 
 # Record an observed failure on the current step (or open sub-step).
+#
+# A failure is usually a BURST of log errors: the cause first, then the
+# "possible causes" and "how to fix" hint lines. Facets fold last-writer-wins,
+# so naively recording each line would leave the LAST HINT as the step's
+# error and bury the cause. Instead: the burst's FIRST message is the error,
+# and every later line of the same step accumulates into the error's
+# structured details.hints — the cause leads, the guidance travels with it.
 _np_scopes_trace_error() {
   local _lt_node
   _lt_node=$(_np_scopes_node) || return 0
+  if [ "${_NP_SCOPES_ERRED_ON:-}" = "${NP_TRACE:-}" ] && [ -n "${_NP_SCOPES_ERR_MESSAGE:-}" ]; then
+    # Same step, later line: a hint. Re-emit the whole error with the
+    # original cause as the message and the growing hint list as evidence.
+    if [ -n "${_NP_SCOPES_ERR_HINTS:-}" ]; then
+      _NP_SCOPES_ERR_HINTS="$_NP_SCOPES_ERR_HINTS,$(np__json_str "$1")"
+    else
+      _NP_SCOPES_ERR_HINTS="$(np__json_str "$1")"
+    fi
+    np_trace_error "$_lt_node" --message "$_NP_SCOPES_ERR_MESSAGE" \
+      --details "{\"hints\":[$_NP_SCOPES_ERR_HINTS]}"
+    return 0
+  fi
   np_trace_error "$_lt_node" --message "$1" ${2:+--code "$2"}
   # Remember which step already carries a real message (so the exit trap does
   # not shadow it with a generic one) AND the message itself — on a fatal
   # exit, the run-level mirror repeats the real diagnosis, not the mechanism.
   _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
   _NP_SCOPES_LAST_REASON="$1"
+  _NP_SCOPES_ERR_MESSAGE="$1"
+  _NP_SCOPES_ERR_HINTS=""
   return 0
 }
 

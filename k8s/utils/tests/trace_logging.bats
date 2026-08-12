@@ -387,3 +387,28 @@ secret/sec-1 created"
 	[ "$status" -eq 0 ]
 	[ "$(echo "$output" | grep -c '"root failure"')" -eq 1 ]
 }
+
+@test "a hint burst never shadows the cause: first message wins, hints ride as evidence" {
+	run_logged '
+		log error "❌ HostedZone not found (AccessDenied)"
+		log error "💡 Possible causes:"
+		log error "   • The role lacks route53:ListHostedZones"
+	'
+	[ "$status" -eq 0 ]
+	# every emission of the burst carries the CAUSE as the message
+	! echo "$output" | grep '"tracing.error"' | grep -q '"message":"💡'
+	echo "$output" | grep -q '"message":"❌ HostedZone not found (AccessDenied)","details":{"hints":\["💡 Possible causes:","   • The role lacks route53:ListHostedZones"\]}'
+}
+
+@test "a new step starts a new error burst" {
+	run_logged '
+		log error "first cause"
+		export NP_TRACE="1|trace-9|scope-provision-42~create-dns@0.0"
+		log error "second cause"
+		log error "a hint for the second"
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep 'create-dns@0.0' | grep '"tracing.error"' | grep -q '"message":"second cause"'
+	echo "$output" | grep -q '"hints":\["a hint for the second"\]'
+	! echo "$output" | grep 'create-dns@0.0' | grep -q '"message":"first cause"'
+}
