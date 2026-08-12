@@ -5,6 +5,7 @@ steps:
   - name: load_functions
     type: script
     file: "$SERVICE_PATH/diagnose/utils/diagnose_utils"
+    trace: false
     output:
       - name: update_check_result
         type: function
