@@ -38,4 +38,400 @@ log() {
       echo "$message"
     fi
   fi
+
+  # Every `log error`, anywhere in any script, also lands on the TRACE — as a
+  # tracing.error facet on the workflow step it happened in. This is what makes
+  # a failed custom scope read like a failed native one: not just "step exited
+  # 1", but the actual message. A no-op unless the platform launched this
+  # workflow traced (see the tracing section below).
+  if [ "$msg_num" -ge 3 ]; then
+    _np_scopes_trace_error "$message" || true
+  fi
 }
+
+# =============================================================================
+# Tracing — best-effort, structural
+#
+# When the platform launches a workflow, NP_TRACE carries the trace context of
+# the step each fragment runs inside (the np CLI re-points it per step). With
+# the vendored shell SDK sourced:
+#
+#   • every `log error` lands as a tracing.error facet ON that step
+#   • an uncaught command failure surfaces the failing command itself
+#   • long waits report live progress (np_scope_wait_heartbeat)
+#   • a phase inside a script can be its own SUB-STEP in the trace
+#     (np_scope_step_begin / np_scope_step_end), keyed and — for things like
+#     progressive traffic switches — iterated, exactly like native scopes
+#
+# All of it is best-effort: no SDK file, no NP_API_KEY, or no NP_TRACE means
+# plain logging, byte-identical to before. A down tracing API never blocks the
+# workflow: every emit is a local file write, and flushes are hard-bounded.
+# =============================================================================
+
+# Resolve the node observations attach to: the open sub-step when one belongs
+# to the CURRENT platform step, else a fresh adoption of NP_TRACE. Adoption is
+# per-call on purpose: NP_TRACE changes as the CLI moves between steps, so an
+# observation must attach to the step current at the moment it happened — and
+# a sub-step opened under a PREVIOUS platform step must never swallow it.
+_np_scopes_node() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 1
+  [ -n "${NP_TRACE:-}" ] || return 1
+  if [ -n "${_NP_SCOPES_SUBSTEP:-}" ]; then
+    if [ "${_NP_SCOPES_SUBSTEP_UNDER:-}" = "$NP_TRACE" ]; then
+      printf '%s' "$_NP_SCOPES_SUBSTEP"
+      return 0
+    fi
+    # The platform moved on with a sub-step still open — stale; forget it.
+    _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
+  fi
+  local _nd_node
+  _nd_node=$(np_trace_adopt 2>/dev/null) || return 1
+  [ -n "$_nd_node" ] || return 1
+  printf '%s' "$_nd_node"
+  return 0
+}
+
+# Record an observed failure on the current step (or open sub-step).
+#
+# A failure is usually a BURST of log errors: the cause first, then the
+# "possible causes" and "how to fix" hint lines. Facets fold last-writer-wins,
+# so naively recording each line would leave the LAST HINT as the step's
+# error and bury the cause. Instead: the burst's FIRST message is the error,
+# and every later line of the same step accumulates into the error's
+# structured details.hints — the cause leads, the guidance travels with it.
+_np_scopes_trace_error() {
+  local _lt_node _lt_message
+  _lt_node=$(_np_scopes_node) || return 0
+  # The console line arrives verbatim; the trace carries the CAUSE, so strip
+  # the console decoration (leading indentation and the ❌ marker) first.
+  _lt_message="$1"
+  _lt_message="${_lt_message#"${_lt_message%%[![:space:]]*}"}"
+  case "$_lt_message" in "❌ "*) _lt_message="${_lt_message#❌ }" ;; esac
+  if [ "${_NP_SCOPES_ERRED_ON:-}" = "${NP_TRACE:-}" ] && [ -n "${_NP_SCOPES_ERR_MESSAGE:-}" ]; then
+    # Same step, later line: a hint. Re-emit the whole error with the
+    # original cause as the message and the growing hint list as evidence.
+    if [ -n "${_NP_SCOPES_ERR_HINTS:-}" ]; then
+      _NP_SCOPES_ERR_HINTS="$_NP_SCOPES_ERR_HINTS,$(np__json_str "$_lt_message")"
+    else
+      _NP_SCOPES_ERR_HINTS="$(np__json_str "$_lt_message")"
+    fi
+    np_trace_error "$_lt_node" --message "$_NP_SCOPES_ERR_MESSAGE" \
+      --details "{\"hints\":[$_NP_SCOPES_ERR_HINTS]}"
+    return 0
+  fi
+  np_trace_error "$_lt_node" --message "$_lt_message" ${2:+--code "$2"}
+  # State the cause to the workflow engine too (np_step_error is published by
+  # the engine's script preamble): if this step later exits nonzero, the
+  # engine's own failure report carries THIS message instead of a bare exit
+  # status — one diagnosis on the wire, no matter which side reports last.
+  # Only REAL diagnoses state: the exit trap's synthetic mechanism message
+  # must not outrank the engine's own evidence (the shell's stderr words).
+  if [ -z "${_NP_SCOPES_TRAP_REPORT:-}" ] && command -v np_step_error >/dev/null 2>&1; then
+    np_step_error "$_lt_message"
+  fi
+  # Remember which step already carries a real message (so the exit trap does
+  # not shadow it with a generic one) AND the message itself — on a fatal
+  # exit, the run-level mirror repeats the real diagnosis, not the mechanism.
+  _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  _NP_SCOPES_LAST_REASON="$_lt_message"
+  _NP_SCOPES_ERR_MESSAGE="$_lt_message"
+  _NP_SCOPES_ERR_HINTS=""
+  return 0
+}
+
+# np_scope_step_begin <key> [--iteration N] [--attempt N] [--title <text>]
+#
+# Open a keyed sub-step under the step the platform is running — a phase that
+# deserves its own line in the trace (a long wait, one traffic increment). The
+# key names WHAT the phase is (`[A-Za-z0-9_.-]+`); --iteration distinguishes
+# repeats of the same phase (traffic at 10, then 50, then 100). One sub-step
+# open at a time: while open, `log error` and heartbeats attach to it, and
+# np_scope_step_end closes it. Always defined; a no-op when untraced.
+np_scope_step_begin() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 0
+  [ -n "${NP_TRACE:-}" ] || return 0
+  local _sb_key="${1:-}" _sb_title="" _sb_parent _sb_h
+  shift || true
+  local _sb_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) _sb_title="${2:-}"; shift 2 ;;
+      *) _sb_args+=("$1"); shift ;;
+    esac
+  done
+  # A still-open sub-step would silently become the parent — close it instead:
+  # phases at this level are sequential, and a dangling open one is a bug here,
+  # not a hierarchy.
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] && np_scope_step_end 0
+  _sb_parent=$(np_trace_adopt 2>/dev/null) || return 0
+  [ -n "$_sb_parent" ] || return 0
+  _sb_h=$(np_trace_step "$_sb_parent" "$_sb_key" ${_sb_args[@]+"${_sb_args[@]}"})
+  [ -n "$_sb_h" ] || return 0
+  [ -n "$_sb_title" ] && np_trace_explain "$_sb_h" --title "$_sb_title"
+  _NP_SCOPES_SUBSTEP="$_sb_h"
+  _NP_SCOPES_SUBSTEP_UNDER="$NP_TRACE"
+  return 0
+}
+
+# np_scope_step_end [rc] [message]
+#
+# Close the open sub-step: completed on rc 0, failed (with the message) on
+# anything else. Flushed immediately so the phase transition is visible live.
+np_scope_step_end() {
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] || return 0
+  local _se_h="$_NP_SCOPES_SUBSTEP" _se_rc="${1:-0}"
+  _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
+  if [ "$_se_rc" -eq 0 ] 2>/dev/null; then
+    np_trace_complete "$_se_h"
+  else
+    # Only fabricate a generic message when the step does not already carry a
+    # real one (from `log error` or the exit trap) — never shadow the actual
+    # failure with "phase exited with status 1".
+    if [ -n "${2:-}" ]; then
+      np_trace_fail "$_se_h" "$2"
+    elif [ "${_NP_SCOPES_ERRED_ON:-}" != "${NP_TRACE:-}" ]; then
+      np_trace_fail "$_se_h" "phase exited with status $_se_rc"
+    else
+      np_trace_fail "$_se_h"
+    fi
+    _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  fi
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# np_scope_step_timeout [message]
+#
+# Close the open sub-step as timed_out — the truthful terminal state for a
+# wait that hit its deadline (distinct from failed: nothing broke, time ran
+# out). The message, when given, is recorded as the step's error detail.
+np_scope_step_timeout() {
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] || return 0
+  local _st_h="$_NP_SCOPES_SUBSTEP"
+  _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
+  [ -n "${1:-}" ] && np_trace_error "$_st_h" --message "$1"
+  np_trace_timeout "$_st_h"
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# np_scope_wait_heartbeat <what> <elapsed_s> <timeout_s> [state] [k=v ...]
+#
+# Mark the current step (or open sub-step) `waiting` and record progress,
+# flushed immediately so the wait is visible LIVE, not after the workflow
+# ends. Extra k=v pairs carry structured progress — replica counts, ALB state
+# — as labels on the node. The flush is bounded to 2s per beat: with the API
+# down, a 30s-cadence wait loses at most ~6% of its poll budget — the deadline
+# is wall-clock, so the timeout is never extended. Always defined; a no-op
+# when the workflow is untraced.
+np_scope_wait_heartbeat() {
+  local _hb_node
+  _hb_node=$(_np_scopes_node) || return 0
+  local _hb_what="${1:-}" _hb_elapsed="${2:-0}" _hb_timeout="${3:-0}" _hb_state="${4:-}"
+  shift 4 2>/dev/null || shift $#
+  np_trace_labels "$_hb_node" \
+    "wait.what=$_hb_what" "wait.elapsed_s=$_hb_elapsed" "wait.timeout_s=$_hb_timeout" \
+    ${_hb_state:+"wait.state=$_hb_state"} \
+    ${1+"$@"}
+  np_trace_waiting "$_hb_node"
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# np_scope_produces <dataset-id> [<name> <uri>]
+# np_scope_consumes <dataset-id> [<name> <uri>]
+#
+# Data lineage: declare what the current step (or open sub-step) WROTE or
+# READ, by CANONICAL dataset id — the exact grammar the scope-workflow-manager
+# uses, so a custom scope's lineage joins the platform's by value:
+#
+#   k8s-namespace:<ns>            k8s-deployment:<ns>/<name>
+#   k8s-service:<ns>/<name>       k8s-ingress:<ns>/<name>
+#   dns-record:<fqdn>             load-balancer:<arn>
+#   docker-image:<url>            deployment-log:<app>/<scope>/<deploy>
+#
+# Always defined; a no-op when the workflow is untraced.
+np_scope_produces() {
+  command -v np_trace_produces >/dev/null 2>&1 || return 0
+  local _pd_node
+  _pd_node=$(_np_scopes_node) || return 0
+  np_trace_produces "$_pd_node" "$1" ${2:+--name "$2"} ${3:+--uri "$3"}
+  return 0
+}
+
+np_scope_consumes() {
+  command -v np_trace_consumes >/dev/null 2>&1 || return 0
+  local _cd_node
+  _cd_node=$(_np_scopes_node) || return 0
+  np_trace_consumes "$_cd_node" "$1" ${2:+--name "$2"} ${3:+--uri "$3"}
+  return 0
+}
+
+# np_scope_affordance <json-object-or-array>
+#
+# What the current step OFFERS a human to do — the UI renders it as a control
+# (e.g. '{"kind":"deploy-log","application_id":"7","scope_id":"42",...}').
+np_scope_affordance() {
+  command -v np_trace_affordances >/dev/null 2>&1 || return 0
+  local _ad_node
+  _ad_node=$(_np_scopes_node) || return 0
+  np_trace_affordances "$_ad_node" "$1"
+  return 0
+}
+
+# np_scope_progress <current> <target> [unit]
+#
+# A converging phase's advance toward its target (instances 3 of 10).
+np_scope_progress() {
+  command -v np_trace_progress >/dev/null 2>&1 || return 0
+  local _pg_node
+  _pg_node=$(_np_scopes_node) || return 0
+  np_trace_progress "$_pg_node" "$1" "$2" "${3:-}"
+  return 0
+}
+
+# np_scope_output <name> <json> / np_scope_input <name> <json>
+#
+# Record what the current step (or open sub-step) produced or consumed as an
+# inline value carried in the event — the counted evidence a host renders
+# next to the narrative ('instances' with healthy/desired, 'traffic' with the
+# switched level).
+np_scope_output() {
+  command -v np_trace_output >/dev/null 2>&1 || return 0
+  local _ot_node
+  _ot_node=$(_np_scopes_node) || return 0
+  np_trace_output "$_ot_node" "$1" "$2"
+  return 0
+}
+
+np_scope_input() {
+  command -v np_trace_input >/dev/null 2>&1 || return 0
+  local _in_node
+  _in_node=$(_np_scopes_node) || return 0
+  np_trace_input "$_in_node" "$1" "$2"
+  return 0
+}
+
+# np_scope_explain --title T [--what W] [--severity ok|warn|error] ...
+#
+# The plain-language narrative on the current step (or open sub-step) — what
+# the phase is doing, in words, with the severity an operator should read it
+# at. Re-emitted per poll on waits so the latest state wins.
+np_scope_explain() {
+  command -v np_trace_explain >/dev/null 2>&1 || return 0
+  local _ex_node
+  _ex_node=$(_np_scopes_node) || return 0
+  np_trace_explain "$_ex_node" "$@"
+  return 0
+}
+
+# np_scope_error <message> [<json-details>]
+#
+# An observed failure with its structured evidence.
+np_scope_error() {
+  command -v np_trace_error >/dev/null 2>&1 || return 0
+  local _sr_node
+  _sr_node=$(_np_scopes_node) || return 0
+  np_trace_error "$_sr_node" --message "$1" ${2:+--details "$2"}
+  _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  return 0
+}
+
+# np_scope_labels <k=v ...>
+np_scope_labels() {
+  command -v np_trace_labels >/dev/null 2>&1 || return 0
+  local _lb_node
+  _lb_node=$(_np_scopes_node) || return 0
+  np_trace_labels "$_lb_node" "$@"
+  return 0
+}
+
+# np_scope_k8s_applied <namespace> <kubectl-apply-output>
+#
+# Turn `kubectl apply` output lines (`deployment.apps/name created`) into
+# lineage on the current step, for the resource kinds the platform's lineage
+# model knows. One chokepoint (apply_templates) covers every workflow.
+np_scope_k8s_applied() {
+  command -v np_trace_produces >/dev/null 2>&1 || return 0
+  local _ka_ns="$1" _ka_line _ka_kind _ka_name
+  [ -n "$_ka_ns" ] || return 0
+  while IFS= read -r _ka_line; do
+    [ -n "$_ka_line" ] || continue
+    _ka_kind="${_ka_line%%/*}"
+    _ka_name="${_ka_line#*/}"
+    _ka_name="${_ka_name%% *}"
+    case "$_ka_kind" in
+      deployment.apps|deployment)
+        np_scope_produces "k8s-deployment:$_ka_ns/$_ka_name" workload "$_ka_name" ;;
+      service)
+        np_scope_produces "k8s-service:$_ka_ns/$_ka_name" service "$_ka_name" ;;
+      ingress.networking.k8s.io|ingress)
+        np_scope_produces "k8s-ingress:$_ka_ns/$_ka_name" ingress "$_ka_name" ;;
+    esac
+  done <<< "$2"
+  return 0
+}
+
+# A silent failure (no `log error` on the way down) must still be clear: the
+# ERR trap remembers the last failing top-level command, and the EXIT trap
+# reports it against the step that was current when the shell died.
+_np_scopes_on_err() {
+  _NP_SCOPES_LAST_ERR="$BASH_COMMAND (exit ${1:-1})"
+}
+
+# On a fatal exit the RUN's terminal deserves the real reason too: the step
+# carries it already; this mirrors it one level up, so list views (which lead
+# with the run) name the cause without drilling into steps. The run id is the
+# step path minus its last segment — an observed fact on an adopted node,
+# like every other enrichment here.
+_np_scopes_error_on_run() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 0
+  [ -n "${NP_TRACE:-}" ] || return 0
+  local _ru_rest="${NP_TRACE#*|}"
+  local _ru_version="${NP_TRACE%%|*}" _ru_trace="${_ru_rest%%|*}" _ru_run="${_ru_rest#*|}"
+  case "$_ru_run" in
+    *~*) _ru_run="${_ru_run%~*}" ;;
+    *) return 0 ;;
+  esac
+  local _ru_node
+  _ru_node=$(np_trace_adopt "${_ru_version}|${_ru_trace}|${_ru_run}" 2>/dev/null) || return 0
+  [ -n "$_ru_node" ] || return 0
+  np_trace_error "$_ru_node" --message "$1"
+  return 0
+}
+
+_np_scopes_on_exit() {
+  local _ex_rc="${1:-0}"
+  local _ex_reason="${_NP_SCOPES_LAST_REASON:-${_NP_SCOPES_LAST_ERR:-workflow shell exited with status $_ex_rc}}"
+  if [ "$_ex_rc" -ne 0 ] && [ "${_NP_SCOPES_ERRED_ON:-}" != "${NP_TRACE:-}" ]; then
+    _NP_SCOPES_TRAP_REPORT=1
+    _np_scopes_trace_error "$_ex_reason" || true
+    _NP_SCOPES_TRAP_REPORT=""
+  fi
+  if [ "$_ex_rc" -ne 0 ]; then
+    _np_scopes_error_on_run "$_ex_reason" || true
+  fi
+  # A sub-step still open when the shell dies inherits the shell's outcome —
+  # closed AFTER the error report above so the failure detail lands on it.
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] && np_scope_step_end "$_ex_rc" || true
+  np_trace_flush
+}
+
+_NP_SCOPES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The SDK ships as the catalog-tracing-sh submodule; a repo copy that lost the
+# submodule (archive download, docker build context) may carry the single file
+# vendored at the root instead. Neither present -> plain logging, untraced.
+_NP_SCOPES_SDK="$_NP_SCOPES_ROOT/vendor/catalog-tracing-sh/nptrace.sh"
+[ -f "$_NP_SCOPES_SDK" ] || _NP_SCOPES_SDK="$_NP_SCOPES_ROOT/nptrace.sh"
+if [ -z "${NP_TRACE_LOADED:-}" ] \
+  && [ -f "$_NP_SCOPES_SDK" ] \
+  && [ -n "${NP_API_KEY:-}" ] \
+  && [ -n "${NP_TRACE:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$_NP_SCOPES_SDK"
+  # --no-trap: the exit flush is ours, so the uncaught-failure report and the
+  # flush share ONE trap in a defined order.
+  np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" --no-trap
+  trap '_np_scopes_on_err $?' ERR
+  trap '_np_scopes_on_exit $?' EXIT
+fi

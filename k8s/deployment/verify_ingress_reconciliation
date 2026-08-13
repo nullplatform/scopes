@@ -18,6 +18,9 @@ DEPLOYMENT_STRATEGY=$(echo "$CONTEXT" | jq -r ".deployment.strategy")
 
 if [ "$ALB_RECONCILIATION_ENABLED" = "false" ] && [ "$DEPLOYMENT_STRATEGY" = "blue_green" ]; then
     log warn "⚠️ Skipping ALB verification (ALB access needed for blue-green traffic validation)"
+    if command -v np_step_skip >/dev/null 2>&1; then
+        np_step_skip "ALB verification disabled for blue-green"
+    fi
     return 0
 fi
 
@@ -247,10 +250,20 @@ validate_alb_config() {
     fi
 }
 
+# The reconciliation wait is its own SUB-STEP in the trace. (Guarded:
+# overrides may reuse this script without k8s/logging loaded.)
+if command -v np_scope_step_begin >/dev/null 2>&1; then
+    np_scope_step_begin verify-ingress --title "Verify ingress reconciliation ($INGRESS_NAME)"
+    np_scope_wait_heartbeat "ingress-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
+fi
+
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     if [ "$ALB_RECONCILIATION_ENABLED" = "true" ]; then
         if validate_alb_config; then
             log info "✅ ALB configuration validated successfully"
+            if command -v np_scope_step_end >/dev/null 2>&1; then
+                np_scope_step_end 0
+            fi
             return 0
         fi
         log debug "📝 ALB validation incomplete, checking Kubernetes events..."
@@ -281,6 +294,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
                 log debug "📝 Ingress reported as reconciled, but ALB validation has not passed yet"
             else
                 log info "✅ Ingress successfully reconciled"
+                if command -v np_scope_step_end >/dev/null 2>&1; then
+                    np_scope_step_end 0
+                fi
                 return 0
             fi
         fi
@@ -311,6 +327,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     fi
 
     log debug "📝 Waiting for ALB reconciliation... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
+    if [ $((elapsed % 30)) -eq 0 ] && command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+        np_scope_wait_heartbeat "ingress-reconciliation" "$elapsed" "$MAX_WAIT_SECONDS" "reconciling"
+    fi
     sleep $CHECK_INTERVAL
     elapsed=$((elapsed + CHECK_INTERVAL))
 done
@@ -329,4 +348,7 @@ events_json=$(kubectl get events -n "$K8S_NAMESPACE" \
     -o json)
 echo "$events_json" | jq -r '.items | sort_by(.lastTimestamp) | .[] | "  [\(.type)] \(.reason): \(.message)"' | tail -10
 
+if command -v np_scope_step_timeout >/dev/null 2>&1; then
+    np_scope_step_timeout "ingress $INGRESS_NAME not reconciled after ${MAX_WAIT_SECONDS}s"
+fi
 exit 1

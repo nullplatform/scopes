@@ -2,10 +2,20 @@ include:
   - "$SERVICE_PATH/values.yaml"
 configuration:
   INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
+# Trace identities speak the platform's deploy step vocabulary (the actual
+# create-* steps are emitted per applied manifest by apply_templates, under
+# the apply step). Step NAMES never change — overrides anchor on them.
+trace:
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  job: k8s-deployment-initial
+  groups:
+    - {key: setting-up, title: Setting up}
+    - {key: waiting-instances, title: Waiting for instances to be healthy}
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -15,6 +25,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
@@ -25,6 +36,7 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
+    trace: false
     output:
       - name: CONTEXT
         type: environment
@@ -41,9 +53,13 @@ steps:
   - name: validate alb target group capacity
     type: script
     file: "$SERVICE_PATH/deployment/validate_alb_target_group_capacity"
+    trace:
+      group: setting-up
+      flavors: [route53]
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
+    trace: false
     configuration:
       TEMPLATE: "$INGRESS_TEMPLATE"
     output:
@@ -53,6 +69,7 @@ steps:
   - name: create deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"
+    trace: false
     output:
       - name: DEPLOYMENT_PATH
         type: file
@@ -69,6 +86,9 @@ steps:
   - name: apply
     type: script
     file: "$SERVICE_PATH/apply_templates"
+    trace:
+      title: Apply manifests
+      group: setting-up
     configuration:
       ACTION: apply
       DRY_RUN: false
@@ -79,17 +99,27 @@ steps:
         - name: notify_active_domains
           type: script
           file: "$SERVICE_PATH/deployment/notify_active_domains"
+          trace: false
         - name: verify_networking_reconciliation
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+          trace:
+            group: setting-up
+            flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: false
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
+          trace:
+            flavors: [route53]
         - name: wait deployment active
           type: script
           file: "$SERVICE_PATH/deployment/wait_deployment_active"
+          trace:
+            key: wait-for-instances
+            title: Instance health check
+            group: waiting-instances
           configuration:
             TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
 
