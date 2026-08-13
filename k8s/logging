@@ -120,6 +120,15 @@ _np_scopes_trace_error() {
     return 0
   fi
   np_trace_error "$_lt_node" --message "$_lt_message" ${2:+--code "$2"}
+  # State the cause to the workflow engine too (np_step_error is published by
+  # the engine's script preamble): if this step later exits nonzero, the
+  # engine's own failure report carries THIS message instead of a bare exit
+  # status — one diagnosis on the wire, no matter which side reports last.
+  # Only REAL diagnoses state: the exit trap's synthetic mechanism message
+  # must not outrank the engine's own evidence (the shell's stderr words).
+  if [ -z "${_NP_SCOPES_TRAP_REPORT:-}" ] && command -v np_step_error >/dev/null 2>&1; then
+    np_step_error "$_lt_message"
+  fi
   # Remember which step already carries a real message (so the exit trap does
   # not shadow it with a generic one) AND the message itself — on a fatal
   # exit, the run-level mirror repeats the real diagnosis, not the mechanism.
@@ -395,7 +404,9 @@ _np_scopes_on_exit() {
   local _ex_rc="${1:-0}"
   local _ex_reason="${_NP_SCOPES_LAST_REASON:-${_NP_SCOPES_LAST_ERR:-workflow shell exited with status $_ex_rc}}"
   if [ "$_ex_rc" -ne 0 ] && [ "${_NP_SCOPES_ERRED_ON:-}" != "${NP_TRACE:-}" ]; then
+    _NP_SCOPES_TRAP_REPORT=1
     _np_scopes_trace_error "$_ex_reason" || true
+    _NP_SCOPES_TRAP_REPORT=""
   fi
   if [ "$_ex_rc" -ne 0 ]; then
     _np_scopes_error_on_run "$_ex_reason" || true
