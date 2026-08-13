@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Remove unused cloudwatch annotations from deployment objects
 
 ## [1.15.0] - 2026-08-10
 - Fix: **finalize** and **rollback** on blue/green k8s scopes now wait until the load balancer sends all traffic to the surviving deployment before deleting the other one, preventing the 5xx window that happened when it was deleted mid-switch (these actions may take slightly longer as a result)
