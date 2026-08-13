@@ -407,12 +407,17 @@ _np_scopes_on_exit() {
 }
 
 _NP_SCOPES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The SDK ships as the catalog-tracing-sh submodule; a repo copy that lost the
+# submodule (archive download, docker build context) may carry the single file
+# vendored at the root instead. Neither present -> plain logging, untraced.
+_NP_SCOPES_SDK="$_NP_SCOPES_ROOT/vendor/catalog-tracing-sh/nptrace.sh"
+[ -f "$_NP_SCOPES_SDK" ] || _NP_SCOPES_SDK="$_NP_SCOPES_ROOT/nptrace.sh"
 if [ -z "${NP_TRACE_LOADED:-}" ] \
-  && [ -f "$_NP_SCOPES_ROOT/nptrace.sh" ] \
+  && [ -f "$_NP_SCOPES_SDK" ] \
   && [ -n "${NP_API_KEY:-}" ] \
   && [ -n "${NP_TRACE:-}" ]; then
   # shellcheck source=/dev/null
-  . "$_NP_SCOPES_ROOT/nptrace.sh"
+  . "$_NP_SCOPES_SDK"
   # --no-trap: the exit flush is ours, so the uncaught-failure report and the
   # flush share ONE trap in a defined order.
   np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" --no-trap
