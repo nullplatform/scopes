@@ -19,7 +19,7 @@ ROLE_ARN=$(aws iam get-role --role-name "$SERVICE_ACCOUNT_NAME" --query 'Role.Ar
     return 0
   fi
 
-  log error "   ❌ Failed to find IAM role '$SERVICE_ACCOUNT_NAME'"
+  log error "   ❌ Failed to find IAM role '$SERVICE_ACCOUNT_NAME'${ROLE_ARN:+: $ROLE_ARN}"
   log error ""
   log error "💡 Possible causes:"
   log error "   The IAM role may not exist or the agent lacks IAM permissions"

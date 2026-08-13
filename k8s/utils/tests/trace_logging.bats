@@ -395,9 +395,19 @@ secret/sec-1 created"
 		log error "   • The role lacks route53:ListHostedZones"
 	'
 	[ "$status" -eq 0 ]
-	# every emission of the burst carries the CAUSE as the message
+	# every emission of the burst carries the CAUSE as the message — with the
+	# console decoration (indentation, ❌ marker) stripped for the trace
 	! echo "$output" | grep '"tracing.error"' | grep -q '"message":"💡'
-	echo "$output" | grep -q '"message":"❌ HostedZone not found (AccessDenied)","details":{"hints":\["💡 Possible causes:","   • The role lacks route53:ListHostedZones"\]}'
+	echo "$output" | grep -q '"message":"HostedZone not found (AccessDenied)","details":{"hints":\["💡 Possible causes:","• The role lacks route53:ListHostedZones"\]}'
+}
+
+@test "trace errors carry the cause stripped of console decoration" {
+	run_logged '
+		log error "   ❌ Failed to find IAM role: An error occurred (NoSuchEntity)"
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"message":"Failed to find IAM role: An error occurred (NoSuchEntity)"'
+	! echo "$output" | grep '"tracing.error"' | grep -q '"message":"   ❌'
 }
 
 @test "a new step starts a new error burst" {
