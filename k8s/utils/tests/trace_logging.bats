@@ -401,6 +401,31 @@ secret/sec-1 created"
 	echo "$output" | grep -q '"message":"HostedZone not found (AccessDenied)","details":{"hints":\["💡 Possible causes:","• The role lacks route53:ListHostedZones"\]}'
 }
 
+@test "the first error cause is stated to the workflow engine via np_step_error" {
+	STATED="$BATS_TEST_TMPDIR/stated"
+	export STATED
+	run_logged '
+		np_step_error() { printf "%s\n" "$1" >>"$STATED"; }
+		log error "❌ HostedZone not found (AccessDenied)"
+		log error "💡 a hint, not a cause"
+	'
+	[ "$status" -eq 0 ]
+	run cat "$STATED"
+	assert_equal "$output" "HostedZone not found (AccessDenied)"
+}
+
+@test "the exit trap's synthetic message is never stated as a cause" {
+	STATED="$BATS_TEST_TMPDIR/stated"
+	export STATED
+	run_logged '
+		np_step_error() { printf "%s\n" "$1" >>"$STATED"; }
+		( exit 3 )   # arm LAST_ERR without any log error, then die unhandled
+		exit 3
+	'
+	[ "$status" -eq 3 ]
+	[ ! -s "$STATED" ]
+}
+
 @test "trace errors carry the cause stripped of console decoration" {
 	run_logged '
 		log error "   ❌ Failed to find IAM role: An error occurred (NoSuchEntity)"
