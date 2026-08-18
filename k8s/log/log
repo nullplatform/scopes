@@ -45,6 +45,15 @@ fi
 # Never falls back to the current time: substituting "now" for a bound the user
 # asked for silently returns a different window than the one requested.
 epoch_ms_to_iso() {
+    # bc reads bare words as variables, so a non-numeric value evaluates to 0
+    # and would convert to 1970 rather than failing.
+    case "$1" in
+        ''|*[!0-9]*)
+            echo "Error: timestamp '$1' is not epoch milliseconds" >&2
+            return 1
+            ;;
+    esac
+
     # Not named SECONDS: that is a bash special variable whose value is the
     # elapsed time since it was last assigned, so it drifts as the script runs.
     epoch_seconds=$(echo "$1/1000" | bc 2>/dev/null)

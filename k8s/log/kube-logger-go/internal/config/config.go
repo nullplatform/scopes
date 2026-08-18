@@ -30,7 +30,6 @@ func ParseFlags() types.Config {
 	flag.IntVar(&config.Limit, "l", types.DefaultLimit, "Maximum log entries")
 	flag.StringVar(&config.NextPageToken, "t", "", "Pagination token")
 	flag.StringVar(&config.FilterPattern, "f", "", "Filter pattern")
-	flag.StringVar(&config.EndTime, "e", "", "End time (ISO format)")
 	flag.StringVar(&config.InstanceID, "i", "", "Instance ID")
 
 	flag.Parse()
