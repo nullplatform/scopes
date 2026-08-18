@@ -65,7 +65,7 @@ func (f *Fetcher) FetchConcurrently(pods []corev1.Pod, config types.Config) []ty
             }()
 
             processor := NewProcessor()
-            processedLogs := processor.ProcessLinesFromChannel(logCh, config.FilterPattern, p.Name, podUID, getLastReadTime(podUID, lastReadTimes))
+            processedLogs := processor.ProcessLinesFromChannel(logCh, config.FilterPattern, p.Name, podUID, getLastReadTime(podUID, lastReadTimes), config.EndTime)
 
             if len(processedLogs) > 0 {
                 mu.Lock()

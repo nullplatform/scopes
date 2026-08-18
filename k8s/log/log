@@ -41,34 +41,49 @@ if [ -n "$LIMIT" ]; then
     CMD="$CMD --limit $LIMIT"
 fi
 
-# Add optional start time (convert from milliseconds to ISO format)
-if [ -n "$START_TIME" ]; then
-    SECONDS=$(echo "$START_TIME/1000" | bc)
-    
+# Convert an epoch-milliseconds value to ISO-8601 UTC.
+# Never falls back to the current time: substituting "now" for a bound the user
+# asked for silently returns a different window than the one requested.
+epoch_ms_to_iso() {
+    # Not named SECONDS: that is a bash special variable whose value is the
+    # elapsed time since it was last assigned, so it drifts as the script runs.
+    epoch_seconds=$(echo "$1/1000" | bc 2>/dev/null)
+
+    if [ -z "$epoch_seconds" ]; then
+        echo "Error: could not convert timestamp '$1' (bc unavailable?)" >&2
+        return 1
+    fi
+
     # Handle different date command versions for Alpine/busybox
-    # Try different approaches for Alpine busybox date
-    if ISO_DATE=$(date -u -d "@$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then
-        # GNU date worked
+    if ISO_DATE=$(date -u -d "@$epoch_seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then
         :
-    elif ISO_DATE=$(date -u -r "$SECONDS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then  
-        # BSD date worked
+    elif ISO_DATE=$(date -u -r "$epoch_seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null); then
         :
     else
-        # Alpine busybox date - manual conversion
-        # Use awk for the conversion since busybox date is limited
-        ISO_DATE=$(awk -v ts="$SECONDS" 'BEGIN {
-            # Manual epoch conversion - this is a simplified version
-            # For a more robust solution, we would need a full date calculation
+        ISO_DATE=$(awk -v ts="$epoch_seconds" 'BEGIN {
             print strftime("%Y-%m-%dT%H:%M:%SZ", ts)
         }' 2>/dev/null)
-        
-        # If awk strftime failed, use a different approach
-        if [ -z "$ISO_DATE" ] || [ "$ISO_DATE" = "" ]; then
-            ISO_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        fi
     fi
-    
-    CMD="$CMD --start-time $ISO_DATE"
+
+    if [ -z "$ISO_DATE" ]; then
+        echo "Error: no usable date conversion for timestamp '$1'" >&2
+        return 1
+    fi
+
+    echo "$ISO_DATE"
+}
+
+# Add optional start time (convert from milliseconds to ISO format)
+if [ -n "$START_TIME" ]; then
+    START_ISO=$(epoch_ms_to_iso "$START_TIME") || exit 1
+    CMD="$CMD --start-time $START_ISO"
+fi
+
+# Add optional end time. Without it the window is open-ended and the query
+# returns the newest lines regardless of the range the user selected.
+if [ -n "$END_TIME" ]; then
+    END_ISO=$(epoch_ms_to_iso "$END_TIME") || exit 1
+    CMD="$CMD --end-time $END_ISO"
 fi
 
 eval "$CMD"

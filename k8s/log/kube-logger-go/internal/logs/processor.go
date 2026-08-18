@@ -16,8 +16,10 @@ func NewProcessor() *Processor {
 	return &Processor{}
 }
 
-// ProcessLinesFromChannel processes log lines received from a channel and returns structured log entries
-func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime string) []types.LogEntry {
+// ProcessLinesFromChannel processes log lines received from a channel and returns structured log entries.
+// endTime bounds the window from above: the Kubernetes API only accepts SinceTime, so the upper
+// bound has to be applied here over the streamed lines.
+func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime, endTime string) []types.LogEntry {
     var entries []types.LogEntry
 
     var terms []string
@@ -46,6 +48,10 @@ func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, 
             if timestamp <= lastReadTime {
                 continue
             }
+        }
+
+        if endTime != "" && timestamp > endTime {
+            continue
         }
 
         if len(terms) > 0 {
