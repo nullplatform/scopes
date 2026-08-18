@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Remove unused cloudwatch annotations from deployment objects
-- Fix: log queries on k8s scopes now honor the end of the selected time range, instead of returning the most recent lines whatever range was chosen. The upper bound was never passed to the log reader, so asking for a past window came back with today's logs. Reading now also stops at the end of the window instead of pulling log data that would only be discarded
-- Log queries with an unusable time range now fail with a message naming the offending bound, instead of ignoring it or falling back to the current time and quietly answering a wider range than the one requested
+- Fix: log queries on k8s scopes now answer the time range that was selected. Asking for a past window came back with the most recent lines whatever range was chosen, paging through the results could repeat lines already shown without ever reaching the end of the range, and an unusable bound was ignored or replaced with the current time rather than reported. The upper bound is now passed through to the log reader and reading stops at the end of the window, paging keeps each instance's position so every line is returned once, and a bound that cannot be used fails with a message naming it
 
 ## [1.15.1] - 2026-08-12
 - Fix: gRPC additional ports on k8s scopes now leave the declared port free for the application, so a gRPC server can bind the port configured in the scope instead of failing to start with "address already in use". gRPC ports now work the same way HTTP ones already did
