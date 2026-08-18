@@ -2,6 +2,29 @@ package logs
 
 import "testing"
 
+// A bound that is not RFC3339 compares below every log timestamp, so nothing ever
+// exceeds it and the window silently reverts to unbounded. Callers reject one up
+// front rather than let the query answer a wider range than was asked for.
+func TestValidTimestamp(t *testing.T) {
+	valid := []string{
+		"2026-08-17T23:59:59Z",
+		"2026-08-17T10:00:00.000000000Z",
+		"2026-08-17T10:00:00+02:00",
+	}
+	for _, timestamp := range valid {
+		if !ValidTimestamp(timestamp) {
+			t.Errorf("expected %q to be accepted", timestamp)
+		}
+	}
+
+	invalid := []string{"", "garbage", "1786924800000", "2026-08-17", "17/08/2026"}
+	for _, timestamp := range invalid {
+		if ValidTimestamp(timestamp) {
+			t.Errorf("expected %q to be rejected", timestamp)
+		}
+	}
+}
+
 func linesChannel(lines ...string) <-chan string {
 	ch := make(chan string, len(lines))
 	for _, line := range lines {

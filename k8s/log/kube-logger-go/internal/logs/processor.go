@@ -153,6 +153,16 @@ func (p *Processor) ProcessLines(logs, filterPattern, podName, podUID, lastReadT
 
 // isValidTimestamp checks if a timestamp string is in a valid format
 func (p *Processor) isValidTimestamp(timestamp string) bool {
+	return ValidTimestamp(timestamp)
+}
+
+// ValidTimestamp reports whether a string is an RFC3339 timestamp.
+//
+// Window bounds are compared against log timestamps lexicographically, which is
+// only meaningful for RFC3339 values: a malformed bound would compare below every
+// timestamp and silently drop the bound instead of failing, so callers validate
+// before handing one over.
+func ValidTimestamp(timestamp string) bool {
 	// Check RFC3339 format (e.g., 2025-09-04T15:24:34.944759409Z)
 	_, err := time.Parse(time.RFC3339Nano, timestamp)
 	if err != nil {

@@ -56,6 +56,7 @@ epoch_ms_to_iso() {
 
     # Not named SECONDS: that is a bash special variable whose value is the
     # elapsed time since it was last assigned, so it drifts as the script runs.
+    local epoch_seconds ISO_DATE
     epoch_seconds=$(echo "$1/1000" | bc 2>/dev/null)
 
     if [ -z "$epoch_seconds" ]; then
