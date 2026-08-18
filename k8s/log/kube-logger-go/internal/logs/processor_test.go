@@ -2,9 +2,7 @@ package logs
 
 import "testing"
 
-// A bound that is not RFC3339 compares below every log timestamp, so nothing ever
-// exceeds it and the window silently reverts to unbounded. Callers reject one up
-// front rather than let the query answer a wider range than was asked for.
+// A bound that is not RFC3339 compares below every timestamp, leaving the window unbounded.
 func TestValidTimestamp(t *testing.T) {
 	valid := []string{
 		"2026-08-17T23:59:59Z",
@@ -34,9 +32,7 @@ func linesChannel(lines ...string) <-chan string {
 	return ch
 }
 
-// The Kubernetes API only bounds log reads from below (SinceTime), so without an
-// upper bound a query for a past window returns whatever the live pods hold — the
-// newest lines — which reads to the user as "the filter behaves as if it were today".
+// The Kubernetes API only bounds reads from below, so the upper bound is applied here.
 func TestProcessLinesFromChannelAppliesEndTime(t *testing.T) {
 	lines := []string{
 		"2026-08-17T10:00:00.000000000Z inside the window",
@@ -55,9 +51,7 @@ func TestProcessLinesFromChannelAppliesEndTime(t *testing.T) {
 	}
 }
 
-// The stream is chronological, so the processor stops at the first line past the
-// window rather than reading to the end and discarding. Leftovers in the channel
-// are the observable difference: draining it would mean the bound only filtered.
+// Leftovers in the channel are what distinguishes stopping from filtering to the end.
 func TestProcessLinesFromChannelStopsReadingPastEndTime(t *testing.T) {
 	ch := make(chan string, 10)
 	ch <- "2026-08-17T10:00:00.000000000Z inside the window"
@@ -75,8 +69,7 @@ func TestProcessLinesFromChannelStopsReadingPastEndTime(t *testing.T) {
 	}
 }
 
-// Ordering holds within a container's stream, but a filtered-out line must not be
-// mistaken for the end of the window.
+// A filtered-out line must not be mistaken for the end of the window.
 func TestProcessLinesFromChannelKeepsReadingThroughFilteredLines(t *testing.T) {
 	ch := make(chan string, 10)
 	ch <- "2026-08-17T10:00:00.000000000Z keep me"

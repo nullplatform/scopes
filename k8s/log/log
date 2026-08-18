@@ -41,12 +41,9 @@ if [ -n "$LIMIT" ]; then
     CMD="$CMD --limit $LIMIT"
 fi
 
-# Convert an epoch-milliseconds value to ISO-8601 UTC.
-# Never falls back to the current time: substituting "now" for a bound the user
-# asked for silently returns a different window than the one requested.
+# Convert an epoch-milliseconds value to ISO-8601 UTC. Fails rather than falling back to now.
 epoch_ms_to_iso() {
-    # bc reads bare words as variables, so a non-numeric value evaluates to 0
-    # and would convert to 1970 rather than failing.
+    # bc reads bare words as variables, so a non-numeric value would convert to 1970.
     case "$1" in
         ''|*[!0-9]*)
             echo "Error: timestamp '$1' is not epoch milliseconds" >&2
@@ -54,8 +51,7 @@ epoch_ms_to_iso() {
             ;;
     esac
 
-    # Not named SECONDS: that is a bash special variable whose value is the
-    # elapsed time since it was last assigned, so it drifts as the script runs.
+    # Not named SECONDS: bash keeps overwriting that one with elapsed time.
     local epoch_seconds ISO_DATE
     epoch_seconds=$(echo "$1/1000" | bc 2>/dev/null)
 
@@ -89,8 +85,7 @@ if [ -n "$START_TIME" ]; then
     CMD="$CMD --start-time $START_ISO"
 fi
 
-# Add optional end time. Without it the window is open-ended and the query
-# returns the newest lines regardless of the range the user selected.
+# Add optional end time (convert from milliseconds to ISO format)
 if [ -n "$END_TIME" ]; then
     END_ISO=$(epoch_ms_to_iso "$END_TIME") || exit 1
     CMD="$CMD --end-time $END_ISO"

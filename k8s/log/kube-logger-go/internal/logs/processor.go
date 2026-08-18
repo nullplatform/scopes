@@ -17,8 +17,7 @@ func NewProcessor() *Processor {
 }
 
 // ProcessLinesFromChannel processes log lines received from a channel and returns structured log entries.
-// endTime bounds the window from above: the Kubernetes API only accepts SinceTime, so the upper
-// bound has to be applied here over the streamed lines.
+// endTime is applied here because the Kubernetes API only accepts a lower bound (SinceTime).
 func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime, endTime string) []types.LogEntry {
     var entries []types.LogEntry
 
@@ -50,9 +49,7 @@ func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, 
             }
         }
 
-        // A single container's log stream is chronological, so the first line
-        // past the window ends it: reading on would only transfer lines that
-        // are going to be discarded.
+        // The stream is chronological, so the first line past the window ends it.
         if endTime != "" && timestamp > endTime {
             break
         }
@@ -157,11 +154,6 @@ func (p *Processor) isValidTimestamp(timestamp string) bool {
 }
 
 // ValidTimestamp reports whether a string is an RFC3339 timestamp.
-//
-// Window bounds are compared against log timestamps lexicographically, which is
-// only meaningful for RFC3339 values: a malformed bound would compare below every
-// timestamp and silently drop the bound instead of failing, so callers validate
-// before handing one over.
 func ValidTimestamp(timestamp string) bool {
 	// Check RFC3339 format (e.g., 2025-09-04T15:24:34.944759409Z)
 	_, err := time.Parse(time.RFC3339Nano, timestamp)

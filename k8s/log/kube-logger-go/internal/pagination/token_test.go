@@ -14,8 +14,7 @@ func entry(timestamp, podID string) types.LogEntry {
 	}
 }
 
-// The token records the newest entry kept per pod, so the next page resumes exactly where
-// this one was cut. That only holds if the cut keeps the oldest entries.
+// The token resumes where the cut landed, which only holds if the cut keeps the oldest.
 func TestPageKeepsTheOldestEntriesAndTokensTheCut(t *testing.T) {
 	entries := []types.LogEntry{
 		entry("2026-08-17T10:00:03Z", "a"),
@@ -39,9 +38,7 @@ func TestPageKeepsTheOldestEntriesAndTokensTheCut(t *testing.T) {
 	}
 }
 
-// A pod can contribute nothing to a page: it has no new lines, or the rest of its lines
-// are past end_time. Dropping its cursor would make the next page re-read it from
-// start_time and re-deliver lines the caller already saw.
+// Dropping the cursor of a pod that contributed nothing makes the next page re-read it.
 func TestPageCarriesForwardPodsThatContributedNothing(t *testing.T) {
 	incoming := map[string]string{
 		"a": "2026-08-17T10:00:01Z",
@@ -59,8 +56,7 @@ func TestPageCarriesForwardPodsThatContributedNothing(t *testing.T) {
 	}
 }
 
-// An empty page is how the caller learns there are no more pages, so the cursors must not
-// survive it — carrying them forward would keep pagination going forever.
+// An empty page ends pagination, so the cursors must not survive it.
 func TestPageWithNoEntriesEndsPagination(t *testing.T) {
 	page, token := Page(nil, 100, map[string]string{"a": "2026-08-17T10:00:01Z"})
 

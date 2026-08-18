@@ -23,9 +23,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Window bounds are compared against log timestamps as strings, so a
-	// malformed one would be ignored rather than rejected, and the query would
-	// quietly answer a wider range than the caller asked for.
 	for flagName, bound := range map[string]string{"start-time": cfg.StartTime, "end-time": cfg.EndTime} {
 		if bound != "" && !logs.ValidTimestamp(bound) {
 			fmt.Fprintf(os.Stderr, "Error: %s must be RFC3339, e.g. 2026-08-17T23:59:59Z (got %q)\n", flagName, bound)
@@ -71,9 +68,6 @@ func main() {
 	fetcher := logs.NewFetcher(clientset)
 	allLogs := fetcher.FetchConcurrently(pods, cfg)
 
-	// Order the entries, cut them to the limit and record where the cut landed. The
-	// incoming cursors go in so that a pod which contributed nothing to this page keeps
-	// the one it already had instead of restarting from start_time.
 	allLogs, token := pagination.Page(allLogs, cfg.Limit, pagination.DecodeToken(cfg.NextPageToken))
 
 	response := types.Response{

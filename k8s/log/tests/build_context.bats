@@ -1,8 +1,7 @@
 #!/usr/bin/env bats
 # =============================================================================
 # Unit tests for log/build_context
-# Tests the filter extraction from NP_ACTION_CONTEXT, in particular the time
-# range: end_time was never extracted, so log queries had no upper bound
+# Tests filter extraction from NP_ACTION_CONTEXT, including both ends of the time range
 # =============================================================================
 
 setup() {

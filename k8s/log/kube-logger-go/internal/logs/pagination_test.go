@@ -9,9 +9,7 @@ import (
 	"kube-logger-go/internal/types"
 )
 
-// podLogs stands in for what the Kubernetes API returns per container: chronological lines,
-// bounded from below by SinceTime and never from above. It is the only faked piece here —
-// cursor resolution, filtering, ordering and the cut are the production functions.
+// podLogs stands in for the Kubernetes API: chronological lines, bounded from below only.
 type podLogs map[string][]string
 
 func (l podLogs) stream(t *testing.T, podUID, sinceTime string) <-chan string {
@@ -45,8 +43,7 @@ func mustParse(t *testing.T, timestamp string) time.Time {
 	return at
 }
 
-// fetchPage mirrors what cmd/main.go does for one request: resolve each pod's cursor, read
-// and filter its stream, then order and cut the collected entries.
+// fetchPage mirrors what cmd/main.go does for one request.
 func fetchPage(t *testing.T, store podLogs, podUIDs []string, cfg types.Config) ([]types.LogEntry, string) {
 	t.Helper()
 
@@ -69,15 +66,9 @@ func fetchPage(t *testing.T, store podLogs, podUIDs []string, cfg types.Config) 
 	return pagination.Page(collected, cfg.Limit, cursors)
 }
 
-// Paging through a window has to end, and has to show every line once. It stops being true
-// as soon as a pod that contributed nothing to a page loses its cursor: it restarts from
-// start_time on the next page, and with more than one pod the pages take turns evicting
-// each other, so the caller keeps receiving lines it has already seen and never reaches the
-// end of the window.
-//
-// Pod c has no lines inside the window at all, which is the case end_time introduced: it
-// never contributes, so it never gets a cursor, and every page re-reads it — cheaply,
-// because the processor stops at its first line past the window.
+// A pod that loses its cursor restarts from start_time, and with more than one pod the
+// pages take turns evicting each other and never reach the end of the window. Pod c has no
+// lines in the window at all, so it never earns a cursor and is re-read on every page.
 func TestPaginationDeliversEveryLineInTheWindowExactlyOnce(t *testing.T) {
 	store := podLogs{
 		"a": {

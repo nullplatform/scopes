@@ -1,8 +1,7 @@
 #!/usr/bin/env bats
 # =============================================================================
 # Unit tests for log/log
-# Tests the epoch-to-ISO conversion and the flags handed to kube-logger, with
-# the kube-logger binary replaced by a stub that echoes its arguments
+# Tests the epoch-to-ISO conversion and the flags handed to kube-logger, which is stubbed
 # =============================================================================
 
 setup() {
@@ -44,8 +43,7 @@ teardown() {
 }
 
 @test "epoch_ms_to_iso: rejects a non-numeric timestamp" {
-  # bc reads bare words as variables and evaluates them to 0, so this used to
-  # convert to 1970 instead of failing: another window the user never asked for.
+  # bc evaluates bare words to 0, which used to convert to 1970 instead of failing.
   run epoch_ms_to_iso "not-a-timestamp"
   [ "$status" -ne 0 ]
   assert_contains "$output" "not epoch milliseconds"

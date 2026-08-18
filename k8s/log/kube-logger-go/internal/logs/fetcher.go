@@ -57,9 +57,7 @@ func (f *Fetcher) FetchConcurrently(pods []corev1.Pod, config types.Config) []ty
 			// Determine since time for this pod
 			sinceTime := determineSinceTime(podUID, lastReadTimes, config.StartTime)
 
-			// Get pod logs. Cancelling releases the producer once the processor
-			// stops reading at the end of the window, instead of leaving it
-			// blocked on a send nobody will receive.
+			// Cancelling releases the producer when the processor stops at the end of the window.
             ctx, cancel := context.WithCancel(context.Background())
             defer cancel()
 
