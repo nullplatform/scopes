@@ -57,11 +57,16 @@ func (f *Fetcher) FetchConcurrently(pods []corev1.Pod, config types.Config) []ty
 			// Determine since time for this pod
 			sinceTime := determineSinceTime(podUID, lastReadTimes, config.StartTime)
 
-			// Get pod logs
+			// Get pod logs. Cancelling releases the producer once the processor
+			// stops reading at the end of the window, instead of leaving it
+			// blocked on a send nobody will receive.
+            ctx, cancel := context.WithCancel(context.Background())
+            defer cancel()
+
             logCh := make(chan string, 100)
             go func() {
                 defer close(logCh)
-                f.streamPodLogs(&p, config.Namespace, sinceTime, int64(podLimit*3072), logCh)
+                f.streamPodLogs(ctx, &p, config.Namespace, sinceTime, int64(podLimit*3072), logCh)
             }()
 
             processor := NewProcessor()
@@ -114,8 +119,7 @@ func (f *Fetcher) getPodLogs(pod *corev1.Pod, namespace, sinceTime string, limit
 	return logContent.String()
 }
 
-func (f *Fetcher) streamPodLogs(pod *corev1.Pod, namespace, sinceTime string, limitBytes int64, logCh chan<- string) {
-    ctx := context.Background()
+func (f *Fetcher) streamPodLogs(ctx context.Context, pod *corev1.Pod, namespace, sinceTime string, limitBytes int64, logCh chan<- string) {
     opts := &corev1.PodLogOptions{
         Container:  types.DefaultContainerName,
         Timestamps: true,
@@ -136,7 +140,11 @@ func (f *Fetcher) streamPodLogs(pod *corev1.Pod, namespace, sinceTime string, li
 
     scanner := bufio.NewScanner(podLogs)
     for scanner.Scan() {
-        logCh <- scanner.Text()
+        select {
+        case logCh <- scanner.Text():
+        case <-ctx.Done():
+            return
+        }
     }
 }
 

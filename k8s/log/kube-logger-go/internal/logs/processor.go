@@ -50,8 +50,11 @@ func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, 
             }
         }
 
+        // A single container's log stream is chronological, so the first line
+        // past the window ends it: reading on would only transfer lines that
+        // are going to be discarded.
         if endTime != "" && timestamp > endTime {
-            continue
+            break
         }
 
         if len(terms) > 0 {

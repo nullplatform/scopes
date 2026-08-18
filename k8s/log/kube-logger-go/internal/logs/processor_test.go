@@ -32,6 +32,42 @@ func TestProcessLinesFromChannelAppliesEndTime(t *testing.T) {
 	}
 }
 
+// The stream is chronological, so the processor stops at the first line past the
+// window rather than reading to the end and discarding. Leftovers in the channel
+// are the observable difference: draining it would mean the bound only filtered.
+func TestProcessLinesFromChannelStopsReadingPastEndTime(t *testing.T) {
+	ch := make(chan string, 10)
+	ch <- "2026-08-17T10:00:00.000000000Z inside the window"
+	ch <- "2026-08-18T09:00:00.000000000Z first line past the window"
+	ch <- "2026-08-18T10:00:00.000000000Z should never be read"
+	close(ch)
+
+	entries := NewProcessor().ProcessLinesFromChannel(ch, "", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z")
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry within the window, got %d", len(entries))
+	}
+	if len(ch) != 1 {
+		t.Errorf("expected the processor to stop at the first out-of-window line, leaving 1 unread; %d left", len(ch))
+	}
+}
+
+// Ordering holds within a container's stream, but a filtered-out line must not be
+// mistaken for the end of the window.
+func TestProcessLinesFromChannelKeepsReadingThroughFilteredLines(t *testing.T) {
+	ch := make(chan string, 10)
+	ch <- "2026-08-17T10:00:00.000000000Z keep me"
+	ch <- "2026-08-17T11:00:00.000000000Z drop me"
+	ch <- "2026-08-17T12:00:00.000000000Z keep me too"
+	close(ch)
+
+	entries := NewProcessor().ProcessLinesFromChannel(ch, "keep", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z")
+
+	if len(entries) != 2 {
+		t.Fatalf("expected both matching entries, got %d", len(entries))
+	}
+}
+
 func TestProcessLinesFromChannelWithoutEndTimeKeepsEverything(t *testing.T) {
 	lines := []string{
 		"2026-08-17T10:00:00.000000000Z first",
