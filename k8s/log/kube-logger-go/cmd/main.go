@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -72,21 +71,10 @@ func main() {
 	fetcher := logs.NewFetcher(clientset)
 	allLogs := fetcher.FetchConcurrently(pods, cfg)
 
-	// Sort logs by datetime
-	sort.Slice(allLogs, func(i, j int) bool {
-		return allLogs[i].DateTime < allLogs[j].DateTime
-	})
-
-	// Limit results
-	if len(allLogs) > cfg.Limit {
-		allLogs = allLogs[:cfg.Limit]
-	}
-	if len(allLogs) == 0 {
-		allLogs = []types.LogEntry{}
-	}
-
-	// Generate next page token
-	token := pagination.GenerateToken(allLogs)
+	// Order the entries, cut them to the limit and record where the cut landed. The
+	// incoming cursors go in so that a pod which contributed nothing to this page keeps
+	// the one it already had instead of restarting from start_time.
+	allLogs, token := pagination.Page(allLogs, cfg.Limit, pagination.DecodeToken(cfg.NextPageToken))
 
 	response := types.Response{
 		Results:       allLogs,
