@@ -35,5 +35,6 @@ type Config struct {
 	NextPageToken  string
 	FilterPattern  string
 	StartTime      string
+	EndTime        string
 	InstanceID     string
 }

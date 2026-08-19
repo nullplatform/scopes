@@ -16,8 +16,9 @@ func NewProcessor() *Processor {
 	return &Processor{}
 }
 
-// ProcessLinesFromChannel processes log lines received from a channel and returns structured log entries
-func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime string) []types.LogEntry {
+// ProcessLinesFromChannel processes log lines received from a channel and returns structured log entries.
+// endTime is applied here because the Kubernetes API only accepts a lower bound (SinceTime).
+func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime, endTime string) []types.LogEntry {
     var entries []types.LogEntry
 
     var terms []string
@@ -46,6 +47,11 @@ func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, 
             if timestamp <= lastReadTime {
                 continue
             }
+        }
+
+        // The stream is chronological, so the first line past the window ends it.
+        if endTime != "" && timestamp > endTime {
+            break
         }
 
         if len(terms) > 0 {
@@ -144,6 +150,11 @@ func (p *Processor) ProcessLines(logs, filterPattern, podName, podUID, lastReadT
 
 // isValidTimestamp checks if a timestamp string is in a valid format
 func (p *Processor) isValidTimestamp(timestamp string) bool {
+	return ValidTimestamp(timestamp)
+}
+
+// ValidTimestamp reports whether a string is an RFC3339 timestamp.
+func ValidTimestamp(timestamp string) bool {
 	// Check RFC3339 format (e.g., 2025-09-04T15:24:34.944759409Z)
 	_, err := time.Parse(time.RFC3339Nano, timestamp)
 	if err != nil {
