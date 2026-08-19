@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Publish containers and scheduled task scopes as docker images
 - Remove unused cloudwatch annotations from deployment objects
 - Fix: log queries on k8s scopes now return the time range that was selected, instead of the most recent lines whatever range was chosen
 - Fix: paging through logs on k8s scopes no longer repeats lines already shown, and now reaches the end of the selected range
