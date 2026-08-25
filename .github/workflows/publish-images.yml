@@ -23,8 +23,8 @@ on:
       - 'v*'
 
 permissions:
-  id-token: write   # OIDC against AWS
-  contents: read
+  id-token: write    # OIDC against AWS
+  contents: write    # create/update the GitHub release with artifact metadata
 
 jobs:
   # ── containers (base) ──────────────────────────────────────────────────────
@@ -121,3 +121,46 @@ jobs:
             --repository nullplatform/scopes/containers-datadog \
             --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
             --visible-to "organization=*"
+
+  # ── GitHub release with artifact metadata ──────────────────────────────────
+  # Tags here are human-pushed and previously produced no GitHub release at
+  # all, so the published digests were invisible to consumers. Upsert a release
+  # for the tag whose body carries every image's digest and copyable pinned
+  # reference. Runs after the registrations so the table reflects what was
+  # actually published; the digest check keeps re-runs idempotent.
+  finalize-release:
+    name: Publish release with artifact metadata
+    needs: [containers, scheduled-task, containers-datadog, register-containers, register-scheduled-task, register-containers-datadog]
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      REGISTRY: public.ecr.aws/nullplatform
+      DIGEST_CONTAINERS: ${{ needs.containers.outputs.image_digest }}
+      DIGEST_SCHEDULED: ${{ needs.scheduled-task.outputs.image_digest }}
+      DIGEST_DATADOG: ${{ needs.containers-datadog.outputs.image_digest }}
+    steps:
+      - name: Upsert release with artifact table
+        run: |
+          SECTION=$(printf '## Artifacts\n\n| Image | Digest | Pinned reference |\n|---|---|---|\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |' \
+            "$REGISTRY/scopes/containers" "$TAG" "$DIGEST_CONTAINERS" "$REGISTRY/scopes/containers" "$DIGEST_CONTAINERS" \
+            "$REGISTRY/scopes/scheduled-task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled-task" "$DIGEST_SCHEDULED" \
+            "$REGISTRY/scopes/containers-datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers-datadog" "$DIGEST_DATADOG")
+
+          # Drafts are not resolvable via releases/tags/:tag — list and filter.
+          RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name==\"$TAG\")][0].id // empty")
+
+          if [ -z "$RELEASE_ID" ]; then
+            gh release create "$TAG" --title "$TAG" --notes "$SECTION" --verify-tag
+            echo "created release $TAG"
+          else
+            BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.body // ""')
+            if printf '%s' "$BODY" | grep -qF "$DIGEST_CONTAINERS"; then
+              echo "release $TAG already carries these digests"
+            else
+              printf '%s\n\n%s' "$BODY" "$SECTION" > body.md
+              gh release edit "$TAG" --draft=false --notes-file body.md
+              echo "updated release $TAG"
+            fi
+          fi
