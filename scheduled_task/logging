@@ -434,4 +434,14 @@ if [ -z "${NP_TRACE_LOADED:-}" ] \
   np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" --no-trap
   trap '_np_scopes_on_err $?' ERR
   trap '_np_scopes_on_exit $?' EXIT
+elif [ -z "${NP_TRACE_LOADED:-}" ] \
+  && [ -n "${NP_TRACE:-}" ] \
+  && [ -n "${NP_API_KEY:-}" ] \
+  && [ ! -f "$_NP_SCOPES_SDK" ]; then
+  # The engine is tracing this run and the credentials are present, yet the shell
+  # SDK is not in this bundle: the scope-side story (sub-steps, live waits, real
+  # errors, lineage, affordances) will be ABSENT while everything else looks fine.
+  # A build that loses the submodule (archive download, docker build context) is
+  # exactly the failure nobody sees — so say it, once, on the workflow's own log.
+  log warn "⚠️  tracing SDK not bundled (vendor/catalog-tracing-sh/nptrace.sh missing) — scope-side tracing disabled for this run"
 fi

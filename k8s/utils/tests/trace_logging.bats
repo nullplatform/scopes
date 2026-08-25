@@ -447,3 +447,32 @@ secret/sec-1 created"
 	echo "$output" | grep -q '"hints":\["a hint for the second"\]'
 	! echo "$output" | grep 'create-dns@0.0' | grep -q '"message":"first cause"'
 }
+
+@test "a traced run with credentials but NO bundled SDK warns loudly instead of degrading silently" {
+	run "$BASH" -c '
+		export NP_TRACE="1|trace-1|run-1@0.0"
+		export NP_API_KEY="key"
+		NP_SCOPES_TEST_ROOT="$BATS_TEST_TMPDIR/empty-bundle"
+		mkdir -p "$NP_SCOPES_TEST_ROOT/k8s"
+		cp "'"$LOGGING"'" "$NP_SCOPES_TEST_ROOT/k8s/logging"
+		source "$NP_SCOPES_TEST_ROOT/k8s/logging"
+		log info "workflow proceeds"
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q "tracing SDK not bundled"
+	echo "$output" | grep -q "workflow proceeds"
+}
+
+@test "an untraced run (no NP_TRACE) stays silent about the SDK" {
+	run "$BASH" -c '
+		unset NP_TRACE
+		export NP_API_KEY="key"
+		NP_SCOPES_TEST_ROOT="$BATS_TEST_TMPDIR/empty-bundle2"
+		mkdir -p "$NP_SCOPES_TEST_ROOT/k8s"
+		cp "'"$LOGGING"'" "$NP_SCOPES_TEST_ROOT/k8s/logging"
+		source "$NP_SCOPES_TEST_ROOT/k8s/logging"
+		log info "plain logging"
+	'
+	[ "$status" -eq 0 ]
+	! echo "$output" | grep -q "tracing SDK not bundled"
+}
