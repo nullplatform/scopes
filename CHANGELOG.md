@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- k8s scopes can now pin the traffic-manager sidecar version cluster-wide via the container-orchestration provider's `traffic_manager.version`, instead of only per-scope
 - Publish containers and scheduled task scopes as docker images
 - Remove unused cloudwatch annotations from deployment objects
 - Fix: log queries on k8s scopes now return the time range that was selected, instead of the most recent lines whatever range was chosen
