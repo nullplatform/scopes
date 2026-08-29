@@ -6,6 +6,10 @@ configuration:
 # never change — overrides anchor on them.
 trace:
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  # This workflow runs ONCE PER TRAFFIC INCREMENT (ten times in a 10%-step
+  # switch): declared steps only, so injected/override plumbing can never
+  # multiply into noise on the wire.
+  default: false
   job: k8s-deployment-switch-traffic
   groups:
     - {key: switching-traffic, title: Switching traffic}
@@ -48,12 +52,11 @@ steps:
         type: environment
       - name: BLUE_DEPLOYMENT_ID
         type: environment
+  # Scaling is a no-op for blue-green (counts ride the manifests) and runs
+  # once per increment — no milestone; the post's health check is the story.
   - name: create deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
-    trace:
-      title: Scale green deployment
-      group: switching-traffic
     post:
       name: wait deployment active
       type: script
@@ -77,12 +80,10 @@ steps:
       - name: INGRESS_FILE
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  # Same no-op-for-blue-green scaling — untraced under default: false.
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
-    trace:
-      title: Scale previous deployment
-      group: switching-traffic
   - name: apply traffic
     type: script
     file: "$SERVICE_PATH/apply_templates"
@@ -107,9 +108,8 @@ steps:
             flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: true
+        # Metrics publishing is machine bookkeeping, once per increment.
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
-          trace:
-            title: Publish load balancer metrics
-            flavors: [route53]
+          trace: false

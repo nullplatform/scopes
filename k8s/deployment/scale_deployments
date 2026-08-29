@@ -11,7 +11,7 @@ if [ "$DEPLOY_STRATEGY" != "rolling" ]; then
   # Blue-green carries its replica counts in the manifests themselves — this step
   # has nothing to do, and the trace says so instead of showing a hollow success.
   if command -v np_step_skip >/dev/null 2>&1; then
-    np_step_skip "scaling rides the manifests for the $DEPLOY_STRATEGY strategy"
+    np_step_skip "instance counts are set by the manifests for the $DEPLOY_STRATEGY strategy — nothing to scale"
   fi
 fi
 
