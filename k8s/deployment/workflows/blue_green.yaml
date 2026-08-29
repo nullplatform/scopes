@@ -19,4 +19,5 @@ steps:
     file: "$SERVICE_PATH/deployment/scale_deployments"
     trace:
       title: Prepare previous deployment
+      group: setting-up
     after: create deployment

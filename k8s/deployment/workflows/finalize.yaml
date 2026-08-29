@@ -49,6 +49,7 @@ steps:
   - name: build green deployment
     trace:
       title: Promote new deployment
+      group: finalize
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
     post:
@@ -67,6 +68,7 @@ steps:
   - name: route traffic
     trace:
       title: Configure ingress
+      group: finalize
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
     configuration:
@@ -74,6 +76,7 @@ steps:
   - name: apply traffic
     trace:
       title: Apply final routing
+      group: finalize
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
@@ -90,6 +93,7 @@ steps:
         - name: verify_networking_reconciliation
           trace:
             title: Verify networking
+            group: finalize
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
           configuration:
@@ -120,6 +124,7 @@ steps:
   - name: delete deployment
     trace:
       title: Remove previous deployment
+      group: finalize
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
