@@ -58,10 +58,13 @@ while IFS= read -r TEMPLATE_FILE; do
      # onto the trace, not a bare "failed to apply".
      if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND 2>&1); then
        [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
+       [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
+       # Lineage AFTER the sub-step closes: what was applied belongs to the PLANNED
+       # step the user clicks ("Apply manifests"), not to an invisible technical
+       # sub-step — the row's detail must show the workloads it produced.
        if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
          np_scope_k8s_applied "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
        fi
-       [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
      else
        [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT" >&2
        log error "   ❌ Failed to apply $FILENAME${KUBECTL_OUT:+: $KUBECTL_OUT}"

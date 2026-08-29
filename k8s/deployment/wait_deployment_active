@@ -216,11 +216,11 @@ log debug "📋 Namespace: $K8S_NAMESPACE"
 log debug "📋 Timeout: ${TIMEOUT}s (max $MAX_ITERATIONS iterations)"
 log debug ""
 
-# The rollout wait is its own SUB-STEP in the trace; heartbeats carry the live
-# replica counts. (Guarded: overrides may reuse this script without k8s/logging
-# loaded.)
-if command -v np_scope_step_begin >/dev/null 2>&1; then
-    np_scope_step_begin wait-deployment-active --title "Wait for deployment rollout ($K8S_DEPLOYMENT_NAME)"
+# The rollout wait IS the planned step ("Instance health check") — heartbeats,
+# counts and the narrative attach to that step directly, so clicking its row
+# shows the diagnosis. A sub-step would split one human moment across two
+# nodes. (Guarded: overrides may reuse this script without k8s/logging loaded.)
+if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
     np_scope_wait_heartbeat "deployment-active" 0 "$TIMEOUT" "starting"
 fi
 
@@ -297,7 +297,7 @@ while true; do
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
         log debug ""
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
-        if command -v np_scope_step_end >/dev/null 2>&1; then
+        if command -v np_scope_progress >/dev/null 2>&1; then
             np_scope_progress "$ready" "$desired" instances
             # Every pod is ready: any earlier probe warning has recovered, and
             # the terminal narrative must say so (a crash-loop on the way here
@@ -330,7 +330,6 @@ while true; do
                 np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"$_wda_app_id\",\"scope_id\":\"$_wda_scope_id\",\"type\":\"application\"${_wda_start_ms:+,\"start_time\":$_wda_start_ms}}"
             fi
 
-            np_scope_step_end 0
         fi
         break
     fi
