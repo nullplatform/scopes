@@ -60,7 +60,47 @@ LAST_REPORTED_COUNTS=""
 # a crash-loop that heals mid-wait must not read as an uneventful wait.
 UNHEALTHY_POD_COUNT=0
 UNHEALTHY_POD_REASONS=""
-WAIT_TITLE="Instance health check"
+# The row's phase-specific words (the workflow step sets both the trace title and
+# WAIT_TITLE): the provision wait is "Instance health check"; the switch phase
+# verifies scaled instances; finalize verifies final capacity.
+WAIT_TITLE="${WAIT_TITLE:-Instance health check}"
+
+# Provider reason CODES -> plain words for the narrative surfaces (same table the
+# native scopes use). The raw code is machine detail — it stays on the io facets
+# for the dialog; the narrative speaks human. Unknown codes fall through verbatim.
+humanize_k8s_reason() {
+    case "$1" in
+        OOMKilled) echo "out of memory" ;;
+        CrashLoopBackOff) echo "crashing repeatedly" ;;
+        ImagePullBackOff|ErrImagePull|InvalidImageName) echo "can't pull the container image" ;;
+        CreateContainerConfigError|CreateContainerError|RunContainerError|ContainerCannotRun) echo "container failed to start" ;;
+        Error) echo "exited with an error" ;;
+        DeadlineExceeded) echo "timed out" ;;
+        Evicted) echo "evicted from its node" ;;
+        Unschedulable|FailedScheduling) echo "can't be scheduled onto a node" ;;
+        BackOff) echo "restarting after failures" ;;
+        FailedMount|FailedAttachVolume) echo "can't attach its storage" ;;
+        FailedCreate) echo "couldn't be created" ;;
+        Unhealthy) echo "failing health checks" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# A comma-separated reason list, translated and deduped AFTER translation — two
+# codes that mean the same thing read once.
+humanize_k8s_reasons() {
+    local _hr_out="" _hr_word
+    IFS=', ' read -ra _hr_parts <<< "$1"
+    for _hr_part in "${_hr_parts[@]}"; do
+        [ -n "$_hr_part" ] || continue
+        _hr_word=$(humanize_k8s_reason "$_hr_part")
+        case ", $_hr_out," in
+            *", $_hr_word,"*) ;;
+            *) _hr_out="${_hr_out:+$_hr_out, }$_hr_word" ;;
+        esac
+    done
+    echo "$_hr_out"
+}
 
 # Report the wait's live narrative onto the trace — the counted io, the
 # instances-health meter a host renders as pips, and the plain-language
@@ -87,7 +127,8 @@ report_wait_narrative() {
     [ -n "$restarted" ] || restarted="[]"
     restart_total=$(echo "$restarted" | jq 'map(.restarts) | add // 0' 2>/dev/null) || restart_total=0
     restart_reasons=$(echo "$restarted" | jq -r '[.[].reason // empty] | unique | join(", ")' 2>/dev/null) || restart_reasons=""
-    restart_clause="${restart_reasons:+ ($restart_reasons)}"
+    restart_words=$(humanize_k8s_reasons "${restart_reasons:-}")
+    restart_clause="${restart_words:+ ($restart_words)}"
     problems=$(echo "$pods_json" \
         | jq -c '[.items[] | .metadata.name as $pod | .status.containerStatuses[]?
                   | select(.state.waiting.reason != null
@@ -143,9 +184,11 @@ report_wait_narrative() {
          + (if $crash != "" then {last_crash_log: $crash} else {} end)')
     np_scope_output instances "$instances"
 
+    # The meter is user-facing: its reason captions speak human words; the io
+    # above keeps the raw codes for the dialog.
     meter=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
-        --argjson u "$problem_count" --arg reasons "$problem_reasons" --argjson t "$restart_total" \
-        --arg rreasons "$restart_reasons" \
+        --argjson u "$problem_count" --arg reasons "$(humanize_k8s_reasons "$problem_reasons")" --argjson t "$restart_total" \
+        --arg rreasons "$(humanize_k8s_reasons "$restart_reasons")" \
         '{kind: "instances-health", healthy: $h, launched: $l, desired: $d}
          + (if $u > 0 then {unhealthy: $u, reasons: ($reasons | split(", ") | map(select(. != "")))} else {} end)
          + (if $t > 0 then {restarts: $t} else {} end)
@@ -156,8 +199,10 @@ report_wait_narrative() {
     [ "$restart_total" -eq 1 ] && restarts_label="restart"
     [ -n "$WAIT_REAL_DETAIL" ] && detail_clause=": $WAIT_REAL_DETAIL"
     if [ "$problem_count" -gt 0 ]; then
+        local problem_words
+        problem_words=$(humanize_k8s_reasons "${problem_reasons:-}")
         np_scope_explain --title "$WAIT_TITLE" --severity warn \
-            --what "Waiting for $ready_now/$desired_now instances to be healthy — $problem_count with ${problem_reasons:-failing health checks}$detail_clause" \
+            --what "Waiting for $ready_now/$desired_now instances to be healthy — $problem_count with ${problem_words:-failing health checks}$detail_clause" \
             --impact "The deployment fails if the instances don't become healthy before the health-check timeout."
     elif [ "$restart_total" -gt 0 ]; then
         if [ "$all_healthy" = "true" ]; then
@@ -172,7 +217,13 @@ report_wait_narrative() {
     elif [ "$all_healthy" = "true" ]; then
         np_scope_explain --title "$WAIT_TITLE" --what "All $desired_now instances healthy"
     else
-        np_scope_explain --title "$WAIT_TITLE" --what "Waiting for $ready_now/$desired_now instances to be healthy"
+        # Calm but not silent: instances exist and are booting — a heavy boot reads
+        # as a heavy boot, never as a black box (and never as a problem).
+        local graced_clause=""
+        if [ "$launched_now" -gt "$ready_now" ] 2>/dev/null; then
+            graced_clause=" (instances starting — normal while the app boots)"
+        fi
+        np_scope_explain --title "$WAIT_TITLE" --what "Waiting for $ready_now/$desired_now instances to be healthy$graced_clause"
     fi
     return 0
 }
@@ -245,8 +296,9 @@ while true; do
             if [ -n "$timeout_cause" ]; then
                 timeout_message="$timeout_cause ($timeout_message)"
             fi
+            timeout_reason_words=$(humanize_k8s_reasons "${timeout_reasons:-}")
             np_scope_explain --title "$WAIT_TITLE" --severity error \
-                --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${timeout_reasons:+ — $timeout_reasons}${timeout_cause:+: $timeout_cause}"
+                --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${timeout_reason_words:+ — $timeout_reason_words}${timeout_cause:+: $timeout_cause}"
             np_scope_error "$timeout_message" \
                 "$(jq -nc --argjson h "${ready:-0}" --argjson l "${launched:-0}" --argjson d "${desired:-0}" --arg reasons "$timeout_reasons" \
                     '{instances: {healthy: $h, launched: $l, desired: $d}} + (if $reasons != "" then {reasons: ($reasons | split(", "))} else {} end)')"

@@ -184,3 +184,9 @@ if [[ "$LISTENER_COUNT" -ge "$ALB_MAX_LISTENERS" ]]; then
 fi
 
 log info "✅ ALB listener capacity validated: $LISTENER_COUNT/$ALB_MAX_LISTENERS"
+
+# The row's summary: the quota headroom this pre-flight verified, in numbers.
+if command -v np_scope_explain >/dev/null 2>&1; then
+    np_scope_explain --title "Validate load balancer capacity"         --what "Load balancer has room: $TARGET_GROUP_COUNT/$ALB_MAX_TARGET_GROUPS target groups, $LISTENER_COUNT/$ALB_MAX_LISTENERS listeners in use"
+    np_scope_output capacity "{\"target_groups\": {\"used\": $TARGET_GROUP_COUNT, \"max\": $ALB_MAX_TARGET_GROUPS}, \"listeners\": {\"used\": $LISTENER_COUNT, \"max\": $ALB_MAX_LISTENERS}}"
+fi

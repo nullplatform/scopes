@@ -263,6 +263,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
             log info "✅ ALB configuration validated successfully"
             if command -v np_scope_step_end >/dev/null 2>&1; then
                 np_scope_step_end 0
+                # The planned row's plain-language summary — what was verified, on the
+                # step the user clicks (after the sub-step closes).
+                np_scope_explain --title "Verify networking"                     --what "Load-balancer routing verified for $INGRESS_NAME — rules and weights match the deployment"
             fi
             return 0
         fi
@@ -296,6 +299,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
                 log info "✅ Ingress successfully reconciled"
                 if command -v np_scope_step_end >/dev/null 2>&1; then
                     np_scope_step_end 0
+                fi
+                if command -v np_scope_explain >/dev/null 2>&1; then
+                    np_scope_explain --title "Verify networking"                         --what "Ingress $INGRESS_NAME reconciled — the controller reported the routing applied"
                 fi
                 return 0
             fi

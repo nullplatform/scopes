@@ -57,11 +57,14 @@ steps:
       file: "$SERVICE_PATH/deployment/wait_deployment_active"
       trace:
         key: finalize-instances-check
-        title: Instance health check
+        # The same wait, in THIS phase's words: full capacity must be healthy
+        # before the previous version is removed.
+        title: Verify final capacity
         group: finalize
       configuration:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
         SKIP_DEPLOYMENT_STATUS_CHECK: true
+        WAIT_TITLE: Verify final capacity
   - name: route traffic
     trace:
       title: Configure ingress

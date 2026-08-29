@@ -383,6 +383,40 @@ np_scope_k8s_applied() {
   return 0
 }
 
+
+# np_scope_k8s_deleted <namespace> <kubectl-delete-output>
+#
+# The removal counterpart of np_scope_k8s_applied: record what a delete removed
+# ("deployment.apps \"name\" deleted" lines) as pointers on the planned step, so a
+# finalize's "Remove previous deployment" (or a rollback's "Remove new deployment")
+# names what it removed.
+np_scope_k8s_deleted() {
+  command -v np_trace_output >/dev/null 2>&1 || return 0
+  local _kd_ns="$1" _kd_node _kd_line _kd_kind _kd_name
+  [ -n "$_kd_ns" ] || return 0
+  _kd_node=$(_np_scopes_node) || return 0
+  while IFS= read -r _kd_line; do
+    [ -n "$_kd_line" ] || continue
+    case "$_kd_line" in
+      *" deleted") ;;
+      *) continue ;;
+    esac
+    _kd_kind="${_kd_line%%[ /]*}"
+    _kd_name="${_kd_line#*\"}"
+    _kd_name="${_kd_name%%\"*}"
+    [ -n "$_kd_name" ] || continue
+    case "$_kd_kind" in
+      deployment.apps|deployment)
+        np_trace_output "$_kd_node" removed-workload --uri "$_kd_name" ;;
+      service)
+        np_trace_output "$_kd_node" removed-service --uri "$_kd_name" ;;
+      ingress.networking.k8s.io|ingress)
+        np_trace_output "$_kd_node" removed-ingress --uri "$_kd_name" ;;
+    esac
+  done <<< "$2"
+  return 0
+}
+
 # A silent failure (no `log error` on the way down) must still be clear: the
 # ERR trap remembers the last failing top-level command, and the EXIT trap
 # reports it against the step that was current when the shell died.

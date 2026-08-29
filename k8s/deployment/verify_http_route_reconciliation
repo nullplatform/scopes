@@ -52,6 +52,7 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         log info "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
         if command -v np_scope_step_end >/dev/null 2>&1; then
             np_scope_step_end 0
+            np_scope_explain --title "Verify networking"                 --what "HTTPRoute $HTTPROUTE_NAME reconciled — DNS routing verified"
         fi
         return 0
     fi

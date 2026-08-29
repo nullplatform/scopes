@@ -60,10 +60,13 @@ steps:
       file: "$SERVICE_PATH/deployment/wait_deployment_active"
       trace:
         key: switch-instances-check
-        title: Instance health check
+        # The same wait, in THIS phase's words: green must hold its scaled
+        # replicas healthy before any weight shifts.
+        title: Verify scaled instances
         group: switching-traffic
       configuration:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
+        WAIT_TITLE: Verify scaled instances
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"

@@ -17,6 +17,7 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/diagnose/build_context"
+    trace: false
     output:
       - name: CONTEXT
         type: environment
@@ -28,10 +29,14 @@ steps:
       name: notify_check_running
       type: script
       file: "$SERVICE_PATH/diagnose/notify_check_running"
+      # Bookkeeping around each check — the CHECKS are the diagnosis's story;
+      # two notify steps per check would triple every disclosure.
+      trace: false
     after_each:
       name: notify_check_results
       type: script
       file: "$SERVICE_PATH/diagnose/notify_diagnose_results"
+      trace: false
     folders:
       - "$SERVICE_PATH/diagnose/service"
       - "$SERVICE_PATH/diagnose/scope"

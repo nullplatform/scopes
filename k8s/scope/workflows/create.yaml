@@ -70,6 +70,7 @@ steps:
     type: script
     file: "$SERVICE_PATH/scope/validate_alb_capacity"
     trace:
+      title: Validate load balancer capacity
       flavors: [route53]
   - name: iam
     type: workflow
@@ -77,9 +78,13 @@ steps:
       - name: create role
         type: script
         file: "$SERVICE_PATH/scope/iam/create_role"
+        trace:
+          title: Create IAM role
       - name: build service account
         type: script
         file: "$SERVICE_PATH/scope/iam/build_service_account"
+        # Template generation — the apply below is the observable act.
+        trace: false
         configuration:
           ACTION: create
         output:
@@ -89,6 +94,9 @@ steps:
       - name: apply
         type: script
         file: "$SERVICE_PATH/apply_templates"
+        trace:
+          key: apply-service-account
+          title: Apply service account
         configuration:
           ACTION: apply
           DRY_RUN: false
@@ -98,6 +106,8 @@ steps:
       - name: generate domain
         type: script
         file: "$SERVICE_PATH/scope/networking/dns/domain/generate_domain"
+        # Pure computation — the DNS create below is the observable act.
+        trace: false
         output:
           - name: SCOPE_DOMAIN
             type: environment
@@ -126,6 +136,9 @@ steps:
             - name: apply dns templates
               type: script
               file: "$SERVICE_PATH/apply_templates"
+              trace:
+                key: apply-dns
+                title: Apply DNS records
               configuration:
                 ACTION: apply
                 DRY_RUN: false
@@ -133,4 +146,5 @@ steps:
               type: script
               file: "$SERVICE_PATH/scope/wait_on_balancer"
               trace:
+                title: Wait for load balancer
                 flavors: [external_dns]
