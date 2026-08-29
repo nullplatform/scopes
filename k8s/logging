@@ -90,14 +90,22 @@ _np_scopes_node() {
     # The platform moved on with a sub-step still open — stale; forget it.
     _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
   fi
-  if [ -n "${_NP_SCOPES_ADOPTED:-}" ] && [ "${_NP_SCOPES_ADOPTED_UNDER:-}" = "$NP_TRACE" ]; then
-    printf '%s' "$_NP_SCOPES_ADOPTED"
-    return 0
+  # The cache lives in the SDK's state dir, not a shell variable: every np_scope_*
+  # helper resolves the node inside a command substitution, where a variable write
+  # dies with the subshell — a FILE is the only memory all those subshells share.
+  local _nd_node _nd_under _nd_cached
+  if [ -n "${NP_TRACE_DIR:-}" ] && [ -f "$NP_TRACE_DIR/scopes_adopted" ]; then
+    IFS=' ' read -r _nd_under _nd_cached < "$NP_TRACE_DIR/scopes_adopted" 2>/dev/null || true
+    if [ "$_nd_under" = "$NP_TRACE" ] && [ -n "$_nd_cached" ]; then
+      printf '%s' "$_nd_cached"
+      return 0
+    fi
   fi
-  local _nd_node
   _nd_node=$(np_trace_adopt 2>/dev/null) || return 1
   [ -n "$_nd_node" ] || return 1
-  _NP_SCOPES_ADOPTED="$_nd_node" _NP_SCOPES_ADOPTED_UNDER="$NP_TRACE"
+  if [ -n "${NP_TRACE_DIR:-}" ]; then
+    printf '%s %s' "$NP_TRACE" "$_nd_node" > "$NP_TRACE_DIR/scopes_adopted" 2>/dev/null || true
+  fi
   printf '%s' "$_nd_node"
   return 0
 }
