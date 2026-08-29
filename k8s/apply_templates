@@ -114,4 +114,10 @@ if [[ "${TRACE_TRAFFIC_SWITCH:-false}" == "true" ]] && [[ -n "${CONTEXT:-}" ]] \
   fi
 fi
 
+# The manifests' lineage (produced / removed pointers) is this step's evidence —
+# land it now instead of betting the exit flush's budget on it.
+if command -v np_trace_flush >/dev/null 2>&1; then
+  NP_TRACE_FLUSH_TIMEOUT=5 np_trace_flush
+fi
+
 source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"

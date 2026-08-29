@@ -382,6 +382,11 @@ while true; do
                 np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"$_wda_app_id\",\"scope_id\":\"$_wda_scope_id\",\"type\":\"application\"${_wda_start_ms:+,\"start_time\":$_wda_start_ms}}"
             fi
 
+            # The wait's FINAL truth (all healthy, the lineage, the log offer) must not
+            # ride only the exit flush — a spent budget there loses exactly the tail.
+            # One bounded flush here: the wait already took its time; 10s to land the
+            # diagnosis is the cheapest part of it.
+            NP_TRACE_FLUSH_TIMEOUT=10 np_trace_flush
         fi
         break
     fi
