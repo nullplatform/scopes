@@ -54,6 +54,7 @@ steps:
     type: script
     file: "$SERVICE_PATH/deployment/validate_alb_target_group_capacity"
     trace:
+      title: Validate load balancer capacity
       group: setting-up
       flavors: [route53]
   - name: route traffic
@@ -104,6 +105,7 @@ steps:
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
           trace:
+            title: Verify networking
             group: setting-up
             flavors: [route53, external_dns]
           configuration:
@@ -112,6 +114,7 @@ steps:
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
           trace:
+            title: Publish load balancer metrics
             flavors: [route53]
         - name: wait deployment active
           type: script

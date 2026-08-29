@@ -12,4 +12,6 @@ steps:
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
+    trace:
+      title: Prepare previous deployment
     after: create deployment

@@ -79,6 +79,7 @@ steps:
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
     trace:
+      title: Scale previous deployment
       group: switching-traffic
   - name: apply traffic
     type: script
@@ -99,6 +100,7 @@ steps:
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
           trace:
+            title: Verify networking
             group: switching-traffic
             flavors: [route53, external_dns]
           configuration:
@@ -107,4 +109,5 @@ steps:
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
           trace:
+            title: Publish load balancer metrics
             flavors: [route53]

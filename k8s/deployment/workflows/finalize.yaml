@@ -47,6 +47,8 @@ steps:
       - name: BLUE_DEPLOYMENT_ID
         type: environment
   - name: build green deployment
+    trace:
+      title: Promote new deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
     post:
@@ -61,11 +63,15 @@ steps:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
         SKIP_DEPLOYMENT_STATUS_CHECK: true
   - name: route traffic
+    trace:
+      title: Configure ingress
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
     configuration:
       TEMPLATE: "$INGRESS_TEMPLATE"
   - name: apply traffic
+    trace:
+      title: Apply final routing
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
@@ -80,6 +86,8 @@ steps:
       type: workflow
       steps:
         - name: verify_networking_reconciliation
+          trace:
+            title: Verify networking
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
           configuration:
@@ -87,9 +95,11 @@ steps:
             # blue deployment is deleted below. Weights cannot express this state.
             EXPECT_SINGLE_TARGET_GROUP: true
         - name: publish_alb_metrics
+          trace: false
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
   - name: build deployment
+    trace: false
     type: script
     file: "$SERVICE_PATH/deployment/build_blue_deployment"
     output:
@@ -106,6 +116,8 @@ steps:
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
   - name: delete deployment
+    trace:
+      title: Remove previous deployment
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
