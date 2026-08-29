@@ -290,7 +290,7 @@ secret/sec-1 created"
 @test "affordance and progress land as their core facets" {
 	run_logged '
 		np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"7\"}"
-		np_scope_progress 3 10 instances
+		np_scope_progress 3 10 count
 	'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"tracing.affordances":\[{"kind":"deploy-log","application_id":"7"}\]'

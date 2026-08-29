@@ -356,7 +356,7 @@ while true; do
         log debug ""
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
         if command -v np_scope_progress >/dev/null 2>&1; then
-            np_scope_progress "$ready" "$desired" instances
+            np_scope_progress "$ready" "$desired" count
             # Every pod is ready: any earlier probe warning has recovered, and
             # the terminal narrative must say so (a crash-loop on the way here
             # stays visible as "healthy — after N restarts").
@@ -404,7 +404,7 @@ while true; do
             np_scope_wait_heartbeat "deployment-active" "$elapsed_s" "$TIMEOUT" "progressing" \
                 "wait.desired=$desired" "wait.launched=$launched" \
                 "wait.ready=$ready" "wait.available=$current" "wait.updated=$updated"
-            np_scope_progress "$ready" "$desired" instances
+            np_scope_progress "$ready" "$desired" count
         fi
     fi
 
