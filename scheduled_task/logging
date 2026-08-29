@@ -69,10 +69,16 @@ log() {
 # =============================================================================
 
 # Resolve the node observations attach to: the open sub-step when one belongs
-# to the CURRENT platform step, else a fresh adoption of NP_TRACE. Adoption is
-# per-call on purpose: NP_TRACE changes as the CLI moves between steps, so an
-# observation must attach to the step current at the moment it happened — and
-# a sub-step opened under a PREVIOUS platform step must never swallow it.
+# to the CURRENT platform step, else the adoption of NP_TRACE. The adopted
+# handle is CACHED per NP_TRACE value: successive observations on the same
+# platform step must accumulate in ONE bag, because every foreign re-emit
+# carries the handle's full current bag and the API folds each facet
+# last-writer-wins — fresh handles per call would leave only the last fact
+# standing (and a lost tail event would take its fact with it; a cumulative
+# bag re-carries earlier facts on every later emit). NP_TRACE changes as the
+# CLI moves between steps, so the cache keys on it — an observation always
+# attaches to the step current at the moment it happened, and a sub-step or
+# adoption from a PREVIOUS platform step must never swallow it.
 _np_scopes_node() {
   command -v np_trace_adopt >/dev/null 2>&1 || return 1
   [ -n "${NP_TRACE:-}" ] || return 1
@@ -84,9 +90,14 @@ _np_scopes_node() {
     # The platform moved on with a sub-step still open — stale; forget it.
     _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
   fi
+  if [ -n "${_NP_SCOPES_ADOPTED:-}" ] && [ "${_NP_SCOPES_ADOPTED_UNDER:-}" = "$NP_TRACE" ]; then
+    printf '%s' "$_NP_SCOPES_ADOPTED"
+    return 0
+  fi
   local _nd_node
   _nd_node=$(np_trace_adopt 2>/dev/null) || return 1
   [ -n "$_nd_node" ] || return 1
+  _NP_SCOPES_ADOPTED="$_nd_node" _NP_SCOPES_ADOPTED_UNDER="$NP_TRACE"
   printf '%s' "$_nd_node"
   return 0
 }
