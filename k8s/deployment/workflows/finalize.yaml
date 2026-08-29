@@ -64,7 +64,6 @@ steps:
       configuration:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
         SKIP_DEPLOYMENT_STATUS_CHECK: true
-        WAIT_TITLE: Verify final capacity
   - name: route traffic
     trace:
       title: Configure ingress

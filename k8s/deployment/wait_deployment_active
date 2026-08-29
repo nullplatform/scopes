@@ -60,10 +60,16 @@ LAST_REPORTED_COUNTS=""
 # a crash-loop that heals mid-wait must not read as an uneventful wait.
 UNHEALTHY_POD_COUNT=0
 UNHEALTHY_POD_REASONS=""
-# The row's phase-specific words (the workflow step sets both the trace title and
-# WAIT_TITLE): the provision wait is "Instance health check"; the switch phase
-# verifies scaled instances; finalize verifies final capacity.
-WAIT_TITLE="${WAIT_TITLE:-Instance health check}"
+# The row's phase-specific words, derived from the step this wait is running AS
+# (NP_TRACE ends with the step's own run path, `...~<key>@attempt.iteration`) —
+# they must match the trace titles the workflows declare. Never passed through
+# step configuration: the engine splices configuration values into the shell
+# fragment, where a spaced value breaks the command.
+case "${NP_TRACE:-}" in
+    *~switch-instances-check@*)   WAIT_TITLE="Verify scaled instances" ;;
+    *~finalize-instances-check@*) WAIT_TITLE="Verify final capacity" ;;
+    *)                            WAIT_TITLE="Instance health check" ;;
+esac
 
 # Provider reason CODES -> plain words for the narrative surfaces (same table the
 # native scopes use). The raw code is machine detail — it stays on the io facets

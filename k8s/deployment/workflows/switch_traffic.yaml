@@ -66,7 +66,6 @@ steps:
         group: switching-traffic
       configuration:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
-        WAIT_TITLE: Verify scaled instances
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
