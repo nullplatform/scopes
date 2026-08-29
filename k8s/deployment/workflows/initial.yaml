@@ -11,6 +11,8 @@ trace:
   groups:
     - {key: setting-up, title: Setting up}
     - {key: waiting-instances, title: Waiting for instances to be healthy}
+    # Placeholder: the finalize workflow fills this station later.
+    - {key: finalize, title: Finalize}
 steps:
   - name: load logging
     type: script
