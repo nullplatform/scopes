@@ -656,6 +656,26 @@ teardown() {
   assert_contains "$output" "HTTP 502"
 }
 
+@test "wait_deployment_active: a multi-word reason survives the reason list whole" {
+  # The event sweep contributes reasons already in human words ("Startup probe
+  # failing"). Splitting the list on whitespace as well as the comma shredded those
+  # into three, and the phase read "1 with Startup, probe, failing".
+  source "$BATS_TEST_DIRNAME/../wait_deployment_active" 2>/dev/null || true
+  run bash -c "
+    source '$BATS_TEST_DIRNAME/../print_failed_deployment_hints' 2>/dev/null || true
+    \$(declare -f humanize_k8s_reason humanize_k8s_reasons 2>/dev/null)
+    true
+  "
+  # Exercise the helpers directly out of the script's own source.
+  eval "$(sed -n '/^humanize_k8s_reason()/,/^}/p;/^humanize_k8s_reasons()/,/^}/p' "$BATS_TEST_DIRNAME/../wait_deployment_active")"
+
+  [ "$(humanize_k8s_reasons 'Startup probe failing')" = "Startup probe failing" ]
+  [ "$(humanize_k8s_reasons 'OOMKilled, CrashLoopBackOff')" = "out of memory, crashing repeatedly" ]
+  [ "$(humanize_k8s_reasons 'Startup probe failing, OOMKilled')" = "Startup probe failing, out of memory" ]
+  # Two codes meaning the same thing still read once.
+  [ "$(humanize_k8s_reasons 'ImagePullBackOff, ErrImagePull')" = "can't pull the container image" ]
+}
+
 @test "wait_deployment_active: the trace carries WHY it is stuck and what to do, not just the counts" {
   # The console hints already classified this failure; the step's explain must say the
   # same thing, so a reader who opens the phase gets the reason and the fix without

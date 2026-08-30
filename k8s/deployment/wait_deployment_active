@@ -92,12 +92,20 @@ humanize_k8s_reason() {
     esac
 }
 
-# A comma-separated reason list, translated and deduped AFTER translation — two
+# A COMMA-separated reason list, translated and deduped AFTER translation — two
 # codes that mean the same thing read once.
+#
+# Split on the comma ALONE. Not every entry is a one-word kubernetes code: the event
+# sweep contributes phrases it has already put into human words ("Startup probe
+# failing"), and splitting on whitespace too shredded those into their own "reasons" —
+# the phase read "1 with Startup, probe, failing".
 humanize_k8s_reasons() {
     local _hr_out="" _hr_word
-    IFS=', ' read -ra _hr_parts <<< "$1"
+    IFS=',' read -ra _hr_parts <<< "$1"
     for _hr_part in "${_hr_parts[@]}"; do
+        # Trim the space that follows the comma in the joined form.
+        _hr_part="${_hr_part#"${_hr_part%%[![:space:]]*}"}"
+        _hr_part="${_hr_part%"${_hr_part##*[![:space:]]}"}"
         [ -n "$_hr_part" ] || continue
         _hr_word=$(humanize_k8s_reason "$_hr_part")
         case ", $_hr_out," in
