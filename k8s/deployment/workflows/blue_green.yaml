@@ -4,6 +4,11 @@ configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
 trace:
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  # Declared steps only: engine fragments without a trace block (override
+  # plumbing) stay off the wire — the fold shows real observable acts, not
+  # 0ms no-ops. Script-emitted child steps (per-manifest applies) are
+  # unaffected.
+  default: false
   # The job's identity labels are how the deployment page FINDS this plan
   # before any run exists (the pending checklist on a fresh deployment):
   # the page queries entity + strategy + the scope's provider (the service

@@ -7,6 +7,11 @@ configuration:
 # the apply step). Step NAMES never change — overrides anchor on them.
 trace:
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  # Declared steps only: engine fragments without a trace block (override
+  # plumbing) stay off the wire — the fold shows real observable acts, not
+  # 0ms no-ops. Script-emitted child steps (per-manifest applies) are
+  # unaffected.
+  default: false
   # Identity labels: how the deployment page finds this plan before any run
   # exists (see blue_green.yaml).
   job:
@@ -119,12 +124,12 @@ steps:
             flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: false
+        # Metrics publishing is machine bookkeeping — untraced, like the
+        # per-increment copy in switch_traffic.
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
-          trace:
-            title: Publish load balancer metrics
-            flavors: [route53]
+          trace: false
         - name: wait deployment active
           type: script
           file: "$SERVICE_PATH/deployment/wait_deployment_active"

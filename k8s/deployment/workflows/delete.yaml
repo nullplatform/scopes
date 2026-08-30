@@ -2,6 +2,11 @@ include:
   - "$SERVICE_PATH/values.yaml"
 trace:
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  # Declared steps only: engine fragments without a trace block (override
+  # plumbing) stay off the wire — the fold shows real observable acts, not
+  # 0ms no-ops. Script-emitted child steps (per-manifest applies) are
+  # unaffected.
+  default: false
   job: k8s-deployment-delete
 steps:
   - name: load logging
