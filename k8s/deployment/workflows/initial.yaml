@@ -16,6 +16,7 @@ trace:
   # exists (see blue_green.yaml).
   job:
     name: k8s-deployment-initial
+    namespace: "@context:scope.provider"
     labels:
       entity: deployment
       strategy: initial

@@ -6,7 +6,12 @@ include:
 # anchor on them.
 trace:
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
-  job: k8s-scope-create
+  # Per-provider identity: jobs are scoped to the scope's service
+  # specification, so two providers sharing a workflow name never
+  # converge on one definition.
+  job:
+    name: k8s-scope-create
+    namespace: "@context:scope.provider"
 steps:
   - name: load logging
     type: script

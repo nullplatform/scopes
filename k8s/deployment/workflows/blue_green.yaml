@@ -15,6 +15,7 @@ trace:
   # specification id — stable across every scope this agent serves).
   job:
     name: k8s-deployment-blue-green
+    namespace: "@context:scope.provider"
     labels:
       entity: deployment
       strategy: blue_green

@@ -10,7 +10,12 @@ trace:
   # switch): declared steps only, so injected/override plumbing can never
   # multiply into noise on the wire.
   default: false
-  job: k8s-deployment-switch-traffic
+  # Per-provider identity: jobs are scoped to the scope's service
+  # specification, so two providers sharing a workflow name never
+  # converge on one definition.
+  job:
+    name: k8s-deployment-switch-traffic
+    namespace: "@context:scope.provider"
   groups:
     - {key: switching-traffic, title: Switching traffic}
 steps:
