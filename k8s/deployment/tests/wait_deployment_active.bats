@@ -656,6 +656,57 @@ teardown() {
   assert_contains "$output" "HTTP 502"
 }
 
+@test "wait_deployment_active: the trace carries WHY it is stuck and what to do, not just the counts" {
+  # The console hints already classified this failure; the step's explain must say the
+  # same thing, so a reader who opens the phase gets the reason and the fix without
+  # going to the logs.
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[{\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: HTTP probe failed with statuscode: 404\"}]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    # Capture what the step's facets are told, without a tracing backend. The
+    # timeout's trace block is guarded on np_scope_step_timeout existing, so the
+    # stubs must cover the whole terminal trio.
+    np_scope_explain() { echo \"EXPLAIN \$*\"; }
+    np_scope_error() { echo \"ERROR \$*\"; }
+    np_scope_step_timeout() { echo \"TIMEOUT \$*\"; }
+    export -f np_scope_explain np_scope_error np_scope_step_timeout
+
+    export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"health_check\":{\"path\":\"/health-bad\"}}}}'
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  # WHY, in the reader's words, naming the configured path and what was detected.
+  assert_contains "$output" "did not pass its health check at /health-bad"
+  assert_contains "$output" "Detected: Startup probe"
+  assert_contains "$output" "HTTP 404"
+  # …and the actionable next step.
+  assert_contains "$output" "--next"
+}
+
 # =============================================================================
 # Latest Timestamp Initialization
 # =============================================================================

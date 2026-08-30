@@ -108,6 +108,24 @@ humanize_k8s_reasons() {
     echo "$_hr_out"
 }
 
+# The classified diagnosis, for the TRACE — the same words the console hints print,
+# from the same classifier (diagnose_failure in print_failed_deployment_hints, which
+# reads ALL_EVENTS): WHY it is stuck ("The application did not pass its health check at
+# /health — Detected: Startup probe — app responded with HTTP 404 (expected 2xx)") and
+# what to do about it. Sets WAIT_WHY / WAIT_NEXT, both empty when nothing classifies.
+# Cheap enough per heartbeat because it only runs once something is actually wrong.
+WAIT_WHY=""
+WAIT_NEXT=""
+classify_wait_failure() {
+    WAIT_WHY=""
+    WAIT_NEXT=""
+    command -v diagnose_failure >/dev/null 2>&1 || return 0
+    diagnose_failure >/dev/null 2>&1 || true
+    WAIT_WHY="${HUMAN_MESSAGE:-}"
+    WAIT_NEXT="${SUGGESTED_FIX:-}"
+    return 0
+}
+
 # Report the wait's live narrative onto the trace — the counted io, the
 # instances-health meter a host renders as pips, and the plain-language
 # explain with the severity an operator should read it at. Re-emitted per
@@ -207,9 +225,14 @@ report_wait_narrative() {
     if [ "$problem_count" -gt 0 ]; then
         local problem_words
         problem_words=$(humanize_k8s_reasons "${problem_reasons:-}")
+        # The reader asks "why?" the moment the meter goes amber, not only when the
+        # wait finally gives up — so the diagnosis rides the LIVE narrative too.
+        classify_wait_failure
         np_scope_explain --title "$WAIT_TITLE" --severity warn \
             --what "Waiting for $ready_now/$desired_now instances to be healthy — $problem_count with ${problem_words:-failing health checks}$detail_clause" \
-            --impact "The deployment fails if the instances don't become healthy before the health-check timeout."
+            ${WAIT_WHY:+--why "$WAIT_WHY"} \
+            --impact "The deployment fails if the instances don't become healthy before the health-check timeout." \
+            ${WAIT_NEXT:+--next "$WAIT_NEXT"}
     elif [ "$restart_total" -gt 0 ]; then
         if [ "$all_healthy" = "true" ]; then
             np_scope_explain --title "$WAIT_TITLE" --severity warn \
@@ -303,8 +326,13 @@ while true; do
                 timeout_message="$timeout_cause ($timeout_message)"
             fi
             timeout_reason_words=$(humanize_k8s_reasons "${timeout_reasons:-}")
+            # print_failed_deployment_hints (sourced above) has just classified the
+            # failure; the trace says the same thing the console said.
             np_scope_explain --title "$WAIT_TITLE" --severity error \
-                --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${timeout_reason_words:+ — $timeout_reason_words}${timeout_cause:+: $timeout_cause}"
+                --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${timeout_reason_words:+ — $timeout_reason_words}${timeout_cause:+: $timeout_cause}" \
+                ${HUMAN_MESSAGE:+--why "$HUMAN_MESSAGE"} \
+                --impact "The previous version keeps serving traffic; this deployment does not go live." \
+                ${SUGGESTED_FIX:+--next "$SUGGESTED_FIX"}
             np_scope_error "$timeout_message" \
                 "$(jq -nc --argjson h "${ready:-0}" --argjson l "${launched:-0}" --argjson d "${desired:-0}" --arg reasons "$timeout_reasons" \
                     '{instances: {healthy: $h, launched: $l, desired: $d}} + (if $reasons != "" then {reasons: ($reasons | split(", "))} else {} end)')"
