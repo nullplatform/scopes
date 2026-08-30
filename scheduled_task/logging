@@ -383,7 +383,7 @@ np_scope_k8s_applied() {
     _ka_name="${_ka_name%% *}"
     case "$_ka_kind" in
       deployment.apps|deployment)
-        np_scope_produces "k8s-deployment:$_ka_ns/$_ka_name" workload "$_ka_name" ;;
+        np_scope_produces "k8s-deployment:$_ka_ns/$_ka_name" deployment "$_ka_name" ;;
       service)
         np_scope_produces "k8s-service:$_ka_ns/$_ka_name" service "$_ka_name" ;;
       ingress.networking.k8s.io|ingress)
@@ -417,7 +417,7 @@ np_scope_k8s_deleted() {
     [ -n "$_kd_name" ] || continue
     case "$_kd_kind" in
       deployment.apps|deployment)
-        np_trace_output "$_kd_node" removed-workload --uri "$_kd_name" ;;
+        np_trace_output "$_kd_node" removed-deployment --uri "$_kd_name" ;;
       service)
         np_trace_output "$_kd_node" removed-service --uri "$_kd_name" ;;
       ingress.networking.k8s.io|ingress)
