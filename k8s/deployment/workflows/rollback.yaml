@@ -4,7 +4,9 @@ configuration:
   INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
 trace:
   title: Roll back deployment
-  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  # The deploy strategy is a flavor dimension: a step only one strategy can
+  # run never enters another's checklist (see finalize.yaml).
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE", "@context:providers.scope-configurations.deployment.deployment_strategy"]
   # Declared steps only: engine fragments without a trace block (override
   # plumbing) stay off the wire — the fold shows real observable acts, not
   # 0ms no-ops. Script-emitted child steps (per-manifest applies) are
@@ -62,10 +64,15 @@ steps:
     file: "$SERVICE_PATH/deployment/scale_deployments"
     trace:
       title: Restore previous deployment
+      description: Scales the previous version back up to full capacity.
+      # ROLLING ONLY, like finalize's promote step: other strategies never
+      # scaled anything down, so there is nothing to restore.
+      flavors: [rolling]
       group: finalize
   - name: rollback traffic
     trace:
       title: Restore traffic routing
+      description: Rewrites the routing rules to send traffic back to the previous version.
       group: finalize
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/rollback_traffic"
@@ -78,6 +85,7 @@ steps:
   - name: apply traffic
     trace:
       title: Apply routing
+      description: Puts the restored routing live.
       group: finalize
     type: script
     file: "$SERVICE_PATH/apply_templates"
@@ -112,6 +120,7 @@ steps:
   - name: delete deployment
     trace:
       title: Remove new deployment
+      description: Deletes the version being rolled back, now that nothing routes to it.
       group: finalize
     type: script
     file: "$SERVICE_PATH/apply_templates"
