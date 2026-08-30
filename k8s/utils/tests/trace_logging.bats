@@ -103,13 +103,22 @@ run_logged() {
 	[ "$(echo "$output" | grep 'apply-manifests@0.0"' | grep -c 'tracing.error')" -eq 1 ]
 }
 
-@test "wait heartbeat marks the step waiting with progress labels" {
+@test "wait heartbeat marks the step waiting and states the signal it waits on" {
 	run_logged 'np_scope_wait_heartbeat "alb-active" 90 300 "pending"'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"status":"waiting"'
-	echo "$output" | grep -q '"wait.what":"alb-active"'
-	echo "$output" | grep -q '"wait.elapsed_s":"90"'
-	echo "$output" | grep -q '"wait.timeout_s":"300"'
+	# What is being waited for is a FACET, not labels: a wait is a first-class
+	# thing every consumer can render, and the deadline rides it in milliseconds.
+	echo "$output" | grep -q '"tracing.signal":{"name":"alb-active","direction":"wait","timeout_ms":300000}'
+}
+
+@test "a wait with an unresolved timeout still states the wait, without a deadline" {
+	# An unresolved configuration ($DEPLOYMENT_MAX_WAIT_IN_SECONDS arriving
+	# literal) must not put a nonsense deadline on the wire.
+	run_logged 'np_scope_wait_heartbeat "alb-active" 90 "MAX_WAIT" "pending"'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"tracing.signal":{"name":"alb-active","direction":"wait"}'
+	! echo "$output" | grep -q 'timeout_ms'
 }
 
 @test "without NP_TRACE, logging is byte-identical to plain logging" {
@@ -191,11 +200,13 @@ hello" ]
 	echo "$output" | grep '"status":"waiting"' | grep -q 'wait-alb-active@0.0'
 }
 
-@test "heartbeat extra k=v pairs land as labels" {
-	run_logged 'np_scope_wait_heartbeat "deployment-active" 20 600 "progressing" "wait.ready=2" "wait.desired=5"'
+@test "a heartbeat puts NO wait bookkeeping in the labels" {
+	# Labels are how a node is FILED, and a consumer renders them as tags. The
+	# wait's own bookkeeping is not filing metadata — it read as a row of code-y
+	# chips on the phase, which is what the signal facet replaced.
+	run_logged 'np_scope_wait_heartbeat "deployment-active" 20 600 "progressing"'
 	[ "$status" -eq 0 ]
-	echo "$output" | grep -q '"wait.ready":"2"'
-	echo "$output" | grep -q '"wait.desired":"5"'
+	! echo "$output" | grep -q '"wait\.'
 }
 
 @test "a sub-step left open when the platform moves on is forgotten, not reused" {
@@ -251,7 +262,9 @@ hello" ]
 	run_logged 'np_scope_produces "dns-record:api.example.com" dns_record "api.example.com"'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep '"edge.produces"' | grep -q '"id":"dns-record:api.example.com"'
-	echo "$output" | grep -q '"tracing.binding":{"kind":"pointer","name":"dns_record","uri":"api.example.com"}'
+	# The edge binding says WHICH io of the node the edge is about — a name, and
+	# nothing else. The descriptor itself stays whole on the node's io facet.
+	echo "$output" | grep -q '"tracing.binding":{"name":"dns_record"}'
 	# foreign re-emit carries the io facet on the adopted step
 	echo "$output" | grep '"tracing.output"' | grep -q 'apply-manifests@0.0'
 }
@@ -294,7 +307,9 @@ secret/sec-1 created"
 	'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"tracing.affordances":\[{"kind":"deploy-log","application_id":"7"}\]'
-	echo "$output" | grep -q '"tracing.progress":{"current":3,"target":10,"unit":"instances"}'
+	# The unit is a CLOSED set every consumer can render (percent/count/bytes/
+	# milliseconds) — never a free-text noun the reader has to interpret.
+	echo "$output" | grep -q '"tracing.progress":{"current":3,"target":10,"unit":"count"}'
 }
 
 @test "lineage helpers are defined no-ops when untraced" {
