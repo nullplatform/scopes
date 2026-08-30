@@ -236,22 +236,24 @@ np_scope_step_timeout() {
 
 # np_scope_wait_heartbeat <what> <elapsed_s> <timeout_s> [state] [k=v ...]
 #
-# Mark the current step (or open sub-step) `waiting` and record progress,
-# flushed immediately so the wait is visible LIVE, not after the workflow
-# ends. Extra k=v pairs carry structured progress — replica counts, ALB state
-# — as labels on the node. The flush is bounded to 2s per beat: with the API
-# down, a 30s-cadence wait loses at most ~6% of its poll budget — the deadline
-# is wall-clock, so the timeout is never extended. Always defined; a no-op
-# when the workflow is untraced.
+# Mark the current step (or open sub-step) `waiting` and declare WHAT it
+# waits on as the tracing.signal facet — never as labels: tags are queryable
+# filing, and per-poll diagnostics rendered as label chips are noise (counts
+# ride the meter/progress facets; elapsed rides the node's own clock). The
+# state word and extra k=v pairs are accepted for call-site compatibility and
+# deliberately not recorded. The flush is bounded to 2s per beat: with the
+# API down, a 30s-cadence wait loses at most ~6% of its poll budget — the
+# deadline is wall-clock, so the timeout is never extended. Always defined;
+# a no-op when the workflow is untraced.
 np_scope_wait_heartbeat() {
   local _hb_node
   _hb_node=$(_np_scopes_node) || return 0
-  local _hb_what="${1:-}" _hb_elapsed="${2:-0}" _hb_timeout="${3:-0}" _hb_state="${4:-}"
-  shift 4 2>/dev/null || shift $#
-  np_trace_labels "$_hb_node" \
-    "wait.what=$_hb_what" "wait.elapsed_s=$_hb_elapsed" "wait.timeout_s=$_hb_timeout" \
-    ${_hb_state:+"wait.state=$_hb_state"} \
-    ${1+"$@"}
+  local _hb_what="${1:-}" _hb_timeout="${3:-0}"
+  # A non-numeric timeout (an unresolved configuration) just drops the deadline.
+  case "$_hb_timeout" in
+    '' | *[!0-9]*) np_trace_signal "$_hb_node" "$_hb_what" wait ;;
+    *) np_trace_signal "$_hb_node" "$_hb_what" wait --timeout-ms $(( _hb_timeout * 1000 )) ;;
+  esac
   np_trace_waiting "$_hb_node"
   NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
   return 0
