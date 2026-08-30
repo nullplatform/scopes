@@ -5,6 +5,7 @@ configuration:
 # Trace identities speak the platform's deploy step vocabulary. Step NAMES
 # never change — overrides anchor on them.
 trace:
+  title: Switch traffic
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
   # This workflow runs ONCE PER TRAFFIC INCREMENT (ten times in a 10%-step
   # switch): declared steps only, so injected/override plumbing can never

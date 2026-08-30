@@ -3,6 +3,7 @@ include:
 configuration:
   INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
 trace:
+  title: Roll back deployment
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
   # Declared steps only: engine fragments without a trace block (override
   # plumbing) stay off the wire — the fold shows real observable acts, not

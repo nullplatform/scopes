@@ -1,6 +1,7 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 trace:
+  title: Delete scope
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
   # Per-provider identity: jobs are scoped to the scope's service
   # specification, so two providers sharing a workflow name never

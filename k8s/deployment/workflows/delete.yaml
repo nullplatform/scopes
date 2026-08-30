@@ -1,6 +1,7 @@
 include:
   - "$SERVICE_PATH/values.yaml"
 trace:
+  title: Remove deployment
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
   # Declared steps only: engine fragments without a trace block (override
   # plumbing) stay off the wire — the fold shows real observable acts, not

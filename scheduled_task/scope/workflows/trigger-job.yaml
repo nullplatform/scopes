@@ -4,6 +4,7 @@ provider_categories:
   - container-orchestration
   - cloud-providers
 trace:
+  title: Run scheduled task
   job: scheduled-task-trigger
 steps:
   - name: load logging

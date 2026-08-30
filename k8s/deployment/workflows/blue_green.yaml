@@ -3,6 +3,10 @@ include:
 configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
 trace:
+  # What a HUMAN calls this execution. It lands on the run's explain.title —
+  # the first rung of every consumer's naming contract — so the page shows the
+  # name we chose, never a wording derived from this file's basename.
+  title: Blue/green deployment
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
   # Declared steps only: engine fragments without a trace block (override
   # plumbing) stay off the wire — the fold shows real observable acts, not

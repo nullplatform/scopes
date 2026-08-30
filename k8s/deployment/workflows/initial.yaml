@@ -6,6 +6,7 @@ configuration:
 # create-* steps are emitted per applied manifest by apply_templates, under
 # the apply step). Step NAMES never change — overrides anchor on them.
 trace:
+  title: Initial deployment
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
   # Declared steps only: engine fragments without a trace block (override
   # plumbing) stay off the wire — the fold shows real observable acts, not
