@@ -928,3 +928,91 @@ teardown() {
   assert_contains "$output" "Could not report instance counts"
   assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
 }
+
+@test "wait_deployment_active: an OOM kill in a restart loop is reported as out of memory, not as the loop" {
+  # CrashLoopBackOff is the MECHANISM; OOMKilled is why the container died. Reading
+  # the wrapper sent the operator to "review your startup logs" for what was really
+  # a memory limit, so the backoff wrappers defer to the termination reason.
+  cat > "$BATS_TMPDIR/oom-pods.json" <<'JSON'
+{"items":[{"metadata":{"name":"d-1-2-abc"},
+"status":{"containerStatuses":[{"name":"application",
+"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=application pod=d-1-2-abc_nullplatform(498dc0ab)"}},
+"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}},
+"restartCount":3}]}}]}
+JSON
+
+  # The narrative's reason list: the cause wins.
+  run jq -r '[.items[] | .status.containerStatuses[]?
+      | .state.waiting.reason as $w
+      | (.lastState.terminated.reason // "") as $t0
+      | (if $t0 == "Completed" then "" else $t0 end) as $t
+      | (if ($w == "CrashLoopBackOff" or $w == "BackOff") then $t else $w end)]
+      | unique | join(", ")' "$BATS_TMPDIR/oom-pods.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "OOMKilled" ]
+
+  eval "$(sed -n '/^humanize_k8s_reason()/,/^}/p;/^humanize_k8s_reasons()/,/^}/p' "$BATS_TEST_DIRNAME/../wait_deployment_active")"
+  [ "$(humanize_k8s_reasons "$output")" = "out of memory" ]
+}
+
+@test "wait_deployment_active: the mechanism stays on the io even though the narrative names the cause" {
+  # An agent reading the step must still see that it was looping — the wrapper is
+  # kept as `reason`, the cause added as `cause`. Only the human line is narrowed.
+  cat > "$BATS_TMPDIR/oom-pods.json" <<'JSON'
+{"items":[{"metadata":{"name":"d-1-2-abc"},
+"status":{"containerStatuses":[{"name":"application",
+"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=application"}},
+"lastState":{"terminated":{"reason":"OOMKilled"}},
+"restartCount":3}]}}]}
+JSON
+  run jq -c '[.items[] | .metadata.name as $pod | .status.containerStatuses[]?
+      | .state.waiting.reason as $w
+      | (.lastState.terminated.reason // "") as $t0
+      | (if $t0 == "Completed" then "" else $t0 end) as $t
+      | {pod: $pod, reason: $w,
+         cause: (if ($w == "CrashLoopBackOff" or $w == "BackOff") then $t else "" end)}]' \
+      "$BATS_TMPDIR/oom-pods.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"reason":"CrashLoopBackOff"'
+  echo "$output" | grep -q '"cause":"OOMKilled"'
+}
+
+@test "wait_deployment_active: a real cause still wins over the termination reason" {
+  # Only the backoff wrappers defer. ImagePullBackOff IS the cause and must not be
+  # replaced by whatever the container happened to exit with last time.
+  cat > "$BATS_TMPDIR/pull-pods.json" <<'JSON'
+{"items":[{"metadata":{"name":"d-1-2-abc"},
+"status":{"containerStatuses":[{"name":"application",
+"state":{"waiting":{"reason":"ImagePullBackOff","message":"manifest unknown"}},
+"lastState":{"terminated":{"reason":"Error"}}}]}}]}
+JSON
+  run jq -r '[.items[] | .status.containerStatuses[]?
+      | .state.waiting.reason as $w
+      | (.lastState.terminated.reason // "") as $t
+      | (if ($w == "CrashLoopBackOff" or $w == "BackOff") and $t != "" then $t else $w end)]
+      | unique | join(", ")' "$BATS_TMPDIR/pull-pods.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ImagePullBackOff" ]
+}
+
+@test "wait_deployment_active: the back-off boilerplate never reaches the phase line" {
+  # "back-off 20s restarting failed container=… pod=…(uuid)" repeats the reason and
+  # then runs the line off the page with two ids. It is dropped from the narrative;
+  # a registry's real error is information and is kept (bounded).
+  detail_of() {
+    local d="$1"
+    case "$d" in
+      "back-off "*"restarting failed container="*) d="" ;;
+    esac
+    if [ ${#d} -gt 140 ]; then d="${d:0:137}..."; fi
+    printf '%s' "$d"
+  }
+
+  [ -z "$(detail_of 'back-off 20s restarting failed container=application pod=d-253247585-630235960_nullplatform(498dc0ab-d1f9)')" ]
+  [ "$(detail_of 'manifest unknown: manifest tagged v9 not found')" = 'manifest unknown: manifest tagged v9 not found' ]
+
+  long=$(printf 'x%.0s' $(seq 1 200))
+  capped=$(detail_of "$long")
+  [ "${#capped}" -eq 140 ]
+  case "$capped" in *"...") ;; *) return 1 ;; esac
+}

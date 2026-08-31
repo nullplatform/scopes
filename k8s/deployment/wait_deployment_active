@@ -166,12 +166,18 @@ report_wait_narrative() {
                   | select(.state.waiting.reason != null
                            and .state.waiting.reason != "ContainerCreating"
                            and .state.waiting.reason != "PodInitializing")
-                  | {pod: $pod, reason: .state.waiting.reason,
+                  | .state.waiting.reason as $w
+                  | (.lastState.terminated.reason // "") as $t0
+                  | (if $t0 == "Completed" then "" else $t0 end) as $t
+                  | {pod: $pod, reason: $w,
+                     cause: (if ($w == "CrashLoopBackOff" or $w == "BackOff") then $t else "" end),
                      message: ((.state.waiting.message // "") | .[0:300])}
                   | with_entries(select(.value != ""))]' 2>/dev/null) || problems="[]"
     [ -n "$problems" ] || problems="[]"
     problem_count=$(echo "$problems" | jq 'length' 2>/dev/null) || problem_count=0
-    problem_reasons=$(echo "$problems" | jq -r '[.[].reason] | unique | join(", ")' 2>/dev/null) || problem_reasons=""
+    # The narrative names the CAUSE (out of memory), not the wrapper that kept
+    # restarting it; `reason` stays on the io so an agent still sees the loop.
+    problem_reasons=$(echo "$problems" | jq -r '[.[] | (.cause // .reason)] | unique | join(", ")' 2>/dev/null) || problem_reasons=""
     # Kubernetes' own words for the FIRST problem — the real error, verbatim.
     real_detail=$(echo "$problems" | jq -r '[.[].message // empty] | first // ""' 2>/dev/null \
         | tr '\n' ' ' | sed 's/[[:space:]]*$//') || real_detail=""
@@ -197,6 +203,21 @@ report_wait_narrative() {
         if [ -n "$crash_log" ] && [ -z "$real_detail" ]; then
             WAIT_REAL_DETAIL=$(printf '%s' "$crash_log" | tail -1 | cut -c1-200)
         fi
+    fi
+
+    # A back-off message is pure MECHANISM: "back-off 20s restarting failed
+    # container=application pod=d-253247585-…_nullplatform(498dc0ab-…)" repeats the
+    # reason we just named and then buries the line in two ids no reader parses.
+    # It is the whole reason the phase line ran off the page. Drop it from the
+    # narrative — the cause is on `why`, and the verbatim message is still on the
+    # io for an agent. Everything else (a registry's real error) is information.
+    case "$WAIT_REAL_DETAIL" in
+        "back-off "*"restarting failed container="*) WAIT_REAL_DETAIL="" ;;
+    esac
+    # What is left is read at a glance, so keep it to about one line; the io
+    # carries it untruncated.
+    if [ ${#WAIT_REAL_DETAIL} -gt 140 ]; then
+        WAIT_REAL_DETAIL="${WAIT_REAL_DETAIL:0:137}..."
     fi
 
     # Realtime without noise: emit only when the SITUATION changes (counts, a

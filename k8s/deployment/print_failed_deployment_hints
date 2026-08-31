@@ -122,9 +122,21 @@ diagnose_failure() {
     fi
 
     if [[ -n "$pods_json" ]] && echo "$pods_json" | jq -e . >/dev/null 2>&1; then
+        # CrashLoopBackOff/BackOff name the MECHANISM (it keeps restarting), never
+        # the cause: the cause is how the container died the last time round. An
+        # OOM-killed container in a restart loop reports BOTH, and leading with the
+        # wrapper sends the reader to "review your startup logs" for what is really
+        # a memory limit. So a backoff wrapper defers to the termination reason.
+        # Any other waiting reason (ImagePullBackOff, CreateContainerError) IS the
+        # cause and still wins.
         FAILURE_REASON=$(echo "$pods_json" | jq -r '
             [.items[].status.containerStatuses[]?
-                | (.state.waiting.reason // .lastState.terminated.reason // empty)
+                | (.state.waiting.reason // "") as $w
+                | (.lastState.terminated.reason // "") as $t0
+                | (if $t0 == "Completed" then "" else $t0 end) as $t
+                | (if ($w == "CrashLoopBackOff" or $w == "BackOff") and $t != "" then $t
+                   elif $w != "" then $w
+                   else $t end)
             ] | map(select(. != "" and . != "Completed")) |
             group_by(.) | max_by(length) | .[0] // empty' 2>/dev/null)
 
