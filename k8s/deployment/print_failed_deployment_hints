@@ -211,7 +211,7 @@ diagnose_failure() {
             else
                 HUMAN_MESSAGE="The container exceeded its memory limit and was terminated."
             fi
-            SUGGESTED_FIX="Increase ram_memory for scope '$scope_name' or reduce application memory usage." ;;
+            SUGGESTED_FIX="Raise the RAM Memory of scope '$scope_name', or reduce how much memory the application uses." ;;
         CreateContainerConfigError)
             HUMAN_MESSAGE="The container configuration is invalid."
             SUGGESTED_FIX="Check for missing secrets or configmaps referenced by the deployment." ;;
@@ -247,7 +247,7 @@ diagnose_failure() {
             elif [[ "$UNHEALTHY_MESSAGE" =~ statuscode:[[:space:]]*([0-9]+) ]]; then
                 SUGGESTED_FIX="The app responded with HTTP ${BASH_REMATCH[1]} on $health_check_path — inspect application logs for startup errors; the process is running but $health_check_path is not returning 2xx."
             elif [[ "$UNHEALTHY_MESSAGE" == *"context deadline exceeded"* || "$UNHEALTHY_MESSAGE" == *"Client.Timeout"* || "$UNHEALTHY_MESSAGE" == *"i/o timeout"* ]]; then
-                SUGGESTED_FIX="The probe timed out — the app may be slow to start or $health_check_path is blocking. Consider increasing startup probe initialDelaySeconds/timeoutSeconds, or making $health_check_path lighter."
+                SUGGESTED_FIX="The probe timed out — the app may be slow to start, or $health_check_path is blocking. Raise the health check's Initial Delay or Timeout on scope '$scope_name', or make $health_check_path lighter."
             else
                 SUGGESTED_FIX="Ensure the app listens on port 8080 and returns 2xx on $health_check_path within the readiness window."
             fi ;;
@@ -262,7 +262,7 @@ diagnose_failure() {
             SUGGESTED_FIX="Reduce requested resources, free cluster capacity, or review nodeSelector/affinity rules." ;;
         DeadlineExceeded)
             HUMAN_MESSAGE="The pod ran past its active deadline and was stopped."
-            SUGGESTED_FIX="Raise activeDeadlineSeconds, or find why the workload takes longer than its deadline allows." ;;
+            SUGGESTED_FIX="Find why the workload runs longer than the deadline it was given, or allow it more time." ;;
         "")
             HUMAN_MESSAGE=""
             SUGGESTED_FIX="" ;;

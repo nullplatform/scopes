@@ -149,7 +149,7 @@ teardown() {
   # The hint script must read pod state and surface the user-friendly reason
   assert_contains "$output" "📋 Reason: The container exceeded its memory limit"
   assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
-  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
+  assert_contains "$output" "💡 Suggested fix: Raise the RAM Memory of scope 'my-app'"
 }
 
 # =============================================================================

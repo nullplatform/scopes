@@ -83,7 +83,10 @@ assert_not_contains() {
   assert_contains "$output" "📋 Reason: The container exceeded its memory limit (512Mi)"
   assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
   assert_contains "$output" "📋 Details: out of memory"
-  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
+  # The console calls this setting "RAM Memory"; `ram_memory` is the capability KEY and
+  # sends the reader looking for a field the scope form does not show.
+  assert_contains "$output" "💡 Suggested fix: Raise the RAM Memory of scope 'my-app'"
+  assert_not_contains "$output" "ram_memory"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -301,8 +304,9 @@ assert_not_contains() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "Detected: Startup probe"
   assert_contains "$output" "timed out"
-  # SUGGESTED_FIX mentions timing knobs
-  assert_contains "$output" "initialDelaySeconds"
+  # SUGGESTED_FIX names the timing knobs the CONSOLE shows, not their kubernetes spellings.
+  assert_contains "$output" "Initial Delay or Timeout"
+  assert_not_contains "$output" "initialDelaySeconds"
 }
 
 @test "print_failed_deployment_hints: falls back to raw Unhealthy message when translation is impossible" {
@@ -506,7 +510,7 @@ assert_not_contains() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "exceeded its memory limit"
-  assert_contains "$output" "Increase ram_memory"
+  assert_contains "$output" "Raise the RAM Memory"
   assert_not_contains "$output" "started and crashed repeatedly"
 }
 
