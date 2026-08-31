@@ -488,3 +488,64 @@ assert_not_contains() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "📊 Progress at failure: 1/3 ready, 2/3 available"
 }
+
+@test "print_failed_deployment_hints: an OOM kill inside a crash loop is diagnosed as the OOM" {
+  # CrashLoopBackOff is the restart MECHANISM and OOMKilled is the cause; reading
+  # the wrapper first sent the operator to their startup logs for a memory limit.
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=app pod=d-1_ns(abc)"}},"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "exceeded its memory limit"
+  assert_contains "$output" "Increase ram_memory"
+  assert_not_contains "$output" "started and crashed repeatedly"
+}
+
+@test "print_failed_deployment_hints: a plain non-zero exit in a crash loop keeps its startup-log advice" {
+  # Deferring to the termination reason must NOT strand the ordinary crash loop:
+  # `Error` had no branch of its own, so it would have fallen through to the
+  # nameless default with no suggested fix at all.
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=app"}},"lastState":{"terminated":{"reason":"Error","exitCode":1}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "exited with code 1"
+  assert_contains "$output" "Review application logs for startup errors"
+  assert_not_contains "$output" "Pods are failing with reason: Error"
+}
+
+@test "print_failed_deployment_hints: an evicted pod says why and what to do" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"Evicted"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "evicted from its node"
+  assert_contains "$output" "ran out of memory or disk"
+}

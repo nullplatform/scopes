@@ -263,14 +263,24 @@ report_wait_narrative() {
             --impact "The deployment fails if the instances don't become healthy before the health-check timeout." \
             ${WAIT_NEXT:+--next "$WAIT_NEXT"}
     elif [ "$restart_total" -gt 0 ]; then
+        # A container that crashed and is running again is between waiting states,
+        # so nothing above classified it — and this branch used to say only THAT it
+        # restarted, never why or what to do. A restart has a cause (the
+        # termination reason is right there in `restart_reasons`), so ask for it
+        # here too rather than leaving the amber phase mute.
+        classify_wait_failure
         if [ "$all_healthy" = "true" ]; then
             np_scope_explain --title "$WAIT_TITLE" --severity warn \
                 --what "All $desired_now instances healthy — after $restart_total $restarts_label$restart_clause" \
-                --impact "The instances crashed on the way here; the last crash output is attached to this step."
+                ${WAIT_WHY:+--why "$WAIT_WHY"} \
+                --impact "The instances crashed on the way here; the last crash output is attached to this step." \
+                ${WAIT_NEXT:+--next "$WAIT_NEXT"}
         else
             np_scope_explain --title "$WAIT_TITLE" --severity warn \
                 --what "Waiting for $ready_now/$desired_now instances to be healthy — $restart_total $restarts_label so far$restart_clause$detail_clause" \
-                --impact "The last crash output is attached to this step."
+                ${WAIT_WHY:+--why "$WAIT_WHY"} \
+                --impact "The last crash output is attached to this step." \
+                ${WAIT_NEXT:+--next "$WAIT_NEXT"}
         fi
     elif [ "$all_healthy" = "true" ]; then
         np_scope_explain --title "$WAIT_TITLE" --what "All $desired_now instances healthy"
