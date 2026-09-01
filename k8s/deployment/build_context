@@ -211,10 +211,17 @@ resolve_traffic_proxy() {
   value=$(get_config_value \
     --env TRAFFIC_PROXY \
     --provider '.providers["scope-configurations"].deployment.traffic_proxy' \
-    --default "nginx")
+    --default "nginx"
+  )
 
   if [[ "$value" != "nginx" && "$value" != "istio" ]]; then
     log error "❌ TRAFFIC_PROXY must be 'nginx' or 'istio', got: '$value'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - Typo in the configured value (e.g. 'Istio' or 'envoy')"
+    log error "🔧 How to fix:"
+    log error "   • Set TRAFFIC_PROXY to one of: nginx, istio"
+    log error ""
     return 1
   fi
 

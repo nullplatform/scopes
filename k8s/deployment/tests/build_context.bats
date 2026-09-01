@@ -1309,3 +1309,27 @@ EOF
   [ "$status" -ne 0 ]
   assert_contains "$output" "TRAFFIC_PROXY"
 }
+
+@test "traffic_proxy: an invalid value aborts the full build_context, not just the isolated function" {
+  # Guards the wiring, not just resolve_traffic_proxy in isolation: if a future
+  # edit re-introduces `local` on `TRAFFIC_PROXY=$(resolve_traffic_proxy) || exit 1`,
+  # `local`'s own exit status would mask the failure and the script would carry
+  # on with an empty TRAFFIC_PROXY instead of aborting.
+  setup_full_build_context
+  export TRAFFIC_PROXY=envoy
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ TRAFFIC_PROXY must be 'nginx' or 'istio', got: 'envoy'
+
+💡 Possible causes:
+   - Typo in the configured value (e.g. 'Istio' or 'envoy')
+🔧 How to fix:
+   • Set TRAFFIC_PROXY to one of: nginx, istio
+EOF
+)
+  assert_contains "$output" "$expected"
+}
