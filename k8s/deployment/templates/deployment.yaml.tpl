@@ -358,10 +358,11 @@ spec:
           lifecycle:
             preStop:
               exec:
-                {{- if and (has . "traffic_proxy") (eq .traffic_proxy "istio") }}
-                command: ["/bin/sh", "-c", "sleep 15"]
-                {{- else }}
                 command:
+                {{- if and (has . "traffic_proxy") (eq .traffic_proxy "istio") }}
+                  - /bin/sleep
+                  - '15'
+                {{- else }}
                   - /bin/sleep
                   - '16'
                 {{- end }}
