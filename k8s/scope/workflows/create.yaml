@@ -13,6 +13,14 @@ trace:
   job:
     name: k8s-scope-create
     namespace: "@context:scope.provider"
+    # Identity labels, the same grammar the deployment workflows declare:
+    # `entity` + `scope.provider` scope the search, `operation` names the
+    # lifecycle act. They are how a consumer finds this plan BEFORE the run
+    # exists, instead of an empty canvas until the agent picks the command up.
+    labels:
+      entity: scope
+      operation: create
+      scope.provider: "@context:scope.provider"
 steps:
   - name: load logging
     type: script
