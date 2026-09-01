@@ -20,6 +20,16 @@ trace:
   job:
     name: k8s-deployment-finalize
     namespace: "@context:scope.provider"
+    # Identity labels, the same grammar the deploy workflows declare: `entity` +
+    # `scope.provider` scope the search, and `operation` names the lifecycle act this
+    # job performs — the word the deployment entity's own statuses use. They are how
+    # the deployment page finds this plan BEFORE the run exists: a cancel shows the
+    # rollback checklist pending the moment the entity says the wind-down began,
+    # instead of an empty canvas until the agent picks the command up.
+    labels:
+      entity: deployment
+      operation: finalize
+      scope.provider: "@context:scope.provider"
   groups:
     - {key: finalize, title: Finalize}
 steps:
