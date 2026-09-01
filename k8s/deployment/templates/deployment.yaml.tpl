@@ -118,6 +118,7 @@ spec:
       {{- end }}
       {{- end }}
       containers:
+        {{- if or (not (has . "traffic_proxy")) (ne .traffic_proxy "istio") }}
         - name: http
           securityContext:
             runAsUser: 0
@@ -295,6 +296,7 @@ spec:
         {{ end }}
         {{ end }}
         {{ end }}
+        {{- end }}
         - name: application
           envFrom:
             - secretRef:
@@ -356,9 +358,13 @@ spec:
           lifecycle:
             preStop:
               exec:
+                {{- if and (has . "traffic_proxy") (eq .traffic_proxy "istio") }}
+                command: ["/bin/sh", "-c", "sleep 15"]
+                {{- else }}
                 command:
                   - /bin/sleep
                   - '16'
+                {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
@@ -398,7 +404,11 @@ spec:
   {{- end }}
 {{- end }}
       restartPolicy: Always
+      {{- if and (has . "traffic_proxy") (eq .traffic_proxy "istio") }}
+      terminationGracePeriodSeconds: 45
+      {{- else }}
       terminationGracePeriodSeconds: 30
+      {{- end }}
       dnsPolicy: ClusterFirst
       schedulerName: default-scheduler
       topologySpreadConstraints:
