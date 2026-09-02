@@ -166,7 +166,17 @@ run_scale_deployments() {
     source '$PROJECT_ROOT/k8s/deployment/scale_deployments'"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Failed to scale green deployment"
+  local expected
+  expected=$(cat <<'EOF'
+📝 Scaling deployments for rolling strategy...
+📋 Green deployment: d-scope-123-deploy-new -> 5 replicas
+📋 Blue deployment: d-scope-123-deploy-old -> 3 replicas
+
+📝 Scaling green deployment...
+   ❌ Failed to scale green deployment
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "scale_deployments: fails when blue deployment scale fails" {
@@ -184,7 +194,19 @@ run_scale_deployments() {
     source '$PROJECT_ROOT/k8s/deployment/scale_deployments'"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Failed to scale blue deployment"
+  local expected
+  expected=$(cat <<'EOF'
+📝 Scaling deployments for rolling strategy...
+📋 Green deployment: d-scope-123-deploy-new -> 5 replicas
+📋 Blue deployment: d-scope-123-deploy-old -> 3 replicas
+
+📝 Scaling green deployment...
+   ✅ Green deployment scaled to 5 replicas
+📝 Scaling blue deployment...
+   ❌ Failed to scale blue deployment
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================

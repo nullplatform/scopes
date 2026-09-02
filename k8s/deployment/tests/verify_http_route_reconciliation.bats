@@ -45,9 +45,14 @@ run_with_mock() {
   run_with_mock '{"status":{"parents":[{"conditions":[{"type":"Accepted","status":"True","reason":"Accepted","message":"Route accepted"},{"type":"ResolvedRefs","status":"True","reason":"ResolvedRefs","message":"Refs resolved"}]}]}}'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
-  assert_contains "$output" "📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s"
-  assert_contains "$output" "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s
+✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -57,63 +62,91 @@ run_with_mock() {
   run_with_mock '{"status":{"parents":[{"conditions":[{"type":"Accepted","status":"False","reason":"CertificateError","message":"TLS secret not found"},{"type":"ResolvedRefs","status":"True","reason":"ResolvedRefs","message":"Refs resolved"}]}]}}'
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
-  assert_contains "$output" "❌ Certificate/TLS error detected"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- TLS secret does not exist in namespace test-namespace"
-  assert_contains "$output" "- Certificate is invalid or expired"
-  assert_contains "$output" "- Gateway references incorrect certificate secret"
-  assert_contains "$output" "- Accepted: CertificateError - TLS secret not found"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Verify TLS secret: kubectl get secret -n test-namespace | grep tls"
-  assert_contains "$output" "- Check certificate validity"
-  assert_contains "$output" "- Ensure Gateway references the correct secret"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s
+❌ Certificate/TLS error detected
+💡 Possible causes:
+   - TLS secret does not exist in namespace test-namespace
+   - Certificate is invalid or expired
+   - Gateway references incorrect certificate secret
+   - Accepted: CertificateError - TLS secret not found
+🔧 How to fix:
+   - Verify TLS secret: kubectl get secret -n test-namespace | grep tls
+   - Check certificate validity
+   - Ensure Gateway references the correct secret
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "verify_http_route_reconciliation: fails with full troubleshooting on backend error" {
   run_with_mock '{"status":{"parents":[{"conditions":[{"type":"Accepted","status":"True","reason":"Accepted","message":"Accepted"},{"type":"ResolvedRefs","status":"False","reason":"BackendNotFound","message":"service my-svc not found"}]}]}}'
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
-  assert_contains "$output" "❌ Backend service error detected"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Referenced service does not exist"
-  assert_contains "$output" "- Service name is misspelled in HTTPRoute"
-  assert_contains "$output" "- Message: service my-svc not found"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- List services: kubectl get svc -n test-namespace"
-  assert_contains "$output" "- Verify backend service name in HTTPRoute"
-  assert_contains "$output" "- Ensure service has ready endpoints"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s
+❌ Backend service error detected
+💡 Possible causes:
+   - Referenced service does not exist
+   - Service name is misspelled in HTTPRoute
+   - Message: service my-svc not found
+🔧 How to fix:
+   - List services: kubectl get svc -n test-namespace
+   - Verify backend service name in HTTPRoute
+   - Ensure service has ready endpoints
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "verify_http_route_reconciliation: fails with full troubleshooting when not accepted" {
   run_with_mock '{"status":{"parents":[{"conditions":[{"type":"Accepted","status":"False","reason":"NotAccepted","message":"Gateway not found"},{"type":"ResolvedRefs","status":"True","reason":"ResolvedRefs","message":"Refs resolved"}]}]}}'
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
-  assert_contains "$output" "❌ HTTPRoute not accepted by Gateway"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Reason: NotAccepted"
-  assert_contains "$output" "- Message: Gateway not found"
-  assert_contains "$output" "📋 All conditions:"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Check Gateway configuration"
-  assert_contains "$output" "- Verify HTTPRoute spec matches Gateway requirements"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s
+❌ HTTPRoute not accepted by Gateway
+💡 Possible causes:
+   - Reason: NotAccepted
+   - Message: Gateway not found
+📋 All conditions:
+   - Accepted: False (NotAccepted) - Gateway not found
+   - ResolvedRefs: True (ResolvedRefs) - Refs resolved
+🔧 How to fix:
+   - Check Gateway configuration
+   - Verify HTTPRoute spec matches Gateway requirements
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "verify_http_route_reconciliation: fails with full troubleshooting when refs not resolved" {
   run_with_mock '{"status":{"parents":[{"conditions":[{"type":"Accepted","status":"True","reason":"Accepted","message":"Accepted"},{"type":"ResolvedRefs","status":"False","reason":"InvalidBackend","message":"Invalid backend port"}]}]}}'
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
-  assert_contains "$output" "❌ HTTPRoute references could not be resolved"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Reason: InvalidBackend"
-  assert_contains "$output" "- Message: Invalid backend port"
-  assert_contains "$output" "📋 All conditions:"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Verify all referenced services exist"
-  assert_contains "$output" "- Check backend service ports match"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s
+❌ HTTPRoute references could not be resolved
+💡 Possible causes:
+   - Reason: InvalidBackend
+   - Message: Invalid backend port
+📋 All conditions:
+   - Accepted: True (Accepted) - Accepted
+   - ResolvedRefs: False (InvalidBackend) - Invalid backend port
+🔧 How to fix:
+   - Verify all referenced services exist
+   - Check backend service ports match
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "verify_http_route_reconciliation: fails with full troubleshooting on timeout" {
@@ -127,13 +160,30 @@ run_with_mock() {
   "
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Timeout waiting for HTTPRoute reconciliation after 1s"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Gateway controller is not running"
-  assert_contains "$output" "- Network policies blocking reconciliation"
-  assert_contains "$output" "- Resource constraints on controller"
-  assert_contains "$output" "📋 Current conditions:"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Check Gateway controller logs"
-  assert_contains "$output" "- Verify Gateway and Istio configuration"
+  # Everything up to the dynamic "Current conditions" dump: the mock's empty
+  # parents list makes the jq read on it fail, so its tool-error text (not a
+  # product message) is deliberately excluded here.
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Verifying HTTPRoute reconciliation...
+📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s
+📝 HTTPRoute pending sync (no parent status yet)... (0s/1s)
+❌ Timeout waiting for HTTPRoute reconciliation after 1s
+💡 Possible causes:
+   - Gateway controller is not running
+   - Network policies blocking reconciliation
+   - Resource constraints on controller
+📋 Current conditions:
+EOF
+)
+  assert_contains "$output" "$expected"
+
+  local expected_fix
+  expected_fix=$(cat <<'EOF'
+🔧 How to fix:
+   - Check Gateway controller logs
+   - Verify Gateway and Istio configuration
+EOF
+)
+  assert_contains "$output" "$expected_fix"
 }

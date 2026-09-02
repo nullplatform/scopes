@@ -37,13 +37,18 @@ teardown() {
   run source "$BATS_TEST_DIRNAME/../notify_active_domains"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Checking for custom domains to activate..."
-  assert_contains "$output" "📋 Found 2 custom domain(s) to activate"
-  assert_contains "$output" "📝 Activating custom domain: app.example.com..."
-  assert_contains "$output" "✅ Custom domain activated: app.example.com"
-  assert_contains "$output" "📝 Activating custom domain: api.example.com..."
-  assert_contains "$output" "✅ Custom domain activated: api.example.com"
-  assert_contains "$output" "✨ Custom domain activation completed"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Checking for custom domains to activate...
+📋 Found 2 custom domain(s) to activate
+📝 Activating custom domain: app.example.com...
+✅ Custom domain activated: app.example.com
+📝 Activating custom domain: api.example.com...
+✅ Custom domain activated: api.example.com
+✨ Custom domain activation completed
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -55,8 +60,13 @@ teardown() {
   run source "$BATS_TEST_DIRNAME/../notify_active_domains"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Checking for custom domains to activate..."
-  assert_contains "$output" "📋 No domains configured, skipping activation"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Checking for custom domains to activate...
+📋 No domains configured, skipping activation
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -72,14 +82,35 @@ teardown() {
   run source "$BATS_TEST_DIRNAME/../notify_active_domains"
 
   [ "$status" -eq 0 ]  # Script continues with other domains
-  assert_contains "$output" "❌ Failed to activate custom domain: app.example.com"
-  assert_contains "$output" '📋 Error: {"error": "scope write error: request failed with status 403: Forbidden"}'
-  assert_contains "$output" "scope write error"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "Domain ID dom-1 may not exist"
-  assert_contains "$output" "Insufficient permissions (403 Forbidden)"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "Verify domain exists: np scope domain get --id dom-1"
-  assert_contains "$output" "Check API token permissions"
+  # np fails identically for every domain, so both dom-1 and dom-2 produce a
+  # full error block; the loop does not abort after the first failure.
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Checking for custom domains to activate...
+📋 Found 2 custom domain(s) to activate
+📝 Activating custom domain: app.example.com...
+❌ Failed to activate custom domain: app.example.com
+📋 Error: {"error": "scope write error: request failed with status 403: Forbidden"}
+💡 Possible causes:
+   - Domain ID dom-1 may not exist
+   - Insufficient permissions (403 Forbidden)
+   - API connectivity issues
+🔧 How to fix:
+   - Verify domain exists: np scope domain get --id dom-1
+   - Check API token permissions
+📝 Activating custom domain: api.example.com...
+❌ Failed to activate custom domain: api.example.com
+📋 Error: {"error": "scope write error: request failed with status 403: Forbidden"}
+💡 Possible causes:
+   - Domain ID dom-2 may not exist
+   - Insufficient permissions (403 Forbidden)
+   - API connectivity issues
+🔧 How to fix:
+   - Verify domain exists: np scope domain get --id dom-2
+   - Check API token permissions
+✨ Custom domain activation completed
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 

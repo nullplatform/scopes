@@ -46,8 +46,16 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../delete_ingress_finalizer"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Checking for ingress finalizers to remove..."
-  assert_contains "$output" "📋 Ingress name: k-8-s-my-app-123-internet-facing"
+  # The kubectl mock echoes "kubectl $*" for the unredirected `patch` call, which lands
+  # in $output between these two messages, so they can't be joined into one block without
+  # baking that mock-instrumentation line in as if it were a real message.
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Checking for ingress finalizers to remove...
+📋 Ingress name: k-8-s-my-app-123-internet-facing
+EOF
+)
+  assert_contains "$output" "$expected"
   assert_contains "$output" "📝 Removing finalizers from ingress k-8-s-my-app-123-internet-facing..."
   assert_contains "$output" "✅ Finalizers removed from ingress k-8-s-my-app-123-internet-facing"
 }
@@ -69,7 +77,13 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../delete_ingress_finalizer"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Checking for ingress finalizers to remove..."
-  assert_contains "$output" "📋 Ingress k-8-s-my-app-123-internet-facing not found, skipping finalizer removal"
+  local expected
+  expected=$(cat <<'EOF'
+🔍 Checking for ingress finalizers to remove...
+📋 Ingress name: k-8-s-my-app-123-internet-facing
+📋 Ingress k-8-s-my-app-123-internet-facing not found, skipping finalizer removal
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 

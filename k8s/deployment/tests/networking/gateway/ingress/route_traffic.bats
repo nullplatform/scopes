@@ -64,12 +64,17 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/ingress/route_traffic" --template="$MOCK_TEMPLATE"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Creating internet-facing ingress..."
-  assert_contains "$output" "📋 Scope: scope-123 | Deployment: deploy-456"
-  assert_contains "$output" "📋 Template: $MOCK_TEMPLATE"
-  assert_contains "$output" "📋 Output: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml"
-  assert_contains "$output" "📝 Building ingress template..."
-  assert_contains "$output" "✅ Ingress template created: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml"
+  local expected
+  expected=$(cat <<EOF
+🔍 Creating internet-facing ingress...
+📋 Scope: scope-123 | Deployment: deploy-456
+📋 Template: $MOCK_TEMPLATE
+📋 Output: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml
+📝 Building ingress template...
+✅ Ingress template created: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "ingress/route_traffic: displays correct visibility type for internal" {
@@ -97,11 +102,16 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/ingress/route_traffic"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Template argument is required"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Missing --template= argument"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Provide template: --template=/path/to/template.yaml"
+  local expected
+  expected=$(cat <<'EOF'
+❌ Template argument is required
+💡 Possible causes:
+   - Missing --template= argument
+🔧 How to fix:
+   - Provide template: --template=/path/to/template.yaml
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "ingress/route_traffic: fails with full troubleshooting when gomplate fails" {
@@ -114,15 +124,24 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/ingress/route_traffic" --template="$MOCK_TEMPLATE"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Creating internet-facing ingress..."
-  assert_contains "$output" "📝 Building ingress template..."
-  assert_contains "$output" "❌ Failed to build ingress template"
-  assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "- Template file does not exist or is invalid"
-  assert_contains "$output" "- Scope attributes may be missing"
-  assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "- Verify template exists: ls -la $MOCK_TEMPLATE"
-  assert_contains "$output" "- Verify that your scope has all required attributes"
+  local expected
+  expected=$(cat <<EOF
+🔍 Creating internet-facing ingress...
+📋 Scope: scope-123 | Deployment: deploy-456
+📋 Template: $MOCK_TEMPLATE
+📋 Output: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml
+📝 Building ingress template...
+template: template.yaml:5: function 'undefined' not defined
+❌ Failed to build ingress template
+💡 Possible causes:
+   - Template file does not exist or is invalid
+   - Scope attributes may be missing
+🔧 How to fix:
+   - Verify template exists: ls -la $MOCK_TEMPLATE
+   - Verify that your scope has all required attributes
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "ingress/route_traffic: cleans up context file on gomplate failure" {

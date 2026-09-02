@@ -53,27 +53,23 @@ teardown() {
 
   [ "$status" -eq 0 ]
 
-  # Header messages
-  assert_contains "$output" "📝 Building deployment templates..."
-  assert_contains "$output" "📋 Output directory:"
+  local expected
+  expected=$(cat <<EOF
+📝 Building deployment templates...
+📋 Output directory: $OUTPUT_DIR
 
-  # Deployment template
-  assert_contains "$output" "✅ Deployment template:"
+   ✅ Deployment template: $OUTPUT_DIR/deployment-scope-123-deploy-456.yaml
+   ✅ Secret template: $OUTPUT_DIR/secret-scope-123-deploy-456.yaml
+   ✅ Secret-files template: $OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml
+   ✅ Scaling template: $OUTPUT_DIR/scaling-scope-123-deploy-456.yaml
+   ✅ Service template: $OUTPUT_DIR/service-scope-123-deploy-456.yaml
+📝 Building PDB template...
+   ✅ PDB template: $OUTPUT_DIR/pdb-scope-123-deploy-456.yaml
 
-  # Secret template
-  assert_contains "$output" "✅ Secret template:"
-
-  # Scaling template
-  assert_contains "$output" "✅ Scaling template:"
-
-  # Service template
-  assert_contains "$output" "✅ Service template:"
-
-  # PDB template
-  assert_contains "$output" "✅ PDB template:"
-
-  # Summary
-  assert_contains "$output" "✨ All templates built successfully"
+✨ All templates built successfully
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
@@ -99,7 +95,15 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Failed to build deployment template"
+  local expected
+  expected=$(cat <<EOF
+📝 Building deployment templates...
+📋 Output directory: $OUTPUT_DIR
+
+   ❌ Failed to build deployment template
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 @test "build_deployment: fails when secret template generation fails" {
@@ -124,7 +128,16 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../build_deployment"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Failed to build secret template"
+  local expected
+  expected=$(cat <<EOF
+📝 Building deployment templates...
+📋 Output directory: $OUTPUT_DIR
+
+   ✅ Deployment template: $OUTPUT_DIR/deployment-scope-123-deploy-456.yaml
+   ❌ Failed to build secret template
+EOF
+)
+  assert_equal "$output" "$expected"
 }
 
 # =============================================================================
