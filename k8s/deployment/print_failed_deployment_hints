@@ -124,7 +124,12 @@ diagnose_failure() {
     if [[ -n "$pods_json" ]] && echo "$pods_json" | jq -e . >/dev/null 2>&1; then
         FAILURE_REASON=$(echo "$pods_json" | jq -r '
             [.items[].status.containerStatuses[]?
-                | (.state.waiting.reason // .lastState.terminated.reason // empty)
+                | (.state.waiting.reason // "") as $w
+                | (.lastState.terminated.reason // "") as $t0
+                | (if $t0 == "Completed" then "" else $t0 end) as $t
+                | (if ($w == "CrashLoopBackOff" or $w == "BackOff") and $t != "" then $t
+                   elif $w != "" then $w
+                   else $t end)
             ] | map(select(. != "" and . != "Completed")) |
             group_by(.) | max_by(length) | .[0] // empty' 2>/dev/null)
 
@@ -181,13 +186,20 @@ diagnose_failure() {
         CrashLoopBackOff|BackOff)
             HUMAN_MESSAGE="The container started and crashed repeatedly."
             SUGGESTED_FIX="Review application logs for startup errors (failed dependencies, bad config, panics)." ;;
+        Error|ContainerStatusUnknown)
+            if [[ -n "$FAILURE_EXIT_CODE" ]]; then
+                HUMAN_MESSAGE="The container started and exited with code ${FAILURE_EXIT_CODE}."
+            else
+                HUMAN_MESSAGE="The container started and crashed repeatedly."
+            fi
+            SUGGESTED_FIX="Review application logs for startup errors (failed dependencies, bad config, panics)." ;;
         OOMKilled)
             if [[ -n "$req_memory" ]]; then
                 HUMAN_MESSAGE="The container exceeded its memory limit (${req_memory}Mi) and was terminated."
             else
                 HUMAN_MESSAGE="The container exceeded its memory limit and was terminated."
             fi
-            SUGGESTED_FIX="Increase ram_memory for scope '$scope_name' or reduce application memory usage." ;;
+            SUGGESTED_FIX="Raise the RAM Memory of scope '$scope_name', or reduce how much memory the application uses." ;;
         CreateContainerConfigError)
             HUMAN_MESSAGE="The container configuration is invalid."
             SUGGESTED_FIX="Check for missing secrets or configmaps referenced by the deployment." ;;
@@ -223,18 +235,28 @@ diagnose_failure() {
             elif [[ "$UNHEALTHY_MESSAGE" =~ statuscode:[[:space:]]*([0-9]+) ]]; then
                 SUGGESTED_FIX="The app responded with HTTP ${BASH_REMATCH[1]} on $health_check_path — inspect application logs for startup errors; the process is running but $health_check_path is not returning 2xx."
             elif [[ "$UNHEALTHY_MESSAGE" == *"context deadline exceeded"* || "$UNHEALTHY_MESSAGE" == *"Client.Timeout"* || "$UNHEALTHY_MESSAGE" == *"i/o timeout"* ]]; then
-                SUGGESTED_FIX="The probe timed out — the app may be slow to start or $health_check_path is blocking. Consider increasing startup probe initialDelaySeconds/timeoutSeconds, or making $health_check_path lighter."
+                SUGGESTED_FIX="The probe timed out — the app may be slow to start, or $health_check_path is blocking. Raise the health check's Initial Delay or Timeout on scope '$scope_name', or make $health_check_path lighter."
             else
                 SUGGESTED_FIX="Ensure the app listens on port 8080 and returns 2xx on $health_check_path within the readiness window."
             fi ;;
         FailedCreate|FailedCreatePodSandBox)
             HUMAN_MESSAGE="Kubernetes could not create the pod sandbox."
             SUGGESTED_FIX="Check node health, CNI configuration, and pod security policies." ;;
+        Evicted)
+            HUMAN_MESSAGE="The pod was evicted from its node."
+            SUGGESTED_FIX="The node ran out of memory or disk. Lower the scope's resource requests, or free capacity on the cluster." ;;
+        Unschedulable)
+            HUMAN_MESSAGE="No node can accept the pod."
+            SUGGESTED_FIX="Reduce requested resources, free cluster capacity, or review nodeSelector/affinity rules." ;;
+        DeadlineExceeded)
+            HUMAN_MESSAGE="The pod ran past its active deadline and was stopped."
+            SUGGESTED_FIX="Find why the workload runs longer than the deadline it was given, or allow it more time." ;;
         "")
             HUMAN_MESSAGE=""
             SUGGESTED_FIX="" ;;
         *)
             HUMAN_MESSAGE="Pods are failing with reason: $FAILURE_REASON"
+            # Empty on purpose: an empty fix routes the reader to the generic checklist below.
             SUGGESTED_FIX="" ;;
     esac
 }

@@ -213,22 +213,50 @@ teardown() {
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================
-@test "traffic container: uses websocket2 for web_sockets, latest for http" {
-  # web_sockets protocol
-  SCOPE_TRAFFIC_PROTOCOL="web_sockets"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
+resolve_traffic_container_version() {
+  local protocol="$1"
+  if [[ "$protocol" == "web_sockets" ]]; then
+    echo "websocket2"
+  else
+    get_config_value \
+      --provider '.providers["container-orchestration"].traffic_manager.version' \
+      --default "latest"
   fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "websocket2"
+}
 
-  # http protocol
-  SCOPE_TRAFFIC_PROTOCOL="http"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
-  fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "latest"
+@test "traffic container: uses websocket2 for web_sockets, latest for http" {
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "latest"
+}
+
+@test "traffic container: http protocol uses container-orchestration provider version when set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "1.8.0"
+}
+
+@test "traffic container: web_sockets protocol ignores container-orchestration provider version" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+}
+
+@test "traffic container: provider version flows into the default image when no full-image override is set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+  unset TRAFFIC_CONTAINER_IMAGE
+
+  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http")
+  result=$(get_config_value \
+    --env TRAFFIC_CONTAINER_IMAGE \
+    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
+    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
+  )
+  assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0"
 }
 
 # =============================================================================

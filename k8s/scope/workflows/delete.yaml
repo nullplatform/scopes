@@ -1,9 +1,20 @@
 include:
   - "$SERVICE_PATH/values.yaml"
+trace:
+  title: Delete scope
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  job:
+    name: k8s-scope-delete
+    namespace: "@context:scope.provider"
+    labels:
+      entity: scope
+      operation: delete
+      scope.provider: "@context:scope.provider"
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -13,6 +24,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
@@ -38,12 +50,15 @@ steps:
       - name: delete dns
         type: script
         file: "$SERVICE_PATH/scope/networking/dns/manage_dns"
+        trace:
+          title: Delete DNS records
         configuration:
           ACTION: DELETE
         pre:
           name: build dns context
           type: script
           file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
+          trace: false
           output:
             - name: HOSTED_PUBLIC_ZONE_ID
               type: environment
@@ -55,6 +70,7 @@ steps:
       - name: build service account
         type: script
         file: "$SERVICE_PATH/scope/iam/build_service_account"
+        trace: false
         configuration:
           ACTION: delete
         output:
@@ -64,9 +80,14 @@ steps:
       - name: apply
         type: script
         file: "$SERVICE_PATH/apply_templates"
+        trace:
+          key: remove-service-account
+          title: Remove service account
         configuration:
           ACTION: delete
           DRY_RUN: false
       - name: delete role
         type: script
         file: "$SERVICE_PATH/scope/iam/delete_role"
+        trace:
+          title: Delete IAM role

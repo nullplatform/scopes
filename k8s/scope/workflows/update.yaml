@@ -1,5 +1,15 @@
 include:
   - "$SERVICE_PATH/scope/workflows/create.yaml"
+trace:
+  title: Update scope
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  job:
+    name: k8s-scope-update
+    namespace: "@context:scope.provider"
+    labels:
+      entity: scope
+      operation: update
+      scope.provider: "@context:scope.provider"
 steps:
   - name: networking
     type: workflow

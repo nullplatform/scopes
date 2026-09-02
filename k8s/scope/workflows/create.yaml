@@ -1,9 +1,20 @@
 include:
   - "$SERVICE_PATH/values.yaml"
+trace:
+  title: Create scope
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  job:
+    name: k8s-scope-create
+    namespace: "@context:scope.provider"
+    labels:
+      entity: scope
+      operation: create
+      scope.provider: "@context:scope.provider"
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -13,6 +24,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
@@ -23,6 +35,10 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/scope/build_context"
+    trace:
+      key: create-namespace
+      title: Create namespace
+      optional: true
     output:
       - name: CONTEXT
         type: environment
@@ -39,6 +55,9 @@ steps:
   - name: apply autocreated ingress
     type: script
     file: "$SERVICE_PATH/apply_templates"
+    trace:
+      key: create-ingress
+      title: Create ingress
     configuration:
       ACTION: apply
       DRY_RUN: false
@@ -46,18 +65,28 @@ steps:
       name: wait for alb
       type: script
       file: "$SERVICE_PATH/scope/networking/wait_for_alb"
+      trace:
+        key: wait-for-ingress
+        title: Wait for ingress
+        flavors: [route53]
   - name: validate alb capacity
     type: script
     file: "$SERVICE_PATH/scope/validate_alb_capacity"
+    trace:
+      title: Validate load balancer capacity
+      flavors: [route53]
   - name: iam
     type: workflow
     steps:
       - name: create role
         type: script
         file: "$SERVICE_PATH/scope/iam/create_role"
+        trace:
+          title: Create IAM role
       - name: build service account
         type: script
         file: "$SERVICE_PATH/scope/iam/build_service_account"
+        trace: false
         configuration:
           ACTION: create
         output:
@@ -67,6 +96,9 @@ steps:
       - name: apply
         type: script
         file: "$SERVICE_PATH/apply_templates"
+        trace:
+          key: apply-service-account
+          title: Apply service account
         configuration:
           ACTION: apply
           DRY_RUN: false
@@ -76,18 +108,23 @@ steps:
       - name: generate domain
         type: script
         file: "$SERVICE_PATH/scope/networking/dns/domain/generate_domain"
+        trace: false
         output:
           - name: SCOPE_DOMAIN
             type: environment
       - name: create dns
         type: script
         file: "$SERVICE_PATH/scope/networking/dns/manage_dns"
+        trace:
+          key: create-dns
+          title: Create DNS
         configuration:
           ACTION: CREATE
         pre:
           name: build dns context
           type: script
           file: "$SERVICE_PATH/scope/networking/dns/build_dns_context"
+          trace: false
           output:
             - name: HOSTED_PUBLIC_ZONE_ID
               type: environment
@@ -100,9 +137,15 @@ steps:
             - name: apply dns templates
               type: script
               file: "$SERVICE_PATH/apply_templates"
+              trace:
+                key: apply-dns
+                title: Apply DNS records
               configuration:
                 ACTION: apply
                 DRY_RUN: false
             - name: wait on balancer
               type: script
               file: "$SERVICE_PATH/scope/wait_on_balancer"
+              trace:
+                title: Wait for load balancer
+                flavors: [external_dns]

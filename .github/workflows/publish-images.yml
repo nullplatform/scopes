@@ -1,0 +1,169 @@
+name: publish-images
+
+# Publishes every scope's worker image to ECR Public on each semver tag, then
+# registers each as an oci_image platform artifact (visible-to organization=*).
+# Same mold as scopes-lambda (publish-image.yml), fanned out to the 3 images:
+#
+#   scopes/containers            <- k8s/            (base; FROM worker-bridge + tooling)
+#   scopes/scheduled-task        <- scheduled_task/ (leaner)
+#   scopes/containers-datadog    <- containers + datadog/  overlay (metric)
+#
+# The datadog overlay is FROM the containers base (which bakes the whole repo
+# into /app/pkg), so it must be pushed first — its build `needs: containers` and
+# passes BASE_VERSION so its Dockerfile can FROM containers:<tag>.
+# (azure / azure-aro are pure config overlays the tofu modules configure at
+# install time via NP_OVERRIDES_PATH, so they need no image of their own.)
+#
+# Explicit job per image on purpose: a matrixed job that calls the reusable
+# workflow collapses `image_digest` to a single value (matrix outputs overwrite
+# each other), which would register every artifact against the same image.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write    # OIDC against AWS
+  contents: write    # create/update the GitHub release with artifact metadata
+
+jobs:
+  # ── containers (base) ──────────────────────────────────────────────────────
+  containers:
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
+    with:
+      image_name: scopes/containers
+      context: .
+      submodules: true
+      dockerfile: docker/containers.Dockerfile
+      tag: ${{ github.ref_name }}
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
+
+  register-containers:
+    name: Register containers artifact
+    needs: containers
+    runs-on: ubuntu-24.04
+    env:
+      NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
+      NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
+    steps:
+      - name: Install np CLI (alpha-packages build)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
+      - name: Register scopes/containers image artifact (visible to everyone)
+        run: |
+          np artifact create \
+            --nrn "$NP_ARTIFACT_NRN" \
+            --type oci_image \
+            --registry public.ecr.aws \
+            --repository nullplatform/scopes/containers \
+            --digest "${{ needs.containers.outputs.image_digest }}" \
+            --visible-to "organization=*"
+
+  # ── scheduled-task (standalone) ────────────────────────────────────────────
+  scheduled-task:
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
+    with:
+      image_name: scopes/scheduled-task
+      context: .
+      submodules: true
+      dockerfile: docker/scheduled-task.Dockerfile
+      tag: ${{ github.ref_name }}
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
+
+  register-scheduled-task:
+    name: Register scheduled-task artifact
+    needs: scheduled-task
+    runs-on: ubuntu-24.04
+    env:
+      NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
+      NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
+    steps:
+      - name: Install np CLI (alpha-packages build)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
+      - name: Register scopes/scheduled-task image artifact (visible to everyone)
+        run: |
+          np artifact create \
+            --nrn "$NP_ARTIFACT_NRN" \
+            --type oci_image \
+            --registry public.ecr.aws \
+            --repository nullplatform/scopes/scheduled-task \
+            --digest "${{ needs.scheduled-task.outputs.image_digest }}" \
+            --visible-to "organization=*"
+
+  # ── containers-datadog (overlay) ───────────────────────────────────────────
+  containers-datadog:
+    needs: containers
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
+    with:
+      image_name: scopes/containers-datadog
+      context: .
+      submodules: true
+      dockerfile: docker/containers-datadog.Dockerfile
+      tag: ${{ github.ref_name }}
+      build_args: BASE_VERSION=${{ github.ref_name }}
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
+
+  register-containers-datadog:
+    name: Register containers-datadog artifact
+    needs: containers-datadog
+    runs-on: ubuntu-24.04
+    env:
+      NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
+      NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
+    steps:
+      - name: Install np CLI (alpha-packages build)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
+      - name: Register scopes/containers-datadog image artifact (visible to everyone)
+        run: |
+          np artifact create \
+            --nrn "$NP_ARTIFACT_NRN" \
+            --type oci_image \
+            --registry public.ecr.aws \
+            --repository nullplatform/scopes/containers-datadog \
+            --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
+            --visible-to "organization=*"
+
+  # ── GitHub release with artifact metadata ──────────────────────────────────
+  # Tags here are human-pushed and previously produced no GitHub release at
+  # all, so the published digests were invisible to consumers. Upsert a release
+  # for the tag whose body carries every image's digest and copyable pinned
+  # reference. Runs after the registrations so the table reflects what was
+  # actually published; the digest check keeps re-runs idempotent.
+  finalize-release:
+    name: Publish release with artifact metadata
+    needs: [containers, scheduled-task, containers-datadog, register-containers, register-scheduled-task, register-containers-datadog]
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      REGISTRY: public.ecr.aws/nullplatform
+      DIGEST_CONTAINERS: ${{ needs.containers.outputs.image_digest }}
+      DIGEST_SCHEDULED: ${{ needs.scheduled-task.outputs.image_digest }}
+      DIGEST_DATADOG: ${{ needs.containers-datadog.outputs.image_digest }}
+    steps:
+      - name: Upsert release with artifact table
+        run: |
+          SECTION=$(printf '## Artifacts\n\n| Image | Digest | Pinned reference |\n|---|---|---|\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |' \
+            "$REGISTRY/scopes/containers" "$TAG" "$DIGEST_CONTAINERS" "$REGISTRY/scopes/containers" "$DIGEST_CONTAINERS" \
+            "$REGISTRY/scopes/scheduled-task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled-task" "$DIGEST_SCHEDULED" \
+            "$REGISTRY/scopes/containers-datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers-datadog" "$DIGEST_DATADOG")
+
+          # Drafts are not resolvable via releases/tags/:tag — list and filter.
+          RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name==\"$TAG\")][0].id // empty")
+
+          if [ -z "$RELEASE_ID" ]; then
+            gh release create "$TAG" --title "$TAG" --notes "$SECTION" --verify-tag
+            echo "created release $TAG"
+          else
+            BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.body // ""')
+            if printf '%s' "$BODY" | grep -qF "$DIGEST_CONTAINERS"; then
+              echo "release $TAG already carries these digests"
+            else
+              printf '%s\n\n%s' "$BODY" "$SECTION" > body.md
+              gh release edit "$TAG" --draft=false --notes-file body.md
+              echo "updated release $TAG"
+            fi
+          fi

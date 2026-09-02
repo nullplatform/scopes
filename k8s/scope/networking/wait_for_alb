@@ -24,6 +24,9 @@
 # time out and fail the scope creation.
 if [ "${DNS_TYPE:-}" != "route53" ]; then
 	log debug "📋 DNS type is '${DNS_TYPE:-unset}', skipping ALB active-state wait"
+	if command -v np_step_skip >/dev/null 2>&1; then
+		np_step_skip "no ALB on DNS type '${DNS_TYPE:-unset}'"
+	fi
 	return 0 2>/dev/null || exit 0
 fi
 
@@ -49,6 +52,10 @@ polls_since_heartbeat=0
 heartbeats_emitted=0
 
 log info "⏳ Waiting up to ${TIMEOUT_SECONDS}s for ALB '$ALB_NAME' to become active..."
+if command -v np_scope_step_begin >/dev/null 2>&1; then
+	np_scope_step_begin wait-alb-active --title "Wait for ALB '$ALB_NAME' to become active"
+	np_scope_wait_heartbeat "alb-active" 0 "$TIMEOUT_SECONDS" "pending"
+fi
 
 state=""
 alb_arn=""
@@ -80,6 +87,9 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 		heartbeats_emitted=$((heartbeats_emitted + 1))
 		elapsed=$((heartbeats_emitted * polls_per_heartbeat * poll_interval))
 		log info "⏳ Still waiting for ALB '$ALB_NAME' to become active (${state:-pending}, ~${elapsed}s elapsed)"
+		if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+			np_scope_wait_heartbeat "alb-active" "$elapsed" "$TIMEOUT_SECONDS" "${state:-pending}"
+		fi
 		polls_since_heartbeat=0
 	fi
 
@@ -93,7 +103,20 @@ if [ "$state" != "active" ]; then
 	log error "🔧 How to fix:"
 	log error "   • Check controller logs: kubectl -n kube-system logs deploy/aws-load-balancer-controller"
 	log error "   • Verify ALB quota: aws service-quotas get-service-quota --service-code elasticloadbalancing --quota-code L-53DA6B97"
+	if command -v np_scope_step_timeout >/dev/null 2>&1; then
+		np_scope_explain --title "Wait for ingress" --severity error \
+			--what "Gave up waiting for ALB '$ALB_NAME' to become active (last state: ${state:-pending})"
+		np_scope_step_timeout "ALB '$ALB_NAME' not active after ${TIMEOUT_SECONDS}s (last state: ${state:-pending})"
+	fi
 	exit 1
+fi
+
+if [ -n "$alb_arn" ] && command -v np_scope_consumes >/dev/null 2>&1; then
+	np_scope_consumes "load-balancer:$alb_arn" load_balancer "$alb_arn"
+fi
+
+if command -v np_scope_step_end >/dev/null 2>&1; then
+	np_scope_step_end 0
 fi
 
 # Audit tags — only on the scope that triggered the autocreate, so the cloud

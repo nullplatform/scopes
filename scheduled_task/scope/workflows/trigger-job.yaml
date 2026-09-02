@@ -3,10 +3,14 @@ include:
 provider_categories:
   - container-orchestration
   - cloud-providers
+trace:
+  title: Run scheduled task
+  job: scheduled-task-trigger
 steps:
   - name: load logging
     type: script
     file: "$OVERRIDES_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
