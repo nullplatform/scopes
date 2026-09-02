@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.16.0] - 2026-09-02
+- k8s scopes now show live, step-by-step progress in the dashboard when a scope is created, updated or deleted, and for every deployment action (deploy, switch traffic, finalize, rollback, delete, diagnose, kill instance, restart pods, pause/resume autoscaling, set instance count): each step with its duration, and long waits (load balancer, DNS, instance health) saying what they are waiting for. Requires `NP_API_KEY` on the agent; without it everything works as before
+- Failed k8s deployments now explain why on the step that failed, and what to do about it: image pull errors with the registry's message, out-of-memory kills, crash exit codes with the application's last log lines, and failing health checks with the path and response detected
+- k8s **diagnose** now shows what each check found (summary, severity, affected pods, recommended action) instead of a list of green steps
 - k8s scopes can now pin the traffic-manager sidecar version cluster-wide via the container-orchestration provider's `traffic_manager.version`, instead of only per-scope
 - Publish containers and scheduled task scopes as docker images
 - Remove unused cloudwatch annotations from deployment objects
