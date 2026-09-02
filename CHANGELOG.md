@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.1] - 2026-09-02
+- Fix: the Instances tab of the performance view now shows every pod of a k8s scope. The instance list had a hard cap of 10 that nothing could override, so a scope with 20 pods showed only the first 10 and the table had no next page. A `limit` in the request is honored, the `LIMIT` env var on the agent stays as the operator override, and with neither every pod is returned
+
 ## [1.16.0] - 2026-09-02
 - k8s scopes now show live, step-by-step progress in the dashboard when a scope is created, updated or deleted, and for every deployment action (deploy, switch traffic, finalize, rollback, delete, diagnose, kill instance, restart pods, pause/resume autoscaling, set instance count): each step with its duration, and long waits (load balancer, DNS, instance health) saying what they are waiting for. Requires `NP_API_KEY` on the agent; without it everything works as before
 - Failed k8s deployments now explain why on the step that failed, and what to do about it: image pull errors with the registry's message, out-of-memory kills, crash exit codes with the application's last log lines, and failing health checks with the path and response detected
