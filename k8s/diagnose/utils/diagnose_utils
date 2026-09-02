@@ -123,8 +123,16 @@ read_log_tail() {
 # Convert newline-delimited stdin into a JSON array of non-empty strings.
 # Used by read_log_tail and update_check_result to share one canonical
 # tail-text-to-JSON pipeline.
+#
+# Lines are truncated at $EVIDENCE_LOG_LINE_MAX_CHARS (default 2000): kubectl's
+# --tail bounds line count, not line length.
 lines_to_json_array() {
-    jq -R -s 'split("\n") | map(select(length > 0))'
+    local max="${EVIDENCE_LOG_LINE_MAX_CHARS:-2000}"
+    jq -R -s --argjson max "$max" '
+        split("\n")
+        | map(select(length > 0))
+        | map(if length > $max then .[:$max] + "…[truncated]" else . end)
+    '
 }
 
 # Append a JSON object to a bash indexed array (passed by name). Avoids the
@@ -354,10 +362,18 @@ notify_results() {
         exit 1
     fi
 
-    # Generate grouped results directly in memory
-    # Use xargs to avoid "Argument list too long" error
-    local grouped_results
-    grouped_results=$(echo "$json_files" | xargs jq -s '
+    # The payload must never travel through argv: Linux caps a single execve
+    # argument at 128 KiB, and ulimit does not lift it. Hence xargs, then
+    # --slurpfile, then a file path for np --body.
+    #
+    # The .json suffix is required: np reads --body from disk only when the
+    # value ends in .json, otherwise it sends the string itself.
+    local work_dir results_file body_file rc
+    work_dir="$(mktemp -d)"
+    results_file="$work_dir/results.json"
+    body_file="$work_dir/body.json"
+
+    if ! echo "$json_files" | xargs jq -s '
       # category helper
       def cat: .category // "unknown";
 
@@ -376,19 +392,31 @@ notify_results() {
           },
           checks: .
         })
-    ')
+    ' > "$results_file"; then
+        print_error "Failed to group check results from $NP_OUTPUT_DIR"
+        rm -rf "$work_dir"
+        return 1
+    fi
 
     # Extract action and service IDs
     ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
     SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
 
     # Build action body with grouped results
-    ACTION_BODY=$(jq -nc \
-                    --argjson result "$grouped_results" \
-                    '{
-                      results: { categories: $result }
-                    }')
+    if ! jq -nc \
+            --slurpfile result "$results_file" \
+            '{
+              results: { categories: $result[0] }
+            }' > "$body_file"; then
+        print_error "Failed to build the action body"
+        rm -rf "$work_dir"
+        return 1
+    fi
 
     # Send to np service
-    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$ACTION_BODY" --no-output
+    np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$body_file" --no-output
+    rc=$?
+
+    rm -rf "$work_dir"
+    return $rc
 }
