@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Fix: editing a k8s scope now runs the provider's update workflow (networking, ingress and IAM re-applied from the new settings, with step-by-step progress in the dashboard). Before, the `update-scope` action was never registered, so an edit was marked active immediately without touching the cluster. Providers configured before this version need the new action registered once: `np service specification action specification create --serviceSpecificationId <id> --body "$(gomplate --file k8s/specs/actions/update-scope.json.tpl)"` with `SERVICE_SPECIFICATION_ID` set, or re-run `./configure`
+
 ## [1.16.1] - 2026-09-02
 - Fix: the Instances tab of the performance view now shows every pod of a k8s scope. The instance list had a hard cap of 10 that nothing could override, so a scope with 20 pods showed only the first 10 and the table had no next page. A `limit` in the request is honored, the `LIMIT` env var on the agent stays as the operator override, and with neither every pod is returned
 
