@@ -337,7 +337,6 @@ _np_scopes_on_exit() {
 
 _NP_SCOPES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 _NP_SCOPES_SDK="$_NP_SCOPES_ROOT/vendor/catalog-tracing-sh/nptrace.sh"
-[ -f "$_NP_SCOPES_SDK" ] || _NP_SCOPES_SDK="$_NP_SCOPES_ROOT/nptrace.sh"
 if [ -z "${NP_TRACE_LOADED:-}" ] \
   && [ -f "$_NP_SCOPES_SDK" ] \
   && [ -n "${NP_API_KEY:-}" ] \

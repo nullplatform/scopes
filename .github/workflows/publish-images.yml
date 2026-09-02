@@ -33,6 +33,7 @@ jobs:
     with:
       image_name: scopes/containers
       context: .
+      submodules: true
       dockerfile: docker/containers.Dockerfile
       tag: ${{ github.ref_name }}
     secrets:
@@ -64,6 +65,7 @@ jobs:
     with:
       image_name: scopes/scheduled-task
       context: .
+      submodules: true
       dockerfile: docker/scheduled-task.Dockerfile
       tag: ${{ github.ref_name }}
     secrets:
@@ -96,6 +98,7 @@ jobs:
     with:
       image_name: scopes/containers-datadog
       context: .
+      submodules: true
       dockerfile: docker/containers-datadog.Dockerfile
       tag: ${{ github.ref_name }}
       build_args: BASE_VERSION=${{ github.ref_name }}
