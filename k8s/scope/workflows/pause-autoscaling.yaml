@@ -1,9 +1,12 @@
+trace:
+  title: Pause autoscaling
 include:
   - "$SERVICE_PATH/values.yaml"
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function

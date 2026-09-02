@@ -420,6 +420,60 @@ strip_ansi() {
   assert_contains "$clean" "⚠ No JSON result files found in $NP_OUTPUT_DIR"
 }
 
+# --- the verdict reaches the TRACE, not only the results file -----------------
+
+_stub_trace() {
+  np_scope_explain() { echo "EXPLAIN $*" >> "$TRACE_LOG"; }
+  np_scope_output()  { echo "OUTPUT $1" >> "$TRACE_LOG"; }
+  export -f np_scope_explain np_scope_output
+  export TRACE_LOG="$(mktemp)"
+}
+
+@test "diagnose_utils: a failed check states its finding on the step, with what to do" {
+  _stub_trace
+  evidence=$(evidence_json "1 of 1 pod(s) had OOMKilled containers" "critical" '["pod-a"]' '{}' \
+    '["Increase memory limits or optimize application memory usage"]')
+
+  update_check_result --status "failed" --evidence "$evidence"
+
+  grep -q -- "--severity error" "$TRACE_LOG"
+  grep -q -- "OOMKilled containers" "$TRACE_LOG"
+  grep -q -- "--next Increase memory limits" "$TRACE_LOG"
+  grep -q "^OUTPUT check_evidence" "$TRACE_LOG"
+  rm -f "$TRACE_LOG"
+}
+
+@test "diagnose_utils: a warning check reads as a warning, not an error" {
+  _stub_trace
+  evidence=$(evidence_json "2 pod(s) restarted recently" "warning" '[]' '{}' '[]')
+
+  update_check_result --status "warning" --evidence "$evidence"
+
+  grep -q -- "--severity warn" "$TRACE_LOG"
+  ! grep -q -- "--severity error" "$TRACE_LOG"
+  rm -f "$TRACE_LOG"
+}
+
+@test "diagnose_utils: a passing check says nothing — a clean run is not 21 lines of green" {
+  _stub_trace
+  evidence=$(evidence_json "No OOMKilled containers detected in 1 pod(s)" "info" '[]' '{}' '[]')
+
+  update_check_result --status "success" --evidence "$evidence"
+
+  [ ! -s "$TRACE_LOG" ]
+  rm -f "$TRACE_LOG"
+}
+
+@test "diagnose_utils: the results file is still written when the workflow is untraced" {
+  evidence=$(evidence_json "1 of 1 pod(s) had OOMKilled containers" "critical" '["pod-a"]' '{}' '[]')
+
+  run update_check_result --status "failed" --evidence "$evidence"
+
+  [ "$status" -eq 0 ]
+  assert_equal "$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")" "failed"
+  assert_contains "$(jq -r '.evidence.summary' "$SCRIPT_OUTPUT_FILE")" "OOMKilled"
+}
+
 @test "notify_results: sends payloads larger than the argv limit" {
   # 2 MB of log text in one check: past the argv limit on both Linux and macOS.
   local line

@@ -55,6 +55,183 @@ iteration=0
 LATEST_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 LAST_REPORTED_COUNTS=""
+UNHEALTHY_POD_COUNT=0
+UNHEALTHY_POD_REASONS=""
+case "${NP_TRACE:-}" in
+    *~switch-instances-check@*)   WAIT_TITLE="Verify scaled instances" ;;
+    *~finalize-instances-check@*) WAIT_TITLE="Verify final capacity" ;;
+    *)                            WAIT_TITLE="Instance health check" ;;
+esac
+
+humanize_k8s_reason() {
+    case "$1" in
+        OOMKilled) echo "out of memory" ;;
+        CrashLoopBackOff) echo "crashing repeatedly" ;;
+        ImagePullBackOff|ErrImagePull|InvalidImageName) echo "can't pull the container image" ;;
+        CreateContainerConfigError|CreateContainerError|RunContainerError|ContainerCannotRun) echo "container failed to start" ;;
+        Error) echo "exited with an error" ;;
+        DeadlineExceeded) echo "timed out" ;;
+        Evicted) echo "evicted from its node" ;;
+        Unschedulable|FailedScheduling) echo "can't be scheduled onto a node" ;;
+        BackOff) echo "restarting after failures" ;;
+        FailedMount|FailedAttachVolume) echo "can't attach its storage" ;;
+        FailedCreate) echo "couldn't be created" ;;
+        Unhealthy) echo "failing health checks" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+humanize_k8s_reasons() {
+    local _hr_out="" _hr_word
+    IFS=',' read -ra _hr_parts <<< "$1"
+    for _hr_part in "${_hr_parts[@]}"; do
+        _hr_part="${_hr_part#"${_hr_part%%[![:space:]]*}"}"
+        _hr_part="${_hr_part%"${_hr_part##*[![:space:]]}"}"
+        [ -n "$_hr_part" ] || continue
+        _hr_word=$(humanize_k8s_reason "$_hr_part")
+        case ", $_hr_out," in
+            *", $_hr_word,"*) ;;
+            *) _hr_out="${_hr_out:+$_hr_out, }$_hr_word" ;;
+        esac
+    done
+    echo "$_hr_out"
+}
+
+WAIT_WHY=""
+WAIT_NEXT=""
+classify_wait_failure() {
+    WAIT_WHY=""
+    WAIT_NEXT=""
+    command -v diagnose_failure >/dev/null 2>&1 || return 0
+    diagnose_failure >/dev/null 2>&1 || true
+    WAIT_WHY="${HUMAN_MESSAGE:-}"
+    WAIT_NEXT="${SUGGESTED_FIX:-}"
+    return 0
+}
+
+report_wait_narrative() {
+    command -v np_scope_explain >/dev/null 2>&1 || return 0
+    local ready_now="$1" desired_now="$2" launched_now="$3" all_healthy="${4:-false}"
+
+    local pods_json restarted restart_total restart_reasons restart_clause
+    local problems problem_count problem_reasons real_detail
+    pods_json=$(kubectl get pods -n "$K8S_NAMESPACE" -l "deployment_id=${DEPLOYMENT_ID}" -o json 2>/dev/null) || pods_json=""
+    restarted=$(echo "$pods_json" \
+        | jq -c '[.items[] | {name: .metadata.name,
+                              restarts: ([.status.containerStatuses[]?.restartCount] | add // 0),
+                              reason: ([.status.containerStatuses[]?.lastState.terminated.reason // empty] | first // empty)}
+                  | select(.restarts > 0) | with_entries(select(.value != "" and .value != null))]' 2>/dev/null) || restarted="[]"
+    [ -n "$restarted" ] || restarted="[]"
+    restart_total=$(echo "$restarted" | jq 'map(.restarts) | add // 0' 2>/dev/null) || restart_total=0
+    restart_reasons=$(echo "$restarted" | jq -r '[.[].reason // empty] | unique | join(", ")' 2>/dev/null) || restart_reasons=""
+    restart_words=$(humanize_k8s_reasons "${restart_reasons:-}")
+    restart_clause="${restart_words:+ ($restart_words)}"
+    problems=$(echo "$pods_json" \
+        | jq -c '[.items[] | .metadata.name as $pod | .status.containerStatuses[]?
+                  | select(.state.waiting.reason != null
+                           and .state.waiting.reason != "ContainerCreating"
+                           and .state.waiting.reason != "PodInitializing")
+                  | .state.waiting.reason as $w
+                  | (.lastState.terminated.reason // "") as $t0
+                  | (if $t0 == "Completed" then "" else $t0 end) as $t
+                  | {pod: $pod, reason: $w,
+                     cause: (if ($w == "CrashLoopBackOff" or $w == "BackOff") then $t else "" end),
+                     message: ((.state.waiting.message // "") | .[0:300])}
+                  | with_entries(select(.value != ""))]' 2>/dev/null) || problems="[]"
+    [ -n "$problems" ] || problems="[]"
+    problem_count=$(echo "$problems" | jq 'length' 2>/dev/null) || problem_count=0
+    problem_reasons=$(echo "$problems" | jq -r '[.[] | (.cause // .reason)] | unique | join(", ")' 2>/dev/null) || problem_reasons=""
+    real_detail=$(echo "$problems" | jq -r '[.[].message // empty] | first // ""' 2>/dev/null \
+        | tr '\n' ' ' | sed 's/[[:space:]]*$//') || real_detail=""
+
+    if [ "${problem_count:-0}" -eq 0 ] && [ "$UNHEALTHY_POD_COUNT" -gt 0 ]; then
+        problem_count=$UNHEALTHY_POD_COUNT
+        problem_reasons=$UNHEALTHY_POD_REASONS
+    fi
+    WAIT_EFFECTIVE_REASONS="${problem_reasons:-$restart_reasons}"
+    WAIT_REAL_DETAIL="$real_detail"
+
+    local crash_log=""
+    if [ "$restart_total" -gt 0 ]; then
+        local crash_pod
+        crash_pod=$(echo "$restarted" | jq -r '.[0].name // empty' 2>/dev/null) || crash_pod=""
+        if [ -n "$crash_pod" ]; then
+            crash_log=$(kubectl logs "$crash_pod" -n "$K8S_NAMESPACE" --previous --tail=15 2>/dev/null | tail -c 1500) || crash_log=""
+        fi
+        if [ -n "$crash_log" ] && [ -z "$real_detail" ]; then
+            WAIT_REAL_DETAIL=$(printf '%s' "$crash_log" | tail -1 | cut -c1-200)
+        fi
+    fi
+
+    case "$WAIT_REAL_DETAIL" in
+        "back-off "*"restarting failed container="*) WAIT_REAL_DETAIL="" ;;
+    esac
+    if [ ${#WAIT_REAL_DETAIL} -gt 140 ]; then
+        WAIT_REAL_DETAIL="${WAIT_REAL_DETAIL:0:137}..."
+    fi
+
+    local snapshot="$ready_now/$desired_now/$launched_now/$problem_count/$problem_reasons/$restart_total/$all_healthy"
+    if [ "$snapshot" = "${WAIT_NARRATIVE_SNAPSHOT:-}" ]; then
+        return 0
+    fi
+    WAIT_NARRATIVE_SNAPSHOT="$snapshot"
+
+    local instances meter
+    instances=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
+        --argjson p "$problems" --argjson r "$restarted" --arg crash "$crash_log" \
+        '{healthy: $h, launched: $l, desired: $d}
+         + (if ($p | length) > 0 then {problems: $p} else {} end)
+         + (if ($r | length) > 0 then {restarted: $r} else {} end)
+         + (if $crash != "" then {last_crash_log: $crash} else {} end)')
+    np_scope_output instances "$instances"
+
+    meter=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
+        --argjson u "$problem_count" --arg reasons "$(humanize_k8s_reasons "$problem_reasons")" --argjson t "$restart_total" \
+        --arg rreasons "$(humanize_k8s_reasons "$restart_reasons")" \
+        '{kind: "instances-health", healthy: $h, launched: $l, desired: $d}
+         + (if $u > 0 then {unhealthy: $u, reasons: ($reasons | split(", ") | map(select(. != "")))} else {} end)
+         + (if $t > 0 then {restarts: $t} else {} end)
+         + (if $rreasons != "" then {restart_reasons: ($rreasons | split(", "))} else {} end)')
+    np_scope_affordance "$meter"
+
+    local restarts_label="restarts" detail_clause=""
+    [ "$restart_total" -eq 1 ] && restarts_label="restart"
+    [ -n "$WAIT_REAL_DETAIL" ] && detail_clause=": $WAIT_REAL_DETAIL"
+    if [ "$problem_count" -gt 0 ]; then
+        local problem_words
+        problem_words=$(humanize_k8s_reasons "${problem_reasons:-}")
+        classify_wait_failure
+        np_scope_explain --title "$WAIT_TITLE" --severity warn \
+            --what "Waiting for $ready_now/$desired_now instances to be healthy — $problem_count with ${problem_words:-failing health checks}$detail_clause" \
+            ${WAIT_WHY:+--why "$WAIT_WHY"} \
+            --impact "The deployment fails if the instances don't become healthy before the health-check timeout." \
+            ${WAIT_NEXT:+--next "$WAIT_NEXT"}
+    elif [ "$restart_total" -gt 0 ]; then
+        classify_wait_failure
+        if [ "$all_healthy" = "true" ]; then
+            np_scope_explain --title "$WAIT_TITLE" --severity warn \
+                --what "All $desired_now instances healthy — after $restart_total $restarts_label$restart_clause" \
+                ${WAIT_WHY:+--why "$WAIT_WHY"} \
+                --impact "The instances crashed on the way here; the last crash output is attached to this step." \
+                ${WAIT_NEXT:+--next "$WAIT_NEXT"}
+        else
+            np_scope_explain --title "$WAIT_TITLE" --severity warn \
+                --what "Waiting for $ready_now/$desired_now instances to be healthy — $restart_total $restarts_label so far$restart_clause$detail_clause" \
+                ${WAIT_WHY:+--why "$WAIT_WHY"} \
+                --impact "The last crash output is attached to this step." \
+                ${WAIT_NEXT:+--next "$WAIT_NEXT"}
+        fi
+    elif [ "$all_healthy" = "true" ]; then
+        np_scope_explain --title "$WAIT_TITLE" --what "All $desired_now instances healthy"
+    else
+        local graced_clause=""
+        if [ "$launched_now" -gt "$ready_now" ] 2>/dev/null; then
+            graced_clause=" (instances starting — normal while the app boots)"
+        fi
+        np_scope_explain --title "$WAIT_TITLE" --what "Waiting for $ready_now/$desired_now instances to be healthy$graced_clause"
+    fi
+    return 0
+}
 
 # Report the instance counters onto the deployment's strategy_data
 # (amount_instances_to_wait / launched_instances / healthy_instances) so the
@@ -95,6 +272,10 @@ log debug "📋 Namespace: $K8S_NAMESPACE"
 log debug "📋 Timeout: ${TIMEOUT}s (max $MAX_ITERATIONS iterations)"
 log debug ""
 
+if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+    np_scope_wait_heartbeat "deployment-active" 0 "$TIMEOUT" "starting"
+fi
+
 while true; do
     ((++iteration))
     if [ $iteration -gt $MAX_ITERATIONS ]; then
@@ -104,6 +285,24 @@ while true; do
 
         source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 
+        if command -v np_scope_step_timeout >/dev/null 2>&1; then
+            timeout_cause="${WAIT_REAL_DETAIL:-}"
+            timeout_reasons="${WAIT_EFFECTIVE_REASONS:-$UNHEALTHY_POD_REASONS}"
+            timeout_message="deployment '$K8S_DEPLOYMENT_NAME' not active after ${TIMEOUT}s"
+            if [ -n "$timeout_cause" ]; then
+                timeout_message="$timeout_cause ($timeout_message)"
+            fi
+            timeout_reason_words=$(humanize_k8s_reasons "${timeout_reasons:-}")
+            np_scope_explain --title "$WAIT_TITLE" --severity error \
+                --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${timeout_reason_words:+ — $timeout_reason_words}${timeout_cause:+: $timeout_cause}" \
+                ${HUMAN_MESSAGE:+--why "$HUMAN_MESSAGE"} \
+                --impact "The previous version keeps serving traffic; this deployment does not go live." \
+                ${SUGGESTED_FIX:+--next "$SUGGESTED_FIX"}
+            np_scope_error "$timeout_message" \
+                "$(jq -nc --argjson h "${ready:-0}" --argjson l "${launched:-0}" --argjson d "${desired:-0}" --arg reasons "$timeout_reasons" \
+                    '{instances: {healthy: $h, launched: $l, desired: $d}} + (if $reasons != "" then {reasons: ($reasons | split(", "))} else {} end)')"
+            np_scope_step_timeout "$timeout_message"
+        fi
         exit 1
     fi
 
@@ -141,15 +340,49 @@ while true; do
 
     report_instance_counts "$desired" "$launched" "$ready"
 
+    report_wait_narrative "$ready" "$desired" "$launched"
+
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
         log debug ""
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
+        if command -v np_scope_progress >/dev/null 2>&1; then
+            np_scope_progress "$ready" "$desired" count
+            UNHEALTHY_POD_COUNT=0
+            UNHEALTHY_POD_REASONS=""
+            report_wait_narrative "$ready" "$desired" "$launched" true
+
+            _wda_asset_url=$(echo "$CONTEXT" | jq -r '.asset.url // empty')
+            _wda_asset_type=$(echo "$CONTEXT" | jq -r '.asset.type // "docker-image"')
+            if [ -n "$_wda_asset_url" ]; then
+                np_scope_consumes "$_wda_asset_type:$_wda_asset_url" image "$_wda_asset_url"
+            fi
+            _wda_app_id=$(echo "$CONTEXT" | jq -r '.application.id // empty')
+            _wda_scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // empty')
+            _wda_created=$(echo "$CONTEXT" | jq -r '.deployment.created_at // empty')
+            _wda_start_ms=$(date -d "$_wda_created" +%s000 2>/dev/null || echo "")
+            if [ -n "$_wda_app_id" ] && [ -n "$_wda_scope_id" ]; then
+                _wda_log_uri="application/$_wda_app_id/log?scope=$_wda_scope_id&type=application"
+                [ -n "$_wda_start_ms" ] && _wda_log_uri="$_wda_log_uri&start_time=$_wda_start_ms"
+                np_scope_produces \
+                    "deployment-log:$_wda_app_id/$_wda_scope_id/$DEPLOYMENT_ID" \
+                    log "$_wda_log_uri"
+                np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"$_wda_app_id\",\"scope_id\":\"$_wda_scope_id\",\"type\":\"application\"${_wda_start_ms:+,\"start_time\":$_wda_start_ms}}"
+            fi
+
+            NP_TRACE_FLUSH_TIMEOUT=10 np_trace_flush
+        fi
         break
     fi
 
     if [ "$iteration" -eq 1 ] || [ $(( iteration % HEARTBEAT_INTERVAL )) -eq 0 ]; then
         elapsed_s=$(( iteration * 10 ))
         log info "⏳ Still waiting — Ready: $ready/$desired, Available: $current/$desired (attempt $iteration/$MAX_ITERATIONS, ${elapsed_s}s elapsed)"
+        if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+            np_scope_wait_heartbeat "deployment-active" "$elapsed_s" "$TIMEOUT" "progressing" \
+                "wait.desired=$desired" "wait.launched=$launched" \
+                "wait.ready=$ready" "wait.available=$current" "wait.updated=$updated"
+            np_scope_progress "$ready" "$desired" count
+        fi
     fi
 
     POD_SELECTOR="deployment_id=${DEPLOYMENT_ID}"
@@ -216,8 +449,22 @@ while true; do
     ')
 
     if [ -n "$UNHEALTHY_GROUPS" ]; then
+        UNHEALTHY_POD_COUNT=0
         while IFS=$'\t' read -r ts pod_name messages_concat; do
             [ -z "$pod_name" ] && continue
+            ((UNHEALTHY_POD_COUNT++))
+            first_msg=$(printf '%s' "$messages_concat" | tr '\001' '\n' | head -1)
+            parsed=$(parse_probe_message "$first_msg" 2>/dev/null) || parsed=""
+            probe_kind="${parsed%%|*}"
+            if [ -n "$probe_kind" ]; then
+                unhealthy_reason="$probe_kind probe failing"
+            else
+                unhealthy_reason="failing health checks"
+            fi
+            case ", $UNHEALTHY_POD_REASONS," in
+                *", $unhealthy_reason,"*) ;;
+                *) UNHEALTHY_POD_REASONS="${UNHEALTHY_POD_REASONS:+$UNHEALTHY_POD_REASONS, }$unhealthy_reason" ;;
+            esac
             log_unhealthy_group "$ts" "$pod_name" "$messages_concat" \
                 || log_unhealthy_raw "$ts" "$pod_name" "$messages_concat"
         done <<< "$UNHEALTHY_GROUPS"

@@ -1,3 +1,5 @@
+trace:
+  title: Diagnose the failed deployment
 continue_on_error: true
 include:
   - "$SERVICE_PATH/values.yaml"
@@ -5,6 +7,7 @@ steps:
   - name: load_functions
     type: script
     file: "$SERVICE_PATH/diagnose/utils/diagnose_utils"
+    trace: false
     output:
       - name: update_check_result
         type: function
@@ -16,6 +19,7 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/diagnose/build_context"
+    trace: false
     output:
       - name: CONTEXT
         type: environment
@@ -27,10 +31,12 @@ steps:
       name: notify_check_running
       type: script
       file: "$SERVICE_PATH/diagnose/notify_check_running"
+      trace: false
     after_each:
       name: notify_check_results
       type: script
       file: "$SERVICE_PATH/diagnose/notify_diagnose_results"
+      trace: false
     folders:
       - "$SERVICE_PATH/diagnose/service"
       - "$SERVICE_PATH/diagnose/scope"

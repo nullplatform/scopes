@@ -149,7 +149,7 @@ teardown() {
   # The hint script must read pod state and surface the user-friendly reason
   assert_contains "$output" "📋 Reason: The container exceeded its memory limit"
   assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
-  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
+  assert_contains "$output" "💡 Suggested fix: Raise the RAM Memory of scope 'my-app'"
 }
 
 # =============================================================================
@@ -656,6 +656,64 @@ teardown() {
   assert_contains "$output" "HTTP 502"
 }
 
+@test "wait_deployment_active: a multi-word reason survives the reason list whole" {
+  source "$BATS_TEST_DIRNAME/../wait_deployment_active" 2>/dev/null || true
+  run bash -c "
+    source '$BATS_TEST_DIRNAME/../print_failed_deployment_hints' 2>/dev/null || true
+    \$(declare -f humanize_k8s_reason humanize_k8s_reasons 2>/dev/null)
+    true
+  "
+  eval "$(sed -n '/^humanize_k8s_reason()/,/^}/p;/^humanize_k8s_reasons()/,/^}/p' "$BATS_TEST_DIRNAME/../wait_deployment_active")"
+
+  [ "$(humanize_k8s_reasons 'Startup probe failing')" = "Startup probe failing" ]
+  [ "$(humanize_k8s_reasons 'OOMKilled, CrashLoopBackOff')" = "out of memory, crashing repeatedly" ]
+  [ "$(humanize_k8s_reasons 'Startup probe failing, OOMKilled')" = "Startup probe failing, out of memory" ]
+  [ "$(humanize_k8s_reasons 'ImagePullBackOff, ErrImagePull')" = "can't pull the container image" ]
+}
+
+@test "wait_deployment_active: the trace carries WHY it is stuck and what to do, not just the counts" {
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":0,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o jsonpath\"*)
+          echo 'd-scope-123-deploy-456-abc'
+          ;;
+        \"get events\"*\"Pod\"*)
+          echo '{\"items\":[{\"lastTimestamp\":\"9999-12-31T23:59:59Z\",\"type\":\"Warning\",\"involvedObject\":{\"kind\":\"Pod\",\"name\":\"d-scope-123-deploy-456-abc\"},\"reason\":\"Unhealthy\",\"message\":\"Startup probe failed: HTTP probe failed with statuscode: 404\"}]}'
+          ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    np_scope_explain() { echo \"EXPLAIN \$*\"; }
+    np_scope_error() { echo \"ERROR \$*\"; }
+    np_scope_step_timeout() { echo \"TIMEOUT \$*\"; }
+    export -f np_scope_explain np_scope_error np_scope_step_timeout
+
+    export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"health_check\":{\"path\":\"/health-bad\"}}}}'
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "did not pass its health check at /health-bad"
+  assert_contains "$output" "Detected: Startup probe"
+  assert_contains "$output" "HTTP 404"
+  assert_contains "$output" "--next"
+}
+
 # =============================================================================
 # Latest Timestamp Initialization
 # =============================================================================
@@ -856,4 +914,81 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "Could not report instance counts"
   assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
+}
+
+@test "wait_deployment_active: an OOM kill in a restart loop is reported as out of memory, not as the loop" {
+  cat > "$BATS_TMPDIR/oom-pods.json" <<'JSON'
+{"items":[{"metadata":{"name":"d-1-2-abc"},
+"status":{"containerStatuses":[{"name":"application",
+"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=application pod=d-1-2-abc_nullplatform(498dc0ab)"}},
+"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}},
+"restartCount":3}]}}]}
+JSON
+
+  run jq -r '[.items[] | .status.containerStatuses[]?
+      | .state.waiting.reason as $w
+      | (.lastState.terminated.reason // "") as $t0
+      | (if $t0 == "Completed" then "" else $t0 end) as $t
+      | (if ($w == "CrashLoopBackOff" or $w == "BackOff") then $t else $w end)]
+      | unique | join(", ")' "$BATS_TMPDIR/oom-pods.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "OOMKilled" ]
+
+  eval "$(sed -n '/^humanize_k8s_reason()/,/^}/p;/^humanize_k8s_reasons()/,/^}/p' "$BATS_TEST_DIRNAME/../wait_deployment_active")"
+  [ "$(humanize_k8s_reasons "$output")" = "out of memory" ]
+}
+
+@test "wait_deployment_active: the mechanism stays on the io even though the narrative names the cause" {
+  cat > "$BATS_TMPDIR/oom-pods.json" <<'JSON'
+{"items":[{"metadata":{"name":"d-1-2-abc"},
+"status":{"containerStatuses":[{"name":"application",
+"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=application"}},
+"lastState":{"terminated":{"reason":"OOMKilled"}},
+"restartCount":3}]}}]}
+JSON
+  run jq -c '[.items[] | .metadata.name as $pod | .status.containerStatuses[]?
+      | .state.waiting.reason as $w
+      | (.lastState.terminated.reason // "") as $t0
+      | (if $t0 == "Completed" then "" else $t0 end) as $t
+      | {pod: $pod, reason: $w,
+         cause: (if ($w == "CrashLoopBackOff" or $w == "BackOff") then $t else "" end)}]' \
+      "$BATS_TMPDIR/oom-pods.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"reason":"CrashLoopBackOff"'
+  echo "$output" | grep -q '"cause":"OOMKilled"'
+}
+
+@test "wait_deployment_active: a real cause still wins over the termination reason" {
+  cat > "$BATS_TMPDIR/pull-pods.json" <<'JSON'
+{"items":[{"metadata":{"name":"d-1-2-abc"},
+"status":{"containerStatuses":[{"name":"application",
+"state":{"waiting":{"reason":"ImagePullBackOff","message":"manifest unknown"}},
+"lastState":{"terminated":{"reason":"Error"}}}]}}]}
+JSON
+  run jq -r '[.items[] | .status.containerStatuses[]?
+      | .state.waiting.reason as $w
+      | (.lastState.terminated.reason // "") as $t
+      | (if ($w == "CrashLoopBackOff" or $w == "BackOff") and $t != "" then $t else $w end)]
+      | unique | join(", ")' "$BATS_TMPDIR/pull-pods.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ImagePullBackOff" ]
+}
+
+@test "wait_deployment_active: the back-off boilerplate never reaches the phase line" {
+  detail_of() {
+    local d="$1"
+    case "$d" in
+      "back-off "*"restarting failed container="*) d="" ;;
+    esac
+    if [ ${#d} -gt 140 ]; then d="${d:0:137}..."; fi
+    printf '%s' "$d"
+  }
+
+  [ -z "$(detail_of 'back-off 20s restarting failed container=application pod=d-253247585-630235960_nullplatform(498dc0ab-d1f9)')" ]
+  [ "$(detail_of 'manifest unknown: manifest tagged v9 not found')" = 'manifest unknown: manifest tagged v9 not found' ]
+
+  long=$(printf 'x%.0s' $(seq 1 200))
+  capped=$(detail_of "$long")
+  [ "${#capped}" -eq 140 ]
+  case "$capped" in *"...") ;; *) return 1 ;; esac
 }

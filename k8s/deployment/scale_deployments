@@ -7,6 +7,12 @@ GREEN_DEPLOYMENT_ID=$DEPLOYMENT_ID
 BLUE_REPLICAS=$(echo "$CONTEXT" | jq -r .blue_replicas)
 BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
 
+if [ "$DEPLOY_STRATEGY" != "rolling" ]; then
+  if command -v np_step_skip >/dev/null 2>&1; then
+    np_step_skip "instance counts are set by the manifests for the $DEPLOY_STRATEGY strategy — nothing to scale"
+  fi
+fi
+
 if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
   GREEN_DEPLOYMENT_NAME="d-$SCOPE_ID-$GREEN_DEPLOYMENT_ID"
   BLUE_DEPLOYMENT_NAME="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
@@ -40,6 +46,10 @@ if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
 
   unset TIMEOUT
   unset SKIP_DEPLOYMENT_STATUS_CHECK
+
+  if command -v np_scope_output >/dev/null 2>&1; then
+    np_scope_output replicas "{\"green\": $GREEN_REPLICAS, \"previous\": $BLUE_REPLICAS}"
+  fi
 
   log debug ""
   log info "✨ Deployments scaled successfully"
