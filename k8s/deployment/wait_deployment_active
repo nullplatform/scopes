@@ -55,25 +55,14 @@ iteration=0
 LATEST_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"
 LAST_REPORTED_COUNTS=""
-# The wait's memory for the trace narrative: how many pods the LAST event
-# sweep saw failing health checks (and why), and the pods' restart history —
-# a crash-loop that heals mid-wait must not read as an uneventful wait.
 UNHEALTHY_POD_COUNT=0
 UNHEALTHY_POD_REASONS=""
-# The row's phase-specific words, derived from the step this wait is running AS
-# (NP_TRACE ends with the step's own run path, `...~<key>@attempt.iteration`) —
-# they must match the trace titles the workflows declare. Never passed through
-# step configuration: the engine splices configuration values into the shell
-# fragment, where a spaced value breaks the command.
 case "${NP_TRACE:-}" in
     *~switch-instances-check@*)   WAIT_TITLE="Verify scaled instances" ;;
     *~finalize-instances-check@*) WAIT_TITLE="Verify final capacity" ;;
     *)                            WAIT_TITLE="Instance health check" ;;
 esac
 
-# Provider reason CODES -> plain words for the narrative surfaces (same table the
-# native scopes use). The raw code is machine detail — it stays on the io facets
-# for the dialog; the narrative speaks human. Unknown codes fall through verbatim.
 humanize_k8s_reason() {
     case "$1" in
         OOMKilled) echo "out of memory" ;;
@@ -92,18 +81,10 @@ humanize_k8s_reason() {
     esac
 }
 
-# A COMMA-separated reason list, translated and deduped AFTER translation — two
-# codes that mean the same thing read once.
-#
-# Split on the comma ALONE. Not every entry is a one-word kubernetes code: the event
-# sweep contributes phrases it has already put into human words ("Startup probe
-# failing"), and splitting on whitespace too shredded those into their own "reasons" —
-# the phase read "1 with Startup, probe, failing".
 humanize_k8s_reasons() {
     local _hr_out="" _hr_word
     IFS=',' read -ra _hr_parts <<< "$1"
     for _hr_part in "${_hr_parts[@]}"; do
-        # Trim the space that follows the comma in the joined form.
         _hr_part="${_hr_part#"${_hr_part%%[![:space:]]*}"}"
         _hr_part="${_hr_part%"${_hr_part##*[![:space:]]}"}"
         [ -n "$_hr_part" ] || continue
@@ -116,12 +97,6 @@ humanize_k8s_reasons() {
     echo "$_hr_out"
 }
 
-# The classified diagnosis, for the TRACE — the same words the console hints print,
-# from the same classifier (diagnose_failure in print_failed_deployment_hints, which
-# reads ALL_EVENTS): WHY it is stuck ("The application did not pass its health check at
-# /health — Detected: Startup probe — app responded with HTTP 404 (expected 2xx)") and
-# what to do about it. Sets WAIT_WHY / WAIT_NEXT, both empty when nothing classifies.
-# Cheap enough per heartbeat because it only runs once something is actually wrong.
 WAIT_WHY=""
 WAIT_NEXT=""
 classify_wait_failure() {
@@ -134,20 +109,10 @@ classify_wait_failure() {
     return 0
 }
 
-# Report the wait's live narrative onto the trace — the counted io, the
-# instances-health meter a host renders as pips, and the plain-language
-# explain with the severity an operator should read it at. Re-emitted per
-# heartbeat: facets fold last-writer-wins, so the latest state (and a
-# recovered warning) always wins. Best-effort, like every trace call.
 report_wait_narrative() {
     command -v np_scope_explain >/dev/null 2>&1 || return 0
     local ready_now="$1" desired_now="$2" launched_now="$3" all_healthy="${4:-false}"
 
-    # ONE pod-state read feeds everything: the restart history (with its
-    # reasons), and the LIVE problem classification with kubernetes' own
-    # verbatim message — an ImagePullBackOff shows the registry's actual
-    # error, not a "check your image" hint. Boot churn (ContainerCreating,
-    # PodInitializing) is never presented as a problem.
     local pods_json restarted restart_total restart_reasons restart_clause
     local problems problem_count problem_reasons real_detail
     pods_json=$(kubectl get pods -n "$K8S_NAMESPACE" -l "deployment_id=${DEPLOYMENT_ID}" -o json 2>/dev/null) || pods_json=""
@@ -175,15 +140,10 @@ report_wait_narrative() {
                   | with_entries(select(.value != ""))]' 2>/dev/null) || problems="[]"
     [ -n "$problems" ] || problems="[]"
     problem_count=$(echo "$problems" | jq 'length' 2>/dev/null) || problem_count=0
-    # The narrative names the CAUSE (out of memory), not the wrapper that kept
-    # restarting it; `reason` stays on the io so an agent still sees the loop.
     problem_reasons=$(echo "$problems" | jq -r '[.[] | (.cause // .reason)] | unique | join(", ")' 2>/dev/null) || problem_reasons=""
-    # Kubernetes' own words for the FIRST problem — the real error, verbatim.
     real_detail=$(echo "$problems" | jq -r '[.[].message // empty] | first // ""' 2>/dev/null \
         | tr '\n' ' ' | sed 's/[[:space:]]*$//') || real_detail=""
 
-    # The event sweep fills in what pod state alone cannot name (which probe,
-    # on which path) when the state itself shows nothing.
     if [ "${problem_count:-0}" -eq 0 ] && [ "$UNHEALTHY_POD_COUNT" -gt 0 ]; then
         problem_count=$UNHEALTHY_POD_COUNT
         problem_reasons=$UNHEALTHY_POD_REASONS
@@ -191,8 +151,6 @@ report_wait_narrative() {
     WAIT_EFFECTIVE_REASONS="${problem_reasons:-$restart_reasons}"
     WAIT_REAL_DETAIL="$real_detail"
 
-    # A crash-loop's REAL error is what the app printed before it died: fetch
-    # the previous container's last lines once per situation change, bounded.
     local crash_log=""
     if [ "$restart_total" -gt 0 ]; then
         local crash_pod
@@ -205,23 +163,13 @@ report_wait_narrative() {
         fi
     fi
 
-    # A back-off message is pure MECHANISM: "back-off 20s restarting failed
-    # container=application pod=d-253247585-…_nullplatform(498dc0ab-…)" repeats the
-    # reason we just named and then buries the line in two ids no reader parses.
-    # It is the whole reason the phase line ran off the page. Drop it from the
-    # narrative — the cause is on `why`, and the verbatim message is still on the
-    # io for an agent. Everything else (a registry's real error) is information.
     case "$WAIT_REAL_DETAIL" in
         "back-off "*"restarting failed container="*) WAIT_REAL_DETAIL="" ;;
     esac
-    # What is left is read at a glance, so keep it to about one line; the io
-    # carries it untruncated.
     if [ ${#WAIT_REAL_DETAIL} -gt 140 ]; then
         WAIT_REAL_DETAIL="${WAIT_REAL_DETAIL:0:137}..."
     fi
 
-    # Realtime without noise: emit only when the SITUATION changes (counts, a
-    # new problem, a recovery) — the loop calls this every poll.
     local snapshot="$ready_now/$desired_now/$launched_now/$problem_count/$problem_reasons/$restart_total/$all_healthy"
     if [ "$snapshot" = "${WAIT_NARRATIVE_SNAPSHOT:-}" ]; then
         return 0
@@ -237,8 +185,6 @@ report_wait_narrative() {
          + (if $crash != "" then {last_crash_log: $crash} else {} end)')
     np_scope_output instances "$instances"
 
-    # The meter is user-facing: its reason captions speak human words; the io
-    # above keeps the raw codes for the dialog.
     meter=$(jq -nc --argjson h "$ready_now" --argjson l "$launched_now" --argjson d "$desired_now" \
         --argjson u "$problem_count" --arg reasons "$(humanize_k8s_reasons "$problem_reasons")" --argjson t "$restart_total" \
         --arg rreasons "$(humanize_k8s_reasons "$restart_reasons")" \
@@ -254,8 +200,6 @@ report_wait_narrative() {
     if [ "$problem_count" -gt 0 ]; then
         local problem_words
         problem_words=$(humanize_k8s_reasons "${problem_reasons:-}")
-        # The reader asks "why?" the moment the meter goes amber, not only when the
-        # wait finally gives up — so the diagnosis rides the LIVE narrative too.
         classify_wait_failure
         np_scope_explain --title "$WAIT_TITLE" --severity warn \
             --what "Waiting for $ready_now/$desired_now instances to be healthy — $problem_count with ${problem_words:-failing health checks}$detail_clause" \
@@ -263,11 +207,6 @@ report_wait_narrative() {
             --impact "The deployment fails if the instances don't become healthy before the health-check timeout." \
             ${WAIT_NEXT:+--next "$WAIT_NEXT"}
     elif [ "$restart_total" -gt 0 ]; then
-        # A container that crashed and is running again is between waiting states,
-        # so nothing above classified it — and this branch used to say only THAT it
-        # restarted, never why or what to do. A restart has a cause (the
-        # termination reason is right there in `restart_reasons`), so ask for it
-        # here too rather than leaving the amber phase mute.
         classify_wait_failure
         if [ "$all_healthy" = "true" ]; then
             np_scope_explain --title "$WAIT_TITLE" --severity warn \
@@ -285,8 +224,6 @@ report_wait_narrative() {
     elif [ "$all_healthy" = "true" ]; then
         np_scope_explain --title "$WAIT_TITLE" --what "All $desired_now instances healthy"
     else
-        # Calm but not silent: instances exist and are booting — a heavy boot reads
-        # as a heavy boot, never as a black box (and never as a problem).
         local graced_clause=""
         if [ "$launched_now" -gt "$ready_now" ] 2>/dev/null; then
             graced_clause=" (instances starting — normal while the app boots)"
@@ -335,10 +272,6 @@ log debug "📋 Namespace: $K8S_NAMESPACE"
 log debug "📋 Timeout: ${TIMEOUT}s (max $MAX_ITERATIONS iterations)"
 log debug ""
 
-# The rollout wait IS the planned step ("Instance health check") — heartbeats,
-# counts and the narrative attach to that step directly, so clicking its row
-# shows the diagnosis. A sub-step would split one human moment across two
-# nodes. (Guarded: overrides may reuse this script without k8s/logging loaded.)
 if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
     np_scope_wait_heartbeat "deployment-active" 0 "$TIMEOUT" "starting"
 fi
@@ -353,11 +286,6 @@ while true; do
         source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 
         if command -v np_scope_step_timeout >/dev/null 2>&1; then
-            # The terminal leads with the CAUSE — kubernetes' own words or the
-            # app's last crash line — and the mechanism (the timeout) follows
-            # in parentheses. ONE message everywhere: facets fold last-writer-
-            # wins, so the close must not overwrite the cause with the
-            # mechanism.
             timeout_cause="${WAIT_REAL_DETAIL:-}"
             timeout_reasons="${WAIT_EFFECTIVE_REASONS:-$UNHEALTHY_POD_REASONS}"
             timeout_message="deployment '$K8S_DEPLOYMENT_NAME' not active after ${TIMEOUT}s"
@@ -365,8 +293,6 @@ while true; do
                 timeout_message="$timeout_cause ($timeout_message)"
             fi
             timeout_reason_words=$(humanize_k8s_reasons "${timeout_reasons:-}")
-            # print_failed_deployment_hints (sourced above) has just classified the
-            # failure; the trace says the same thing the console said.
             np_scope_explain --title "$WAIT_TITLE" --severity error \
                 --what "Gave up with ${ready:-0}/${desired:-0} instances healthy${timeout_reason_words:+ — $timeout_reason_words}${timeout_cause:+: $timeout_cause}" \
                 ${HUMAN_MESSAGE:+--why "$HUMAN_MESSAGE"} \
@@ -414,9 +340,6 @@ while true; do
 
     report_instance_counts "$desired" "$launched" "$ready"
 
-    # Realtime WHY: the narrative re-evaluates every poll and emits only when
-    # the situation changes — a new problem appears on the trace within one
-    # poll interval, not at the next heartbeat.
     report_wait_narrative "$ready" "$desired" "$launched"
 
     if [ "$desired" = "$current" ] && [ "$desired" = "$updated" ] && [ "$desired" = "$ready" ] && [ "$desired" -gt 0 ]; then
@@ -424,19 +347,10 @@ while true; do
         log info "✅ All pods in deployment '$K8S_DEPLOYMENT_NAME' are available and ready!"
         if command -v np_scope_progress >/dev/null 2>&1; then
             np_scope_progress "$ready" "$desired" count
-            # Every pod is ready: any earlier probe warning has recovered, and
-            # the terminal narrative must say so (a crash-loop on the way here
-            # stays visible as "healthy — after N restarts").
             UNHEALTHY_POD_COUNT=0
             UNHEALTHY_POD_REASONS=""
             report_wait_narrative "$ready" "$desired" "$launched" true
 
-            # Lineage, by the same canonical ids the platform's own scopes use,
-            # so a custom scope's graph joins by value:
-            #  • the deployment CONSUMED the build's asset — the cross-flow
-            #    edge that links this deploy back to the build that made it
-            #  • it PRODUCED this deploy's logs; the pointer is the concrete
-            #    log query, and the affordance is the UI's "view logs" control
             _wda_asset_url=$(echo "$CONTEXT" | jq -r '.asset.url // empty')
             _wda_asset_type=$(echo "$CONTEXT" | jq -r '.asset.type // "docker-image"')
             if [ -n "$_wda_asset_url" ]; then
@@ -455,10 +369,6 @@ while true; do
                 np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"$_wda_app_id\",\"scope_id\":\"$_wda_scope_id\",\"type\":\"application\"${_wda_start_ms:+,\"start_time\":$_wda_start_ms}}"
             fi
 
-            # The wait's FINAL truth (all healthy, the lineage, the log offer) must not
-            # ride only the exit flush — a spent budget there loses exactly the tail.
-            # One bounded flush here: the wait already took its time; 10s to land the
-            # diagnosis is the cheapest part of it.
             NP_TRACE_FLUSH_TIMEOUT=10 np_trace_flush
         fi
         break
@@ -543,8 +453,6 @@ while true; do
         while IFS=$'\t' read -r ts pod_name messages_concat; do
             [ -z "$pod_name" ] && continue
             ((UNHEALTHY_POD_COUNT++))
-            # Remember WHY for the trace narrative — the probe kind when the
-            # message parses, a generic reason when it doesn't.
             first_msg=$(printf '%s' "$messages_concat" | tr '\001' '\n' | head -1)
             parsed=$(parse_probe_message "$first_msg" 2>/dev/null) || parsed=""
             probe_kind="${parsed%%|*}"

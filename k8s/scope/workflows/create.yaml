@@ -1,22 +1,11 @@
 include:
   - "$SERVICE_PATH/values.yaml"
-# The trace identity of each step (trace: blocks below) speaks the same step
-# vocabulary the platform's own scopes emit, so a custom scope's provision
-# reads identically in the timeline. Step NAMES never change — overrides
-# anchor on them.
 trace:
   title: Create scope
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
-  # Per-provider identity: jobs are scoped to the scope's service
-  # specification, so two providers sharing a workflow name never
-  # converge on one definition.
   job:
     name: k8s-scope-create
     namespace: "@context:scope.provider"
-    # Identity labels, the same grammar the deployment workflows declare:
-    # `entity` + `scope.provider` scope the search, `operation` names the
-    # lifecycle act. They are how a consumer finds this plan BEFORE the run
-    # exists, instead of an empty canvas until the agent picks the command up.
     labels:
       entity: scope
       operation: create
@@ -97,7 +86,6 @@ steps:
       - name: build service account
         type: script
         file: "$SERVICE_PATH/scope/iam/build_service_account"
-        # Template generation — the apply below is the observable act.
         trace: false
         configuration:
           ACTION: create
@@ -120,7 +108,6 @@ steps:
       - name: generate domain
         type: script
         file: "$SERVICE_PATH/scope/networking/dns/domain/generate_domain"
-        # Pure computation — the DNS create below is the observable act.
         trace: false
         output:
           - name: SCOPE_DOMAIN

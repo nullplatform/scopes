@@ -1,15 +1,5 @@
 #!/usr/bin/env bats
-# =============================================================================
 # Unit tests for the tracing hooks in k8s/logging
-#
-# (Lives under utils/tests because the runner discovers k8s/<module>/tests;
-# the file under test is k8s/logging.)
-#
-# The contract under test: with the platform's trace context present, every
-# `log error` and every uncaught failure lands ON the workflow step as a
-# tracing.error facet, waits report progress — and with anything missing, the
-# behavior is byte-identical to plain logging.
-# =============================================================================
 
 setup() {
 	export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -17,9 +7,6 @@ setup() {
 
 	export LOGGING="$PROJECT_ROOT/k8s/logging"
 
-	# A traced environment, as the np CLI provides it: NP_TRACE points at the
-	# step this fragment runs inside; the state dir is per-test; the endpoint is
-	# unroutable so nothing ever leaves the machine and flushes fail fast.
 	export NP_TRACE="1|trace-9|scope-provision-42~apply-manifests@0.0"
 	export NP_API_KEY="test-key"
 	export NP_TRACE_DIR="$BATS_TEST_TMPDIR/nptrace"
@@ -34,8 +21,6 @@ teardown() {
 	unset NP_TRACE_FLUSH_TIMEOUT NP_TRACE_MAX_RETRIES
 }
 
-# Run a snippet in a fresh bash with logging sourced, then print every spooled
-# envelope (the spool is the wire: it is what the API would receive).
 run_logged() {
 	run "$BASH" -c "
 		source '$LOGGING'
@@ -56,8 +41,6 @@ run_logged() {
 }
 
 @test "the error attaches to the step CURRENT at the moment it happened" {
-	# NP_TRACE moves between steps; adoption is per-call, so a later error must
-	# land on the later step.
 	run_logged '
 		log error "first failure"
 		export NP_TRACE="1|trace-9|scope-provision-42~wait-for-alb@0.0"
@@ -98,8 +81,6 @@ run_logged() {
 	"
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q 'the real reason'
-	# exactly one error facet ON THE STEP: the generic exit report stood down
-	# (the run-level mirror is a separate node and is asserted elsewhere)
 	[ "$(echo "$output" | grep 'apply-manifests@0.0"' | grep -c 'tracing.error')" -eq 1 ]
 }
 
@@ -107,14 +88,10 @@ run_logged() {
 	run_logged 'np_scope_wait_heartbeat "alb-active" 90 300 "pending"'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"status":"waiting"'
-	# What is being waited for is a FACET, not labels: a wait is a first-class
-	# thing every consumer can render, and the deadline rides it in milliseconds.
 	echo "$output" | grep -q '"tracing.signal":{"name":"alb-active","direction":"wait","timeout_ms":300000}'
 }
 
 @test "a wait with an unresolved timeout still states the wait, without a deadline" {
-	# An unresolved configuration ($DEPLOYMENT_MAX_WAIT_IN_SECONDS arriving
-	# literal) must not put a nonsense deadline on the wire.
 	run_logged 'np_scope_wait_heartbeat "alb-active" 90 "MAX_WAIT" "pending"'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"tracing.signal":{"name":"alb-active","direction":"wait"}'
@@ -155,8 +132,6 @@ hello" ]
 # --- sub-steps --------------------------------------------------------------
 
 @test "step_begin opens a keyed sub-step under the platform step" {
-	# The title rides the next lifecycle emit (own-node enrichment is bagged,
-	# not emitted eagerly), so close the step to see it on the wire.
 	run_logged 'np_scope_step_begin wait-alb-active --title "Wait for the ALB"; np_scope_step_end 0'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"run_id":"scope-provision-42~apply-manifests@0.0~wait-alb-active@0.0"'
@@ -186,8 +161,6 @@ hello" ]
 }
 
 @test "while a sub-step is open, log error attaches to IT, not the platform step" {
-	# The facet rides the step's closing emit — and because a real message was
-	# already recorded, the close adds no generic shadow next to it.
 	run_logged 'np_scope_step_begin wait-alb-active; log error "quota exceeded"; np_scope_step_end 1'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep '"quota exceeded"' | grep -q 'wait-alb-active@0.0'
@@ -201,9 +174,6 @@ hello" ]
 }
 
 @test "a heartbeat puts NO wait bookkeeping in the labels" {
-	# Labels are how a node is FILED, and a consumer renders them as tags. The
-	# wait's own bookkeeping is not filing metadata — it read as a row of code-y
-	# chips on the phase, which is what the signal facet replaced.
 	run_logged 'np_scope_wait_heartbeat "deployment-active" 20 600 "progressing"'
 	[ "$status" -eq 0 ]
 	! echo "$output" | grep -q '"wait\.'
@@ -216,7 +186,6 @@ hello" ]
 		log error "late failure"
 	'
 	[ "$status" -eq 0 ]
-	# the error lands on the NEW platform step, not the stale sub-step
 	echo "$output" | grep '"late failure"' | grep -q 'scope-provision-42~wait-for-alb@0.0"'
 }
 
@@ -232,7 +201,6 @@ hello" ]
 	[ "$status" -eq 0 ]
 	echo "$output" | grep '"status":"failed"' | grep -q 'wait-alb-active@0.0'
 	echo "$output" | grep '"the real reason"' | grep -q 'wait-alb-active@0.0'
-	# no generic 'phase exited' shadow next to the real message
 	! echo "$output" | grep -q 'phase exited with status'
 }
 
@@ -262,10 +230,7 @@ hello" ]
 	run_logged 'np_scope_produces "dns-record:api.example.com" dns_record "api.example.com"'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep '"edge.produces"' | grep -q '"id":"dns-record:api.example.com"'
-	# The edge binding says WHICH io of the node the edge is about — a name, and
-	# nothing else. The descriptor itself stays whole on the node's io facet.
 	echo "$output" | grep -q '"tracing.binding":{"name":"dns_record"}'
-	# foreign re-emit carries the io facet on the adopted step
 	echo "$output" | grep '"tracing.output"' | grep -q 'apply-manifests@0.0'
 }
 
@@ -296,7 +261,6 @@ secret/sec-1 created"
 	echo "$output" | grep -q '"id":"k8s-deployment:ns-42/d-1-2"'
 	echo "$output" | grep -q '"id":"k8s-service:ns-42/s-1-2"'
 	echo "$output" | grep -q '"id":"k8s-ingress:ns-42/i-1-2"'
-	# kinds outside the platform lineage model are not datasets
 	! echo "$output" | grep -q 'sec-1'
 }
 
@@ -307,8 +271,6 @@ secret/sec-1 created"
 	'
 	[ "$status" -eq 0 ]
 	echo "$output" | grep -q '"tracing.affordances":\[{"kind":"deploy-log","application_id":"7"}\]'
-	# The unit is a CLOSED set every consumer can render (percent/count/bytes/
-	# milliseconds) — never a free-text noun the reader has to interpret.
 	echo "$output" | grep -q '"tracing.progress":{"current":3,"target":10,"unit":"count"}'
 }
 
@@ -383,9 +345,7 @@ secret/sec-1 created"
 		true
 	"
 	[ "$status" -eq 0 ]
-	# the step carries it...
 	echo "$output" | grep '"the real reason"' | grep -q 'scope-provision-42~apply-manifests@0.0"'
-	# ...and so does the run (the step path minus its last segment)
 	echo "$output" | grep '"the real reason"' | grep -q '"run_id":"scope-provision-42"'
 }
 
@@ -410,8 +370,6 @@ secret/sec-1 created"
 		log error "   • The role lacks route53:ListHostedZones"
 	'
 	[ "$status" -eq 0 ]
-	# every emission of the burst carries the CAUSE as the message — with the
-	# console decoration (indentation, ❌ marker) stripped for the trace
 	! echo "$output" | grep '"tracing.error"' | grep -q '"message":"💡'
 	echo "$output" | grep -q '"message":"HostedZone not found (AccessDenied)","details":{"hints":\["💡 Possible causes:","• The role lacks route53:ListHostedZones"\]}'
 }

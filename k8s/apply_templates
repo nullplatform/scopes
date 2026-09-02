@@ -31,10 +31,6 @@ while IFS= read -r TEMPLATE_FILE; do
        IGNORE_NOT_FOUND="--ignore-not-found=true"
      fi
 
-     # Each manifest apply is its own SUB-STEP, keyed by the platform's step
-     # vocabulary (create-deployment, create-service, ...) so a custom
-     # deploy's trace reads like a native one — the manifest filename prefix
-     # names what is being created.
      TRACE_STEP_KEY=""
      if [[ "$ACTION" == "apply" ]] && command -v np_scope_step_begin >/dev/null 2>&1; then
        case "$FILENAME" in
@@ -53,20 +49,12 @@ while IFS= read -r TEMPLATE_FILE; do
        [[ -n "$TRACE_STEP_KEY" ]] && np_scope_step_begin "$TRACE_STEP_KEY"
      fi
 
-     # Captured with stderr (and re-echoed) so applied resources can be
-     # recorded as lineage — and so a FAILURE carries kubectl's actual reason
-     # onto the trace, not a bare "failed to apply".
      if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND 2>&1); then
        [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
        [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
-       # Lineage AFTER the sub-step closes: what was applied belongs to the PLANNED
-       # step the user clicks ("Apply manifests"), not to an invisible technical
-       # sub-step — the row's detail must show the workloads it produced.
        if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
          np_scope_k8s_applied "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
        fi
-       # A removal is evidence too: the finalize/rollback row that deleted the
-       # previous (or aborted) deployment names what it removed.
        if [[ "$ACTION" == "delete" ]] && command -v np_scope_k8s_deleted >/dev/null 2>&1; then
          np_scope_k8s_deleted "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
        fi
@@ -94,11 +82,6 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 1
 fi
 
-# When this apply IS the blue/green traffic switch (switch_traffic.yaml sets
-# TRACE_TRAFFIC_SWITCH on the step), report the switch the way the platform's
-# own scopes do: the request as input, what landed as output, the resulting
-# traffic split as the affordance a host renders, and the phase's convergence
-# toward 100%.
 if [[ "${TRACE_TRAFFIC_SWITCH:-false}" == "true" ]] && [[ -n "${CONTEXT:-}" ]] \
   && command -v np_scope_explain >/dev/null 2>&1; then
   TRAFFIC_TO=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 100')
@@ -114,8 +97,6 @@ if [[ "${TRACE_TRAFFIC_SWITCH:-false}" == "true" ]] && [[ -n "${CONTEXT:-}" ]] \
   fi
 fi
 
-# The manifests' lineage (produced / removed pointers) is this step's evidence —
-# land it now instead of betting the exit flush's budget on it.
 if command -v np_trace_flush >/dev/null 2>&1; then
   NP_TRACE_FLUSH_TIMEOUT=5 np_trace_flush
 fi

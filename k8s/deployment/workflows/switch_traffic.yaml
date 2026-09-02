@@ -2,27 +2,13 @@ include:
   - "$SERVICE_PATH/values.yaml"
 configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
-# Trace identities speak the platform's deploy step vocabulary. Step NAMES
-# never change — overrides anchor on them.
 trace:
   title: Switch traffic
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
-  # This workflow runs ONCE PER TRAFFIC INCREMENT (ten times in a 10%-step
-  # switch): declared steps only, so injected/override plumbing can never
-  # multiply into noise on the wire.
   default: false
-  # Per-provider identity: jobs are scoped to the scope's service
-  # specification, so two providers sharing a workflow name never
-  # converge on one definition.
   job:
     name: k8s-deployment-switch-traffic
     namespace: "@context:scope.provider"
-    # Identity labels, the same grammar the deploy workflows declare: `entity` +
-    # `scope.provider` scope the search, and `operation` names the lifecycle act this
-    # job performs — the word the deployment entity's own statuses use. They are how
-    # the deployment page finds this plan BEFORE the run exists: a cancel shows the
-    # rollback checklist pending the moment the entity says the wind-down began,
-    # instead of an empty canvas until the agent picks the command up.
     labels:
       entity: deployment
       operation: switch-traffic
@@ -68,8 +54,6 @@ steps:
         type: environment
       - name: BLUE_DEPLOYMENT_ID
         type: environment
-  # Scaling is a no-op for blue-green (counts ride the manifests) and runs
-  # once per increment — no milestone; the post's health check is the story.
   - name: create deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
@@ -79,8 +63,6 @@ steps:
       file: "$SERVICE_PATH/deployment/wait_deployment_active"
       trace:
         key: switch-instances-check
-        # The same wait, in THIS phase's words: green must hold its scaled
-        # replicas healthy before any weight shifts.
         title: Verify scaled instances
         group: switching-traffic
       configuration:
@@ -96,7 +78,6 @@ steps:
       - name: INGRESS_FILE
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
-  # Same no-op-for-blue-green scaling — untraced under default: false.
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
@@ -124,7 +105,6 @@ steps:
             flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: true
-        # Metrics publishing is machine bookkeeping, once per increment.
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"

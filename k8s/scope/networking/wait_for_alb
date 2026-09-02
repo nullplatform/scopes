@@ -24,8 +24,6 @@
 # time out and fail the scope creation.
 if [ "${DNS_TYPE:-}" != "route53" ]; then
 	log debug "📋 DNS type is '${DNS_TYPE:-unset}', skipping ALB active-state wait"
-	# Tell the platform this step's branch wasn't taken: it closes as
-	# `skipped`, not `completed`. (Guarded: defined by the np CLI's preamble.)
 	if command -v np_step_skip >/dev/null 2>&1; then
 		np_step_skip "no ALB on DNS type '${DNS_TYPE:-unset}'"
 	fi
@@ -54,10 +52,6 @@ polls_since_heartbeat=0
 heartbeats_emitted=0
 
 log info "⏳ Waiting up to ${TIMEOUT_SECONDS}s for ALB '$ALB_NAME' to become active..."
-# The wait is its own SUB-STEP in the trace, flipped to `waiting` right away —
-# an operator watching the provision sees WHAT it is blocked on, live, not
-# after the workflow ends. (Guarded: overrides may reuse this script without
-# k8s/logging loaded.)
 if command -v np_scope_step_begin >/dev/null 2>&1; then
 	np_scope_step_begin wait-alb-active --title "Wait for ALB '$ALB_NAME' to become active"
 	np_scope_wait_heartbeat "alb-active" 0 "$TIMEOUT_SECONDS" "pending"
@@ -117,14 +111,10 @@ if [ "$state" != "active" ]; then
 	exit 1
 fi
 
-# The scope depends on this ALB: record the lineage under its ARN — the same
-# address the platform's own scopes name — before closing the wait sub-step.
 if [ -n "$alb_arn" ] && command -v np_scope_consumes >/dev/null 2>&1; then
 	np_scope_consumes "load-balancer:$alb_arn" load_balancer "$alb_arn"
 fi
 
-# The wait phase is over and the ALB is active — close its sub-step; the audit
-# tagging below is not part of the wait.
 if command -v np_scope_step_end >/dev/null 2>&1; then
 	np_scope_step_end 0
 fi

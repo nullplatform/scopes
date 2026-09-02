@@ -18,8 +18,6 @@ case "$DNS_TYPE" in
 
     log debug "📋 Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
 
-    # The DNS wait is its own SUB-STEP in the trace, heartbeating every ~30s.
-    # (Guarded: overrides may reuse this script without k8s/logging loaded.)
     if command -v np_scope_step_begin >/dev/null 2>&1; then
         np_scope_step_begin wait-dns-endpoint --title "Wait for ExternalDNS to process $DNS_ENDPOINT_NAME"
         np_scope_wait_heartbeat "dns-endpoint" 0 "$((MAX_ITERATIONS * 10))" "pending"

@@ -11,8 +11,6 @@ elapsed=0
 log debug "🔍 Verifying HTTPRoute reconciliation..."
 log debug "📋 HTTPRoute: $HTTPROUTE_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
 
-# The reconciliation wait is its own SUB-STEP in the trace. (Guarded:
-# overrides may reuse this script without k8s/logging loaded.)
 if command -v np_scope_step_begin >/dev/null 2>&1; then
     np_scope_step_begin verify-httproute --title "Verify HTTPRoute reconciliation ($HTTPROUTE_NAME)"
     np_scope_wait_heartbeat "httproute-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"

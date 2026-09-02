@@ -142,8 +142,6 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   fi
 else
   log info "   ✅ Namespace '$K8S_NAMESPACE' exists"
-  # This step's trace identity is create-namespace: when the namespace
-  # already exists, that branch wasn't taken — close as `skipped`.
   if command -v np_step_skip >/dev/null 2>&1; then
     np_step_skip "namespace '$K8S_NAMESPACE' already exists"
   fi

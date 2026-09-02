@@ -657,29 +657,21 @@ teardown() {
 }
 
 @test "wait_deployment_active: a multi-word reason survives the reason list whole" {
-  # The event sweep contributes reasons already in human words ("Startup probe
-  # failing"). Splitting the list on whitespace as well as the comma shredded those
-  # into three, and the phase read "1 with Startup, probe, failing".
   source "$BATS_TEST_DIRNAME/../wait_deployment_active" 2>/dev/null || true
   run bash -c "
     source '$BATS_TEST_DIRNAME/../print_failed_deployment_hints' 2>/dev/null || true
     \$(declare -f humanize_k8s_reason humanize_k8s_reasons 2>/dev/null)
     true
   "
-  # Exercise the helpers directly out of the script's own source.
   eval "$(sed -n '/^humanize_k8s_reason()/,/^}/p;/^humanize_k8s_reasons()/,/^}/p' "$BATS_TEST_DIRNAME/../wait_deployment_active")"
 
   [ "$(humanize_k8s_reasons 'Startup probe failing')" = "Startup probe failing" ]
   [ "$(humanize_k8s_reasons 'OOMKilled, CrashLoopBackOff')" = "out of memory, crashing repeatedly" ]
   [ "$(humanize_k8s_reasons 'Startup probe failing, OOMKilled')" = "Startup probe failing, out of memory" ]
-  # Two codes meaning the same thing still read once.
   [ "$(humanize_k8s_reasons 'ImagePullBackOff, ErrImagePull')" = "can't pull the container image" ]
 }
 
 @test "wait_deployment_active: the trace carries WHY it is stuck and what to do, not just the counts" {
-  # The console hints already classified this failure; the step's explain must say the
-  # same thing, so a reader who opens the phase gets the reason and the fix without
-  # going to the logs.
   run bash -c "
     sleep() { :; }
     export -f sleep
@@ -703,9 +695,6 @@ teardown() {
     np() { echo 'running'; }
     export -f np
 
-    # Capture what the step's facets are told, without a tracing backend. The
-    # timeout's trace block is guarded on np_scope_step_timeout existing, so the
-    # stubs must cover the whole terminal trio.
     np_scope_explain() { echo \"EXPLAIN \$*\"; }
     np_scope_error() { echo \"ERROR \$*\"; }
     np_scope_step_timeout() { echo \"TIMEOUT \$*\"; }
@@ -719,11 +708,9 @@ teardown() {
   "
 
   [ "$status" -eq 1 ]
-  # WHY, in the reader's words, naming the configured path and what was detected.
   assert_contains "$output" "did not pass its health check at /health-bad"
   assert_contains "$output" "Detected: Startup probe"
   assert_contains "$output" "HTTP 404"
-  # …and the actionable next step.
   assert_contains "$output" "--next"
 }
 
@@ -930,9 +917,6 @@ teardown() {
 }
 
 @test "wait_deployment_active: an OOM kill in a restart loop is reported as out of memory, not as the loop" {
-  # CrashLoopBackOff is the MECHANISM; OOMKilled is why the container died. Reading
-  # the wrapper sent the operator to "review your startup logs" for what was really
-  # a memory limit, so the backoff wrappers defer to the termination reason.
   cat > "$BATS_TMPDIR/oom-pods.json" <<'JSON'
 {"items":[{"metadata":{"name":"d-1-2-abc"},
 "status":{"containerStatuses":[{"name":"application",
@@ -941,7 +925,6 @@ teardown() {
 "restartCount":3}]}}]}
 JSON
 
-  # The narrative's reason list: the cause wins.
   run jq -r '[.items[] | .status.containerStatuses[]?
       | .state.waiting.reason as $w
       | (.lastState.terminated.reason // "") as $t0
@@ -956,8 +939,6 @@ JSON
 }
 
 @test "wait_deployment_active: the mechanism stays on the io even though the narrative names the cause" {
-  # An agent reading the step must still see that it was looping — the wrapper is
-  # kept as `reason`, the cause added as `cause`. Only the human line is narrowed.
   cat > "$BATS_TMPDIR/oom-pods.json" <<'JSON'
 {"items":[{"metadata":{"name":"d-1-2-abc"},
 "status":{"containerStatuses":[{"name":"application",
@@ -978,8 +959,6 @@ JSON
 }
 
 @test "wait_deployment_active: a real cause still wins over the termination reason" {
-  # Only the backoff wrappers defer. ImagePullBackOff IS the cause and must not be
-  # replaced by whatever the container happened to exit with last time.
   cat > "$BATS_TMPDIR/pull-pods.json" <<'JSON'
 {"items":[{"metadata":{"name":"d-1-2-abc"},
 "status":{"containerStatuses":[{"name":"application",
@@ -996,9 +975,6 @@ JSON
 }
 
 @test "wait_deployment_active: the back-off boilerplate never reaches the phase line" {
-  # "back-off 20s restarting failed container=… pod=…(uuid)" repeats the reason and
-  # then runs the line off the page with two ids. It is dropped from the narrative;
-  # a registry's real error is information and is kept (bounded).
   detail_of() {
     local d="$1"
     case "$d" in

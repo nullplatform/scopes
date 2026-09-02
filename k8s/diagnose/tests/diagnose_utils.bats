@@ -422,7 +422,6 @@ strip_ansi() {
 
 # --- the verdict reaches the TRACE, not only the results file -----------------
 
-# Stand in for the logging shims so the test can see exactly what the check said.
 _stub_trace() {
   np_scope_explain() { echo "EXPLAIN $*" >> "$TRACE_LOG"; }
   np_scope_output()  { echo "OUTPUT $1" >> "$TRACE_LOG"; }
@@ -440,7 +439,6 @@ _stub_trace() {
   grep -q -- "--severity error" "$TRACE_LOG"
   grep -q -- "OOMKilled containers" "$TRACE_LOG"
   grep -q -- "--next Increase memory limits" "$TRACE_LOG"
-  # The evidence rides along so the dialog can show the affected pods.
   grep -q "^OUTPUT check_evidence" "$TRACE_LOG"
   rm -f "$TRACE_LOG"
 }
@@ -467,7 +465,6 @@ _stub_trace() {
 }
 
 @test "diagnose_utils: the results file is still written when the workflow is untraced" {
-  # No np_scope_* in scope: the mirror is a no-op and the check still records.
   evidence=$(evidence_json "1 of 1 pod(s) had OOMKilled containers" "critical" '["pod-a"]' '{}' '[]')
 
   run update_check_result --status "failed" --evidence "$evidence"

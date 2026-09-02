@@ -250,8 +250,6 @@ validate_alb_config() {
     fi
 }
 
-# The reconciliation wait is its own SUB-STEP in the trace. (Guarded:
-# overrides may reuse this script without k8s/logging loaded.)
 if command -v np_scope_step_begin >/dev/null 2>&1; then
     np_scope_step_begin verify-ingress --title "Verify ingress reconciliation ($INGRESS_NAME)"
     np_scope_wait_heartbeat "ingress-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
@@ -263,8 +261,6 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
             log info "✅ ALB configuration validated successfully"
             if command -v np_scope_step_end >/dev/null 2>&1; then
                 np_scope_step_end 0
-                # The planned row's plain-language summary — what was verified, on the
-                # step the user clicks (after the sub-step closes).
                 np_scope_explain --title "Verify networking"                     --what "Load-balancer routing verified for $INGRESS_NAME — rules and weights match the deployment"
             fi
             return 0

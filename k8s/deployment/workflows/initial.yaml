@@ -2,19 +2,10 @@ include:
   - "$SERVICE_PATH/values.yaml"
 configuration:
   INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
-# Trace identities speak the platform's deploy step vocabulary (the actual
-# create-* steps are emitted per applied manifest by apply_templates, under
-# the apply step). Step NAMES never change — overrides anchor on them.
 trace:
   title: Initial deployment
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
-  # Declared steps only: engine fragments without a trace block (override
-  # plumbing) stay off the wire — the fold shows real observable acts, not
-  # 0ms no-ops. Script-emitted child steps (per-manifest applies) are
-  # unaffected.
   default: false
-  # Identity labels: how the deployment page finds this plan before any run
-  # exists (see blue_green.yaml).
   job:
     name: k8s-deployment-initial
     namespace: "@context:scope.provider"
@@ -25,7 +16,6 @@ trace:
   groups:
     - {key: setting-up, title: Setting up}
     - {key: waiting-instances, title: Waiting for instances to be healthy}
-    # Placeholder: the finalize workflow fills this station later.
     - {key: finalize, title: Finalize}
 steps:
   - name: load logging
@@ -126,8 +116,6 @@ steps:
             flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: false
-        # Metrics publishing is machine bookkeeping — untraced, like the
-        # per-increment copy in switch_traffic.
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"

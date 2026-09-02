@@ -3,20 +3,9 @@ include:
 configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
 trace:
-  # What a HUMAN calls this execution. It lands on the run's explain.title —
-  # the first rung of every consumer's naming contract — so the page shows the
-  # name we chose, never a wording derived from this file's basename.
   title: Blue/green deployment
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
-  # Declared steps only: engine fragments without a trace block (override
-  # plumbing) stay off the wire — the fold shows real observable acts, not
-  # 0ms no-ops. Script-emitted child steps (per-manifest applies) are
-  # unaffected.
   default: false
-  # The job's identity labels are how the deployment page FINDS this plan
-  # before any run exists (the pending checklist on a fresh deployment):
-  # the page queries entity + strategy + the scope's provider (the service
-  # specification id — stable across every scope this agent serves).
   job:
     name: k8s-deployment-blue-green
     namespace: "@context:scope.provider"
@@ -27,15 +16,9 @@ trace:
   groups:
     - {key: setting-up, title: Setting up}
     - {key: waiting-instances, title: Waiting for instances to be healthy}
-    # Declared with no steps here on purpose: PLACEHOLDER stations the later
-    # workflows (switch_traffic, finalize) fill — the line shows the whole
-    # journey pending from the first paint, exactly like a native scope.
     - {key: switching-traffic, title: Switching traffic}
     - {key: finalize, title: Finalize}
 steps:
-  # No milestone title: scaling is a no-op for blue-green (counts ride the
-  # manifests; the script skips itself) and technical detail for rolling —
-  # native's Setting up declares no scaling milestone either.
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"

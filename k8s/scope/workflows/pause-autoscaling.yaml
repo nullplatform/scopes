@@ -1,8 +1,4 @@
 trace:
-  # What a HUMAN calls this execution. It lands on the run's explain.title — the
-  # first rung of every consumer's naming contract. Without it a consumer has only
-  # the run id, and prints its own neutral word: this run rendered as
-  # "Activity · N steps", which names nothing the reader can act on.
   title: Pause autoscaling
 include:
   - "$SERVICE_PATH/values.yaml"

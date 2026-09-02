@@ -122,13 +122,6 @@ diagnose_failure() {
     fi
 
     if [[ -n "$pods_json" ]] && echo "$pods_json" | jq -e . >/dev/null 2>&1; then
-        # CrashLoopBackOff/BackOff name the MECHANISM (it keeps restarting), never
-        # the cause: the cause is how the container died the last time round. An
-        # OOM-killed container in a restart loop reports BOTH, and leading with the
-        # wrapper sends the reader to "review your startup logs" for what is really
-        # a memory limit. So a backoff wrapper defers to the termination reason.
-        # Any other waiting reason (ImagePullBackOff, CreateContainerError) IS the
-        # cause and still wins.
         FAILURE_REASON=$(echo "$pods_json" | jq -r '
             [.items[].status.containerStatuses[]?
                 | (.state.waiting.reason // "") as $w
@@ -194,11 +187,6 @@ diagnose_failure() {
             HUMAN_MESSAGE="The container started and crashed repeatedly."
             SUGGESTED_FIX="Review application logs for startup errors (failed dependencies, bad config, panics)." ;;
         Error|ContainerStatusUnknown)
-            # The ordinary crash-loop cause: the app ran and exited non-zero. Now
-            # that the backoff wrapper defers to the termination reason, this is
-            # where a panic or a bad config lands, so it needs the crash-loop
-            # wording the wrapper used to give it — plus the exit code, which is
-            # the first thing an operator greps their logs for.
             if [[ -n "$FAILURE_EXIT_CODE" ]]; then
                 HUMAN_MESSAGE="The container started and exited with code ${FAILURE_EXIT_CODE}."
             else
@@ -268,9 +256,7 @@ diagnose_failure() {
             SUGGESTED_FIX="" ;;
         *)
             HUMAN_MESSAGE="Pods are failing with reason: $FAILURE_REASON"
-            # Deliberately empty: an empty fix is the signal that hands the reader
-            # the full generic troubleshooting checklist below, which is richer than
-            # any one line this branch could invent for a reason it does not know.
+            # Empty on purpose: an empty fix routes the reader to the generic checklist below.
             SUGGESTED_FIX="" ;;
     esac
 }

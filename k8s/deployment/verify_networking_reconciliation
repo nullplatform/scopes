@@ -12,8 +12,6 @@ case "$DNS_TYPE" in
     ;;
   *)
     log warn "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
-    # On azure/ARO there is nothing to verify: close the step as `skipped`,
-    # not a hollow `completed`. (Guarded: defined by the np CLI's preamble.)
     if command -v np_step_skip >/dev/null 2>&1; then
       np_step_skip "no networking verification for DNS type '$DNS_TYPE'"
     fi

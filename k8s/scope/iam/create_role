@@ -127,8 +127,6 @@ if [[ -n "$BOUNDARY_ARN" && "$BOUNDARY_ARN" != "null" ]]; then
   CREATE_ROLE_ARGS+=(--permissions-boundary "$BOUNDARY_ARN")
 fi
 
-# Captured (with stderr) so a failure carries AWS's actual reason onto the
-# trace; on success the response is echoed exactly as before.
 CREATE_ROLE_OUT=$(aws iam create-role "${CREATE_ROLE_ARGS[@]}" 2>&1) || create_role_error
 [[ -n "$CREATE_ROLE_OUT" ]] && echo "$CREATE_ROLE_OUT"
 log info "   ✅ IAM role created successfully"

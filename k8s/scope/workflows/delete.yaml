@@ -3,16 +3,9 @@ include:
 trace:
   title: Delete scope
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
-  # Per-provider identity: jobs are scoped to the scope's service
-  # specification, so two providers sharing a workflow name never
-  # converge on one definition.
   job:
     name: k8s-scope-delete
     namespace: "@context:scope.provider"
-    # Identity labels, the same grammar the deployment workflows declare:
-    # `entity` + `scope.provider` scope the search, `operation` names the
-    # lifecycle act. They are how a consumer finds this plan BEFORE the run
-    # exists, instead of an empty canvas until the agent picks the command up.
     labels:
       entity: scope
       operation: delete
@@ -77,7 +70,6 @@ steps:
       - name: build service account
         type: script
         file: "$SERVICE_PATH/scope/iam/build_service_account"
-        # Template generation — the delete below is the observable act.
         trace: false
         configuration:
           ACTION: delete

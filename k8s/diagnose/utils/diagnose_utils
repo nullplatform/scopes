@@ -322,23 +322,9 @@ update_check_result() {
 
     mv "$tmpfile" "$output_file"
 
-    # ...and say the same thing on the TRACE. A check's verdict lived only in this
-    # file, read by the diagnose API — so a reader on the deployment page saw 21
-    # steps that exited 0 and a summary reading "all succeeded", while the check
-    # that had just found the OOM sat there green. The evidence is already built by
-    # the caller (summary, severity, recommendations); it only needed saying.
-    #
-    # The step's STATUS stays whatever the script did: a check that FOUND a problem
-    # did its job, and marking it failed would conflate "this check broke" with
-    # "this check found something". The FINDING rides `explain.severity`, which is
-    # the same channel every other producer surface uses for attention.
     _np_trace_check_result "$status_lower" "$evidence"
 }
 
-# Mirror a check's verdict onto its traced step: the finding as the step's
-# narrative, its first recommendation as what to do, and the whole evidence as an
-# output so the dialog can show the affected pods and details. A no-op when the
-# workflow is untraced (the logging shims return 0 without a trace).
 _np_trace_check_result() {
     local _cr_status="$1" _cr_evidence="$2" _cr_severity="" _cr_summary="" _cr_action=""
     command -v np_scope_explain >/dev/null 2>&1 || return 0
@@ -346,8 +332,6 @@ _np_trace_check_result() {
     case "$_cr_status" in
         failed)  _cr_severity="error" ;;
         warning) _cr_severity="warn" ;;
-        # A passing or skipped check is not news: it would turn a clean diagnosis
-        # into 21 lines of green noise, which is how nothing gets read.
         *)       return 0 ;;
     esac
 
