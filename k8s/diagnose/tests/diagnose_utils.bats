@@ -419,3 +419,59 @@ strip_ansi() {
   local clean=$(strip_ansi "$output")
   assert_contains "$clean" "⚠ No JSON result files found in $NP_OUTPUT_DIR"
 }
+
+@test "notify_results: sends payloads larger than the argv limit" {
+  # 2 MB of log text in one check: past the argv limit on both Linux and macOS.
+  local line
+  line=$(printf 'x%.0s' {1..1000})
+  jq -nc --arg line "$line" \
+    '{category: "logs", status: "success", evidence: {}, logs: [range(2000) | $line]}' \
+    > "$NP_OUTPUT_DIR/big.json"
+
+  local body_file="$(mktemp)"
+  export BODY_CAPTURE="$body_file"
+  # Mirror np: --body is read from disk only when the value ends in .json,
+  # otherwise it is sent verbatim. Resolved here because the caller cleans up.
+  np() {
+    local prev=""
+    for arg in "$@"; do
+      if [[ "$prev" == "--body" ]]; then
+        if [[ "$arg" == *.json ]]; then cat "$arg" > "$BODY_CAPTURE"; else printf '%s' "$arg" > "$BODY_CAPTURE"; fi
+      fi
+      prev="$arg"
+    done
+    return 0
+  }
+  export -f np
+
+  run notify_results
+  [ "$status" -eq 0 ]
+
+  assert_equal "$(jq -r '.results.categories[0].category' "$body_file")" "logs"
+  assert_equal "$(jq -r '.results.categories[0].checks[0].logs | length' "$body_file")" "2000"
+
+  rm -f "$body_file"
+  unset BODY_CAPTURE
+}
+
+# =============================================================================
+# lines_to_json_array
+# =============================================================================
+@test "lines_to_json_array: passes short lines through untouched" {
+  local out
+  out=$(printf 'alpha\n\nbeta\n' | lines_to_json_array)
+
+  assert_equal "$(echo "$out" | jq -r 'length')" "2"
+  assert_equal "$(echo "$out" | jq -r '.[0]')" "alpha"
+  assert_equal "$(echo "$out" | jq -r '.[1]')" "beta"
+}
+
+@test "lines_to_json_array: truncates a line past the character cap" {
+  local out
+  out=$(printf 'x%.0s' {1..5000} | EVIDENCE_LOG_LINE_MAX_CHARS=100 lines_to_json_array)
+
+  assert_equal "$(echo "$out" | jq -r 'length')" "1"
+  assert_contains "$(echo "$out" | jq -r '.[0]')" "[truncated]"
+  # 100 kept characters plus the marker, nowhere near the original 5000.
+  [ "$(echo "$out" | jq -r '.[0] | length')" -lt 200 ]
+}

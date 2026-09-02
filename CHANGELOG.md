@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove unused cloudwatch annotations from deployment objects
 - Fix: log queries on k8s scopes now return the time range that was selected, instead of the most recent lines whatever range was chosen
 - Fix: paging through logs on k8s scopes no longer repeats lines already shown, and now reaches the end of the selected range
+- Fix: diagnose on k8s scopes no longer fails to publish its results when a check collects application logs
 
 ## [1.15.1] - 2026-08-12
 - Fix: gRPC additional ports on k8s scopes now leave the declared port free for the application, so a gRPC server can bind the port configured in the scope instead of failing to start with "address already in use". gRPC ports now work the same way HTTP ones already did
