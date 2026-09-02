@@ -14,8 +14,8 @@ fi
 
 PODS=$(kubectl get pods -n "$K8S_NAMESPACE" -l "$LABEL_SELECTOR" -o json)
 
-echo "$PODS" | jq --argjson limit ${LIMIT:-10} '{
- results: .items[:$limit] | map({
+echo "$PODS" | jq --argjson limit "${LIMIT:-0}" '{
+ results: (if $limit > 0 then .items[:$limit] else .items end) | map({
    id: .metadata.name,
    selector: .metadata.labels,
    details: {
