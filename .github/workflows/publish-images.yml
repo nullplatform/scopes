@@ -49,6 +49,7 @@ jobs:
       submodules: true
       dockerfile: docker/containers.Dockerfile
       tag: ${{ inputs.existing_tag || github.ref_name }}
+      ref: ${{ inputs.existing_tag || '' }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -81,6 +82,7 @@ jobs:
       submodules: true
       dockerfile: docker/scheduled-task.Dockerfile
       tag: ${{ inputs.existing_tag || github.ref_name }}
+      ref: ${{ inputs.existing_tag || '' }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -114,6 +116,7 @@ jobs:
       submodules: true
       dockerfile: docker/containers-datadog.Dockerfile
       tag: ${{ inputs.existing_tag || github.ref_name }}
+      ref: ${{ inputs.existing_tag || '' }}
       build_args: BASE_VERSION=${{ inputs.existing_tag || github.ref_name }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
