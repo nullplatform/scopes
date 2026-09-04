@@ -73,7 +73,7 @@ Run the configuration script to register the scope schema, actions, and the agen
 
 The script will:
 -   Register the JSON schema for the selected scope (from `$SERVICE_PATH`).
--   Create action specifications (e.g., `create-scope`, `delete-scope`).
+-   Create action specifications (e.g., `create-scope`, `update-scope`, `delete-scope`).
 -   Register the scope type.
 -   Set up a notification channel for your agent.
 

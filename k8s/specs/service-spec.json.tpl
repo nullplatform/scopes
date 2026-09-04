@@ -1,6 +1,7 @@
 {
   "available_actions": [
     "create-scope",
+    "update-scope",
     "delete-scope",
     "start-initial",
     "start-blue-green",
