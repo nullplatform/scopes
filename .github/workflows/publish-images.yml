@@ -5,8 +5,15 @@ name: publish-images
 # Same mold as scopes-lambda (publish-image.yml), fanned out to the 3 images:
 #
 #   scopes/containers            <- k8s/            (base; FROM worker-bridge + tooling)
-#   scopes/scheduled-task        <- scheduled_task/ (leaner)
-#   scopes/containers-datadog    <- containers + datadog/  overlay (metric)
+#   scopes/scheduled_task        <- scheduled_task/ (leaner)
+#   scopes/containers_datadog    <- containers + datadog/  overlay (metric)
+#
+# Image names use underscores, matching the source directories — the ECR
+# repositories must exist under these exact names (ECR never creates on push).
+#
+# Recovery / backfill: dispatch with existing_tag to publish an already-pushed
+# tag with the CURRENT workflow (a tag push runs the workflow at the tagged
+# commit, so fixes on main never reach old tags without this).
 #
 # The datadog overlay is FROM the containers base (which bakes the whole repo
 # into /app/pkg), so it must be pushed first — its build `needs: containers` and
@@ -21,6 +28,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      existing_tag:
+        description: 'Publish an existing tag with the current workflow (recovery/backfill)'
+        required: true
+        type: string
 
 permissions:
   id-token: write    # OIDC against AWS
@@ -35,7 +48,8 @@ jobs:
       context: .
       submodules: true
       dockerfile: docker/containers.Dockerfile
-      tag: ${{ github.ref_name }}
+      tag: ${{ inputs.existing_tag || github.ref_name }}
+      ref: ${{ inputs.existing_tag || '' }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -47,8 +61,8 @@ jobs:
       NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
       NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
     steps:
-      - name: Install np CLI (alpha-packages build)
-        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
+      - name: Install np CLI (2.10.0)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=2.10.0 sh
       - name: Register scopes/containers image artifact (visible to everyone)
         run: |
           np artifact create \
@@ -63,11 +77,12 @@ jobs:
   scheduled-task:
     uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
     with:
-      image_name: scopes/scheduled-task
+      image_name: scopes/scheduled_task
       context: .
       submodules: true
       dockerfile: docker/scheduled-task.Dockerfile
-      tag: ${{ github.ref_name }}
+      tag: ${{ inputs.existing_tag || github.ref_name }}
+      ref: ${{ inputs.existing_tag || '' }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -79,15 +94,15 @@ jobs:
       NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
       NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
     steps:
-      - name: Install np CLI (alpha-packages build)
-        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
-      - name: Register scopes/scheduled-task image artifact (visible to everyone)
+      - name: Install np CLI (2.10.0)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=2.10.0 sh
+      - name: Register scopes/scheduled_task image artifact (visible to everyone)
         run: |
           np artifact create \
             --nrn "$NP_ARTIFACT_NRN" \
             --type oci_image \
             --registry public.ecr.aws \
-            --repository nullplatform/scopes/scheduled-task \
+            --repository nullplatform/scopes/scheduled_task \
             --digest "${{ needs.scheduled-task.outputs.image_digest }}" \
             --visible-to "organization=*"
 
@@ -96,12 +111,13 @@ jobs:
     needs: containers
     uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
     with:
-      image_name: scopes/containers-datadog
+      image_name: scopes/containers_datadog
       context: .
       submodules: true
       dockerfile: docker/containers-datadog.Dockerfile
-      tag: ${{ github.ref_name }}
-      build_args: BASE_VERSION=${{ github.ref_name }}
+      tag: ${{ inputs.existing_tag || github.ref_name }}
+      ref: ${{ inputs.existing_tag || '' }}
+      build_args: BASE_VERSION=${{ inputs.existing_tag || github.ref_name }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -113,15 +129,15 @@ jobs:
       NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
       NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
     steps:
-      - name: Install np CLI (alpha-packages build)
-        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=alpha-packages sh
-      - name: Register scopes/containers-datadog image artifact (visible to everyone)
+      - name: Install np CLI (2.10.0)
+        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=2.10.0 sh
+      - name: Register scopes/containers_datadog image artifact (visible to everyone)
         run: |
           np artifact create \
             --nrn "$NP_ARTIFACT_NRN" \
             --type oci_image \
             --registry public.ecr.aws \
-            --repository nullplatform/scopes/containers-datadog \
+            --repository nullplatform/scopes/containers_datadog \
             --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
             --visible-to "organization=*"
 
@@ -137,7 +153,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ inputs.existing_tag || github.ref_name }}
       REGISTRY: public.ecr.aws/nullplatform
       DIGEST_CONTAINERS: ${{ needs.containers.outputs.image_digest }}
       DIGEST_SCHEDULED: ${{ needs.scheduled-task.outputs.image_digest }}
@@ -147,8 +163,8 @@ jobs:
         run: |
           SECTION=$(printf '## Artifacts\n\n| Image | Digest | Pinned reference |\n|---|---|---|\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |' \
             "$REGISTRY/scopes/containers" "$TAG" "$DIGEST_CONTAINERS" "$REGISTRY/scopes/containers" "$DIGEST_CONTAINERS" \
-            "$REGISTRY/scopes/scheduled-task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled-task" "$DIGEST_SCHEDULED" \
-            "$REGISTRY/scopes/containers-datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers-datadog" "$DIGEST_DATADOG")
+            "$REGISTRY/scopes/scheduled_task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled_task" "$DIGEST_SCHEDULED" \
+            "$REGISTRY/scopes/containers_datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers_datadog" "$DIGEST_DATADOG")
 
           # Drafts are not resolvable via releases/tags/:tag — list and filter.
           RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
