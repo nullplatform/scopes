@@ -153,6 +153,9 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
+      # No checkout in this job: gh infers the repo from git otherwise and dies
+      # with "not a git repository" — GH_REPO pins it explicitly.
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ inputs.existing_tag || github.ref_name }}
       REGISTRY: public.ecr.aws/nullplatform
       DIGEST_CONTAINERS: ${{ needs.containers.outputs.image_digest }}
