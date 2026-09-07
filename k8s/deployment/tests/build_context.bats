@@ -1302,3 +1302,68 @@ EOF
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
+
+# External ServiceAccounts are selected by the real context builder, while IAM
+# role creation/deletion stays disabled for resources owned by IaC.
+@test "external service account: uses the container-orchestration provider" {
+  setup_full_build_context
+  export IAM='{"ENABLED":false}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "ui-plugins-stage"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account_name)" "ui-plugins-stage"
+  assert_equal "$IAM_ENABLED" "false"
+}
+
+@test "external service account: scope-configurations override the orchestrator default" {
+  setup_full_build_context
+  export IAM='{"ENABLED":false}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "base-sa" | .providers["scope-configurations"].security.service_account_name = "scope-sa"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account_name)" "scope-sa"
+}
+
+@test "external service account: keeps managed IAM name when no external name is configured" {
+  setup_full_build_context
+  export IAM='{"ENABLED":true,"PREFIX":"managed"}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account_name)" "managed-test-scope-123"
+}
+
+@test "external service account: leaves the pod default when neither mode is configured" {
+  setup_full_build_context
+  export IAM='{"ENABLED":false}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account_name)" ""
+}
+
+@test "external service account: rejects conflicting lifecycle ownership" {
+  setup_full_build_context
+  export IAM='{"ENABLED":true,"PREFIX":"managed"}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "external-sa"')
+  export CONTEXT
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "either an external service_account_name or managed IAM"
+}
+
+@test "external service account: rejects names that could inject YAML" {
+  setup_full_build_context
+  export IAM='{"ENABLED":false}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "bad\nname"')
+  export CONTEXT
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "Invalid external service_account_name"
+}

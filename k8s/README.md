@@ -186,3 +186,16 @@ Advanced configuration options.
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
 | **K8S_MODIFIERS** | JSON string with dynamic modifications to Kubernetes objects | `object_modifiers` |
+
+### ServiceAccounts managed outside the scope
+
+To run pods with an existing ServiceAccount (for example IRSA managed by
+OpenTofu), set `security.service_account_name` in the application's
+`container-orchestration` provider. A `scope-configurations` value at that path
+has precedence. Keep managed IAM disabled; configuring both modes is rejected.
+
+The ServiceAccount must already exist in the scope's Kubernetes namespace and
+carry the desired IAM role annotation. The deployment builder only selects it
+through `spec.template.spec.serviceAccountName`; the scope does not create or
+delete the external ServiceAccount or its IAM role. Existing managed-IAM naming
+and the unconfigured pod default remain unchanged.

@@ -199,9 +199,26 @@ fi
 
 IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 
-SERVICE_ACCOUNT_NAME=""
+# Externally managed ServiceAccounts (for example, IRSA declared in IaC) are
+# selected for the pod without enabling the scope's role/SA lifecycle manager.
+EXTERNAL_SERVICE_ACCOUNT_NAME=$(get_config_value \
+  --provider '.providers["scope-configurations"].security.service_account_name' \
+  --provider '.providers["container-orchestration"].security.service_account_name' \
+  --default ""
+)
 
-if [[ "$IAM_ENABLED" == "true" ]]; then
+SERVICE_ACCOUNT_NAME=""
+if [[ -n "$EXTERNAL_SERVICE_ACCOUNT_NAME" ]]; then
+  if [[ "$IAM_ENABLED" == "true" ]]; then
+    log error "Configure either an external service_account_name or managed IAM, not both"
+    exit 1
+  fi
+  if [[ ${#EXTERNAL_SERVICE_ACCOUNT_NAME} -gt 253 || ! "$EXTERNAL_SERVICE_ACCOUNT_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]]; then
+    log error "Invalid external service_account_name: expected a Kubernetes DNS subdomain name"
+    exit 1
+  fi
+  SERVICE_ACCOUNT_NAME="$EXTERNAL_SERVICE_ACCOUNT_NAME"
+elif [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
