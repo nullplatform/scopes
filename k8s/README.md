@@ -190,12 +190,13 @@ Advanced configuration options.
 ### ServiceAccounts managed outside the scope
 
 To run pods with an existing ServiceAccount (for example IRSA managed by
-OpenTofu), set `security.service_account_name` in the application's
-`container-orchestration` provider. A `scope-configurations` value at that path
-has precedence. Keep managed IAM disabled; configuring both modes is rejected.
+OpenTofu), set the scope capability `service_account_name`. Leave it empty to
+preserve current behavior. Account-level provider defaults are not consulted
+for this opt-in, so other scopes keep their existing identity. Keep managed IAM
+disabled; configuring both ownership modes is rejected.
 
 The ServiceAccount must already exist in the scope's Kubernetes namespace and
 carry the desired IAM role annotation. The deployment builder only selects it
 through `spec.template.spec.serviceAccountName`; the scope does not create or
 delete the external ServiceAccount or its IAM role. Existing managed-IAM naming
-and the unconfigured pod default remain unchanged.
+and unconfigured defaults remain unchanged.

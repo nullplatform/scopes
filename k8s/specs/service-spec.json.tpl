@@ -63,6 +63,16 @@
                "elements":[
                   {
                      "type":"Category",
+                     "label":"ServiceAccount",
+                     "elements":[
+                        {
+                           "type":"Control",
+                           "scope":"#/properties/service_account_name"
+                        }
+                     ]
+                  },
+                  {
+                     "type":"Category",
                      "label":"Resources",
                      "elements":[
                         {
@@ -340,6 +350,14 @@
             "type":"string",
             "export":false,
             "default":"docker-image"
+         },
+         "service_account_name": {
+            "type": "string",
+            "title": "Existing ServiceAccount",
+            "default": "",
+            "maxLength": 253,
+            "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+            "description": "Use an existing Kubernetes ServiceAccount managed outside this scope. Leave empty for the default. Requires managed IAM to remain disabled."
          },
          "ram_memory":{
             "type":"integer",

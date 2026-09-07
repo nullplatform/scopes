@@ -1305,10 +1305,10 @@ EOF
 
 # External ServiceAccounts are selected by the real context builder, while IAM
 # role creation/deletion stays disabled for resources owned by IaC.
-@test "external service account: uses the container-orchestration provider" {
+@test "external service account: uses the explicitly selected scope account" {
   setup_full_build_context
   export IAM='{"ENABLED":false}'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "ui-plugins-stage"')
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.service_account_name = "ui-plugins-stage"')
 
   source "$SCRIPT"
 
@@ -1316,14 +1316,14 @@ EOF
   assert_equal "$IAM_ENABLED" "false"
 }
 
-@test "external service account: scope-configurations override the orchestrator default" {
+@test "external service account: ignores inherited account defaults without scope opt-in" {
   setup_full_build_context
   export IAM='{"ENABLED":false}'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "base-sa" | .providers["scope-configurations"].security.service_account_name = "scope-sa"')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "base-sa"')
 
   source "$SCRIPT"
 
-  assert_equal "$(echo "$CONTEXT" | jq -r .service_account_name)" "scope-sa"
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account_name)" ""
 }
 
 @test "external service account: keeps managed IAM name when no external name is configured" {
@@ -1347,7 +1347,7 @@ EOF
 @test "external service account: rejects conflicting lifecycle ownership" {
   setup_full_build_context
   export IAM='{"ENABLED":true,"PREFIX":"managed"}'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "external-sa"')
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.service_account_name = "external-sa"')
   export CONTEXT
 
   run bash -c 'source "$SCRIPT"'
@@ -1359,7 +1359,7 @@ EOF
 @test "external service account: rejects names that could inject YAML" {
   setup_full_build_context
   export IAM='{"ENABLED":false}'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].security.service_account_name = "bad\nname"')
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.service_account_name = "bad\nname"')
   export CONTEXT
 
   run bash -c 'source "$SCRIPT"'
