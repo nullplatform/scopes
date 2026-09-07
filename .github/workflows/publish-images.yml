@@ -5,11 +5,11 @@ name: publish-images
 # Same mold as scopes-lambda (publish-image.yml), fanned out to the 3 images:
 #
 #   scopes/containers            <- k8s/            (base; FROM worker-bridge + tooling)
-#   scopes/scheduled_task        <- scheduled_task/ (leaner)
-#   scopes/containers_datadog    <- containers + datadog/  overlay (metric)
+#   scopes/scheduled-task        <- scheduled_task/ (leaner)
+#   scopes/containers-datadog    <- containers + datadog/  overlay (metric)
 #
-# Image names use underscores, matching the source directories — the ECR
-# repositories must exist under these exact names (ECR never creates on push).
+# Image names use hyphens; the ECR repositories must exist under these exact
+# names (ECR never creates on push).
 #
 # Recovery / backfill: dispatch with existing_tag to publish an already-pushed
 # tag with the CURRENT workflow (a tag push runs the workflow at the tagged
@@ -77,7 +77,7 @@ jobs:
   scheduled-task:
     uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
     with:
-      image_name: scopes/scheduled_task
+      image_name: scopes/scheduled-task
       context: .
       submodules: true
       dockerfile: docker/scheduled-task.Dockerfile
@@ -96,13 +96,13 @@ jobs:
     steps:
       - name: Install np CLI (2.10.0)
         run: curl -s https://cli.nullplatform.com/install.sh | VERSION=2.10.0 sh
-      - name: Register scopes/scheduled_task image artifact (visible to everyone)
+      - name: Register scopes/scheduled-task image artifact (visible to everyone)
         run: |
           np artifact create \
             --nrn "$NP_ARTIFACT_NRN" \
             --type oci_image \
             --registry public.ecr.aws \
-            --repository nullplatform/scopes/scheduled_task \
+            --repository nullplatform/scopes/scheduled-task \
             --digest "${{ needs.scheduled-task.outputs.image_digest }}" \
             --visible-to "organization=*"
 
@@ -111,7 +111,7 @@ jobs:
     needs: containers
     uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
     with:
-      image_name: scopes/containers_datadog
+      image_name: scopes/containers-datadog
       context: .
       submodules: true
       dockerfile: docker/containers-datadog.Dockerfile
@@ -131,13 +131,13 @@ jobs:
     steps:
       - name: Install np CLI (2.10.0)
         run: curl -s https://cli.nullplatform.com/install.sh | VERSION=2.10.0 sh
-      - name: Register scopes/containers_datadog image artifact (visible to everyone)
+      - name: Register scopes/containers-datadog image artifact (visible to everyone)
         run: |
           np artifact create \
             --nrn "$NP_ARTIFACT_NRN" \
             --type oci_image \
             --registry public.ecr.aws \
-            --repository nullplatform/scopes/containers_datadog \
+            --repository nullplatform/scopes/containers-datadog \
             --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
             --visible-to "organization=*"
 
@@ -163,8 +163,8 @@ jobs:
         run: |
           SECTION=$(printf '## Artifacts\n\n| Image | Digest | Pinned reference |\n|---|---|---|\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |' \
             "$REGISTRY/scopes/containers" "$TAG" "$DIGEST_CONTAINERS" "$REGISTRY/scopes/containers" "$DIGEST_CONTAINERS" \
-            "$REGISTRY/scopes/scheduled_task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled_task" "$DIGEST_SCHEDULED" \
-            "$REGISTRY/scopes/containers_datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers_datadog" "$DIGEST_DATADOG")
+            "$REGISTRY/scopes/scheduled-task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled-task" "$DIGEST_SCHEDULED" \
+            "$REGISTRY/scopes/containers-datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers-datadog" "$DIGEST_DATADOG")
 
           # Drafts are not resolvable via releases/tags/:tag — list and filter.
           RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
