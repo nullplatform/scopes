@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.3] - 2026-09-08
+- Fix: k8s deployment logs no longer show a "np_trace_flush: command not found" error when tracing is disabled
+
 ## [1.16.2] - 2026-09-08
 - Fix: the scheduled-task worker image now runs the k8s scope with the scheduled_task overlay (`NP_OVERRIDES_PATH`), like the legacy channel does — it previously executed the overlay's partial workflows as the whole scope — and ships aws-cli, which the k8s scripts need from the assume_role step onwards
 - The publish pipeline now registers every scope image artifact with its release tag, so packages can resolve a worker image by tag (`lookup = true` + `meta.tag`) instead of copying digests around
