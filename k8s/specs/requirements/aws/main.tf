@@ -100,11 +100,6 @@ resource "aws_iam_policy" "nullplatform_elb_policy" {
       "Version" : "2012-10-17",
       "Statement" : [
         {
-          # DescribeListeners/DescribeRules/DescribeTargetHealth don't support
-          # resource-level permissions (AWS's own managed policy
-          # AmazonECSInfrastructureRolePolicyForLoadBalancers uses Resource: "*"
-          # for these too), so scoping them to an ARN pattern silently never
-          # matches and the calls get denied.
           "Effect" : "Allow",
           "Action" : [
             "elasticloadbalancing:DescribeLoadBalancers",

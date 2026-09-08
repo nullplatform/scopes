@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.16.3] - 2026-09-08
+- Add: remove resource level restriction for `elasticloadbalancing:Describe*` permissions as AWS does not support it.
 - Fix: k8s deployment logs no longer show a "np_trace_flush: command not found" error when tracing is disabled
 
 ## [1.16.2] - 2026-09-08
