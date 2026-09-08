@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.2] - 2026-09-08
+- Fix: the scheduled-task worker image now runs the k8s scope with the scheduled_task overlay (`NP_OVERRIDES_PATH`), like the legacy channel does — it previously executed the overlay's partial workflows as the whole scope — and ships aws-cli, which the k8s scripts need from the assume_role step onwards
+- The publish pipeline now registers every scope image artifact with its release tag, so packages can resolve a worker image by tag (`lookup = true` + `meta.tag`) instead of copying digests around
+- Publish pipeline fixes: image names corrected to the existing ECR repositories (scopes/scheduled-task, scopes/containers-datadog — v1.16.1's images were recovered via backfill), a `workflow_dispatch` recovery path that publishes an existing tag building the tag's own commit, and the GitHub release upsert no longer fails when the job has no checkout
+
 ## [1.16.1] - 2026-09-02
 - Fix: the Instances tab of the performance view now shows every pod of a k8s scope. The instance list had a hard cap of 10 that nothing could override, so a scope with 20 pods showed only the first 10 and the table had no next page. A `limit` in the request is honored, the `LIMIT` env var on the agent stays as the operator override, and with neither every pod is returned
 
