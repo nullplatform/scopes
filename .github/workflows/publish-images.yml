@@ -1,7 +1,9 @@
 name: publish-images
 
 # Publishes every scope's worker image to ECR Public on each semver tag, then
-# registers each as an oci_image platform artifact (visible-to organization=*).
+# registers each as an oci_image platform artifact (visible-to organization=*)
+# carrying both the digest and the release tag, so packages can resolve it by
+# tag (`lookup = true` + meta.tag) instead of copying a digest around.
 # Same mold as scopes-lambda (publish-image.yml), fanned out to the 3 images:
 #
 #   scopes/containers            <- k8s/            (base; FROM worker-bridge + tooling)
@@ -71,6 +73,7 @@ jobs:
             --registry public.ecr.aws \
             --repository nullplatform/scopes/containers \
             --digest "${{ needs.containers.outputs.image_digest }}" \
+            --tag "${{ inputs.existing_tag || github.ref_name }}" \
             --visible-to "organization=*"
 
   # ── scheduled-task (standalone) ────────────────────────────────────────────
@@ -104,6 +107,7 @@ jobs:
             --registry public.ecr.aws \
             --repository nullplatform/scopes/scheduled-task \
             --digest "${{ needs.scheduled-task.outputs.image_digest }}" \
+            --tag "${{ inputs.existing_tag || github.ref_name }}" \
             --visible-to "organization=*"
 
   # ── containers-datadog (overlay) ───────────────────────────────────────────
@@ -139,6 +143,7 @@ jobs:
             --registry public.ecr.aws \
             --repository nullplatform/scopes/containers-datadog \
             --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
+            --tag "${{ inputs.existing_tag || github.ref_name }}" \
             --visible-to "organization=*"
 
   # ── GitHub release with artifact metadata ──────────────────────────────────
@@ -153,6 +158,9 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
+      # No checkout in this job: gh infers the repo from git otherwise and dies
+      # with "not a git repository" — GH_REPO pins it explicitly.
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ inputs.existing_tag || github.ref_name }}
       REGISTRY: public.ecr.aws/nullplatform
       DIGEST_CONTAINERS: ${{ needs.containers.outputs.image_digest }}
