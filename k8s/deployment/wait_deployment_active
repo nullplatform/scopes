@@ -369,7 +369,9 @@ while true; do
                 np_scope_affordance "{\"kind\":\"deploy-log\",\"application_id\":\"$_wda_app_id\",\"scope_id\":\"$_wda_scope_id\",\"type\":\"application\"${_wda_start_ms:+,\"start_time\":$_wda_start_ms}}"
             fi
 
-            NP_TRACE_FLUSH_TIMEOUT=10 np_trace_flush
+            if command -v np_trace_flush >/dev/null 2>&1; then
+                NP_TRACE_FLUSH_TIMEOUT=10 np_trace_flush
+            fi
         fi
         break
     fi
