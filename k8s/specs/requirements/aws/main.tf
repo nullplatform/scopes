@@ -100,10 +100,18 @@ resource "aws_iam_policy" "nullplatform_elb_policy" {
       "Version" : "2012-10-17",
       "Statement" : [
         {
+          # DescribeListeners/DescribeRules/DescribeTargetHealth don't support
+          # resource-level permissions (AWS's own managed policy
+          # AmazonECSInfrastructureRolePolicyForLoadBalancers uses Resource: "*"
+          # for these too), so scoping them to an ARN pattern silently never
+          # matches and the calls get denied.
           "Effect" : "Allow",
           "Action" : [
             "elasticloadbalancing:DescribeLoadBalancers",
-            "elasticloadbalancing:DescribeTargetGroups"
+            "elasticloadbalancing:DescribeTargetGroups",
+            "elasticloadbalancing:DescribeTargetHealth",
+            "elasticloadbalancing:DescribeListeners",
+            "elasticloadbalancing:DescribeRules"
           ],
           "Resource" : "*",
           "Condition" : {
@@ -113,18 +121,6 @@ resource "aws_iam_policy" "nullplatform_elb_policy" {
               ]
             }
           }
-        },
-        {
-          "Effect" : "Allow",
-          "Action" : [
-            "elasticloadbalancing:DescribeTargetHealth",
-            "elasticloadbalancing:DescribeListeners",
-            "elasticloadbalancing:DescribeRules"
-          ],
-          "Resource" : [
-            "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/k8s-nullplatform-*",
-            "arn:aws:elasticloadbalancing:*:*:targetgroup/k8s-nullplatform-*"
-          ],
         }
       ]
     }
