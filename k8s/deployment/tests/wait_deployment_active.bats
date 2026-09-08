@@ -992,3 +992,22 @@ JSON
   [ "${#capped}" -eq 140 ]
   case "$capped" in *"...") ;; *) return 1 ;; esac
 }
+
+# =============================================================================
+# Tracing SDK Absent
+# =============================================================================
+@test "wait_deployment_active: reports readiness without np_trace_flush when the tracing SDK is not loaded" {
+  np_scope_progress() { :; }
+  np_scope_consumes() { :; }
+  np_scope_produces() { :; }
+  np_scope_affordance() { :; }
+  export -f np_scope_progress np_scope_consumes np_scope_produces np_scope_affordance
+
+  export CONTEXT='{"asset":{"url":"registry.example.com/app:1.0.0","type":"docker-image"},"application":{"id":"app-789"},"scope":{"id":"scope-123"},"deployment":{"created_at":"2026-09-08T10:00:00Z"}}'
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ All pods in deployment 'd-scope-123-deploy-456' are available and ready!"
+  [[ "$output" != *"np_trace_flush: command not found"* ]]
+}
