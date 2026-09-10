@@ -77,6 +77,8 @@ spec:
 {{- end }}
 {{ if .scope.capabilities.additional_ports }}
 {{ range .scope.capabilities.additional_ports }}
+{{- $port := .port }}
+{{- $port_type := .type }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -155,9 +157,9 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}
+                name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq $port_type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $port }}
                 port:
-                  number: {{ .port }}
+                  number: {{ $port }}
 {{- end }}
 {{ end }}
 {{ end }}
