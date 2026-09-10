@@ -19,12 +19,15 @@ setup() {
 
   # Extract validate_status function from build_context for isolated testing
   eval "$(sed -n '/^validate_status()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+
+  # Extract resolve_image_pull_secrets from build_context for isolated testing
+  eval "$(sed -n '/^resolve_image_pull_secrets()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
 }
 
 teardown() {
-  unset -f validate_status 2>/dev/null || true
+  unset -f validate_status resolve_image_pull_secrets 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT 2>/dev/null || true
 }
 
 # =============================================================================
@@ -260,17 +263,56 @@ resolve_traffic_container_version() {
 }
 
 # =============================================================================
-# Image Pull Secrets Tests
+# Image Pull Secrets Tests (resolve_image_pull_secrets)
 # =============================================================================
-@test "image pull secrets: PULL_SECRETS takes precedence over IMAGE_PULL_SECRETS" {
-  PULL_SECRETS='["secret1"]'
-  IMAGE_PULL_SECRETS="{}"
+@test "resolve_image_pull_secrets: PULL_SECRETS env takes precedence over provider and default" {
+  export PULL_SECRETS='{"ENABLED":true,"SECRETS":["from-env"]}'
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": {"image_pull_secrets_enabled": true, "image_pull_secrets": ["acr-secret"]}
+  }')
 
-  if [[ -n "$PULL_SECRETS" ]]; then
-    IMAGE_PULL_SECRETS=$PULL_SECRETS
-  fi
+  resolve_image_pull_secrets
 
-  assert_equal "$IMAGE_PULL_SECRETS" '["secret1"]'
+  assert_json_equal "$IMAGE_PULL_SECRETS" '{"ENABLED":true,"SECRETS":["from-env"]}'
+}
+
+@test "resolve_image_pull_secrets: provider wins over the values.yaml default" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": {"image_pull_secrets_enabled": true, "image_pull_secrets": ["acr-secret"]}
+  }')
+
+  resolve_image_pull_secrets
+
+  assert_json_equal "$IMAGE_PULL_SECRETS" '{"ENABLED":true,"SECRETS":["acr-secret"]}'
+}
+
+@test "resolve_image_pull_secrets: provider can explicitly disable pull secrets" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": {"image_pull_secrets_enabled": false}
+  }')
+
+  resolve_image_pull_secrets
+
+  assert_json_equal "$IMAGE_PULL_SECRETS" '{"ENABLED":false,"SECRETS":[]}'
+}
+
+@test "resolve_image_pull_secrets: falls back to the values.yaml default when the provider is silent" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+
+  resolve_image_pull_secrets
+
+  assert_json_equal "$IMAGE_PULL_SECRETS" '{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+}
+
+@test "resolve_image_pull_secrets: disabled when neither provider nor default is set" {
+  unset IMAGE_PULL_SECRETS
+
+  resolve_image_pull_secrets
+
+  assert_json_equal "$IMAGE_PULL_SECRETS" '{"ENABLED":false,"SECRETS":[]}'
 }
 
 # =============================================================================

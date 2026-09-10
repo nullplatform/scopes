@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Fix: k8s scopes that have both a custom domain and additional ports now deploy, instead of failing with "Failed to build ingress template"
+- Fix: k8s scopes now honor the scope-configurations provider's `security.image_pull_secrets_enabled` / `security.image_pull_secrets` over the `values.yaml` default, so non-EKS clusters (e.g. AKS pulling from ACR) no longer reference a non-existent `ecr-secret` and hit `ImagePullBackOff`
 
 ## [1.16.3] - 2026-09-08
 - Add: remove resource level restriction for `elasticloadbalancing:Describe*` permissions as AWS does not support it.
