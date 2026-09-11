@@ -118,23 +118,28 @@ fi
 if [[ -n "$PULL_SECRETS" ]]; then
   IMAGE_PULL_SECRETS=$PULL_SECRETS
 else
-  if [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
-    IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
-  else
-    PULL_SECRETS_ENABLED=$(get_config_value \
-      --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
-      --default "false"
-    )
-    PULL_SECRETS_LIST=$(get_config_value \
-      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
-      --default "[]"
-    )
+  # Providers win over IMAGE_PULL_SECRETS, which is how values.yaml reaches
+  # this script (the workflow includes it), so an installation can turn the
+  # secrets off or replace them from scope-configurations like every other
+  # setting. Without a provider the included value still applies.
+  ENV_PULL_SECRETS=${IMAGE_PULL_SECRETS:-'{}'}
 
-    IMAGE_PULL_SECRETS=$(jq -n \
-      --argjson enabled "$PULL_SECRETS_ENABLED" \
-      --argjson secrets "$PULL_SECRETS_LIST" \
-      '{ENABLED: $enabled, SECRETS: $secrets}')
-  fi
+  PULL_SECRETS_ENABLED=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
+    --default "$(echo "$ENV_PULL_SECRETS" | jq -r '.ENABLED // false')"
+  )
+  PULL_SECRETS_LIST=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
+    --default "$(echo "$ENV_PULL_SECRETS" | jq -c '.SECRETS // []')"
+  )
+
+  # An empty list means nothing to pull with: rendering `imagePullSecrets` with
+  # no entries, or naming a secret the cluster does not have, only makes the
+  # kubelet warn on every pod.
+  IMAGE_PULL_SECRETS=$(jq -n \
+    --argjson enabled "$PULL_SECRETS_ENABLED" \
+    --argjson secrets "$PULL_SECRETS_LIST" \
+    '{ENABLED: ($enabled and ($secrets | length > 0)), SECRETS: $secrets}')
 fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
