@@ -442,8 +442,7 @@
                "enabled":{
                   "type":"boolean",
                   "title":"Enable Health Check",
-                  "default":true,
-                  "description":"When off, instances are considered available as soon as the process starts and nullplatform stops restarting the ones that fail to respond"
+                  "default":true
                },
                "period_seconds":{
                   "type":"integer",
