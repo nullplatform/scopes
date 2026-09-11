@@ -291,13 +291,34 @@ resolve_pull_secrets() {
     '{ENABLED: ($enabled and ($secrets | length > 0)), SECRETS: $secrets}'
 }
 
-@test "image pull secrets: the values.yaml default applies when no provider sets it" {
+@test "image pull secrets: the values.yaml default leaves the block off" {
+  # What k8s/values.yaml now ships.
+  export IMAGE_PULL_SECRETS='{"ENABLED":false,"SECRETS":[]}'
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "false"
+}
+
+@test "image pull secrets: an included value with secrets still applies when no provider sets it" {
   export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
 
   result=$(resolve_pull_secrets)
 
   assert_equal "$(echo "$result" | jq -r '.ENABLED')" "true"
   assert_contains "$result" "ecr-secret"
+}
+
+@test "image pull secrets: the provider turns them on over an off default" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":false,"SECRETS":[]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": { "image_pull_secrets_enabled": true, "image_pull_secrets": ["registry-creds"] }
+  }')
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "true"
+  assert_contains "$result" "registry-creds"
 }
 
 @test "image pull secrets: the provider overrides the values.yaml default" {
