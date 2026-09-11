@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: turning off the health check on a k8s, azure or azure-aro scope now removes the liveness, readiness and startup probes from every container of the pod
 - Fix: k8s scopes that have both a custom domain and additional ports now deploy, instead of failing with "Failed to build ingress template"
 
 ## [1.16.3] - 2026-09-08
