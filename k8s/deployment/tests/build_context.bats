@@ -273,6 +273,86 @@ resolve_traffic_container_version() {
   assert_equal "$IMAGE_PULL_SECRETS" '["secret1"]'
 }
 
+# The resolution below mirrors build_context: the provider wins, then the
+# IMAGE_PULL_SECRETS env (which is how values.yaml reaches the script), and an
+# empty secret list always disables the block.
+resolve_pull_secrets() {
+  local env_value=${IMAGE_PULL_SECRETS:-'{}'}
+  local enabled secrets
+  enabled=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
+    --default "$(echo "$env_value" | jq -r '.ENABLED // false')"
+  )
+  secrets=$(get_config_value \
+    --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
+    --default "$(echo "$env_value" | jq -c '.SECRETS // []')"
+  )
+  jq -n --argjson enabled "$enabled" --argjson secrets "$secrets" \
+    '{ENABLED: ($enabled and ($secrets | length > 0)), SECRETS: $secrets}'
+}
+
+@test "image pull secrets: the values.yaml default leaves the block off" {
+  # What k8s/values.yaml now ships.
+  export IMAGE_PULL_SECRETS='{"ENABLED":false,"SECRETS":[]}'
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "false"
+}
+
+@test "image pull secrets: an included value with secrets still applies when no provider sets it" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "true"
+  assert_contains "$result" "ecr-secret"
+}
+
+@test "image pull secrets: the provider turns them on over an off default" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":false,"SECRETS":[]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": { "image_pull_secrets_enabled": true, "image_pull_secrets": ["registry-creds"] }
+  }')
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "true"
+  assert_contains "$result" "registry-creds"
+}
+
+@test "image pull secrets: the provider overrides the values.yaml default" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": { "image_pull_secrets": ["registry-creds"] }
+  }')
+
+  result=$(resolve_pull_secrets)
+
+  assert_contains "$result" "registry-creds"
+  assert_equal "$(echo "$result" | jq -r '.SECRETS | index("ecr-secret") // "absent"')" "absent"
+}
+
+@test "image pull secrets: an empty provider list turns the block off" {
+  export IMAGE_PULL_SECRETS='{"ENABLED":true,"SECRETS":["ecr-secret"]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "security": { "image_pull_secrets": [] }
+  }')
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "false"
+  assert_equal "$(echo "$result" | jq -c '.SECRETS')" "[]"
+}
+
+@test "image pull secrets: nothing configured anywhere leaves it off" {
+  unset IMAGE_PULL_SECRETS
+
+  result=$(resolve_pull_secrets)
+
+  assert_equal "$(echo "$result" | jq -r '.ENABLED')" "false"
+}
+
 # =============================================================================
 # get_config_value Tests - DEPLOY_STRATEGY
 # =============================================================================

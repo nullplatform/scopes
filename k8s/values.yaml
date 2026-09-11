@@ -49,10 +49,13 @@ configuration:
 # port for pod-to-pod traffic BEFORE setting this — with VPC CNI custom
 # networking that is the security group in the ENIConfig CRD, not the node's.
 #  MAIN_TRAFFIC_MANAGER_PORT: 10080
+  # Off by default, like azure and azure-aro: the scope names pull secrets but
+  # never creates them, so a default pointing at one leaves every pod asking
+  # the kubelet for a secret the cluster does not have. Clusters that need one
+  # set security.image_pull_secrets in the scope-configurations provider.
   IMAGE_PULL_SECRETS:
-    ENABLED: true
-    SECRETS:
-      - ecr-secret
+    ENABLED: false
+    SECRETS: []
   # VAULT_ADDR: "http://localhost:8200"
   # VAULT_TOKEN: "myroot"
   IAM:
