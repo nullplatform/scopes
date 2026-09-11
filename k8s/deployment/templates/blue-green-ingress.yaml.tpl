@@ -83,6 +83,8 @@ spec:
 
 {{ if .scope.capabilities.additional_ports }}
 {{ range .scope.capabilities.additional_ports }}
+{{- $port := .port }}
+{{- $port_type := .type }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -192,20 +194,20 @@ spec:
     - host: {{ .name }}
       http:
         paths:
-          {{ if eq $.type "HTTP" }}
-          - path: /{{ $.port }}
+          {{ if eq $port_type "HTTP" }}
+          - path: /{{ $port }}
             pathType: Prefix
             backend:
               service:
-                name: bg-deployment-{{ if eq $.type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $.port }}
+                name: bg-deployment-{{ if eq $port_type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $port }}
                 port:
                   name: use-annotation
-          {{ else if eq $.type "GRPC" }}
+          {{ else if eq $port_type "GRPC" }}
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: bg-deployment-{{ if eq $.type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $.port }}
+                name: bg-deployment-{{ if eq $port_type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $port }}
                 port:
                   name: use-annotation
           {{ end }}
