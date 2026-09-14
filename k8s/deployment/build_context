@@ -85,6 +85,43 @@ validate_status() {
   esac
 }
 
+# Resolves the image pull secrets for the pod spec into IMAGE_PULL_SECRETS.
+# Priority (highest to lowest):
+#   1. PULL_SECRETS env var (full JSON object, used as-is)
+#   2. scope-configurations provider (security.image_pull_secrets_enabled /
+#      security.image_pull_secrets) — only when the provider explicitly sets the flag
+#   3. IMAGE_PULL_SECRETS from values.yaml (the shipped default)
+#   4. Disabled
+# The flag is read with an explicit null-check instead of get_config_value because
+# that helper evaluates `<path> // empty`, which turns an explicit `false` into "not set".
+resolve_image_pull_secrets() {
+  if [[ -n "${PULL_SECRETS:-}" ]]; then
+    IMAGE_PULL_SECRETS=$PULL_SECRETS
+    return 0
+  fi
+
+  local provider_enabled
+  provider_enabled=$(echo "$CONTEXT" | jq -r \
+    '.providers["scope-configurations"].security.image_pull_secrets_enabled
+     | if . == null then "null" else tostring end')
+
+  if [ "$provider_enabled" != "null" ]; then
+    local provider_secrets
+    provider_secrets=$(get_config_value \
+      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
+      --default "[]"
+    )
+    IMAGE_PULL_SECRETS=$(jq -n \
+      --argjson enabled "$provider_enabled" \
+      --argjson secrets "$provider_secrets" \
+      '{ENABLED: $enabled, SECRETS: $secrets}')
+  elif [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
+    IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
+  else
+    IMAGE_PULL_SECRETS='{"ENABLED":false,"SECRETS":[]}'
+  fi
+}
+
 if ! validate_status "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
   log error "❌ Invalid deployment status '$DEPLOYMENT_STATUS' for action '$SERVICE_ACTION'"
   log error "💡 Possible causes:"
@@ -115,27 +152,7 @@ if [ "$DEPLOY_STRATEGY" = "rolling" ] && [ "$DEPLOYMENT_STATUS" = "running" ]; t
   GREEN_REPLICAS=$(( MIN_REPLICAS > GREEN_REPLICAS ? MIN_REPLICAS : GREEN_REPLICAS ))
 fi
 
-if [[ -n "$PULL_SECRETS" ]]; then
-  IMAGE_PULL_SECRETS=$PULL_SECRETS
-else
-  if [ -n "${IMAGE_PULL_SECRETS:-}" ]; then
-    IMAGE_PULL_SECRETS=$(echo "$IMAGE_PULL_SECRETS" | jq .)
-  else
-    PULL_SECRETS_ENABLED=$(get_config_value \
-      --provider '.providers["scope-configurations"].security.image_pull_secrets_enabled' \
-      --default "false"
-    )
-    PULL_SECRETS_LIST=$(get_config_value \
-      --provider '.providers["scope-configurations"].security.image_pull_secrets | @json' \
-      --default "[]"
-    )
-
-    IMAGE_PULL_SECRETS=$(jq -n \
-      --argjson enabled "$PULL_SECRETS_ENABLED" \
-      --argjson secrets "$PULL_SECRETS_LIST" \
-      '{ENABLED: $enabled, SECRETS: $secrets}')
-  fi
-fi
+resolve_image_pull_secrets
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
 
