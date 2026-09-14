@@ -16,9 +16,9 @@ RUN apk add --no-cache aws-cli gomplate yq
 # Pinned binaries not reliably packaged on alpine: OpenTofu, kubectl, helm.
 # NOTE: review/pin these versions to what the scopes actually target.
 ARG TARGETARCH
-ARG TOFU_VERSION=1.10.6
+ARG TOFU_VERSION=1.12.6
 ARG KUBECTL_VERSION=1.30.4
-ARG HELM_VERSION=3.15.4
+ARG HELM_VERSION=3.22.0
 RUN set -eux; \
     curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${TARGETARCH}.tar.gz" \
       | tar -xz -C /usr/local/bin tofu; \
