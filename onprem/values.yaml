@@ -1,0 +1,12 @@
+configuration:
+  DNS_TYPE: external_dns
+  K8S_FLAVOR: onprem
+  USE_ACCOUNT_SLUG: false
+  IMAGE_PULL_SECRETS:
+    ENABLED: true
+    SECRETS:
+      - image-pull-secret-nullplatform
+  DOMAIN: $OVERRIDE_DOMAIN
+  SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
+  INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
+  BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/blue-green-httproute.yaml.tpl"

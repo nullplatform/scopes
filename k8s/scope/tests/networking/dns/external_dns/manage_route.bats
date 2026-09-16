@@ -76,6 +76,38 @@ teardown() {
 }
 
 # =============================================================================
+# CREATE: GATEWAY_EXTERNAL_IP override
+# =============================================================================
+@test "manage_route: CREATE - uses GATEWAY_EXTERNAL_IP when set, skips kubectl lookups" {
+  export ACTION="CREATE"
+  export GATEWAY_EXTERNAL_IP="192.0.2.200"
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  # kubectl must not be called at all when the override is set.
+  kubectl() { echo "kubectl should not be called: $*" >&2; return 1; }
+  export -f kubectl
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📡 Using GATEWAY_EXTERNAL_IP override: 192.0.2.200"
+  assert_contains "$output" "✅ Gateway address: 192.0.2.200 (recordType: A)"
+}
+
+@test "manage_route: CREATE - falls back to auto-detection when GATEWAY_EXTERNAL_IP is unset" {
+  export ACTION="CREATE"
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📡 ALB Ingress not found, resolving gateway address directly..."
+  assert_contains "$output" "✅ Gateway address: 10.0.0.1 (recordType: A)"
+}
+
+# =============================================================================
 # CREATE: fallback to service IP
 # =============================================================================
 @test "manage_route: CREATE - falls back to service when gateway has no IP" {
