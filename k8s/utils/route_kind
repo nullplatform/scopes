@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Reads the Kubernetes kind out of a rendered manifest.
+# The rendered kind is the only reliable signal of which networking resource a
+# deployment created: DNS_TYPE describes how DNS records are managed and
+# K8S_FLAVOR which cluster variant runs, and neither determines whether the
+# routing templates render an Ingress or an HTTPRoute.
+# Reads the first document's kind; these templates render a single resource.
+# Usage: route_kind /path/to/manifest.yaml
+route_kind() {
+  local manifest="${1:-}"
+
+  [ -n "$manifest" ] && [ -f "$manifest" ] || return 1
+
+  awk '/^kind:[[:space:]]/ {
+         sub(/^kind:[[:space:]]*/, "")
+         gsub(/["\047[:space:]]/, "")
+         print
+         exit
+       }' "$manifest"
+}
