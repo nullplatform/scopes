@@ -76,7 +76,7 @@ teardown() {
 }
 
 # =============================================================================
-# CREATE: GATEWAY_EXTERNAL_IP override
+# CREATE: GATEWAY_EXTERNAL_IP override - an IP yields an A record
 # =============================================================================
 @test "manage_route: CREATE - uses GATEWAY_EXTERNAL_IP when set, skips kubectl lookups" {
   export ACTION="CREATE"
@@ -84,17 +84,81 @@ teardown() {
   export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
   echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
 
-  # kubectl must not be called at all when the override is set.
+  # Any kubectl call aborts the script: the lookups run as VAR=$(kubectl ...)
+  # under set -e, so a non-zero return fails the status assertion below. The
+  # message never surfaces -- the script's own 2>/dev/null swallows it.
   kubectl() { echo "kubectl should not be called: $*" >&2; return 1; }
   export -f kubectl
 
   run bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "📡 Using GATEWAY_EXTERNAL_IP override: 192.0.2.200"
+  assert_contains "$output" "📡 Using GATEWAY_EXTERNAL_IP override: 192.0.2.200 (recordType: A)"
   assert_contains "$output" "✅ Gateway address: 192.0.2.200 (recordType: A)"
+  assert_contains "$output" "✅ DNSEndpoint manifest created:"
 }
 
+# =============================================================================
+# CREATE: GATEWAY_EXTERNAL_IP override - a hostname yields a CNAME
+# =============================================================================
+@test "manage_route: CREATE - GATEWAY_EXTERNAL_IP with a hostname yields a CNAME" {
+  export ACTION="CREATE"
+  export GATEWAY_EXTERNAL_IP="gateway.example.com"
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Gateway address: gateway.example.com (recordType: CNAME)"
+}
+
+# =============================================================================
+# CREATE: GATEWAY_EXTERNAL_IP override - malformed values fail loudly
+# =============================================================================
+@test "manage_route: CREATE - GATEWAY_EXTERNAL_IP with a scheme or port fails with guidance" {
+  export ACTION="CREATE"
+  export GATEWAY_EXTERNAL_IP="http://192.0.2.200:8080"
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ GATEWAY_EXTERNAL_IP is neither an IPv4 address nor a hostname"
+  assert_contains "$output" "🔧 How to fix:"
+}
+
+# =============================================================================
+# CREATE: GATEWAY_EXTERNAL_IP override - blank values mean "not set"
+# =============================================================================
+@test "manage_route: CREATE - whitespace-only GATEWAY_EXTERNAL_IP falls back to auto-detection" {
+  export ACTION="CREATE"
+  export GATEWAY_EXTERNAL_IP="   "
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Gateway address: 10.0.0.1 (recordType: A)"
+}
+
+@test "manage_route: CREATE - empty-string GATEWAY_EXTERNAL_IP falls back to auto-detection" {
+  export ACTION="CREATE"
+  export GATEWAY_EXTERNAL_IP=""
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Gateway address: 10.0.0.1 (recordType: A)"
+}
+
+# =============================================================================
+# CREATE: no override leaves the auto-detection chain untouched
+# =============================================================================
 @test "manage_route: CREATE - falls back to auto-detection when GATEWAY_EXTERNAL_IP is unset" {
   export ACTION="CREATE"
   export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"

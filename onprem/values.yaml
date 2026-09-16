@@ -7,6 +7,9 @@ configuration:
     SECRETS:
       - image-pull-secret-nullplatform
   DOMAIN: $OVERRIDE_DOMAIN
+  # Set GATEWAY_EXTERNAL_IP in the agent's environment when a NAT/VIP device fronts
+  # the gateway: DNS then publishes that address instead of the cluster-internal one
+  # the Gateway reports. Unset, the address is auto-detected. See k8s/README.md.
   SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
   INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
   BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/blue-green-httproute.yaml.tpl"
