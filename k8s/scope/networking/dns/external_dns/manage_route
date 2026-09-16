@@ -6,10 +6,13 @@ if [ "$ACTION" = "CREATE" ]; then
     log debug "🔍 Building DNSEndpoint manifest for ExternalDNS..."
     log debug "📡 Getting IP for gateway: $GATEWAY_NAME"
 
+    # `kubectl get <type> <name>` exits 1 when the resource is absent, so each
+    # lookup tolerates it: otherwise `set -e` ends the script on the first miss.
+
     # Try ALB Ingress first (AWS-specific: gateway-alb-public / gateway-alb-private)
     GATEWAY_SUFFIX="${GATEWAY_NAME#gateway-}"
     GATEWAY_IP=$(kubectl get ingress "gateway-alb-${GATEWAY_SUFFIX}" -n gateways \
-      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null) || GATEWAY_IP=""
     RECORD_TYPE="CNAME"
 
     if [ -n "$GATEWAY_IP" ]; then
@@ -18,14 +21,14 @@ if [ "$ACTION" = "CREATE" ]; then
       log debug "📡 ALB Ingress not found, resolving gateway address directly..."
 
       GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-        -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
+        -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null) || GATEWAY_IP=""
       RECORD_TYPE="A"
 
       if [ -z "$GATEWAY_IP" ]; then
         log warn "⚠️  Gateway IP not found, trying hostname..."
 
         GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
-          -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null)
+          -o jsonpath='{.status.addresses[?(@.type=="Hostname")].value}' 2>/dev/null) || GATEWAY_IP=""
         RECORD_TYPE="CNAME"
       fi
 
@@ -33,7 +36,7 @@ if [ "$ACTION" = "CREATE" ]; then
         log warn "⚠️  Gateway hostname not found, trying service fallback..."
 
         GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
-          -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+          -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) || GATEWAY_IP=""
         RECORD_TYPE="A"
       fi
 
@@ -41,13 +44,14 @@ if [ "$ACTION" = "CREATE" ]; then
         log warn "⚠️  Gateway service IP not found, trying service hostname fallback..."
 
         GATEWAY_IP=$(kubectl get service "$GATEWAY_NAME" -n gateways \
-          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null) || GATEWAY_IP=""
         RECORD_TYPE="CNAME"
       fi
     fi
 
     if [ -z "$GATEWAY_IP" ]; then
       log warn "⚠️  Could not determine gateway IP address yet, DNSEndpoint will be created later"
+      log warn "   If it persists: kubectl get gateway,service -n gateways (or check RBAC)"
       exit 0
     fi
 

@@ -103,6 +103,45 @@ teardown() {
 }
 
 # =============================================================================
+# CREATE: a genuine NotFound falls through instead of killing the script
+# =============================================================================
+@test "manage_route: CREATE - a NotFound on the ALB Ingress falls through to the Gateway" {
+  export ACTION="CREATE"
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  # Real kubectl exits 1 when the named resource does not exist, which is what
+  # an on-premise cluster does for the AWS-only ALB Ingress. The shared mock in
+  # setup() always exits 0, so this case was never covered.
+  kubectl() {
+    case "$*" in
+      *"get ingress"*) return 1 ;;
+      *"get gateway"*) echo "10.0.0.1" ;;
+      *) echo "" ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Gateway address: 10.0.0.1 (recordType: A)"
+}
+
+@test "manage_route: CREATE - every lookup failing still exits 0 with guidance" {
+  export ACTION="CREATE"
+
+  kubectl() { return 1; }
+  export -f kubectl
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  Could not determine gateway IP address yet"
+  assert_contains "$output" "If it persists: kubectl get gateway,service -n gateways"
+}
+
+# =============================================================================
 # CREATE: no IP available - exits 0
 # =============================================================================
 @test "manage_route: CREATE - exits 0 when no IP available" {
