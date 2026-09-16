@@ -6,12 +6,8 @@ if [ "$ACTION" = "CREATE" ]; then
     log debug "🔍 Building DNSEndpoint manifest for ExternalDNS..."
     log debug "📡 Getting IP for gateway: $GATEWAY_NAME"
 
-    # Every lookup below tolerates a non-zero exit. `kubectl get <type> <name>`
-    # returns 1 when the resource does not exist at all -- as opposed to
-    # returning 0 with an empty field, which is what a resource that exists but
-    # has no address yet does. Under `set -e` that first case aborts the script
-    # instead of moving to the next fallback, and `2>/dev/null` hides the
-    # message without touching the exit code, so it surfaces as a bare exit 1.
+    # `kubectl get <type> <name>` exits 1 when the resource is absent, so each
+    # lookup tolerates it: otherwise `set -e` ends the script on the first miss.
 
     # Try ALB Ingress first (AWS-specific: gateway-alb-public / gateway-alb-private)
     GATEWAY_SUFFIX="${GATEWAY_NAME#gateway-}"
@@ -55,15 +51,7 @@ if [ "$ACTION" = "CREATE" ]; then
 
     if [ -z "$GATEWAY_IP" ]; then
       log warn "⚠️  Could not determine gateway IP address yet, DNSEndpoint will be created later"
-      log warn ""
-      log warn "💡 Possible causes:"
-      log warn "   The load balancer is still being provisioned, the gateway does not"
-      log warn "   exist on this platform, or the agent cannot read it"
-      log warn ""
-      log warn "🔧 If it never resolves:"
-      log warn "   • kubectl get gateway,service -n gateways"
-      log warn "   • kubectl auth can-i get gateway -n gateways"
-      log warn ""
+      log warn "   If it persists: kubectl get gateway,service -n gateways (or check RBAC)"
       exit 0
     fi
 

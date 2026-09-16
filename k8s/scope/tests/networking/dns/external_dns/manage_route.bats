@@ -138,7 +138,7 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Could not determine gateway IP address yet"
-  assert_contains "$output" "kubectl auth can-i get gateway -n gateways"
+  assert_contains "$output" "If it persists: kubectl get gateway,service -n gateways"
 }
 
 # =============================================================================
