@@ -370,6 +370,13 @@ np_naming_roles_patterned() {
 	local base_s base_d=""
 	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern")" || return 1
 
+	local existing
+	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
+	if [ -n "$existing" ]; then
+		log info "✅ Keeping the existing scope object name '$existing'" >&2
+		base_s="$existing"
+	fi
+
 	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
 		np_naming_validate_pattern "$deployment_pattern" "deployment_id" || return 1
 		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern")" || return 1
@@ -395,6 +402,13 @@ np_naming_lookup() {
 	found="$(kubectl get "$kind" -n "$namespace" -l "deployment_id=$deployment_id" \
 		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 	if [ -z "$found" ]; then return 1; fi
+	echo "$found"
+}
+
+np_naming_discover_scope() {
+	local namespace="$1" scope_id="$2" found
+	found="$(kubectl get ingress,httproute -n "$namespace" -l "scope_id=$scope_id" \
+		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 	echo "$found"
 }
 
