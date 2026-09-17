@@ -19,7 +19,7 @@ np_name_cap() {
 	echo "$best"
 }
 
-np_trim_name() {
+np_trim_segments() {
 	local budget="$1" overhead="$2"; shift 2
 	local -a segments=() lengths=()
 	local segment clean
@@ -47,8 +47,9 @@ np_trim_name() {
 	for len in "${lengths[@]}"; do total=$((total + len)); done
 
 	if [ "$total" -le "$available" ]; then
-		local IFS=-
-		echo "${segments[*]}"
+		for segment in "${segments[@]}"; do
+			echo "$segment"
+		done
 		return 0
 	fi
 
@@ -60,13 +61,24 @@ np_trim_name() {
 		return 1
 	fi
 
-	local -a trimmed=()
 	local i
 	for ((i = 0; i < ${#segments[@]}; i++)); do
 		clean="${segments[$i]:0:$cap}"
 		clean="${clean%-}"
-		trimmed+=("$clean")
+		echo "$clean"
 	done
+}
+
+np_trim_name() {
+	local budget="$1" overhead="$2"; shift 2
+	local segs
+	segs="$(np_trim_segments "$budget" "$overhead" "$@")" || return 1
+
+	local -a trimmed=()
+	local line
+	while IFS= read -r line; do
+		trimmed+=("$line")
+	done <<< "$segs"
 
 	local IFS=-
 	echo "${trimmed[*]}"
@@ -160,32 +172,14 @@ np_name_render() {
 	done
 	overhead=$((overhead + ${#rest}))
 
-	np_trim_name "$budget" "$overhead" "${flex[@]}" >/dev/null || return 1
-
-	local -a sanitized=() lengths=()
-	local seg clean
-	for seg in "${flex[@]}"; do
-		clean="$(np_name_sanitize "$seg")"
-		sanitized+=("$clean")
-		lengths+=("${#clean}")
-	done
-
-	local available=$((budget - overhead))
-	local total=0 len
-	for len in "${lengths[@]}"; do total=$((total + len)); done
+	local segs
+	segs="$(np_trim_segments "$budget" "$overhead" "${flex[@]}")" || return 1
 
 	local -a trimmed_flex=()
-	if [ "$total" -le "$available" ]; then
-		trimmed_flex=("${sanitized[@]}")
-	else
-		local cap i
-		cap="$(np_name_cap "$available" "${lengths[@]}")"
-		for ((i = 0; i < ${#sanitized[@]}; i++)); do
-			clean="${sanitized[$i]:0:$cap}"
-			clean="${clean%-}"
-			trimmed_flex+=("$clean")
-		done
-	fi
+	local line
+	while IFS= read -r line; do
+		trimmed_flex+=("$line")
+	done <<< "$segs"
 
 	local out="" item flex_i=0
 	for item in "${order[@]}"; do

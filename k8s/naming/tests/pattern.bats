@@ -91,3 +91,10 @@ setup() {
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"resolves to an empty value"* ]]
 }
+
+@test "np_name_render: three hyphenated placeholders return every segment intact" {
+	export NP_NAME_SCOPE="production-canary"
+	export NP_NAME_NAMESPACE="multi-word-value"
+	run np_name_render 60 "{application}-{scope}-{namespace}"
+	assert_equal "$output" "checkout-api-production-canary-multi-word-value"
+}

@@ -94,3 +94,29 @@ setup() {
 	[[ "$output" != *- ]]
 	[[ "$output" != *--* ]]
 }
+
+@test "np_trim_segments: emits one line per segment when they fit" {
+	run np_trim_segments 46 8 "checkout-api" "production"
+	[ "${#lines[@]}" -eq 2 ]
+	assert_equal "${lines[0]}" "checkout-api"
+	assert_equal "${lines[1]}" "production"
+}
+
+@test "np_trim_segments: emits one line per segment when trimmed" {
+	run np_trim_segments 46 8 "customer-notifications-dispatcher" "production-canary-eu-west"
+	[ "${#lines[@]}" -eq 2 ]
+	assert_equal "${lines[0]}" "customer-notificati"
+	assert_equal "${lines[1]}" "production-canary-e"
+}
+
+@test "np_trim_segments: fails when a segment is empty after sanitising" {
+	run np_trim_segments 46 8 "" "production"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Slug segment 1 is empty after sanitising; a Kubernetes name cannot contain an empty component"
+}
+
+@test "np_trim_segments: fails when the cap falls below three characters" {
+	run np_trim_segments 12 8 "customer-notifications-dispatcher" "production-canary-eu-west"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Name budget 12 leaves 4 characters for 2 slug segments, under the 3-character minimum"
+}
