@@ -103,7 +103,8 @@ np_name_is_known() {
 
 np_naming_validate_pattern() {
 	local pattern="$1" required="$2"
-	local rest="$pattern" placeholder first_placeholder="" first_literal=""
+	local rest="$pattern" placeholder first_placeholder="" first_literal="" literal
+	local literal_total=0 fixed_total=0 flex_count=0 seen_placeholder=false
 
 	case "$pattern" in
 		*"{$required}"*) : ;;
@@ -118,17 +119,38 @@ np_naming_validate_pattern() {
 	esac
 
 	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
-		if [ -z "$first_placeholder" ]; then first_literal="${BASH_REMATCH[1]}"; fi
+		literal="${BASH_REMATCH[1]}"
 		placeholder="${BASH_REMATCH[2]}"
 		rest="${BASH_REMATCH[3]}"
+		if [ -z "$first_placeholder" ]; then first_literal="$literal"; fi
+
+		if $seen_placeholder && [ "$literal" != "-" ]; then
+			log error "❌ Naming pattern '$pattern' uses '$literal' between placeholders"
+			log error "🔧 How to fix:"
+			log error "   • Separate placeholders with a single hyphen"
+			return 1
+		fi
+
 		if ! np_name_is_known "$placeholder"; then
 			log error "❌ Unknown naming placeholder {$placeholder}"
 			log error "🔧 How to fix:"
 			log error "   • Valid placeholders: {application} {scope} {namespace} {account} {deployment_id} {scope_id} {application_id} {namespace_id}"
 			return 1
 		fi
+
+		literal_total=$((literal_total + ${#literal}))
+		if np_name_is_fixed "$placeholder"; then
+			local fixed_value
+			fixed_value="$(np_name_value "$placeholder")"
+			fixed_total=$((fixed_total + ${#fixed_value}))
+		else
+			flex_count=$((flex_count + 1))
+		fi
+
 		if [ -z "$first_placeholder" ]; then first_placeholder="$placeholder"; fi
+		seen_placeholder=true
 	done
+	literal_total=$((literal_total + ${#rest}))
 
 	local head="$first_literal"
 	if [ -z "$head" ]; then head="$(np_name_value "$first_placeholder")"; fi
@@ -142,6 +164,20 @@ np_naming_validate_pattern() {
 			return 1
 			;;
 	esac
+
+	if [ "$flex_count" -gt 0 ]; then
+		local budget="${NAMING_MAX_LENGTH:-46}"
+		local available=$((budget - literal_total - fixed_total))
+		local minimum=$((flex_count * 3))
+		if [ "$available" -lt "$minimum" ]; then
+			log error "❌ Naming pattern '$pattern' consumes most of the $budget-character naming budget in fixed text, leaving nothing for the slugs"
+			log error "💡 Possible causes:"
+			log error "   - The pattern's literals and fixed ids leave fewer than 3 characters per slug placeholder"
+			log error "🔧 How to fix:"
+			log error "   • Shorten the pattern's literals or increase the naming budget"
+			return 1
+		fi
+	fi
 }
 
 np_name_render() {
