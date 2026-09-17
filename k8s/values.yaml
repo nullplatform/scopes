@@ -30,6 +30,7 @@ configuration:
   ALB_AUTOCREATE_TIMEOUT_SECONDS: 300
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
   NAMING_MAX_LENGTH: 46
+#  NAMING_STRATEGY: qualified # Available values ids | qualified | custom
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
   SECRET_FILES_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret-files.yaml.tpl"
