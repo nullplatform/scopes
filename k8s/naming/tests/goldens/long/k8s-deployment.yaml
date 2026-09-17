@@ -1,0 +1,242 @@
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: d-123456-789012
+  namespace: nullplatform
+  labels:
+    name: d-123456-789012
+    app.kubernetes.io/part-of: payments
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: customer-notifications-dispatcher
+    application_id: "111"
+    scope: production-canary-eu-west
+    scope_id: "123456"
+    deployment_id: "789012"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      name: d-123456-789012
+  template:
+    metadata:
+      labels:
+        name: d-123456-789012
+        app.kubernetes.io/part-of: payments-checkout-api
+        nullplatform: "true"
+        account: "acme"
+        account_id: "1"
+        namespace: "payments"
+        namespace_id: "11"
+        application: "customer-notifications-dispatcher"
+        application_id: "111"
+        scope: "production-canary-eu-west"
+        scope_id: "123456"
+        deployment_id: "789012"
+      annotations:
+    spec:
+      containers:
+        - name: http
+          securityContext:
+            runAsUser: 0
+          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          env:
+            - name: LISTENER_PORT
+              value: '80'
+            - name: UPSTREAM_PORT
+              value: '8080'
+            - name: HEALTH_CHECK_TYPE
+              value: http
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: http
+            - name: HEALTH_CHECK_PATH
+              value: /health
+          resources:
+            limits:
+              cpu: 93m
+              memory: 64Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            timeoutSeconds: 2
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            timeoutSeconds: 2
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            timeoutSeconds: 2
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+
+        
+        
+        
+        - name: grpc-9090
+          securityContext:
+            runAsUser: 0
+          image: public.ecr.aws/nullplatform/k8s-traffic-manager:latest
+          ports:
+            - containerPort: 19090
+              protocol: TCP
+          env:
+            - name: UPSTREAM_PORT
+              value: '9090'
+            - name: HEALTH_CHECK_TYPE
+              value: grpc
+            - name: GRACE_PERIOD
+              value: '15'
+            - name: LISTENER_PROTOCOL
+              value: grpc
+            - name: LISTENER_PORT
+              value: '19090'
+          resources:
+            limits:
+              cpu: 93m
+              memory: 64Mi
+            requests:
+              cpu: 31m
+          livenessProbe:
+            grpc:
+              port: 19090
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 9
+          readinessProbe:
+            grpc:
+              port: 19090
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            grpc:
+              port: 19090
+            timeoutSeconds: 5
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 90
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+        
+        
+        
+        - name: application
+          envFrom:
+            - secretRef:
+                name: s-123456-d-789012
+          image: >-
+            public.ecr.aws/acme/checkout-api:1.0.0
+          securityContext:
+            runAsUser: 0
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+            
+            
+            - containerPort: 9090
+              protocol: TCP
+            
+            
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1024Mi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 2
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 2
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 2
+            periodSeconds: 10
+            initialDelaySeconds: 5
+            successThreshold: 1
+            failureThreshold: 90
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sleep
+                  - '16'
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+      volumes:
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      schedulerName: default-scheduler
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              name: d-123456-789012
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
