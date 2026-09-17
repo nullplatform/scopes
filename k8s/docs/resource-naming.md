@@ -71,6 +71,10 @@ Switching a scope's `NAMING_STRATEGY` (or editing a `custom` pattern) does not r
 
 This asymmetry is deliberate and only applies to scope-scoped names. Deployment-scoped names (Deployment, HPA, PDB, Secret, CronJob) are always computed fresh from the current strategy — a deployment already gets a new set of objects per deployment, so there is nothing to freeze.
 
+## Known limitations
+
+scheduled_task's `cronjob.*` metrics (`execution_count`, `success_count`, `failure_count`, `cpu_usage`, `memory_usage`) match Prometheus series by parsing the scope id back out of the job/pod name with a `job-${SCOPE_ID}-.*` regex. Under `qualified` or `custom`, job and pod names carry the application and scope slugs instead of that fixed shape, so the regex stops matching and these metrics return no data. This is a known gap, not a crash — it will be fixed by querying Prometheus with the `scope_id` label instead of parsing it out of the name.
+
 ## Implementation Map
 
 - Name resolution engine, strategies and discovery: `k8s/naming/resolve_names`
