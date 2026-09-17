@@ -192,3 +192,120 @@ np_name_render() {
 
 	echo "$out"
 }
+
+np_naming_strategy() {
+	if [ -n "${NAMING_STRATEGY+x}" ] && [ -z "$NAMING_STRATEGY" ]; then
+		log error "❌ NAMING_STRATEGY is set but empty"
+		log error "🔧 How to fix:"
+		log error "   • Remove it to use the default 'ids', or set one of: ids, qualified, custom"
+		return 1
+	fi
+
+	local strategy
+	strategy="$(get_config_value \
+		--provider '.providers["scope-configurations"].naming.strategy' \
+		--provider '.providers["container-orchestration"].naming.strategy' \
+		--env NAMING_STRATEGY \
+		--default "ids")"
+
+	case "$strategy" in
+		ids|qualified|custom) echo "$strategy" ;;
+		*)
+			log error "❌ Unknown naming strategy '$strategy'"
+			log error "🔧 How to fix:"
+			log error "   • Valid strategies: ids, qualified, custom"
+			return 1
+			;;
+	esac
+}
+
+np_naming_resolve() {
+	local strategy
+	strategy="$(np_naming_strategy)" || return 1
+
+	NP_NAME_APPLICATION="$(echo "$CONTEXT" | jq -r '.application.slug // ""')"
+	NP_NAME_SCOPE="$(echo "$CONTEXT" | jq -r '.scope.slug // ""')"
+	NP_NAME_NAMESPACE="$(echo "$CONTEXT" | jq -r '.namespace.slug // ""')"
+	NP_NAME_ACCOUNT="$(echo "$CONTEXT" | jq -r '.account.slug // ""')"
+	NP_NAME_DEPLOYMENT_ID="$(echo "$CONTEXT" | jq -r '.deployment.id // ""')"
+	NP_NAME_SCOPE_ID="$(echo "$CONTEXT" | jq -r '.scope.id // ""')"
+	NP_NAME_APPLICATION_ID="$(echo "$CONTEXT" | jq -r '.application.id // ""')"
+	NP_NAME_NAMESPACE_ID="$(echo "$CONTEXT" | jq -r '.namespace.id // ""')"
+	export NP_NAME_APPLICATION NP_NAME_SCOPE NP_NAME_NAMESPACE NP_NAME_ACCOUNT
+	export NP_NAME_DEPLOYMENT_ID NP_NAME_SCOPE_ID NP_NAME_APPLICATION_ID NP_NAME_NAMESPACE_ID
+
+	local visibility
+	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
+
+	if [ "$strategy" = "ids" ]; then
+		np_naming_roles_ids "$visibility"
+	else
+		np_naming_roles_patterned "$strategy"
+	fi
+}
+
+np_naming_roles_ids() {
+	local visibility="$1"
+	local s="$NP_NAME_SCOPE_ID" d="$NP_NAME_DEPLOYMENT_ID"
+	local base_d="" scope_base="k-8-s-$NP_NAME_SCOPE-$s"
+	local blue
+
+	if [ -n "$d" ]; then base_d="d-$s-$d"; fi
+	blue="$(echo "$CONTEXT" | jq -r '.blue_deployment_id // ""')"
+
+	local dns_app="${NP_NAME_APPLICATION:0:20}" dns_scope="${NP_NAME_SCOPE:0:20}"
+	dns_app="${dns_app%-}"
+	dns_scope="${dns_scope%-}"
+
+	np_naming_emit \
+		"$base_d" \
+		"${base_d:+hpa-$base_d}" \
+		"${base_d:+pdb-$base_d}" \
+		"${d:+s-$s-d-$d}" \
+		"${d:+s-$s-d-$d-files}" \
+		"${d:+job-$s-$d}" \
+		"$scope_base-$visibility" \
+		"k8s-$dns_app-$dns_scope-$s-dns" \
+		"d-$s" \
+		"$scope_base" \
+		"${blue:+d-$s-$blue}" \
+		"ids" "$visibility"
+}
+
+np_naming_emit() {
+	local deployment="$1" hpa="$2" pdb="$3" secret="$4" secret_files="$5" \
+	      cronjob="$6" ingress="$7" dns="$8" cert="$9" ingress_base="${10}" \
+	      blue="${11}" strategy="${12}" visibility="${13}"
+
+	local ports
+	ports="$(echo "$CONTEXT" | jq -c \
+		--arg base_d "$deployment" --arg scope_base "$ingress_base" \
+		--arg visibility "$visibility" --arg strategy "$strategy" '
+		[ (.scope.capabilities.additional_ports // [])[]
+		  | . + {
+		      service_name: (if $base_d == "" then "" else
+		        $base_d + "-" + (if .type == "HTTP" then "http" else "grpc" end) + "-" + (.port|tostring) end),
+		      ingress_name: (
+		        $scope_base + "-" + (if .type == "HTTP" then "http" else "grpc" end) + "-" + (.port|tostring)
+		        + (if $strategy == "ids" then "-" + $visibility else "" end))
+		    } ]')"
+
+	jq -n \
+		--arg deployment "$deployment" --arg service "$deployment" \
+		--arg hpa "$hpa" --arg pdb "$pdb" --arg secret "$secret" \
+		--arg secret_files "$secret_files" --arg cronjob "$cronjob" \
+		--arg scope_ingress "$ingress" --arg scope_dns "$dns" --arg serving_cert "$cert" \
+		--arg blue "$blue" \
+		--argjson additional_ports "$ports" \
+		'{deployment: $deployment, service: $service, hpa: $hpa, pdb: $pdb,
+		  secret: $secret, secret_files: $secret_files, cronjob: $cronjob,
+		  scope_ingress: $scope_ingress, scope_dns: $scope_dns,
+		  serving_cert: $serving_cert,
+		  blue_deployment: $blue, blue_service: $blue,
+		  additional_ports: $additional_ports}'
+}
+
+np_naming_roles_patterned() {
+	log error "❌ Naming strategy '$1' is not available yet"
+	return 1
+}
