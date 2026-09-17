@@ -26,10 +26,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.deployment }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
     account: {{ .account.slug }}
     account_id: "{{ .account.id }}"
@@ -44,11 +44,11 @@ spec:
   replicas: {{ .replicas }}
   selector:
     matchLabels:
-      name: d-{{ .scope.id }}-{{ .deployment.id }}
+      name: {{ .names.deployment }}
   template:
     metadata:
       labels:
-        name: d-{{ .scope.id }}-{{ .deployment.id }}
+        name: {{ .names.deployment }}
         app.kubernetes.io/part-of: {{ .component }}
         nullplatform: "true"
         account: "{{ .account.slug }}"
@@ -299,7 +299,7 @@ spec:
         - name: application
           envFrom:
             - secretRef:
-                name: s-{{ .scope.id }}-d-{{ .deployment.id }}
+                name: {{ .names.secret }}
     {{- if .parameters.results }}
           env:
       {{- range .parameters.results }}
@@ -392,7 +392,7 @@ spec:
         {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
       - name: {{ printf "file-%s" $key }}
         secret:
-          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
+          secretName: {{ $.names.secret_files }}
           items:
           - key: {{ printf "app-file-%s" $key }}
             path: {{ filepath.Base .destination_path | quote }}
@@ -410,7 +410,7 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              name: d-{{ .scope.id }}-{{ .deployment.id }}
+              name: {{ .names.deployment }}
   strategy:
     type: RollingUpdate
     rollingUpdate:

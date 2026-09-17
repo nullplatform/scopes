@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.deployment }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}
@@ -33,7 +33,7 @@ metadata:
   {{- end }}
 {{- end }}
   annotations:
-    service.beta.openshift.io/serving-cert-secret-name: d-{{ .scope.id }}
+    service.beta.openshift.io/serving-cert-secret-name: {{ .names.serving_cert }}
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: '{{ .scope.capabilities.health_check.period_seconds }}'
     alb.ingress.kubernetes.io/healthcheck-path: {{ .scope.capabilities.health_check.path }}
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '{{ .scope.capabilities.health_check.timeout_seconds }}'
@@ -84,10 +84,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: d-{{ $.scope.id }}-{{ $.deployment.id }}-http-{{ .port }}
+  name: {{ .service_name }}
   namespace: {{ $.k8s_namespace }}
   labels:
-    name: d-{{ $.scope.id }}-{{ $.deployment.id }}-http-{{ .port }}
+    name: {{ .service_name }}
     app.kubernetes.io/part-of: {{ $.component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ $.scope.slug }}
@@ -116,7 +116,7 @@ metadata:
   {{- end }}
 {{- end }}
   annotations:
-    service.beta.openshift.io/serving-cert-secret-name: d-{{ $.scope.id }}-http-{{ .port }}
+    service.beta.openshift.io/serving-cert-secret-name: {{ $.names.serving_cert }}-http-{{ .port }}
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: '{{ $.scope.capabilities.health_check.period_seconds }}'
     alb.ingress.kubernetes.io/healthcheck-path: {{ $.scope.capabilities.health_check.path }}
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '{{ $.scope.capabilities.health_check.timeout_seconds }}'
@@ -165,10 +165,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: d-{{ $.scope.id }}-{{ $.deployment.id }}-grpc-{{ .port }}
+  name: {{ .service_name }}
   namespace: {{ $.k8s_namespace }}
   labels:
-    name: d-{{ $.scope.id }}-{{ $.deployment.id }}-grpc-{{ .port }}
+    name: {{ .service_name }}
     app.kubernetes.io/part-of: {{ $.component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ $.scope.slug }}
@@ -183,7 +183,7 @@ metadata:
     scope_id: "{{ $.scope.id }}"
     deployment_id: "{{ $.deployment.id }}"
   annotations:
-    service.beta.openshift.io/serving-cert-secret-name: d-{{ $.scope.id }}-grpc-{{ .port }}
+    service.beta.openshift.io/serving-cert-secret-name: {{ $.names.serving_cert }}-grpc-{{ .port }}
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: '10'
     alb.ingress.kubernetes.io/healthcheck-path: /grpc.health.v1.Health/Check
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
