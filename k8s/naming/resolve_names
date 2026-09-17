@@ -24,8 +24,14 @@ np_trim_name() {
 	local -a segments=() lengths=()
 	local segment clean
 
+	local position=0
 	for segment in "$@"; do
+		position=$((position + 1))
 		clean="$(np_name_sanitize "$segment")"
+		if [ -z "$clean" ]; then
+			log error "❌ Slug segment $position is empty after sanitising; a Kubernetes name cannot contain an empty component"
+			return 1
+		fi
 		segments+=("$clean")
 		lengths+=("${#clean}")
 	done

@@ -59,3 +59,38 @@ setup() {
 	[ "$status" -ne 0 ]
 	assert_contains "$output" "❌ Name budget 12 leaves 4 characters for 2 slug segments, under the 3-character minimum"
 }
+
+@test "np_trim_name: fails when the first segment is empty" {
+	run np_trim_name 46 8 "" "production"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Slug segment 1 is empty after sanitising; a Kubernetes name cannot contain an empty component"
+}
+
+@test "np_trim_name: fails when the second segment is empty" {
+	run np_trim_name 46 8 "production" ""
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Slug segment 2 is empty after sanitising; a Kubernetes name cannot contain an empty component"
+}
+
+@test "np_trim_name: fails when a segment sanitises to empty" {
+	run np_trim_name 46 8 "----" "production"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Slug segment 1 is empty after sanitising; a Kubernetes name cannot contain an empty component"
+}
+
+@test "np_trim_name: never returns a leading, trailing or doubled hyphen" {
+	run np_trim_name 46 8 "checkout-api" "production"
+	[[ "$output" != -* ]]
+	[[ "$output" != *- ]]
+	[[ "$output" != *--* ]]
+
+	run np_trim_name 46 8 "customer-notifications-dispatcher" "production-canary-eu-west"
+	[[ "$output" != -* ]]
+	[[ "$output" != *- ]]
+	[[ "$output" != *--* ]]
+
+	run np_trim_name 20 8 "checkout-api" "production"
+	[[ "$output" != -* ]]
+	[[ "$output" != *- ]]
+	[[ "$output" != *--* ]]
+}
