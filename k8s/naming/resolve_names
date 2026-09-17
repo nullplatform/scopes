@@ -1,0 +1,67 @@
+#!/bin/bash
+
+np_name_sanitize() {
+	echo "$1" \
+		| tr '[:upper:]' '[:lower:]' \
+		| sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+np_name_cap() {
+	local available="$1"; shift
+	local best=0 cap total len
+	for ((cap = 1; cap <= 63; cap++)); do
+		total=0
+		for len in "$@"; do
+			if [ "$len" -lt "$cap" ]; then total=$((total + len)); else total=$((total + cap)); fi
+		done
+		if [ "$total" -le "$available" ]; then best=$cap; else break; fi
+	done
+	echo "$best"
+}
+
+np_trim_name() {
+	local budget="$1" overhead="$2"; shift 2
+	local -a segments=() lengths=()
+	local segment clean
+
+	for segment in "$@"; do
+		clean="$(np_name_sanitize "$segment")"
+		segments+=("$clean")
+		lengths+=("${#clean}")
+	done
+
+	local available=$((budget - overhead))
+
+	if [ "$available" -le 0 ]; then
+		log error "❌ Name budget $budget is too small: separators and ids already need $overhead characters"
+		return 1
+	fi
+
+	local total=0 len
+	for len in "${lengths[@]}"; do total=$((total + len)); done
+
+	if [ "$total" -le "$available" ]; then
+		local IFS=-
+		echo "${segments[*]}"
+		return 0
+	fi
+
+	local cap
+	cap="$(np_name_cap "$available" "${lengths[@]}")"
+
+	if [ "$cap" -lt 3 ]; then
+		log error "❌ Name budget $budget leaves $available characters for ${#segments[@]} slug segments, under the 3-character minimum"
+		return 1
+	fi
+
+	local -a trimmed=()
+	local i
+	for ((i = 0; i < ${#segments[@]}; i++)); do
+		clean="${segments[$i]:0:$cap}"
+		clean="${clean%-}"
+		trimmed+=("$clean")
+	done
+
+	local IFS=-
+	echo "${trimmed[*]}"
+}
