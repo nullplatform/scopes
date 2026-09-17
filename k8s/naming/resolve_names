@@ -307,9 +307,51 @@ np_naming_emit() {
 		  additional_ports: $additional_ports}'
 }
 
+NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT="{application}-{scope}-{deployment_id}"
+NP_NAMING_SCOPE_PATTERN_DEFAULT="{application}-{scope}-{scope_id}"
+NP_NAMING_SCOPE_BUDGET=52
+
 np_naming_roles_patterned() {
-	log error "❌ Naming strategy '$1' is not available yet"
-	return 1
+	local strategy="$1"
+	local deployment_pattern="$NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT"
+	local scope_pattern="$NP_NAMING_SCOPE_PATTERN_DEFAULT"
+
+	if [ "$strategy" = "custom" ]; then
+		deployment_pattern="$(get_config_value \
+			--provider '.providers["scope-configurations"].naming.deployment_pattern' \
+			--provider '.providers["container-orchestration"].naming.deployment_pattern' \
+			--env NAMING_DEPLOYMENT_PATTERN \
+			--default "$NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT")"
+		scope_pattern="$(get_config_value \
+			--provider '.providers["scope-configurations"].naming.scope_pattern' \
+			--provider '.providers["container-orchestration"].naming.scope_pattern' \
+			--env NAMING_SCOPE_PATTERN \
+			--default "$NP_NAMING_SCOPE_PATTERN_DEFAULT")"
+	fi
+
+	np_naming_validate_pattern "$scope_pattern" "scope_id" || return 1
+
+	local base_s base_d=""
+	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern")" || return 1
+
+	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
+		np_naming_validate_pattern "$deployment_pattern" "deployment_id" || return 1
+		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern")" || return 1
+	fi
+
+	np_naming_emit \
+		"$base_d" \
+		"${base_d:+hpa-$base_d}" \
+		"${base_d:+pdb-$base_d}" \
+		"${base_d:+$base_d-env}" \
+		"${base_d:+$base_d-files}" \
+		"${base_d:+job-$base_d}" \
+		"$base_s" \
+		"$base_s-dns" \
+		"$base_s" \
+		"$base_s" \
+		"" \
+		"$strategy" ""
 }
 
 np_naming_lookup() {
