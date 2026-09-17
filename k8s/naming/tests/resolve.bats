@@ -91,3 +91,16 @@ setup() {
 	assert_equal "$(echo "$output" | sed -n 1p)" "d-123456-789012-grpc-9090"
 	assert_equal "$(echo "$output" | sed -n 2p)" "k-8-s-production-123456-grpc-9090-internet-facing"
 }
+
+@test "np_naming_resolve: enriches additional ports with the blue deployment's per-port service name" {
+	names="$(np_naming_resolve)"
+	run jq -r '.additional_ports[0].blue_service_name' <<< "$names"
+	assert_equal "$output" "d-123456-789011-grpc-9090"
+}
+
+@test "np_naming_resolve: blue per-port service name is empty without a blue deployment id" {
+	export CONTEXT="$(echo "$CONTEXT" | jq 'del(.blue_deployment_id)')"
+	names="$(np_naming_resolve)"
+	run jq -r '.additional_ports[0].blue_service_name' <<< "$names"
+	assert_equal "$output" ""
+}

@@ -280,11 +280,13 @@ np_naming_emit() {
 	local ports
 	ports="$(echo "$CONTEXT" | jq -c \
 		--arg base_d "$deployment" --arg scope_base "$ingress_base" \
-		--arg visibility "$visibility" --arg strategy "$strategy" '
+		--arg visibility "$visibility" --arg strategy "$strategy" --arg blue_d "$blue" '
 		[ (.scope.capabilities.additional_ports // [])[]
 		  | . + {
 		      service_name: (if $base_d == "" then "" else
 		        $base_d + "-" + (if .type == "HTTP" then "http" else "grpc" end) + "-" + (.port|tostring) end),
+		      blue_service_name: (if $blue_d == "" then "" else
+		        $blue_d + "-" + (if .type == "HTTP" then "http" else "grpc" end) + "-" + (.port|tostring) end),
 		      ingress_name: (
 		        $scope_base + "-" + (if .type == "HTTP" then "http" else "grpc" end) + "-" + (.port|tostring)
 		        + (if $strategy == "ids" then "-" + $visibility else "" end))
