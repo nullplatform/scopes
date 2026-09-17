@@ -71,3 +71,130 @@ np_trim_name() {
 	local IFS=-
 	echo "${trimmed[*]}"
 }
+
+NP_NAME_PLACEHOLDERS="application scope namespace account deployment_id scope_id application_id namespace_id"
+NP_NAME_FIXED_PLACEHOLDERS="deployment_id scope_id application_id namespace_id"
+
+np_name_value() {
+	local upper
+	upper="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
+	eval "echo \"\${NP_NAME_${upper}:-}\""
+}
+
+np_name_is_fixed() {
+	case " $NP_NAME_FIXED_PLACEHOLDERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+np_name_is_known() {
+	case " $NP_NAME_PLACEHOLDERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+np_naming_validate_pattern() {
+	local pattern="$1" required="$2"
+	local rest="$pattern" placeholder first_placeholder="" first_literal=""
+
+	case "$pattern" in
+		*"{$required}"*) : ;;
+		*)
+			log error "❌ Naming pattern '$pattern' does not contain {$required}"
+			log error "💡 Possible causes:"
+			log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
+			log error "🔧 How to fix:"
+			log error "   • Add {$required} to the pattern"
+			return 1
+			;;
+	esac
+
+	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
+		if [ -z "$first_placeholder" ]; then first_literal="${BASH_REMATCH[1]}"; fi
+		placeholder="${BASH_REMATCH[2]}"
+		rest="${BASH_REMATCH[3]}"
+		if ! np_name_is_known "$placeholder"; then
+			log error "❌ Unknown naming placeholder {$placeholder}"
+			log error "🔧 How to fix:"
+			log error "   • Valid placeholders: {application} {scope} {namespace} {account} {deployment_id} {scope_id} {application_id} {namespace_id}"
+			return 1
+		fi
+		if [ -z "$first_placeholder" ]; then first_placeholder="$placeholder"; fi
+	done
+
+	local head="$first_literal"
+	if [ -z "$head" ]; then head="$(np_name_value "$first_placeholder")"; fi
+
+	case "$head" in
+		[a-z]*) : ;;
+		*)
+			log error "❌ Naming pattern '$pattern' renders a name starting with '${head:0:1}'"
+			log error "🔧 How to fix:"
+			log error "   • Kubernetes names must start with a letter; put a slug placeholder first"
+			return 1
+			;;
+	esac
+}
+
+np_name_render() {
+	local budget="$1" pattern="$2"
+	local rest="$pattern" literal placeholder value
+	local overhead=0
+	local -a flex=() order=()
+
+	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
+		literal="${BASH_REMATCH[1]}"
+		placeholder="${BASH_REMATCH[2]}"
+		rest="${BASH_REMATCH[3]}"
+		overhead=$((overhead + ${#literal}))
+		value="$(np_name_value "$placeholder")"
+		if np_name_is_fixed "$placeholder"; then
+			overhead=$((overhead + ${#value}))
+			order+=("FIXED:$value")
+		else
+			if [ -z "$value" ]; then
+				log error "❌ Naming placeholder {$placeholder} resolves to an empty value"
+				log error "🔧 How to fix:"
+				log error "   • Ensure this entity has a slug in this context, or remove {$placeholder} from the pattern"
+				return 1
+			fi
+			flex+=("$value")
+			order+=("FLEX")
+		fi
+	done
+	overhead=$((overhead + ${#rest}))
+
+	np_trim_name "$budget" "$overhead" "${flex[@]}" >/dev/null || return 1
+
+	local -a sanitized=() lengths=()
+	local seg clean
+	for seg in "${flex[@]}"; do
+		clean="$(np_name_sanitize "$seg")"
+		sanitized+=("$clean")
+		lengths+=("${#clean}")
+	done
+
+	local available=$((budget - overhead))
+	local total=0 len
+	for len in "${lengths[@]}"; do total=$((total + len)); done
+
+	local -a trimmed_flex=()
+	if [ "$total" -le "$available" ]; then
+		trimmed_flex=("${sanitized[@]}")
+	else
+		local cap i
+		cap="$(np_name_cap "$available" "${lengths[@]}")"
+		for ((i = 0; i < ${#sanitized[@]}; i++)); do
+			clean="${sanitized[$i]:0:$cap}"
+			clean="${clean%-}"
+			trimmed_flex+=("$clean")
+		done
+	fi
+
+	local out="" item flex_i=0
+	for item in "${order[@]}"; do
+		if [ -n "$out" ]; then out="$out-"; fi
+		case "$item" in
+			FIXED:*) out="$out${item#FIXED:}" ;;
+			FLEX)    out="$out${trimmed_flex[$flex_i]}"; flex_i=$((flex_i + 1)) ;;
+		esac
+	done
+
+	echo "$out"
+}
