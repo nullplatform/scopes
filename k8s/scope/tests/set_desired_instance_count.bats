@@ -11,8 +11,8 @@ setup() {
   source "$PROJECT_ROOT/testing/assertions.sh"
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
-  source "$PROJECT_ROOT/k8s/scope/require_resource"
-  export -f require_hpa require_deployment find_deployment_by_label
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f np_naming_lookup
 
   # Default environment
   export K8S_NAMESPACE="default-namespace"
@@ -76,8 +76,8 @@ teardown() {
 @test "set_desired_instance_count: fails when deployment not found" {
   kubectl() {
     case "$*" in
-      "get deployment d-scope-123-deploy-456 -n provider-namespace")
-        return 1
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo ""
         ;;
       *)
         return 0
@@ -90,15 +90,11 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "📋 Desired instances: 5"
-  assert_contains "$output" "📋 Deployment: d-scope-123-deploy-456"
-  assert_contains "$output" "📋 Namespace: provider-namespace"
-  assert_contains "$output" "🔍 Looking for deployment 'd-scope-123-deploy-456' in namespace 'provider-namespace'..."
-  assert_contains "$output" "❌ Deployment 'd-scope-123-deploy-456' not found in namespace 'provider-namespace'"
+  assert_contains "$output" "❌ No deployment found for deployment deploy-456 in namespace 'provider-namespace'"
   assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The deployment may not exist or was not created yet"
+  assert_contains "$output" "   - The deployment was not created yet or was deleted"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• Verify the deployment exists: kubectl get deployment -n provider-namespace"
-  assert_contains "$output" "• Check that scope scope-123 has an active deployment"
+  assert_contains "$output" "   • Verify the deployment exists: kubectl get deployment -n provider-namespace -l deployment_id=deploy-456"
 }
 
 # =============================================================================
@@ -110,8 +106,11 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment d-scope-123-deploy-456 -n provider-namespace")
-        return 0
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
+        ;;
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo ""
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         if [[ "$*" == *"readyReplicas"* ]]; then
@@ -126,9 +125,6 @@ teardown() {
             echo "5"  # FINAL_REPLICAS (after scale)
           fi
         fi
-        ;;
-      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace")
-        return 1  # No HPA
         ;;
       "scale deployment"*)
         return 0
@@ -175,8 +171,11 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment d-scope-123-deploy-456 -n provider-namespace")
-        return 0
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
+        ;;
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         if [[ "$*" == *"readyReplicas"* ]]; then
@@ -191,9 +190,6 @@ teardown() {
             echo "5"  # FINAL_REPLICAS
           fi
         fi
-        ;;
-      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace")
-        return 0  # HPA exists
         ;;
       "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         if [[ "$*" == *"autoscaling-paused"* ]]; then
@@ -261,8 +257,11 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment d-scope-123-deploy-456 -n provider-namespace")
-        return 0
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
+        ;;
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         if [[ "$*" == *"readyReplicas"* ]]; then
@@ -277,9 +276,6 @@ teardown() {
             echo "5"  # FINAL_REPLICAS
           fi
         fi
-        ;;
-      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace")
-        return 0  # HPA exists
         ;;
       "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         if [[ "$*" == *"autoscaling-paused"* ]]; then
@@ -327,8 +323,11 @@ teardown() {
 @test "set_desired_instance_count: uses namespace from provider" {
   kubectl() {
     case "$*" in
-      "get deployment d-scope-123-deploy-456 -n provider-namespace")
-        return 0
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
+        ;;
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo ""
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         if [[ "$*" == *"readyReplicas"* ]]; then
@@ -336,9 +335,6 @@ teardown() {
         else
           echo "3"
         fi
-        ;;
-      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace")
-        return 1
         ;;
       "scale deployment"*)
         return 0
@@ -357,7 +353,6 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "📋 Namespace: provider-namespace"
-  assert_contains "$output" "🔍 Looking for deployment 'd-scope-123-deploy-456' in namespace 'provider-namespace'..."
 }
 
 @test "set_desired_instance_count: falls back to default namespace" {
@@ -365,6 +360,12 @@ teardown() {
 
   kubectl() {
     case "$*" in
+      "get deployment -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
+        ;;
+      "get hpa -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo ""
+        ;;
       *"-n default-namespace"*)
         case "$*" in
           "get deployment"*"-o jsonpath"*)
@@ -374,19 +375,10 @@ teardown() {
               echo "3"
             fi
             ;;
-          "get deployment"*)
-            return 0
-            ;;
           *)
             return 0
             ;;
         esac
-        ;;
-      "get hpa"*)
-        return 1
-        ;;
-      "rollout status"*)
-        return 0
         ;;
       *)
         return 0
@@ -399,5 +391,4 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "📋 Namespace: default-namespace"
-  assert_contains "$output" "🔍 Looking for deployment 'd-scope-123-deploy-456' in namespace 'default-namespace'..."
 }

@@ -7,7 +7,22 @@ setup() {
 	export -f log
 	source "$PROJECT_ROOT/k8s/utils/get_config_value"
 	source "$PROJECT_ROOT/k8s/naming/resolve_names"
-	export -f np_naming_discover_blue
+	export -f np_naming_discover_blue np_naming_lookup
+}
+
+@test "np_naming_lookup: returns the object name for a deployment id" {
+	kubectl() { echo "hpa-d-123456-789012"; }
+	export -f kubectl
+	run np_naming_lookup hpa nullplatform 789012
+	assert_equal "$output" "hpa-d-123456-789012"
+}
+
+@test "np_naming_lookup: fails and stays silent when nothing matches" {
+	kubectl() { echo ""; }
+	export -f kubectl
+	run np_naming_lookup hpa nullplatform 789012
+	[ "$status" -ne 0 ]
+	assert_equal "$output" ""
 }
 
 @test "np_naming_discover_blue: finds the main service by its main port" {
