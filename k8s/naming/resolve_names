@@ -370,12 +370,29 @@ np_naming_roles_patterned() {
 	local base_s base_d=""
 	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern")" || return 1
 
-	local existing
+	local existing discover_status
 	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
-	if [ -n "$existing" ]; then
-		log info "✅ Keeping the existing scope object name '$existing'" >&2
-		base_s="$existing"
-	fi
+	discover_status=$?
+
+	case "$discover_status" in
+		0)
+			log info "✅ Keeping the existing scope object name '$existing'" >&2
+			base_s="$existing"
+			;;
+		2) ;;
+		*)
+			log error "❌ Could not check the cluster for the scope's existing Kubernetes object name"
+			log error ""
+			log error "💡 Possible causes:"
+			log error "   - The cluster API server is unreachable"
+			log error "   - RBAC denies listing ingress/httproute in namespace '${K8S_NAMESPACE:-nullplatform}'"
+			log error "   - A requested resource type (e.g. httproute) has no CRD installed, failing the combined get"
+			log error "🔧 How to fix:"
+			log error "   • Verify cluster connectivity and RBAC for ingress/httproute"
+			log error "   • Retry once the API server is reachable"
+			return 1
+			;;
+	esac
 
 	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
 		np_naming_validate_pattern "$deployment_pattern" "deployment_id" || return 1
@@ -412,6 +429,9 @@ np_naming_discover_scope() {
 
 	local raw
 	raw="$(kubectl get ingress,httproute -n "$namespace" -l "scope_id=$scope_id" -o json 2>/dev/null)"
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
 
 	local found
 	found="$(echo "$raw" | jq -r --argjson main "$main_port" '
@@ -422,6 +442,10 @@ np_naming_discover_scope() {
 		    )
 		] | (.[0].metadata.name // empty)
 	')"
+
+	if [ -z "$found" ]; then
+		return 2
+	fi
 
 	echo "$found"
 }

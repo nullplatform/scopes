@@ -98,6 +98,22 @@ setup() {
 	assert_equal "$output" "k-8-s-production-123456-internet-facing"
 }
 
+@test "np_naming_discover_scope: returns not-found when nothing matches" {
+	kubectl() { echo '{"apiVersion":"v1","kind":"List","items":[]}'; }
+	export -f kubectl
+	run np_naming_discover_scope nullplatform 123456
+	[ "$status" -eq 2 ]
+	assert_equal "$output" ""
+}
+
+@test "np_naming_discover_scope: fails loudly when kubectl fails, instead of computing a fresh name" {
+	kubectl() { return 1; }
+	export -f kubectl
+	run np_naming_discover_scope nullplatform 123456
+	[ "$status" -eq 1 ]
+	assert_equal "$output" ""
+}
+
 @test "qualified: keeps an existing scope ingress name instead of renaming it" {
 	export NAMING_STRATEGY=qualified
 	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json"; }
@@ -136,4 +152,15 @@ setup() {
 	export -f kubectl
 	run bash -c "np_naming_resolve 2>/dev/null | jq -e ."
 	[ "$status" -eq 0 ]
+}
+
+@test "qualified: a failed cluster lookup fails resolve instead of computing a fresh name" {
+	export NAMING_STRATEGY=qualified
+	kubectl() { return 1; }
+	export -f kubectl
+	run np_naming_resolve
+	[ "$status" -eq 1 ]
+	assert_contains "$output" "❌ Could not check the cluster for the scope's existing Kubernetes object name"
+	assert_contains "$output" "💡 Possible causes:"
+	assert_contains "$output" "🔧 How to fix:"
 }
