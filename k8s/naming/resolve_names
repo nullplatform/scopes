@@ -432,7 +432,7 @@ np_naming_discover_blue() {
 			service: ([$svc.items[] | select(.spec.ports[0].port == $main) | .metadata.name] | first // ""),
 			ports: ([$svc.items[]
 				| select(.spec.ports[0].port != $main)
-				| {key: ((.metadata.labels.port_type // "grpc") + "-" + (.spec.ports[0].port|tostring)),
+				| {key: (.spec.ports[0].port|tostring),
 				   value: .metadata.name}] | from_entries)
 		}'
 }

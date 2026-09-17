@@ -1363,6 +1363,30 @@ EOF
   assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "true"
 }
 
+@test "blue discovery: finds an HTTP additional port's blue service, which carries no port_type label" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9015,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[
+        {"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}},
+        {"metadata":{"name":"http-blue-svc"},"spec":{"ports":[{"port":9015}]}}
+      ]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" "http-blue-svc"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["http-9015"]')" "true"
+}
+
 @test "blue discovery: per-port blue_service_name is untouched and the port is marked absent when not found" {
   setup_full_build_context
   set_additional_ports '[{"port":9014,"type":"GRPC"}]'

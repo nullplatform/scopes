@@ -42,11 +42,18 @@ setup() {
 	assert_equal "$output" "d-123456-789011"
 }
 
-@test "np_naming_discover_blue: finds a per-port service by its port" {
+@test "np_naming_discover_blue: finds a per-port GRPC service keyed by port number" {
 	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/svc-ids.json"; }
 	export -f kubectl
-	run bash -c "np_naming_discover_blue nullplatform 789011 8080 | jq -r '.ports[\"grpc-9090\"]'"
+	run bash -c "np_naming_discover_blue nullplatform 789011 8080 | jq -r '.ports[\"9090\"]'"
 	assert_equal "$output" "d-123456-789011-grpc-9090"
+}
+
+@test "np_naming_discover_blue: finds a per-port HTTP service, which carries no port_type label" {
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/svc-http-port.json"; }
+	export -f kubectl
+	run bash -c "np_naming_discover_blue nullplatform 789011 8080 | jq -r '.ports[\"9091\"]'"
+	assert_equal "$output" "d-123456-789011-http-9091"
 }
 
 @test "np_naming_discover_blue: returns empty fields when nothing matches" {
