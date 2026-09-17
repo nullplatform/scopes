@@ -9,6 +9,15 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
 
+  source "$PROJECT_ROOT/k8s/utils/get_config_value"
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f get_config_value np_name_sanitize np_name_cap np_trim_segments np_trim_name \
+    np_name_value np_name_is_fixed np_name_is_known np_naming_validate_pattern \
+    np_name_render np_naming_strategy np_naming_resolve np_naming_roles_ids \
+    np_naming_emit np_naming_roles_patterned np_naming_lookup np_naming_discover_blue \
+    np_naming_discover_scope
+  unset NAMING_STRATEGY
+
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export DEPLOYMENT_ID="deploy-new-123"
   export OUTPUT_DIR="$BATS_TEST_TMPDIR"
@@ -118,4 +127,34 @@ MOCK_SCRIPT
   source "$BATS_TEST_TMPDIR/captured_values"
   assert_equal "$CAPTURED_DEPLOYMENT_ID" "deploy-old-456"
   assert_equal "$CAPTURED_CONTEXT_DEPLOYMENT_ID" "deploy-old-456"
+}
+
+@test "rollback_traffic: points the rendered ingress at the blue deployment's own service, not green's" {
+  unset -f gomplate
+
+  local raw_context
+  raw_context="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
+
+  local resolved_names
+  resolved_names="$(CONTEXT="$raw_context" np_naming_resolve)"
+
+  export CONTEXT="$(echo "$raw_context" | jq \
+    --argjson names "$resolved_names" \
+    '. + {names: ($names | del(.additional_ports))}
+     | if ($names.additional_ports | length) > 0
+       then .scope.capabilities.additional_ports = $names.additional_ports
+       else . end
+     | .scope.current_active_deployment = "789011"')"
+
+  export SCOPE_ID="$(echo "$CONTEXT" | jq -r .scope.id)"
+  export DEPLOYMENT_ID="$(echo "$CONTEXT" | jq -r .deployment.id)"
+  export INGRESS_VISIBILITY="$(echo "$CONTEXT" | jq -r .ingress_visibility)"
+  export TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/initial-ingress.yaml.tpl"
+  export OUTPUT_DIR="$BATS_TEST_TMPDIR"
+
+  source "$PROJECT_ROOT/k8s/deployment/networking/gateway/rollback_traffic"
+
+  local backend
+  backend="$(yq -N 'select(document_index == 0) | .spec.rules[0].http.paths[0].backend.service.name' "$OUTPUT_DIR/ingress-$SCOPE_ID-789011.yaml")"
+  assert_equal "$backend" "d-123456-789011"
 }
