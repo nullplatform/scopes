@@ -24,6 +24,13 @@ teardown() {
 	[ "$status" -eq 0 ]
 }
 
+@test "golden: full context renders byte-identically" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full.json" "$RENDER_DIR"
+	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/full" "$RENDER_DIR"
+	[ "$status" -eq 0 ]
+}
+
 @test "golden: renders all fifteen templates" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
 		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json" "$RENDER_DIR"
