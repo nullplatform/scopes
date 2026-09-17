@@ -406,9 +406,23 @@ np_naming_lookup() {
 }
 
 np_naming_discover_scope() {
-	local namespace="$1" scope_id="$2" found
-	found="$(kubectl get ingress,httproute -n "$namespace" -l "scope_id=$scope_id" \
-		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+	local namespace="$1" scope_id="$2"
+	local main_port
+	main_port="$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')"
+
+	local raw
+	raw="$(kubectl get ingress,httproute -n "$namespace" -l "scope_id=$scope_id" -o json 2>/dev/null)"
+
+	local found
+	found="$(echo "$raw" | jq -r --argjson main "$main_port" '
+		[ (.items // [])[]
+		  | select(
+		      .kind == "HTTPRoute"
+		      or (try ([.spec.rules[].http.paths[].backend.service.port.number] | any(. == $main)) catch false)
+		    )
+		] | (.[0].metadata.name // empty)
+	')"
+
 	echo "$found"
 }
 

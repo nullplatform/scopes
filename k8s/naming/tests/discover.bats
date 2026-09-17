@@ -78,7 +78,21 @@ setup() {
 }
 
 @test "np_naming_discover_scope: returns the existing ingress name" {
-	kubectl() { echo "k-8-s-production-123456-internet-facing"; }
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json"; }
+	export -f kubectl
+	run np_naming_discover_scope nullplatform 123456
+	assert_equal "$output" "k-8-s-production-123456-internet-facing"
+}
+
+@test "np_naming_discover_scope: selects the main ingress by its backend port, regardless of item order" {
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope-additional-port-first.json"; }
+	export -f kubectl
+	run np_naming_discover_scope nullplatform 123456
+	assert_equal "$output" "k-8-s-production-123456-internet-facing"
+}
+
+@test "np_naming_discover_scope: keeps an HTTPRoute, which has no per-port variant to filter by port" {
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/httproute-scope.json"; }
 	export -f kubectl
 	run np_naming_discover_scope nullplatform 123456
 	assert_equal "$output" "k-8-s-production-123456-internet-facing"
@@ -86,7 +100,7 @@ setup() {
 
 @test "qualified: keeps an existing scope ingress name instead of renaming it" {
 	export NAMING_STRATEGY=qualified
-	kubectl() { echo "k-8-s-production-123456-internet-facing"; }
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json"; }
 	export -f kubectl
 	run bash -c "np_naming_resolve 2>/dev/null | jq -r .scope_ingress"
 	assert_equal "$output" "k-8-s-production-123456-internet-facing"
@@ -94,7 +108,7 @@ setup() {
 
 @test "qualified: computes a scope ingress name when none exists" {
 	export NAMING_STRATEGY=qualified
-	kubectl() { echo ""; }
+	kubectl() { echo '{"apiVersion":"v1","kind":"List","items":[]}'; }
 	export -f kubectl
 	run bash -c "np_naming_resolve | jq -r .scope_ingress"
 	assert_equal "$output" "checkout-api-production-123456"
@@ -102,7 +116,7 @@ setup() {
 
 @test "qualified: a frozen ingress name does not freeze the deployment name" {
 	export NAMING_STRATEGY=qualified
-	kubectl() { echo "k-8-s-production-123456-internet-facing"; }
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json"; }
 	export -f kubectl
 	run bash -c "np_naming_resolve 2>/dev/null | jq -r .deployment"
 	assert_equal "$output" "checkout-api-production-789012"
@@ -110,7 +124,7 @@ setup() {
 
 @test "qualified: keeping an existing name is logged" {
 	export NAMING_STRATEGY=qualified
-	kubectl() { echo "k-8-s-production-123456-internet-facing"; }
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json"; }
 	export -f kubectl
 	run np_naming_resolve
 	assert_contains "$output" "✅ Keeping the existing scope object name 'k-8-s-production-123456-internet-facing'"
@@ -118,7 +132,7 @@ setup() {
 
 @test "qualified: the resolved JSON on stdout stays valid when an existing name is kept" {
 	export NAMING_STRATEGY=qualified
-	kubectl() { echo "k-8-s-production-123456-internet-facing"; }
+	kubectl() { cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json"; }
 	export -f kubectl
 	run bash -c "np_naming_resolve 2>/dev/null | jq -e ."
 	[ "$status" -eq 0 ]

@@ -1,0 +1,27 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "networking.k8s.io/v1",
+      "kind": "Ingress",
+      "metadata": {
+        "name": "k-8-s-production-123456-internet-facing",
+        "namespace": "nullplatform",
+        "labels": {"scope_id": "123456"}
+      },
+      "spec": {
+        "rules": [
+          {
+            "host": "checkout.example.com",
+            "http": {
+              "paths": [
+                {"backend": {"service": {"name": "checkout-api-production-789012", "port": {"number": 8080}}}}
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
