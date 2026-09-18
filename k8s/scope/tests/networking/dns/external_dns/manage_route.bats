@@ -224,9 +224,6 @@ teardown() {
   assert_contains "$output" "✅ DNSEndpoint deletion completed"
 }
 
-# =============================================================================
-# DELETE: targets the resolved DNS endpoint name from context
-# =============================================================================
 @test "manage_route: DELETE - targets the resolved DNS endpoint name from context, not a constructed one" {
   export ACTION="DELETE"
   export CONTEXT='{"scope":{"slug":"my-scope"},"application":{"slug":"my-app"},"names":{"scope_dns":"checkout-api-production-123456-dns"}}'

@@ -60,9 +60,6 @@ teardown() {
   assert_contains "$output" "   • Verify the HPA exists: kubectl get hpa -n provider-namespace -l deployment_id=deploy-456"
 }
 
-# =============================================================================
-# Deployment Not Found
-# =============================================================================
 @test "pause_autoscaling: fails when deployment does not exist" {
   kubectl() {
     case "$*" in

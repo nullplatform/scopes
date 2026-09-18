@@ -152,9 +152,6 @@ teardown() {
   assert_contains "$output" "❌ DNSEndpoint processing timeout after 20s"
 }
 
-# =============================================================================
-# external_dns: targets the resolved DNS endpoint name from context
-# =============================================================================
 @test "wait_on_balancer: targets the resolved DNS endpoint name from context, not a constructed one" {
   export CONTEXT='{
     "scope": {

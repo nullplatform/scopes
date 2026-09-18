@@ -1303,12 +1303,6 @@ EOF
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
 
-# =============================================================================
-# Blue discovery: names.blue_deployment / names.blue_service / per-port
-# blue_service_name are overwritten by np_naming_discover_blue when the
-# cluster is reachable, and left untouched otherwise.
-# =============================================================================
-
 @test "blue discovery: overwrites blue deployment and service names when found" {
   setup_full_build_context
   CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
