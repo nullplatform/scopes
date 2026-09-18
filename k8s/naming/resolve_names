@@ -385,8 +385,7 @@ np_naming_roles_patterned() {
 			log error ""
 			log error "💡 Possible causes:"
 			log error "   - The cluster API server is unreachable"
-			log error "   - RBAC denies listing ingress/httproute in namespace '${K8S_NAMESPACE:-nullplatform}'"
-			log error "   - A requested resource type (e.g. httproute) has no CRD installed, failing the combined get"
+			log error "   - RBAC denies reading ingress/httproute in namespace '${K8S_NAMESPACE:-nullplatform}'"
 			log error "🔧 How to fix:"
 			log error "   • Verify cluster connectivity and RBAC for ingress/httproute"
 			log error "   • Retry once the API server is reachable"
@@ -411,8 +410,7 @@ np_naming_roles_patterned() {
 				log error ""
 				log error "💡 Possible causes:"
 				log error "   - The cluster API server is unreachable"
-				log error "   - RBAC denies listing dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
-				log error "   - The DNSEndpoint CRD (external-dns) is not installed"
+				log error "   - RBAC denies reading dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
 				log error "🔧 How to fix:"
 				log error "   • Verify cluster connectivity and RBAC for dnsendpoint"
 				log error "   • Retry once the API server is reachable"
@@ -449,51 +447,62 @@ np_naming_lookup() {
 	echo "$found"
 }
 
-np_naming_discover_scope() {
-	local namespace="$1" scope_id="$2"
-	local main_port
-	main_port="$(echo "$CONTEXT" | jq -r '.scope.capabilities.main_http_port // 8080')"
+np_naming_object_exists() {
+	local kind="$1" namespace="$2" name="$3"
+	local out status
+	out="$(kubectl get "$kind" "$name" -n "$namespace" --ignore-not-found -o name 2>&1)"
+	status=$?
 
-	local raw
-	raw="$(kubectl get ingress,httproute -n "$namespace" -l "scope_id=$scope_id" -o json 2>/dev/null)"
-	if [ $? -ne 0 ]; then
-		return 1
+	if [ "$status" -ne 0 ]; then
+		case "$out" in
+			*"doesn't have a resource type"*) return 2 ;;
+			*) return 1 ;;
+		esac
 	fi
 
-	local found
-	found="$(echo "$raw" | jq -r --argjson main "$main_port" '
-		[ (.items // [])[]
-		  | select(
-		      .kind == "HTTPRoute"
-		      or (try ([.spec.rules[].http.paths[].backend.service.port.number] | any(. == $main)) catch false)
-		    )
-		] | (.[0].metadata.name // empty)
-	')"
-
-	if [ -z "$found" ]; then
+	if [ -z "$out" ]; then
 		return 2
 	fi
+}
 
-	echo "$found"
+np_naming_discover_scope() {
+	local namespace="$1" scope_id="$2"
+	local visibility legacy_name status
+	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
+	legacy_name="k-8-s-$NP_NAME_SCOPE-$scope_id-$visibility"
+
+	np_naming_object_exists ingress "$namespace" "$legacy_name"
+	status=$?
+	case "$status" in
+		0) echo "$legacy_name"; return 0 ;;
+		1) return 1 ;;
+	esac
+
+	np_naming_object_exists httproute "$namespace" "$legacy_name"
+	status=$?
+	case "$status" in
+		0) echo "$legacy_name"; return 0 ;;
+		1) return 1 ;;
+	esac
+
+	return 2
 }
 
 np_naming_discover_dns() {
 	local namespace="$1" scope_id="$2"
+	local dns_app dns_scope legacy_name status
+	dns_app="${NP_NAME_APPLICATION:0:20}"; dns_app="${dns_app%-}"
+	dns_scope="${NP_NAME_SCOPE:0:20}"; dns_scope="${dns_scope%-}"
+	legacy_name="k8s-$dns_app-$dns_scope-$scope_id-dns"
 
-	local raw
-	raw="$(kubectl get dnsendpoint -n "$namespace" -l "scope_id=$scope_id" -o json 2>/dev/null)"
-	if [ $? -ne 0 ]; then
-		return 1
-	fi
+	np_naming_object_exists dnsendpoint "$namespace" "$legacy_name"
+	status=$?
+	case "$status" in
+		0) echo "$legacy_name"; return 0 ;;
+		1) return 1 ;;
+	esac
 
-	local found
-	found="$(echo "$raw" | jq -r '(.items // [])[0].metadata.name // empty')"
-
-	if [ -z "$found" ]; then
-		return 2
-	fi
-
-	echo "$found"
+	return 2
 }
 
 np_naming_discover_blue() {
