@@ -19,6 +19,8 @@ setup() {
   printf '#!/usr/bin/env bash\necho "$@"\n' > "$STUB_ROOT/log/kube-logger-go/bin/$platform/exec-$arch"
   chmod +x "$STUB_ROOT/log/kube-logger-go/bin/$platform/exec-$arch"
 
+  unset CONTEXT NAMESPACE_OVERRIDE K8S_NAMESPACE
+
   export SERVICE_PATH="$STUB_ROOT"
   export APPLICATION_ID="26611171"
   export SCOPE_ID="2075362883"
@@ -30,6 +32,7 @@ setup() {
 teardown() {
   unset -f epoch_ms_to_iso 2>/dev/null || true
   unset SERVICE_PATH APPLICATION_ID SCOPE_ID START_TIME END_TIME 2>/dev/null || true
+  unset CONTEXT NAMESPACE_OVERRIDE K8S_NAMESPACE 2>/dev/null || true
   [ -n "$STUB_ROOT" ] && rm -rf "$STUB_ROOT"
 }
 
@@ -85,4 +88,40 @@ teardown() {
   run bash "$LOG_SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" != *"--start-time"* ]]
+}
+
+# =============================================================================
+# Namespace resolution - must match scope/build_context, or the reader looks in
+# a namespace the deployment never wrote to and the UI shows no logs
+# =============================================================================
+@test "log: falls back to the nullplatform namespace" {
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace nullplatform"
+}
+
+@test "log: honors K8S_NAMESPACE from the scope configuration" {
+  export K8S_NAMESPACE="apps"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace apps"
+}
+
+@test "log: NAMESPACE_OVERRIDE wins over K8S_NAMESPACE" {
+  export K8S_NAMESPACE="apps"
+  export NAMESPACE_OVERRIDE="override"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace override"
+}
+
+@test "log: the container-orchestration provider wins over the environment" {
+  export NAMESPACE_OVERRIDE="override"
+  export CONTEXT='{"providers":{"container-orchestration":{"cluster":{"namespace":"from-provider"}}}}'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace from-provider"
 }
