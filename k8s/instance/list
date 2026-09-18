@@ -1,7 +1,10 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../utils/get_config_value"
+source "$SCRIPT_DIR/../utils/get_config_value" || {
+    echo "Error: could not load $SCRIPT_DIR/../utils/get_config_value" >&2
+    exit 1
+}
 
 # Same chain as scope/build_context: listing a namespace the deployment never
 # wrote to returns an empty list, not an error.

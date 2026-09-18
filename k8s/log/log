@@ -1,7 +1,10 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../utils/get_config_value"
+source "$SCRIPT_DIR/../utils/get_config_value" || {
+    echo "Error: could not load $SCRIPT_DIR/../utils/get_config_value" >&2
+    exit 1
+}
 
 PLATFORM=$(uname | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -25,31 +28,32 @@ K8S_NAMESPACE=$(get_config_value \
     --default "nullplatform"
 )
 
-# Build the command with required parameters
-CMD="$KUBE_LOGGER_SCRIPT --namespace $K8S_NAMESPACE --application-id $APPLICATION_ID --scope-id $SCOPE_ID"
+# An array, not a string: the namespace comes from provider JSON, and eval on a
+# string would let a value like "ns; cmd" run as a command.
+CMD=("$KUBE_LOGGER_SCRIPT" --namespace "$K8S_NAMESPACE" --application-id "$APPLICATION_ID" --scope-id "$SCOPE_ID")
 
 if [ -n "$DEPLOYMENT_ID" ]; then
-    CMD="$CMD --deployment-id $DEPLOYMENT_ID"
+    CMD+=(--deployment-id "$DEPLOYMENT_ID")
 fi
 
 # Add optional next page token
 if [ -n "$NEXT_PAGE_TOKEN" ]; then
-    CMD="$CMD --next-page-token $NEXT_PAGE_TOKEN"
+    CMD+=(--next-page-token "$NEXT_PAGE_TOKEN")
 fi
 
 # Add optional filter pattern
 if [ -n "$FILTER_PATTERN" ]; then
-    CMD="$CMD --filter \"$FILTER_PATTERN\""
+    CMD+=(--filter "$FILTER_PATTERN")
 fi
 
 # Add optional instance ID
 if [ -n "$INSTANCE_ID" ]; then
-    CMD="$CMD --instance-id $INSTANCE_ID"
+    CMD+=(--instance-id "$INSTANCE_ID")
 fi
 
 # Add optional limit
 if [ -n "$LIMIT" ]; then
-    CMD="$CMD --limit $LIMIT"
+    CMD+=(--limit "$LIMIT")
 fi
 
 # Convert an epoch-milliseconds value to ISO-8601 UTC. Fails rather than falling back to now.
@@ -93,13 +97,13 @@ epoch_ms_to_iso() {
 # Add optional start time (convert from milliseconds to ISO format)
 if [ -n "$START_TIME" ]; then
     START_ISO=$(epoch_ms_to_iso "$START_TIME") || exit 1
-    CMD="$CMD --start-time $START_ISO"
+    CMD+=(--start-time "$START_ISO")
 fi
 
 # Add optional end time (convert from milliseconds to ISO format)
 if [ -n "$END_TIME" ]; then
     END_ISO=$(epoch_ms_to_iso "$END_TIME") || exit 1
-    CMD="$CMD --end-time $END_ISO"
+    CMD+=(--end-time "$END_ISO")
 fi
 
-eval "$CMD"
+"${CMD[@]}"
