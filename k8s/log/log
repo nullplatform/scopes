@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value"
+
 PLATFORM=$(uname | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
@@ -12,7 +15,15 @@ if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then
     exit 1
 fi
 
-K8S_NAMESPACE="${NAMESPACE_OVERRIDE:-nullplatform}"
+# Same chain as scope/build_context: reading a namespace the deployment never
+# wrote to returns an empty list, not an error.
+K8S_NAMESPACE=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+)
 
 # Build the command with required parameters
 CMD="$KUBE_LOGGER_SCRIPT --namespace $K8S_NAMESPACE --application-id $APPLICATION_ID --scope-id $SCOPE_ID"
