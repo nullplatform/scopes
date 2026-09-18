@@ -18,6 +18,9 @@ setup() {
 	export CONTEXT="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
 	unset NAMING_STRATEGY
 	unset NAMING_MAX_LENGTH
+
+	kubectl() { echo '{"apiVersion":"v1","kind":"List","items":[]}'; }
+	export -f kubectl
 }
 
 @test "qualified: renders the normal deployment name" {
