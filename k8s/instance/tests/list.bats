@@ -49,19 +49,27 @@ teardown() {
 
 # =============================================================================
 # Namespace resolution - must match scope/build_context, or the instance list
-# (and the per-instance metrics built from it) comes back empty
+# comes back empty
 # =============================================================================
 @test "list: falls back to the nullplatform namespace" {
   run bash "$PROJECT_ROOT/k8s/instance/list"
   [ "$status" -eq 0 ]
-  grep -q -- "-n nullplatform" "$KUBECTL_ARGS_FILE"
+  grep -qE -- '(^| )-n nullplatform( |$)' "$KUBECTL_ARGS_FILE"
 }
 
-@test "list: honors K8S_NAMESPACE from the scope configuration" {
+@test "list: honors the K8S_NAMESPACE env var" {
   export K8S_NAMESPACE="apps"
   run bash "$PROJECT_ROOT/k8s/instance/list"
   [ "$status" -eq 0 ]
-  grep -q -- "-n apps" "$KUBECTL_ARGS_FILE"
+  grep -qE -- '(^| )-n apps( |$)' "$KUBECTL_ARGS_FILE"
+}
+
+@test "list: NAMESPACE_OVERRIDE wins over K8S_NAMESPACE" {
+  export K8S_NAMESPACE="apps"
+  export NAMESPACE_OVERRIDE="override"
+  run bash "$PROJECT_ROOT/k8s/instance/list"
+  [ "$status" -eq 0 ]
+  grep -qE -- '(^| )-n override( |$)' "$KUBECTL_ARGS_FILE"
 }
 
 @test "list: the container-orchestration provider wins over the environment" {
@@ -69,5 +77,20 @@ teardown() {
   export CONTEXT='{"providers":{"container-orchestration":{"cluster":{"namespace":"from-provider"}}}}'
   run bash "$PROJECT_ROOT/k8s/instance/list"
   [ "$status" -eq 0 ]
-  grep -q -- "-n from-provider" "$KUBECTL_ARGS_FILE"
+  grep -qE -- '(^| )-n from-provider( |$)' "$KUBECTL_ARGS_FILE"
+}
+
+@test "list: the scope-configurations provider wins over the environment" {
+  export NAMESPACE_OVERRIDE="override"
+  export CONTEXT='{"providers":{"scope-configurations":{"cluster":{"namespace":"from-scope-config"}}}}'
+  run bash "$PROJECT_ROOT/k8s/instance/list"
+  [ "$status" -eq 0 ]
+  grep -qE -- '(^| )-n from-scope-config( |$)' "$KUBECTL_ARGS_FILE"
+}
+
+@test "list: scope-configurations wins over container-orchestration" {
+  export CONTEXT='{"providers":{"scope-configurations":{"cluster":{"namespace":"from-scope-config"}},"container-orchestration":{"cluster":{"namespace":"from-provider"}}}}'
+  run bash "$PROJECT_ROOT/k8s/instance/list"
+  [ "$status" -eq 0 ]
+  grep -qE -- '(^| )-n from-scope-config( |$)' "$KUBECTL_ARGS_FILE"
 }
