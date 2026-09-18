@@ -395,29 +395,31 @@ np_naming_roles_patterned() {
 	esac
 
 	local base_dns="$base_s-dns"
-	local existing_dns dns_discover_status
-	existing_dns="$(np_naming_discover_dns "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
-	dns_discover_status=$?
+	if [ "${DNS_TYPE:-}" = "external_dns" ]; then
+		local existing_dns dns_discover_status
+		existing_dns="$(np_naming_discover_dns "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
+		dns_discover_status=$?
 
-	case "$dns_discover_status" in
-		0)
-			log info "✅ Keeping the existing scope DNS object name '$existing_dns'" >&2
-			base_dns="$existing_dns"
-			;;
-		2) ;;
-		*)
-			log error "❌ Could not check the cluster for the scope's existing DNSEndpoint name"
-			log error ""
-			log error "💡 Possible causes:"
-			log error "   - The cluster API server is unreachable"
-			log error "   - RBAC denies listing dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
-			log error "   - The DNSEndpoint CRD (external-dns) is not installed"
-			log error "🔧 How to fix:"
-			log error "   • Verify cluster connectivity and RBAC for dnsendpoint"
-			log error "   • Retry once the API server is reachable"
-			return 1
-			;;
-	esac
+		case "$dns_discover_status" in
+			0)
+				log info "✅ Keeping the existing scope DNS object name '$existing_dns'" >&2
+				base_dns="$existing_dns"
+				;;
+			2) ;;
+			*)
+				log error "❌ Could not check the cluster for the scope's existing DNSEndpoint name"
+				log error ""
+				log error "💡 Possible causes:"
+				log error "   - The cluster API server is unreachable"
+				log error "   - RBAC denies listing dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
+				log error "   - The DNSEndpoint CRD (external-dns) is not installed"
+				log error "🔧 How to fix:"
+				log error "   • Verify cluster connectivity and RBAC for dnsendpoint"
+				log error "   • Retry once the API server is reachable"
+				return 1
+				;;
+		esac
+	fi
 
 	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
 		np_naming_validate_pattern "$deployment_pattern" "deployment_id" || return 1

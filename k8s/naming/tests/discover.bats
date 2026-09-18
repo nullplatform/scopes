@@ -174,8 +174,45 @@ setup() {
 	assert_equal "$output" "checkout-api-production-789012"
 }
 
+@test "qualified: DNS_TYPE route53 never queries the DNSEndpoint" {
+	export NAMING_STRATEGY=qualified
+	export DNS_TYPE=route53
+	local calls="$BATS_TEST_TMPDIR/kubectl.log"
+	: > "$calls"
+	kubectl() {
+		echo "$*" >> "$calls"
+		case "$2" in
+			ingress,httproute) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
+			*) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
+		esac
+	}
+	run np_naming_resolve
+	[ "$status" -eq 0 ]
+	run grep -c dnsendpoint "$calls"
+	assert_equal "$output" "0"
+}
+
+@test "qualified: unset DNS_TYPE never queries the DNSEndpoint" {
+	export NAMING_STRATEGY=qualified
+	unset DNS_TYPE
+	local calls="$BATS_TEST_TMPDIR/kubectl.log"
+	: > "$calls"
+	kubectl() {
+		echo "$*" >> "$calls"
+		case "$2" in
+			ingress,httproute) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
+			*) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
+		esac
+	}
+	run np_naming_resolve
+	[ "$status" -eq 0 ]
+	run grep -c dnsendpoint "$calls"
+	assert_equal "$output" "0"
+}
+
 @test "qualified: keeps an existing DNSEndpoint name instead of renaming it" {
 	export NAMING_STRATEGY=qualified
+	export DNS_TYPE=external_dns
 	kubectl() {
 		case "$2" in
 			ingress,httproute) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
@@ -189,6 +226,7 @@ setup() {
 
 @test "qualified: computes a scope dns name when none exists" {
 	export NAMING_STRATEGY=qualified
+	export DNS_TYPE=external_dns
 	kubectl() { echo '{"apiVersion":"v1","kind":"List","items":[]}'; }
 	names="$(np_naming_resolve)"
 	run jq -r .scope_dns <<< "$names"
@@ -209,6 +247,7 @@ setup() {
 
 @test "qualified: keeping an existing DNS name is logged" {
 	export NAMING_STRATEGY=qualified
+	export DNS_TYPE=external_dns
 	kubectl() {
 		case "$2" in
 			ingress,httproute) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
@@ -221,6 +260,7 @@ setup() {
 
 @test "qualified: the resolved JSON on stdout stays valid when an existing name is kept" {
 	export NAMING_STRATEGY=qualified
+	export DNS_TYPE=external_dns
 	kubectl() {
 		case "$2" in
 			ingress,httproute) cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/ingress-scope.json" ;;
@@ -244,6 +284,7 @@ setup() {
 
 @test "qualified: a failed dnsendpoint lookup fails resolve instead of computing a fresh name" {
 	export NAMING_STRATEGY=qualified
+	export DNS_TYPE=external_dns
 	kubectl() {
 		case "$2" in
 			ingress,httproute) echo '{"apiVersion":"v1","kind":"List","items":[]}' ;;
