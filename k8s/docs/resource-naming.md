@@ -28,33 +28,30 @@ hpa:            hpa-checkout-api-production-789012
 scope_ingress:  checkout-api-production-123456
 ```
 
-Deployment names use `{application}-{scope}-{deployment_id}`; scope-level names (ingress, HTTPRoute, cert) use `{application}-{scope}-{scope_id}`. Long slugs are trimmed evenly to fit the naming budget — the numeric id is never trimmed.
+Deployment names use `{.application.slug}-{.scope.slug}-{.deployment.id}`; scope-level names (ingress, HTTPRoute, cert) use `{.application.slug}-{.scope.slug}-{.scope.id}`. Long slugs are trimmed evenly to fit the naming budget — the numeric id is never trimmed.
 
 ### `custom`
 
-Same rendering engine as `qualified`, but the patterns themselves come from configuration: `naming.deployment_pattern` and `naming.scope_pattern` on the `container-orchestration` or `scope-configurations` provider.
+Same rendering engine as `qualified`, but the patterns themselves come from configuration: `naming.deployment_pattern` and `naming.scope_pattern` on the `container-orchestration` or `scope-configurations` provider. Each `{...}` segment is a jq path evaluated against the run's `CONTEXT`, so a pattern can reach any field visible there — including capabilities and other metadata, not just the fixed set below.
 
 ```
-naming.deployment_pattern: "{namespace}-{application}-{deployment_id}"
-deployment:                 payments-checkout-api-789012
+naming.deployment_pattern: "{.namespace.slug}-{.application.slug}-{.deployment.id}"
+deployment:                  payments-checkout-api-789012
 ```
 
-A custom pattern must contain its discriminant (`{deployment_id}` for the deployment pattern, `{scope_id}` for the scope pattern) — without it, a new deployment would overwrite the previous one's objects. Placeholders must be separated by a single hyphen; any other literal between two placeholders is rejected, as is a pattern whose fixed literals and ids leave fewer than 3 characters for each remaining slug.
+A custom pattern must contain its discriminant in the canonical dotted form — `{.deployment.id}` for the deployment pattern, `{.scope.id}` for the scope pattern — without it, a new deployment would overwrite the previous one's objects. Placeholders must be separated by a single hyphen; any other literal between two placeholders is rejected, as is a pattern whose fixed literals and ids leave fewer than 3 characters for each remaining slug.
 
-## Placeholders
+Only dotted field access and bracketed quoted keys are accepted inside `{...}` — roughly `.foo.bar` or `.foo["bar-baz"]` — never arbitrary jq (no pipes, filters or variable bindings). The path is rejected before it is ever evaluated, since it is interpolated into a jq program.
 
-| Placeholder | Kind | Source |
-|---|---|---|
-| `{application}` | slug | `application.slug` |
-| `{scope}` | slug | `scope.slug` |
-| `{namespace}` | slug | `namespace.slug` |
-| `{account}` | slug | `account.slug` |
-| `{deployment_id}` | fixed id | `deployment.id` |
-| `{scope_id}` | fixed id | `scope.id` |
-| `{application_id}` | fixed id | `application.id` |
-| `{namespace_id}` | fixed id | `namespace.id` |
+## Fixed versus flexible
 
-Slug placeholders are trimmed to fit the naming budget when a pattern is too long; fixed-id placeholders are never trimmed and always count against the budget in full.
+Whether a resolved value is trimmed to fit the naming budget is decided by the value, not by the path: **a resolved value matching `^[0-9]+$` is fixed and never trimmed; everything else is flexible** and shrinks evenly with the other flexible segments when the pattern is too long. This needs no extra syntax because nullplatform ids are numeric and slugs cannot be — a Kubernetes name must start with a letter, so a slug is never all digits.
+
+```
+{.application.slug}-{.scope.slug}-{.deployment.id}
+```
+
+Here `{.application.slug}` and `{.scope.slug}` are flexible; `{.deployment.id}` is fixed because `deployment.id` resolves to a number.
 
 ## Naming budget
 
@@ -88,5 +85,5 @@ scheduled_task's `cronjob.*` metrics (`execution_count`, `success_count`, `failu
 - `k8s/naming/tests/golden.bats` renders all fifteen templates under the default `ids` strategy and diffs them byte-for-byte against a captured baseline, so a naming change can never silently alter today's names.
 - `k8s/naming/tests/resolve.bats` and `k8s/naming/tests/trim.bats` cover the `ids` strategy and the slug-trimming engine.
 - `k8s/naming/tests/qualified.bats` covers the `qualified` strategy, including the naming-budget precedence chain and the pod/CronJob length ceilings.
-- `k8s/naming/tests/pattern.bats` covers pattern validation (discriminant, unknown placeholders, separator, literal budget) and the `custom` strategy.
+- `k8s/naming/tests/pattern.bats` covers pattern validation (discriminant, unsafe paths, separator, literal budget) and the `custom` strategy.
 - `k8s/naming/tests/discover.bats` covers `np_naming_lookup`, `np_naming_discover_blue`, `np_naming_discover_scope`, and the existing-scope-name freeze behavior.

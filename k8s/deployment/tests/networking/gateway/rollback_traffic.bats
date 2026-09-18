@@ -12,8 +12,8 @@ setup() {
   source "$PROJECT_ROOT/k8s/utils/get_config_value"
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
   export -f get_config_value np_name_sanitize np_name_cap np_trim_segments np_trim_name \
-    np_name_value np_name_is_fixed np_name_is_known np_naming_validate_pattern \
-    np_name_render np_naming_strategy np_naming_resolve np_naming_roles_ids \
+    np_naming_validate_pattern \
+    np_naming_resolve_path np_name_render np_naming_strategy np_naming_resolve np_naming_roles_ids \
     np_naming_emit np_naming_roles_patterned np_naming_lookup np_naming_discover_blue \
     np_naming_discover_scope
   unset NAMING_STRATEGY

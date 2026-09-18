@@ -84,45 +84,34 @@ np_trim_name() {
 	echo "${trimmed[*]}"
 }
 
-NP_NAME_PLACEHOLDERS="application scope namespace account deployment_id scope_id application_id namespace_id"
-NP_NAME_FIXED_PLACEHOLDERS="deployment_id scope_id application_id namespace_id"
+NP_NAMING_PATH_PATTERN='^\.[A-Za-z0-9_]+(\.[A-Za-z0-9_]+|\["[A-Za-z0-9_-]+"\])*$'
 
-np_name_value() {
-	local upper
-	upper="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
-	eval "echo \"\${NP_NAME_${upper}:-}\""
-}
-
-np_name_is_fixed() {
-	case " $NP_NAME_FIXED_PLACEHOLDERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
-}
-
-np_name_is_known() {
-	case " $NP_NAME_PLACEHOLDERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+np_naming_resolve_path() {
+	echo "$CONTEXT" | jq -r "$1 // \"\""
 }
 
 np_naming_validate_pattern() {
 	local pattern="$1" required="$2"
-	local rest="$pattern" placeholder first_placeholder="" first_literal="" literal
+	local rest="$pattern" path first_path="" first_literal="" literal
 	local literal_total=0 fixed_total=0 flex_count=0 seen_placeholder=false
 
 	case "$pattern" in
-		*"{$required}"*) : ;;
+		*"{.$required}"*) : ;;
 		*)
-			log error "❌ Naming pattern '$pattern' does not contain {$required}"
+			log error "❌ Naming pattern '$pattern' does not contain {.$required}"
 			log error "💡 Possible causes:"
 			log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
 			log error "🔧 How to fix:"
-			log error "   • Add {$required} to the pattern"
+			log error "   • Add {.$required} to the pattern"
 			return 1
 			;;
 	esac
 
-	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
+	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
 		literal="${BASH_REMATCH[1]}"
-		placeholder="${BASH_REMATCH[2]}"
+		path="${BASH_REMATCH[2]}"
 		rest="${BASH_REMATCH[3]}"
-		if [ -z "$first_placeholder" ]; then first_literal="$literal"; fi
+		if [ -z "$first_path" ]; then first_literal="$literal"; fi
 
 		if $seen_placeholder && [ "$literal" != "-" ]; then
 			log error "❌ Naming pattern '$pattern' uses '$literal' between placeholders"
@@ -131,29 +120,36 @@ np_naming_validate_pattern() {
 			return 1
 		fi
 
-		if ! np_name_is_known "$placeholder"; then
-			log error "❌ Unknown naming placeholder {$placeholder}"
+		if ! [[ "$path" =~ $NP_NAMING_PATH_PATTERN ]]; then
+			log error "❌ Naming pattern '$pattern' has an unsafe path {$path}"
 			log error "🔧 How to fix:"
-			log error "   • Valid placeholders: {application} {scope} {namespace} {account} {deployment_id} {scope_id} {application_id} {namespace_id}"
+			log error "   • Use dotted field access, e.g. {.scope.capabilities.main_http_port}"
+			return 1
+		fi
+
+		local value
+		value="$(np_naming_resolve_path "$path")"
+		if [ -z "$value" ]; then
+			log error "❌ Naming path {$path} resolves to an empty value"
+			log error "🔧 How to fix:"
+			log error "   • Ensure this field is present in the context, or remove {$path} from the pattern"
 			return 1
 		fi
 
 		literal_total=$((literal_total + ${#literal}))
-		if np_name_is_fixed "$placeholder"; then
-			local fixed_value
-			fixed_value="$(np_name_value "$placeholder")"
-			fixed_total=$((fixed_total + ${#fixed_value}))
+		if [[ "$value" =~ ^[0-9]+$ ]]; then
+			fixed_total=$((fixed_total + ${#value}))
 		else
 			flex_count=$((flex_count + 1))
 		fi
 
-		if [ -z "$first_placeholder" ]; then first_placeholder="$placeholder"; fi
+		if [ -z "$first_path" ]; then first_path="$path"; fi
 		seen_placeholder=true
 	done
 	literal_total=$((literal_total + ${#rest}))
 
 	local head="$first_literal"
-	if [ -z "$head" ]; then head="$(np_name_value "$first_placeholder")"; fi
+	if [ -z "$head" ]; then head="$(np_naming_resolve_path "$first_path")"; fi
 
 	case "$head" in
 		[a-z]*) : ;;
@@ -182,26 +178,26 @@ np_naming_validate_pattern() {
 
 np_name_render() {
 	local budget="$1" pattern="$2"
-	local rest="$pattern" literal placeholder value
+	local rest="$pattern" literal path value
 	local overhead=0
 	local -a flex=() order=()
 
-	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
+	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
 		literal="${BASH_REMATCH[1]}"
-		placeholder="${BASH_REMATCH[2]}"
+		path="${BASH_REMATCH[2]}"
 		rest="${BASH_REMATCH[3]}"
 		overhead=$((overhead + ${#literal}))
-		value="$(np_name_value "$placeholder")"
-		if np_name_is_fixed "$placeholder"; then
+		value="$(np_naming_resolve_path "$path")"
+		if [ -z "$value" ]; then
+			log error "❌ Naming path {$path} resolves to an empty value"
+			log error "🔧 How to fix:"
+			log error "   • Ensure this field is present in the context, or remove {$path} from the pattern"
+			return 1
+		fi
+		if [[ "$value" =~ ^[0-9]+$ ]]; then
 			overhead=$((overhead + ${#value}))
 			order+=("FIXED:$value")
 		else
-			if [ -z "$value" ]; then
-				log error "❌ Naming placeholder {$placeholder} resolves to an empty value"
-				log error "🔧 How to fix:"
-				log error "   • Ensure this entity has a slug in this context, or remove {$placeholder} from the pattern"
-				return 1
-			fi
 			flex+=("$value")
 			order+=("FLEX")
 		fi
@@ -343,8 +339,8 @@ np_naming_emit() {
 		  additional_ports: $additional_ports}'
 }
 
-NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT="{application}-{scope}-{deployment_id}"
-NP_NAMING_SCOPE_PATTERN_DEFAULT="{application}-{scope}-{scope_id}"
+NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT="{.application.slug}-{.scope.slug}-{.deployment.id}"
+NP_NAMING_SCOPE_PATTERN_DEFAULT="{.application.slug}-{.scope.slug}-{.scope.id}"
 NP_NAMING_SCOPE_BUDGET=52
 
 np_naming_roles_patterned() {
@@ -365,7 +361,7 @@ np_naming_roles_patterned() {
 			--default "$NP_NAMING_SCOPE_PATTERN_DEFAULT")"
 	fi
 
-	np_naming_validate_pattern "$scope_pattern" "scope_id" || return 1
+	np_naming_validate_pattern "$scope_pattern" "scope.id" || return 1
 
 	local base_s base_d=""
 	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern")" || return 1
@@ -420,7 +416,7 @@ np_naming_roles_patterned() {
 	fi
 
 	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
-		np_naming_validate_pattern "$deployment_pattern" "deployment_id" || return 1
+		np_naming_validate_pattern "$deployment_pattern" "deployment.id" || return 1
 		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern")" || return 1
 	fi
 
