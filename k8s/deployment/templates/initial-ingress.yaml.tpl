@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: k-8-s-{{ .scope.slug }}-{{ .scope.id }}-{{ .ingress_visibility }}
+  name: {{ .names.scope_ingress }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -60,7 +60,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: d-{{ .scope.id }}-{{ .deployment.id }}
+                name: {{ .names.deployment }}
                 port:
                   number: {{ .main_http_port }}
 {{- range .scope.domains }}
@@ -71,7 +71,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: d-{{ $.scope.id }}-{{ $.deployment.id }}
+                name: {{ $.names.deployment }}
                 port:
                   number: {{ $.main_http_port }}
 {{- end }}
@@ -79,11 +79,12 @@ spec:
 {{ range .scope.capabilities.additional_ports }}
 {{- $port := .port }}
 {{- $port_type := .type }}
+{{- $service_name := .service_name }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: k-8-s-{{ $.scope.slug }}-{{ $.scope.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}-{{ $.ingress_visibility }}
+  name: {{ .ingress_name }}
   namespace: {{ $.k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -146,7 +147,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}
+                name: {{ .service_name }}
                 port:
                   number: {{ .port }}
 {{- range $.scope.domains }}
@@ -157,7 +158,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq $port_type "HTTP" }}http{{ else }}grpc{{ end }}-{{ $port }}
+                name: {{ $service_name }}
                 port:
                   number: {{ $port }}
 {{- end }}

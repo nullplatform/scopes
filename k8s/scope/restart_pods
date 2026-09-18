@@ -33,8 +33,8 @@ kubectl rollout status -n "$K8S_NAMESPACE" "deployment/$DEPLOYMENT" -w || {
     log error "   Pods may be failing to start (image pull errors, crashes, resource limits)"
     log error ""
     log error "🔧 How to fix:"
-    log error "   • Check pod events: kubectl describe pods -n $K8S_NAMESPACE -l name=d-$SCOPE_ID-$DEPLOYMENT_ID"
-    log error "   • Check pod logs: kubectl logs -n $K8S_NAMESPACE -l name=d-$SCOPE_ID-$DEPLOYMENT_ID --tail=50"
+    log error "   • Check pod events: kubectl describe pods -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
+    log error "   • Check pod logs: kubectl logs -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID --tail=50"
     log error ""
     exit 1
 }

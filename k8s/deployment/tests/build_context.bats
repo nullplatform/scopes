@@ -1302,3 +1302,112 @@ EOF
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
+
+@test "blue discovery: overwrites blue deployment and service names when found" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[{"metadata":{"name":"discovered-blue-dep"}}]}' ;;
+      "get service")    echo '{"items":[{"metadata":{"name":"discovered-blue-svc"},"spec":{"ports":[{"port":8080}]}}]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" "discovered-blue-dep"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_service')" "discovered-blue-svc"
+}
+
+@test "blue discovery: leaves the formula's names intact when discovery finds nothing" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.blue_deployment_id = "789011" | .scope.current_active_deployment = "789011"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" "d-test-scope-123-789011"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_service')" "d-test-scope-123-789011"
+}
+
+@test "blue discovery: overwrites a per-port blue_service_name when its service is found" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9014,"type":"GRPC"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[
+        {"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}},
+        {"metadata":{"name":"grpc-blue-svc"},"spec":{"ports":[{"port":9014}]}}
+      ]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" "grpc-blue-svc"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "true"
+}
+
+@test "blue discovery: finds an HTTP additional port's blue service, which carries no port_type label" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9015,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[
+        {"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}},
+        {"metadata":{"name":"http-blue-svc"},"spec":{"ports":[{"port":9015}]}}
+      ]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" "http-blue-svc"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["http-9015"]')" "true"
+}
+
+@test "blue discovery: per-port blue_service_name is untouched and the port is marked absent when not found" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9014,"type":"GRPC"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[{"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}}]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" ""
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "false"
+}
+
+@test "blue discovery: blue_additional_port_services is empty without an active blue deployment" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9014,"type":"GRPC"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.blue_additional_port_services')" '{"grpc-9014":false}'
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" ""
+}

@@ -1,0 +1,76 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: job-123456-789012
+  namespace: nullplatform
+  labels:
+    name: d-123456-789012
+    app.kubernetes.io/part-of: payments-checkout-api
+    nullplatform: "true"
+    account: "acme"
+    account_id: "1"
+    namespace: "payments"
+    namespace_id: "11"
+    application: "customer-notifications-dispatcher"
+    application_id: "111"
+    scope: "production-canary-eu-west"
+    scope_id: "123456"
+    deployment_id: "789012"
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        name: d-123456-789012
+        app.kubernetes.io/part-of: payments-checkout-api
+        nullplatform: "true"
+        account: "acme"
+        account_id: "1"
+        namespace: "payments"
+        namespace_id: "11"
+        application: "customer-notifications-dispatcher"
+        application_id: "111"
+        scope: "production-canary-eu-west"
+        scope_id: "123456"
+        deployment_id: "789012"
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            name: d-123456-789012
+            app.kubernetes.io/part-of: payments-checkout-api
+            nullplatform: "true"
+            account: "acme"
+            account_id: "1"
+            namespace: "payments"
+            namespace_id: "11"
+            application: "customer-notifications-dispatcher"
+            application_id: "111"
+            scope: "production-canary-eu-west"
+            scope_id: "123456"
+            deployment_id: "789012"
+          annotations:
+        spec:
+          containers:
+            - name: application
+              envFrom:
+                - secretRef:
+                    name: s-123456-d-789012
+              image: public.ecr.aws/acme/checkout-api:1.0.0
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+                requests:
+                  cpu: 500m
+                  memory: 512Mi
+              imagePullPolicy: IfNotPresent
+              volumeMounts:
+          volumes:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 0

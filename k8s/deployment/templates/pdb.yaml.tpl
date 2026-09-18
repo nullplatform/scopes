@@ -2,10 +2,10 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: pdb-d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.pdb }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: pdb-d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.pdb }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}
@@ -49,5 +49,5 @@ spec:
   maxUnavailable: {{ .pdb_max_unavailable }}
   selector:
     matchLabels:
-      app: d-{{ .scope.id }}-{{ .deployment.id }}
+      app: {{ .names.deployment }}
 {{- end }}

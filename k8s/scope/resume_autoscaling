@@ -10,9 +10,14 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-HPA_NAME="hpa-d-$SCOPE_ID-$DEPLOYMENT_ID"
-
-require_hpa "$HPA_NAME" "$K8S_NAMESPACE" "$SCOPE_ID"
+HPA_NAME=$(np_naming_lookup hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
+  log error "❌ No HPA found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
+  log error "💡 Possible causes:"
+  log error "   - Autoscaling is not configured for this deployment"
+  log error "🔧 How to fix:"
+  log error "   • Verify the HPA exists: kubectl get hpa -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
+  exit 1
+}
 
 ANNOTATION_DATA=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.annotations.nullplatform\.com/autoscaling-paused}' 2>/dev/null || echo "")
 
