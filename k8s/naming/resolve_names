@@ -385,7 +385,7 @@ np_naming_roles_patterned() {
 	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern")" || return 1
 
 	local existing discover_status
-	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
+	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$base_s")"
 	discover_status=$?
 
 	case "$discover_status" in
@@ -479,23 +479,70 @@ np_naming_object_exists() {
 	fi
 }
 
-np_naming_discover_scope() {
-	local namespace="$1" scope_id="$2"
-	local visibility legacy_name status
-	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
-	legacy_name="k-8-s-$NP_NAME_SCOPE-$scope_id-$visibility"
+np_naming_list_by_label() {
+	local kind="$1" namespace="$2" label="$3"
+	local out status
+	out="$(kubectl get "$kind" -n "$namespace" -l "$label" -o jsonpath='{.items[*].metadata.name}' 2>&1)"
+	status=$?
 
-	np_naming_object_exists ingress "$namespace" "$legacy_name"
+	if [ "$status" -ne 0 ]; then
+		case "$out" in
+			*"doesn't have a resource type"*) return 2 ;;
+			*) return 1 ;;
+		esac
+	fi
+
+	if [ -z "$out" ]; then
+		return 2
+	fi
+
+	echo "$out"
+}
+
+np_naming_pick_main() {
+	local names="$1" exclude="$2"
+	local name
+	for name in $names; do
+		case " $exclude " in
+			*" $name "*) ;;
+			*) echo "$name"; return 0 ;;
+		esac
+	done
+	return 2
+}
+
+np_naming_port_exclusions() {
+	local scope_id="$1" current_base="$2"
+	local visibility legacy_base
+	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
+	legacy_base="k-8-s-$NP_NAME_SCOPE-$scope_id"
+
+	echo "$CONTEXT" | jq -r \
+		--arg legacy "$legacy_base" --arg visibility "$visibility" --arg current "$current_base" '
+		(.scope.capabilities.additional_ports // [])[] |
+		(if .type == "HTTP" then "http" else "grpc" end) as $t |
+		"\($legacy)-\($t)-\(.port)-\($visibility)",
+		"\($current)-\($t)-\(.port)"
+	' | tr '\n' ' '
+}
+
+np_naming_discover_scope() {
+	local namespace="$1" scope_id="$2" current_base="$3"
+	local exclude names status
+
+	exclude="$(np_naming_port_exclusions "$scope_id" "$current_base")"
+
+	names="$(np_naming_list_by_label ingress "$namespace" "scope_id=$scope_id")"
 	status=$?
 	case "$status" in
-		0) echo "$legacy_name"; return 0 ;;
+		0) np_naming_pick_main "$names" "$exclude" && return 0 ;;
 		1) return 1 ;;
 	esac
 
-	np_naming_object_exists httproute "$namespace" "$legacy_name"
+	names="$(np_naming_list_by_label httproute "$namespace" "scope_id=$scope_id")"
 	status=$?
 	case "$status" in
-		0) echo "$legacy_name"; return 0 ;;
+		0) np_naming_pick_main "$names" "$exclude" && return 0 ;;
 		1) return 1 ;;
 	esac
 
@@ -504,19 +551,23 @@ np_naming_discover_scope() {
 
 np_naming_discover_dns() {
 	local namespace="$1" scope_id="$2"
-	local dns_app dns_scope legacy_name status
-	dns_app="${NP_NAME_APPLICATION:0:20}"; dns_app="${dns_app%-}"
-	dns_scope="${NP_NAME_SCOPE:0:20}"; dns_scope="${dns_scope%-}"
-	legacy_name="k8s-$dns_app-$dns_scope-$scope_id-dns"
-
-	np_naming_object_exists dnsendpoint "$namespace" "$legacy_name"
+	local out status
+	out="$(kubectl get dnsendpoint -n "$namespace" -l "scope_id=$scope_id" \
+		-o jsonpath='{.items[0].metadata.name}' 2>&1)"
 	status=$?
-	case "$status" in
-		0) echo "$legacy_name"; return 0 ;;
-		1) return 1 ;;
-	esac
 
-	return 2
+	if [ "$status" -ne 0 ]; then
+		case "$out" in
+			*"doesn't have a resource type"*) return 2 ;;
+			*) return 1 ;;
+		esac
+	fi
+
+	if [ -z "$out" ]; then
+		return 2
+	fi
+
+	echo "$out"
 }
 
 np_naming_discover_blue() {

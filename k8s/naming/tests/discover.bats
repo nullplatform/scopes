@@ -123,28 +123,27 @@ golden_name() {
 
 @test "np_naming_discover_scope: keeps the legacy name when the live Ingress is blue-green shaped" {
 	local name; name="$(golden_name k8s-blue-green-ingress.yaml 0)"
-	kubectl() { [ "$2" = "ingress" ] && [ "$3" = "$name" ] && echo "ingress.networking.k8s.io/$name"; }
-	run np_naming_discover_scope nullplatform 123456
+	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
+	run np_naming_discover_scope nullplatform 123456 ""
 	assert_equal "$output" "$name"
 }
 
 @test "np_naming_discover_scope: keeps the legacy name when the live Ingress is initial shaped" {
 	local name; name="$(golden_name k8s-initial-ingress.yaml 0)"
-	kubectl() { [ "$2" = "ingress" ] && [ "$3" = "$name" ] && echo "ingress.networking.k8s.io/$name"; }
-	run np_naming_discover_scope nullplatform 123456
+	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
+	run np_naming_discover_scope nullplatform 123456 ""
 	assert_equal "$output" "$name"
 }
 
 @test "np_naming_discover_scope: a per-port Ingress existing does not make it the main one, blue-green shape" {
 	local port_name; port_name="$(golden_name k8s-blue-green-ingress.yaml 1)"
 	kubectl() {
-		if [ "$2" = "ingress" ] && [ "$3" = "$port_name" ]; then
-			echo "ingress.networking.k8s.io/$port_name"
-		else
-			echo ""
-		fi
+		case "$2" in
+			ingress) echo "$port_name" ;;
+			httproute) echo "" ;;
+		esac
 	}
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
@@ -152,13 +151,35 @@ golden_name() {
 @test "np_naming_discover_scope: a per-port Ingress existing does not make it the main one, initial shape" {
 	local port_name; port_name="$(golden_name k8s-initial-ingress.yaml 1)"
 	kubectl() {
-		if [ "$2" = "ingress" ] && [ "$3" = "$port_name" ]; then
-			echo "ingress.networking.k8s.io/$port_name"
-		else
-			echo ""
-		fi
+		case "$2" in
+			ingress) echo "$port_name" ;;
+			httproute) echo "" ;;
+		esac
 	}
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
+	[ "$status" -eq 2 ]
+	assert_equal "$output" ""
+}
+
+@test "np_naming_discover_scope: the main Ingress is picked out from among its own per-port siblings" {
+	local main_name port_name
+	main_name="$(golden_name k8s-blue-green-ingress.yaml 0)"
+	port_name="$(golden_name k8s-blue-green-ingress.yaml 1)"
+	kubectl() { [ "$2" = "ingress" ] && echo "$port_name $main_name"; }
+	run np_naming_discover_scope nullplatform 123456 ""
+	assert_equal "$output" "$main_name"
+}
+
+@test "np_naming_discover_scope: a per-port Ingress named after the current pattern does not make it the main one" {
+	local current="checkout-api-production-123456"
+	local port_name="$current-grpc-9090"
+	kubectl() {
+		case "$2" in
+			ingress) echo "$port_name" ;;
+			httproute) echo "" ;;
+		esac
+	}
+	run np_naming_discover_scope nullplatform 123456 "$current"
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
@@ -168,23 +189,23 @@ golden_name() {
 	kubectl() {
 		case "$2" in
 			ingress) echo "" ;;
-			httproute) [ "$3" = "$name" ] && echo "httproute.gateway.networking.k8s.io/$name" ;;
+			httproute) echo "$name" ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
 	assert_equal "$output" "$name"
 }
 
 @test "np_naming_discover_scope: returns not-found when neither Ingress nor HTTPRoute exist" {
 	kubectl() { echo ""; }
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
 
 @test "np_naming_discover_scope: fails loudly when the Ingress lookup fails, instead of computing a fresh name" {
 	kubectl() { [ "$2" = "ingress" ] && { echo "Error from server (Forbidden): ..."; return 1; }; }
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
 	[ "$status" -eq 1 ]
 	assert_equal "$output" ""
 }
@@ -196,7 +217,7 @@ golden_name() {
 			httproute) echo "Error from server (Forbidden): ..."; return 1 ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
 	[ "$status" -eq 1 ]
 	assert_equal "$output" ""
 }
@@ -208,14 +229,14 @@ golden_name() {
 			httproute) echo "error: the server doesn't have a resource type \"httproute\""; return 1 ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456
+	run np_naming_discover_scope nullplatform 123456 ""
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
 
 @test "np_naming_discover_dns: keeps the legacy DNSEndpoint name from the golden" {
 	local name; name="$(golden_name k8s-dns-endpoint.yaml 0)"
-	kubectl() { [ "$2" = "dnsendpoint" ] && [ "$3" = "$name" ] && echo "dnsendpoint.externaldns.k8s.io/$name"; }
+	kubectl() { [ "$2" = "dnsendpoint" ] && echo "$name"; }
 	run np_naming_discover_dns nullplatform 123456
 	assert_equal "$output" "$name"
 }
@@ -244,10 +265,29 @@ golden_name() {
 @test "qualified: keeps an existing scope ingress name instead of renaming it" {
 	export NAMING_STRATEGY=qualified
 	local name; name="$(golden_name k8s-blue-green-ingress.yaml 0)"
-	kubectl() { [ "$2" = "ingress" ] && [ "$3" = "$name" ] && echo "ingress.networking.k8s.io/$name"; }
+	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
 	names="$(np_naming_resolve 2>/dev/null)"
 	run jq -r .scope_ingress <<< "$names"
 	assert_equal "$output" "$name"
+}
+
+@test "qualified: keeps a custom-era ingress name when the strategy changes to qualified" {
+	export NAMING_STRATEGY=qualified
+	local custom_name="payments-checkout-api-123456"
+	kubectl() { [ "$2" = "ingress" ] && echo "$custom_name"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r .scope_ingress <<< "$names"
+	assert_equal "$output" "$custom_name"
+}
+
+@test "custom: keeps a qualified-era ingress name when the strategy changes to custom" {
+	export NAMING_STRATEGY=custom
+	export NAMING_SCOPE_PATTERN="{.namespace.slug}-{.scope.slug}-{.scope.id}"
+	local qualified_name="checkout-api-production-123456"
+	kubectl() { [ "$2" = "ingress" ] && echo "$qualified_name"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r .scope_ingress <<< "$names"
+	assert_equal "$output" "$qualified_name"
 }
 
 @test "qualified: computes a scope ingress name when none exists" {
@@ -261,7 +301,7 @@ golden_name() {
 @test "qualified: a frozen ingress name does not freeze the deployment name" {
 	export NAMING_STRATEGY=qualified
 	local name; name="$(golden_name k8s-blue-green-ingress.yaml 0)"
-	kubectl() { [ "$2" = "ingress" ] && [ "$3" = "$name" ] && echo "ingress.networking.k8s.io/$name"; }
+	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
 	names="$(np_naming_resolve 2>/dev/null)"
 	run jq -r .deployment <<< "$names"
 	assert_equal "$output" "checkout-api-production-789012"
@@ -304,7 +344,7 @@ golden_name() {
 	kubectl() {
 		case "$2" in
 			ingress) echo "" ;;
-			dnsendpoint) [ "$3" = "$dns_name" ] && echo "dnsendpoint.externaldns.k8s.io/$dns_name" ;;
+			dnsendpoint) echo "$dns_name" ;;
 		esac
 	}
 	names="$(np_naming_resolve 2>/dev/null)"
@@ -324,7 +364,7 @@ golden_name() {
 @test "qualified: keeping an existing name is logged" {
 	export NAMING_STRATEGY=qualified
 	local name; name="$(golden_name k8s-initial-ingress.yaml 0)"
-	kubectl() { [ "$2" = "ingress" ] && [ "$3" = "$name" ] && echo "ingress.networking.k8s.io/$name"; }
+	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
 	run np_naming_resolve
 	assert_contains "$output" "✅ Keeping the existing scope object name '$name'"
 }
@@ -336,7 +376,7 @@ golden_name() {
 	kubectl() {
 		case "$2" in
 			ingress) echo "" ;;
-			dnsendpoint) [ "$3" = "$dns_name" ] && echo "dnsendpoint.externaldns.k8s.io/$dns_name" ;;
+			dnsendpoint) echo "$dns_name" ;;
 		esac
 	}
 	run np_naming_resolve
@@ -351,8 +391,8 @@ golden_name() {
 	dns_name="$(golden_name k8s-dns-endpoint.yaml 0)"
 	kubectl() {
 		case "$2" in
-			ingress) [ "$3" = "$name" ] && echo "ingress.networking.k8s.io/$name" ;;
-			dnsendpoint) [ "$3" = "$dns_name" ] && echo "dnsendpoint.externaldns.k8s.io/$dns_name" ;;
+			ingress) echo "$name" ;;
+			dnsendpoint) echo "$dns_name" ;;
 		esac
 	}
 	names="$(np_naming_resolve 2>/dev/null)"
@@ -367,7 +407,10 @@ golden_name() {
 	[ "$status" -eq 1 ]
 	assert_contains "$output" "❌ Could not check the cluster for the scope's existing Kubernetes object name"
 	assert_contains "$output" "💡 Possible causes:"
+	assert_contains "$output" "   - The cluster API server is unreachable"
+	assert_contains "$output" "   - RBAC denies reading ingress/httproute in namespace 'nullplatform'"
 	assert_contains "$output" "🔧 How to fix:"
+	assert_contains "$output" "   • Verify cluster connectivity and RBAC for ingress/httproute"
 }
 
 @test "qualified: a failed dnsendpoint lookup fails resolve instead of computing a fresh name" {
@@ -383,5 +426,8 @@ golden_name() {
 	[ "$status" -eq 1 ]
 	assert_contains "$output" "❌ Could not check the cluster for the scope's existing DNSEndpoint name"
 	assert_contains "$output" "💡 Possible causes:"
+	assert_contains "$output" "   - The cluster API server is unreachable"
+	assert_contains "$output" "   - RBAC denies reading dnsendpoint in namespace 'nullplatform'"
 	assert_contains "$output" "🔧 How to fix:"
+	assert_contains "$output" "   • Verify cluster connectivity and RBAC for dnsendpoint"
 }
