@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Fix: the Logs and Instances tabs of a k8s scope deployed outside the default namespace now show data. Both readers resolved the namespace from a hardcoded default instead of the scope's cluster configuration, so they queried a namespace the deployment never wrote to and returned an empty result with no error
+- Fix: a k8s scope namespace containing shell metacharacters is no longer re-parsed by the shell when fetching logs
+- Change: on the Logs and Instances tabs the scope's cluster configuration now takes precedence over the `NAMESPACE_OVERRIDE` environment variable on the agent, which is how a deployment already resolved its namespace. An agent that pointed `NAMESPACE_OVERRIDE` at a namespace other than the one the scope deploys to was reading where nothing had been written, and now reads the namespace the deployment uses
+- Change: a log filter pattern reaches the log reader verbatim. The shell used to expand it first, so a filter containing `$` or `"` was altered on the way — `$HOME` arrived as the agent's home directory and quotes were dropped
+
 ## [1.17.0] - 2026-09-11
 - Fix: turning off the health check on a k8s, azure or azure-aro scope now removes the liveness, readiness and startup probes from every container of the pod
 - Fix: k8s scopes that have both a custom domain and additional ports now deploy, instead of failing with "Failed to build ingress template"

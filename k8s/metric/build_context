@@ -1,7 +1,22 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value" || {
+  echo "Error: could not load $SCRIPT_DIR/../utils/get_config_value" >&2
+  exit 1
+}
+
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
-K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
+
+# Same chain as scope/build_context. No Prometheus query filters on namespace
+# today, so this only keeps metric in step with the other telemetry readers.
+K8S_NAMESPACE=$(get_config_value \
+  --env NAMESPACE_OVERRIDE \
+  --env K8S_NAMESPACE \
+  --provider '.providers["scope-configurations"].cluster.namespace' \
+  --provider '.providers["container-orchestration"].cluster.namespace' \
+  --default "nullplatform"
+)
 
 if [[ -z "$PROMETHEUS_URL" ]]; then
   NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
