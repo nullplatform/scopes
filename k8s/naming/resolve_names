@@ -394,6 +394,31 @@ np_naming_roles_patterned() {
 			;;
 	esac
 
+	local base_dns="$base_s-dns"
+	local existing_dns dns_discover_status
+	existing_dns="$(np_naming_discover_dns "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
+	dns_discover_status=$?
+
+	case "$dns_discover_status" in
+		0)
+			log info "✅ Keeping the existing scope DNS object name '$existing_dns'" >&2
+			base_dns="$existing_dns"
+			;;
+		2) ;;
+		*)
+			log error "❌ Could not check the cluster for the scope's existing DNSEndpoint name"
+			log error ""
+			log error "💡 Possible causes:"
+			log error "   - The cluster API server is unreachable"
+			log error "   - RBAC denies listing dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
+			log error "   - The DNSEndpoint CRD (external-dns) is not installed"
+			log error "🔧 How to fix:"
+			log error "   • Verify cluster connectivity and RBAC for dnsendpoint"
+			log error "   • Retry once the API server is reachable"
+			return 1
+			;;
+	esac
+
 	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
 		np_naming_validate_pattern "$deployment_pattern" "deployment_id" || return 1
 		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern")" || return 1
@@ -407,7 +432,7 @@ np_naming_roles_patterned() {
 		"${base_d:+$base_d-files}" \
 		"${base_d:+job-$base_d}" \
 		"$base_s" \
-		"$base_s-dns" \
+		"$base_dns" \
 		"$base_s" \
 		"$base_s" \
 		"" \
@@ -442,6 +467,25 @@ np_naming_discover_scope() {
 		    )
 		] | (.[0].metadata.name // empty)
 	')"
+
+	if [ -z "$found" ]; then
+		return 2
+	fi
+
+	echo "$found"
+}
+
+np_naming_discover_dns() {
+	local namespace="$1" scope_id="$2"
+
+	local raw
+	raw="$(kubectl get dnsendpoint -n "$namespace" -l "scope_id=$scope_id" -o json 2>/dev/null)"
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	local found
+	found="$(echo "$raw" | jq -r '(.items // [])[0].metadata.name // empty')"
 
 	if [ -z "$found" ]; then
 		return 2

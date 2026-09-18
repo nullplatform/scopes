@@ -7,13 +7,6 @@ setup() {
 	export -f log
 	source "$PROJECT_ROOT/k8s/utils/get_config_value"
 	source "$PROJECT_ROOT/k8s/naming/resolve_names"
-	export -f get_config_value np_name_sanitize np_name_cap np_trim_segments np_trim_name \
-		np_name_value np_name_is_fixed np_name_is_known np_naming_validate_pattern \
-		np_name_render np_naming_strategy np_naming_resolve np_naming_roles_ids \
-		np_naming_emit np_naming_roles_patterned np_naming_lookup np_naming_discover_blue \
-		np_naming_discover_scope
-	export NP_NAME_PLACEHOLDERS NP_NAME_FIXED_PLACEHOLDERS \
-		NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT NP_NAMING_SCOPE_PATTERN_DEFAULT NP_NAMING_SCOPE_BUDGET
 
 	export NP_NAME_APPLICATION="checkout-api"
 	export NP_NAME_SCOPE="production"
@@ -29,7 +22,6 @@ setup() {
 	unset NAMING_MAX_LENGTH
 
 	kubectl() { echo '{"apiVersion":"v1","kind":"List","items":[]}'; }
-	export -f kubectl
 }
 
 @test "np_naming_validate_pattern: accepts a pattern carrying its discriminant" {
@@ -129,10 +121,9 @@ setup() {
 
 @test "custom: honours a deployment pattern from the provider" {
 	export NAMING_STRATEGY=custom
-	kubectl() { echo ""; }
-	export -f kubectl
 	export CONTEXT="$(echo "$CONTEXT" | jq '.providers["scope-configurations"].naming.deployment_pattern = "{namespace}-{application}-{deployment_id}"')"
-	run bash -c "np_naming_resolve | jq -r .deployment"
+	names="$(np_naming_resolve)"
+	run jq -r .deployment <<< "$names"
 	assert_equal "$output" "payments-checkout-api-789012"
 }
 
