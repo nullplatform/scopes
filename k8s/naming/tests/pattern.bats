@@ -187,6 +187,26 @@ setup() {
 	assert_equal "$output" "checkout-api-production-789012"
 }
 
+@test "custom: falls back to the qualified scope pattern when only the deployment pattern is set" {
+	export NAMING_STRATEGY=custom
+	export NAMING_DEPLOYMENT_PATTERN="{.namespace.slug}-{.application.slug}-{.deployment.id}"
+	kubectl() { echo ""; }
+	names="$(np_naming_resolve)"
+	run jq -r '.deployment, .scope_ingress' <<< "$names"
+	assert_equal "$(echo "$output" | sed -n 1p)" "payments-checkout-api-789012"
+	assert_equal "$(echo "$output" | sed -n 2p)" "checkout-api-production-123456"
+}
+
+@test "custom: falls back to the qualified deployment pattern when only the scope pattern is set" {
+	export NAMING_STRATEGY=custom
+	export NAMING_SCOPE_PATTERN="{.namespace.slug}-{.scope.slug}-{.scope.id}"
+	kubectl() { echo ""; }
+	names="$(np_naming_resolve)"
+	run jq -r '.deployment, .scope_ingress' <<< "$names"
+	assert_equal "$(echo "$output" | sed -n 1p)" "checkout-api-production-789012"
+	assert_equal "$(echo "$output" | sed -n 2p)" "payments-production-123456"
+}
+
 @test "custom: honours a deployment pattern from the provider" {
 	export NAMING_STRATEGY=custom
 	export CONTEXT="$(echo "$CONTEXT" | jq '.providers["scope-configurations"].naming.deployment_pattern = "{.namespace.slug}-{.application.slug}-{.deployment.id}"')"
