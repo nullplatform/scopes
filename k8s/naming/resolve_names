@@ -113,10 +113,17 @@ np_naming_validate_pattern() {
 		rest="${BASH_REMATCH[3]}"
 		if [ -z "$first_path" ]; then first_literal="$literal"; fi
 
-		if $seen_placeholder && [ "$literal" != "-" ]; then
-			log error "❌ Naming pattern '$pattern' uses '$literal' between placeholders"
+		if $seen_placeholder; then
+			if [ "$literal" != "-" ]; then
+				log error "❌ Naming pattern '$pattern' uses '$literal' between placeholders"
+				log error "🔧 How to fix:"
+				log error "   • Separate placeholders with a single hyphen"
+				return 1
+			fi
+		elif [[ -n "$literal" && ! "$literal" =~ ^[a-z0-9-]+$ ]]; then
+			log error "❌ Naming pattern '$pattern' has an invalid leading literal '$literal'"
 			log error "🔧 How to fix:"
-			log error "   • Separate placeholders with a single hyphen"
+			log error "   • Use only lowercase letters, digits and hyphens before the first placeholder"
 			return 1
 		fi
 
@@ -147,6 +154,13 @@ np_naming_validate_pattern() {
 		seen_placeholder=true
 	done
 	literal_total=$((literal_total + ${#rest}))
+
+	if [[ -n "$rest" && ! "$rest" =~ ^[a-z0-9-]+$ ]]; then
+		log error "❌ Naming pattern '$pattern' has an invalid trailing literal '$rest'"
+		log error "🔧 How to fix:"
+		log error "   • Use only lowercase letters, digits and hyphens after the last placeholder"
+		return 1
+	fi
 
 	local head="$first_literal"
 	if [ -z "$head" ]; then head="$(np_naming_resolve_path "$first_path")"; fi
@@ -180,13 +194,14 @@ np_name_render() {
 	local budget="$1" pattern="$2"
 	local rest="$pattern" literal path value
 	local overhead=0
-	local -a flex=() order=()
+	local -a flex=() order=() literals=()
 
 	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
 		literal="${BASH_REMATCH[1]}"
 		path="${BASH_REMATCH[2]}"
 		rest="${BASH_REMATCH[3]}"
 		overhead=$((overhead + ${#literal}))
+		literals+=("$literal")
 		value="$(np_naming_resolve_path "$path")"
 		if [ -z "$value" ]; then
 			log error "❌ Naming path {$path} resolves to an empty value"
@@ -203,6 +218,7 @@ np_name_render() {
 		fi
 	done
 	overhead=$((overhead + ${#rest}))
+	literals+=("$rest")
 
 	local segs
 	segs="$(np_trim_segments "$budget" "$overhead" "${flex[@]}")" || return 1
@@ -213,14 +229,16 @@ np_name_render() {
 		trimmed_flex+=("$line")
 	done <<< "$segs"
 
-	local out="" item flex_i=0
+	local out="" item flex_i=0 literal_i=0
 	for item in "${order[@]}"; do
-		if [ -n "$out" ]; then out="$out-"; fi
+		out="$out${literals[$literal_i]}"
+		literal_i=$((literal_i + 1))
 		case "$item" in
 			FIXED:*) out="$out${item#FIXED:}" ;;
 			FLEX)    out="$out${trimmed_flex[$flex_i]}"; flex_i=$((flex_i + 1)) ;;
 		esac
 	done
+	out="$out${literals[$literal_i]}"
 
 	echo "$out"
 }

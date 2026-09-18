@@ -129,6 +129,64 @@ setup() {
 	assert_equal "$output" "checkout-api-production-canary-multi-word-value"
 }
 
+@test "np_naming_validate_pattern: still rejects a bad separator when a leading literal is present" {
+	run np_naming_validate_pattern "fede-{.application.slug}.{.scope.slug}-{.deployment.id}" "deployment.id"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "uses '.' between placeholders"
+}
+
+@test "np_naming_validate_pattern: accepts a leading literal of lowercase letters, digits and hyphens" {
+	run np_naming_validate_pattern "fede2-{.application.slug}-{.deployment.id}" "deployment.id"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_validate_pattern: rejects a leading literal with characters Kubernetes does not allow" {
+	run np_naming_validate_pattern "Fede_{.application.slug}-{.deployment.id}" "deployment.id"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Naming pattern 'Fede_{.application.slug}-{.deployment.id}' has an invalid leading literal 'Fede_'"
+	assert_contains "$output" "🔧 How to fix:"
+}
+
+@test "np_naming_validate_pattern: accepts a trailing literal" {
+	run np_naming_validate_pattern "{.application.slug}-{.deployment.id}-suffix" "deployment.id"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_validate_pattern: rejects a trailing literal with characters Kubernetes does not allow" {
+	run np_naming_validate_pattern "{.application.slug}-{.deployment.id}-Suffix!" "deployment.id"
+	[ "$status" -ne 0 ]
+	assert_contains "$output" "❌ Naming pattern '{.application.slug}-{.deployment.id}-Suffix!' has an invalid trailing literal '-Suffix!'"
+	assert_contains "$output" "🔧 How to fix:"
+}
+
+@test "np_name_render: keeps a leading literal prefix intact" {
+	run np_name_render 46 "fede-{.application.slug}-{.deployment.id}"
+	assert_equal "$output" "fede-checkout-api-789012"
+}
+
+@test "np_name_render: emits a trailing literal after the last placeholder" {
+	run np_name_render 46 "{.application.slug}-{.deployment.id}-suffix"
+	assert_equal "$output" "checkout-api-789012-suffix"
+}
+
+@test "np_name_render: emits both a leading and a trailing literal" {
+	run np_name_render 46 "fede-{.application.slug}-{.deployment.id}-suffix"
+	assert_equal "$output" "fede-checkout-api-789012-suffix"
+}
+
+@test "np_name_render: a leading literal counts against the budget while the id stays untrimmed" {
+	export CONTEXT="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-long.json")"
+	run np_name_render 46 "fede-{.application.slug}-{.scope.slug}-{.deployment.id}"
+	assert_equal "$output" "fede-customer-notific-production-canar-789012"
+	[ "${#output}" -le 46 ]
+	assert_contains "$output" "789012"
+}
+
+@test "np_name_render: qualified default patterns render unchanged with no leading or trailing literal" {
+	run np_name_render 46 "$NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT"
+	assert_equal "$output" "checkout-api-production-789012"
+}
+
 @test "custom: honours a deployment pattern from the provider" {
 	export NAMING_STRATEGY=custom
 	export CONTEXT="$(echo "$CONTEXT" | jq '.providers["scope-configurations"].naming.deployment_pattern = "{.namespace.slug}-{.application.slug}-{.deployment.id}"')"
