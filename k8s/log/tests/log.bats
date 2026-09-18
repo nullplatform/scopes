@@ -100,7 +100,7 @@ teardown() {
   assert_contains "$output" "--namespace nullplatform"
 }
 
-@test "log: honors K8S_NAMESPACE from the scope configuration" {
+@test "log: honors the K8S_NAMESPACE env var" {
   export K8S_NAMESPACE="apps"
 
   run bash "$LOG_SCRIPT"
@@ -124,4 +124,33 @@ teardown() {
   run bash "$LOG_SCRIPT"
   [ "$status" -eq 0 ]
   assert_contains "$output" "--namespace from-provider"
+}
+
+@test "log: the scope-configurations provider wins over the environment" {
+  export NAMESPACE_OVERRIDE="override"
+  export CONTEXT='{"providers":{"scope-configurations":{"cluster":{"namespace":"from-scope-config"}}}}'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace from-scope-config"
+}
+
+@test "log: scope-configurations wins over container-orchestration" {
+  export CONTEXT='{"providers":{"scope-configurations":{"cluster":{"namespace":"from-scope-config"}},"container-orchestration":{"cluster":{"namespace":"from-provider"}}}}'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace from-scope-config"
+}
+
+# The namespace reaches this script as provider JSON, so it must never be
+# re-parsed by the shell.
+@test "log: a namespace with shell metacharacters is passed inert, not executed" {
+  local marker="$STUB_ROOT/injected"
+  export CONTEXT="{\"providers\":{\"container-orchestration\":{\"cluster\":{\"namespace\":\"ns1; touch $marker\"}}}}"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  assert_contains "$output" "--application-id"
 }
