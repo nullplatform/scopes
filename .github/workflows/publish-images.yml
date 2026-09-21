@@ -44,7 +44,7 @@ permissions:
 jobs:
   # ── containers (base) ──────────────────────────────────────────────────────
   containers:
-    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@v1
     with:
       image_name: scopes/containers
       context: .
@@ -78,7 +78,7 @@ jobs:
 
   # ── scheduled-task (standalone) ────────────────────────────────────────────
   scheduled-task:
-    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@v1
     with:
       image_name: scopes/scheduled-task
       context: .
@@ -113,7 +113,7 @@ jobs:
   # ── containers-datadog (overlay) ───────────────────────────────────────────
   containers-datadog:
     needs: containers
-    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@v1
     with:
       image_name: scopes/containers-datadog
       context: .
