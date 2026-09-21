@@ -6,13 +6,13 @@ on:
 
 jobs:
   go:
-    uses: nullplatform/actions-nullplatform/.github/workflows/pr-checks-go.yml@main
+    uses: nullplatform/actions-nullplatform/.github/workflows/pr-checks-go.yml@v1
     with:
       working-directory: k8s/log/kube-logger-go
       go-version: '1.25.13'
 
   shellcheck:
-    uses: nullplatform/actions-nullplatform/.github/workflows/shellcheck.yml@main
+    uses: nullplatform/actions-nullplatform/.github/workflows/shellcheck.yml@v1
 
   unit-tests:
     name: Unit Tests
