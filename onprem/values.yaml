@@ -1,8 +1,13 @@
-# A cluster with no cloud behind it has no cloud identity to assume and no cloud
-# provider to read. Left inherited from k8s/values.yaml, the platform resolves
-# whatever identity provider the account happens to hold and the workflow tries
-# to assume a role that belongs to someone else's cluster, with an aws CLI the
-# agent image does not carry.
+# The categories this flavor actually uses. A cluster with no cloud behind it has
+# no cloud identity to assume and no cloud provider to read, yet the assume-role
+# step resolves whatever identity provider the account happens to hold and tries
+# to assume a role that belongs to another cluster, with a cloud CLI the agent
+# image does not carry.
+#
+# Declaring them here does not remove the inherited ones yet: the CLI concatenates
+# an override's provider_categories onto the base list rather than replacing it,
+# so cloud-providers and identity-access-control survive the merge. This states
+# what the flavor needs; it takes effect once an override can subtract.
 provider_categories:
   - container-orchestration
   - scope-configurations
