@@ -584,6 +584,7 @@ SCRIPT
   mkdir -p "$mock_service/deployment" "$mock_service/utils"
   cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
   cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/utils/resolve_k8s_namespace" "$PROJECT_ROOT/k8s/utils/sync_image_pull_secrets" "$mock_service/utils/"
 
   run "$test_script" "$mock_service"
 
@@ -632,6 +633,7 @@ SCRIPT
   mkdir -p "$mock_service/deployment" "$mock_service/utils"
   cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
   cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/utils/resolve_k8s_namespace" "$PROJECT_ROOT/k8s/utils/sync_image_pull_secrets" "$mock_service/utils/"
 
   run "$test_script" "$mock_service"
 
@@ -1301,4 +1303,31 @@ EOF
   source "$SCRIPT"
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
+}
+
+# =============================================================================
+# Image pull secrets sync into the deployment namespace
+# =============================================================================
+@test "image pull secrets: build_context syncs them into the namespace the scope deploys to" {
+  setup_full_build_context
+  export IMAGE_PULL_SECRETS='{"ENABLED": true, "SECRETS": ["regcred"]}'
+  export PULL_SECRET_SOURCE_NAMESPACE="registry-creds"
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl_calls"
+  kubectl() {
+    echo "kubectl $*" >> "$KUBECTL_CALLS"
+    case "$1 $2" in
+      "get namespace") return 0 ;;
+      "get service")   return 1 ;;
+      "get secret")    echo '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"regcred","namespace":"registry-creds"},"data":{}}' ;;
+      "apply -n")      cat >/dev/null ;;
+      *)               return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Syncing pull secret 'regcred' from 'registry-creds' to 'default-namespace'..."
+  assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl apply -n default-namespace -f -"
 }

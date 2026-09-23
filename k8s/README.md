@@ -130,6 +130,8 @@ Configuration for pulling images from private container registries.
 |----------|-------------|------------------------------|
 | **IMAGE_PULL_SECRETS_ENABLED** | Whether image pull secrets are enabled | `security.image_pull_secrets_enabled` |
 | **IMAGE_PULL_SECRETS** | List of secret names to use for pulling images | `security.image_pull_secrets` |
+| **IMAGE_PULL_SECRETS_SYNC** | Copy the image pull secrets into the deployment namespace when it is not the one holding them (dynamic `K8S_NAMESPACE_STRATEGY`). See [image pull secrets across namespaces](docs/image-pull-secrets.md) | `security.image_pull_secrets_sync` |
+| **PULL_SECRET_SOURCE_NAMESPACE** | Namespace the image pull secrets are copied from (defaults to `K8S_NAMESPACE`) | `security.pull_secret_source_namespace` |
 
 #### IAM
 

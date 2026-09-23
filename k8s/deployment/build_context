@@ -137,6 +137,11 @@ else
   fi
 fi
 
+# imagePullSecrets are namespace-local: copy them when the scope deploys outside the
+# namespace that holds them (K8S_NAMESPACE_STRATEGY other than static)
+source "$SERVICE_PATH/utils/sync_image_pull_secrets"
+sync_image_pull_secrets "$IMAGE_PULL_SECRETS" "$K8S_NAMESPACE" || exit 1
+
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
 
 if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
