@@ -7,6 +7,24 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 mkdir -p "$OUT_DIR"
 
+log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
+
+source "$ROOT/k8s/utils/get_config_value"
+source "$ROOT/k8s/naming/resolve_names"
+
+CONTEXT="$(cat "$CONTEXT_FILE")"
+RESOLVED_NAMES=$(np_naming_resolve)
+
+ENRICHED_CONTEXT_DIR="$(mktemp -d)"
+trap 'rm -rf "$ENRICHED_CONTEXT_DIR"' EXIT
+ENRICHED_CONTEXT_FILE="$ENRICHED_CONTEXT_DIR/context.json"
+
+echo "$CONTEXT" | jq --argjson names "$RESOLVED_NAMES" '
+  . + {names: ($names | del(.additional_ports))}
+  | if ($names.additional_ports | length) > 0
+    then .scope.capabilities.additional_ports = $names.additional_ports
+    else . end' > "$ENRICHED_CONTEXT_FILE"
+
 render() {
 	local tpl="$1"
 	local module="${tpl%%/*}"
@@ -14,7 +32,7 @@ render() {
 	local name
 	name="$module-$(echo "$rest" | tr '/' '-')"
 	name="${name%.tpl}"
-	gomplate -c .="$CONTEXT_FILE" --file "$ROOT/$tpl" --out "$OUT_DIR/$name"
+	gomplate -c .="$ENRICHED_CONTEXT_FILE" --file "$ROOT/$tpl" --out "$OUT_DIR/$name"
 	touch "$OUT_DIR/$name"
 }
 

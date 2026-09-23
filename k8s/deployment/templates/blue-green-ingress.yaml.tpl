@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: k-8-s-{{ .scope.slug }}-{{ .scope.id }}-{{ .ingress_visibility }}
+  name: {{ .names.scope_ingress }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -30,8 +30,8 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/actions.bg-deployment: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
-        {"serviceName":"d-{{ .scope.id }}-{{ .blue_deployment_id }}","servicePort":{{ .main_http_port }},"weight":{{ sub 100 .deployment.strategy_data.desired_switched_traffic }}},
-        {"serviceName":"d-{{ .scope.id }}-{{ .deployment.id }}","servicePort":{{ .main_http_port }},"weight":{{ .deployment.strategy_data.desired_switched_traffic }}}
+        {"serviceName":"{{ .names.blue_service }}","servicePort":{{ .main_http_port }},"weight":{{ sub 100 .deployment.strategy_data.desired_switched_traffic }}},
+        {"serviceName":"{{ .names.deployment }}","servicePort":{{ .main_http_port }},"weight":{{ .deployment.strategy_data.desired_switched_traffic }}}
       ]}}
     alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
     alb.ingress.kubernetes.io/group.name: {{ .alb_name }}
@@ -85,11 +85,12 @@ spec:
 {{ range .scope.capabilities.additional_ports }}
 {{- $port := .port }}
 {{- $port_type := .type }}
+{{- $service_name := .service_name }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: k-8-s-{{ $.scope.slug }}-{{ $.scope.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}-{{ $.ingress_visibility }}
+  name: {{ .ingress_name }}
   namespace: {{ $.k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -131,13 +132,13 @@ metadata:
 {{- if $blue_svc_exists }}
     alb.ingress.kubernetes.io/actions.bg-deployment-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
-        {"serviceName":"d-{{ $.scope.id }}-{{ $.blue_deployment_id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":{{ sub 100 $.deployment.strategy_data.desired_switched_traffic }}},
-        {"serviceName":"d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":{{ $.deployment.strategy_data.desired_switched_traffic }}}
+        {"serviceName":"{{ .blue_service_name }}","servicePort":{{ .port }},"weight":{{ sub 100 $.deployment.strategy_data.desired_switched_traffic }}},
+        {"serviceName":"{{ .service_name }}","servicePort":{{ .port }},"weight":{{ $.deployment.strategy_data.desired_switched_traffic }}}
       ]}}
 {{- else }}
     alb.ingress.kubernetes.io/actions.bg-deployment-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}: >-
       {"type":"forward","forwardConfig":{"targetGroups":[
-        {"serviceName":"d-{{ $.scope.id }}-{{ $.deployment.id }}-{{ if eq .type "HTTP" }}http{{ else }}grpc{{ end }}-{{ .port }}","servicePort":{{ .port }},"weight":100}
+        {"serviceName":"{{ .service_name }}","servicePort":{{ .port }},"weight":100}
       ]}}
 {{- end }}
     alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'

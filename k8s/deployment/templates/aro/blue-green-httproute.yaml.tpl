@@ -1,7 +1,7 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: k-8-s-{{ .scope.slug }}-{{ .scope.id }}-{{ .ingress_visibility }}
+  name: {{ .names.scope_ingress }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -48,11 +48,11 @@ spec:
   host: {{ .scope.domain }}
   to:
     kind: Service
-    name: d-{{ .scope.id }}-{{ .blue_deployment_id }}
+    name: {{ .names.blue_service }}
     weight: {{ sub 100 .deployment.strategy_data.desired_switched_traffic }}
   port:
     targetPort: {{ .main_traffic_manager_port }}
   alternateBackends:
     - kind: Service
-      name: d-{{ .scope.id }}-{{ .deployment.id }}
+      name: {{ .names.deployment }}
       weight: {{ .deployment.strategy_data.desired_switched_traffic }}

@@ -43,6 +43,7 @@ setup() {
   export CONTEXT='{
     "scope": {
       "id": "test-scope-123",
+      "slug": "test-scope",
       "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
       "domain": "test.nullapps.io",
       "capabilities": {
@@ -112,6 +113,7 @@ teardown() {
   local expected_json='{
     "scope": {
       "id": "test-scope-123",
+      "slug": "test-scope",
       "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
       "domain": "test.nullapps.io",
       "capabilities": {
@@ -155,7 +157,21 @@ teardown() {
     "alb_name": "co-balancer-public",
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
-    "k8s_modifiers": {}
+    "k8s_modifiers": {},
+    "names": {
+      "deployment": "",
+      "service": "",
+      "hpa": "",
+      "pdb": "",
+      "secret": "",
+      "secret_files": "",
+      "cronjob": "",
+      "scope_ingress": "k-8-s-test-scope-test-scope-123-internet-facing",
+      "scope_dns": "k8s-test-app-test-scope-test-scope-123-dns",
+      "serving_cert": "d-test-scope-123",
+      "blue_deployment": "",
+      "blue_service": ""
+    }
   }'
 
   assert_json_equal "$CONTEXT" "$expected_json" "Complete CONTEXT (public)"
@@ -172,6 +188,7 @@ teardown() {
   local expected_json='{
     "scope": {
       "id": "test-scope-123",
+      "slug": "test-scope",
       "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
       "domain": "test.nullapps.io",
       "capabilities": {
@@ -215,7 +232,21 @@ teardown() {
     "alb_name": "co-balancer-private",
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
-    "k8s_modifiers": {}
+    "k8s_modifiers": {},
+    "names": {
+      "deployment": "",
+      "service": "",
+      "hpa": "",
+      "pdb": "",
+      "secret": "",
+      "secret_files": "",
+      "cronjob": "",
+      "scope_ingress": "k-8-s-test-scope-test-scope-123-internal",
+      "scope_dns": "k8s-test-app-test-scope-test-scope-123-dns",
+      "serving_cert": "d-test-scope-123",
+      "blue_deployment": "",
+      "blue_service": ""
+    }
   }'
 
   assert_json_equal "$CONTEXT" "$expected_json" "Complete CONTEXT (private)"

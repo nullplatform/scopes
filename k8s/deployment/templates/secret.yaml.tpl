@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Secret
 immutable: true
 metadata:
-  name: s-{{ .scope.id }}-d-{{ .deployment.id }}
+  name: {{ .names.secret }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"

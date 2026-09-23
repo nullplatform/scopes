@@ -1,2 +1,3 @@
 configuration:
   DEPLOYMENT_TEMPLATE: "$OVERRIDES_PATH/deployment/templates/deployment.yaml.tpl"
+  NAMING_MAX_LENGTH: 43
