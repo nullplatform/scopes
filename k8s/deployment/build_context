@@ -393,6 +393,11 @@ BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$CONTEXT" | jq -c --argjson blue "$DISCOVE
   ] | from_entries
 ')
 
+while IFS= read -r missing_port_key; do
+  [ -z "$missing_port_key" ] && continue
+  log debug "🔍 No blue deployment service for additional port $missing_port_key — its traffic will route entirely to the green deployment"
+done < <(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq -r 'to_entries[] | select(.value == false) | .key')
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
           --arg blue_replicas "$BLUE_REPLICAS" \

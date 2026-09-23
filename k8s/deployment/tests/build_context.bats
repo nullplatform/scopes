@@ -1396,10 +1396,13 @@ EOF
   }
   export -f kubectl
 
-  source "$SCRIPT"
+  local log_output
+  { source "$SCRIPT"; } > "$BATS_TEST_TMPDIR/blue_discovery.log"
+  log_output="$(cat "$BATS_TEST_TMPDIR/blue_discovery.log")"
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" ""
   assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "false"
+  assert_contains "$log_output" "🔍 No blue deployment service for additional port grpc-9014 — its traffic will route entirely to the green deployment"
 }
 
 @test "blue discovery: blue_additional_port_services is empty without an active blue deployment" {
