@@ -111,30 +111,6 @@ golden_name() {
 	assert_equal "$output" "checkout-api-production-789011"
 }
 
-@test "np_naming_object_exists: found returns 0" {
-	kubectl() { [ "$2" = "ingress" ] && [ "$3" = "my-ingress" ] && echo "ingress.networking.k8s.io/my-ingress"; }
-	run np_naming_object_exists ingress nullplatform my-ingress
-	[ "$status" -eq 0 ]
-}
-
-@test "np_naming_object_exists: --ignore-not-found empty output is not-found" {
-	kubectl() { [ "$2" = "ingress" ] && echo ""; }
-	run np_naming_object_exists ingress nullplatform my-ingress
-	[ "$status" -eq 2 ]
-}
-
-@test "np_naming_object_exists: an unregistered resource type is not-found, not a failure" {
-	kubectl() { echo "error: the server doesn't have a resource type \"$2\""; return 1; }
-	run np_naming_object_exists httproute nullplatform my-ingress
-	[ "$status" -eq 2 ]
-}
-
-@test "np_naming_object_exists: any other failure is fatal" {
-	kubectl() { echo "Error from server (Forbidden): ..."; return 1; }
-	run np_naming_object_exists ingress nullplatform my-ingress
-	[ "$status" -eq 1 ]
-}
-
 @test "np_naming_discover_scope: keeps the legacy name when the live Ingress is blue-green shaped" {
 	local name; name="$(golden_name k8s-blue-green-ingress.yaml 0)"
 	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }

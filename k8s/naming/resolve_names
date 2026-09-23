@@ -69,21 +69,6 @@ np_trim_segments() {
 	done
 }
 
-np_trim_name() {
-	local budget="$1" overhead="$2"; shift 2
-	local segs
-	segs="$(np_trim_segments "$budget" "$overhead" "$@")" || return 1
-
-	local -a trimmed=()
-	local line
-	while IFS= read -r line; do
-		trimmed+=("$line")
-	done <<< "$segs"
-
-	local IFS=-
-	echo "${trimmed[*]}"
-}
-
 NP_NAMING_PATH_PATTERN='^\.[A-Za-z0-9_]+(\.[A-Za-z0-9_]+|\["[A-Za-z0-9_-]+"\])*$'
 
 np_naming_resolve_path() {
@@ -457,24 +442,6 @@ np_naming_lookup() {
 	fi
 
 	echo "$found"
-}
-
-np_naming_object_exists() {
-	local kind="$1" namespace="$2" name="$3"
-	local out status
-	out="$(kubectl get "$kind" "$name" -n "$namespace" --ignore-not-found -o name 2>&1)"
-	status=$?
-
-	if [ "$status" -ne 0 ]; then
-		case "$out" in
-			*"doesn't have a resource type"*) return 2 ;;
-			*) return 1 ;;
-		esac
-	fi
-
-	if [ -z "$out" ]; then
-		return 2
-	fi
 }
 
 np_naming_list_by_label() {
