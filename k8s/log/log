@@ -12,7 +12,15 @@ if [ ! -f "$KUBE_LOGGER_SCRIPT" ]; then
     exit 1
 fi
 
-K8S_NAMESPACE="${NAMESPACE_OVERRIDE:-nullplatform}"
+source "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/resolve_k8s_namespace"
+
+# Pods may live outside the static namespace (K8S_NAMESPACE_STRATEGY): find them by label
+if [ -n "${SCOPE_ID:-}" ]; then
+    K8S_NAMESPACE=$(find_scope_namespace "$SCOPE_ID")
+else
+    K8S_NAMESPACE=$(find_application_namespace "$APPLICATION_ID")
+fi
+K8S_NAMESPACE="${K8S_NAMESPACE:-${NAMESPACE_OVERRIDE:-nullplatform}}"
 
 # Build the command with required parameters
 CMD="$KUBE_LOGGER_SCRIPT --namespace $K8S_NAMESPACE --application-id $APPLICATION_ID --scope-id $SCOPE_ID"

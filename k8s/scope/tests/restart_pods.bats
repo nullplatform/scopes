@@ -235,3 +235,25 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "✅ Deployment restart completed successfully"
 }
+
+@test "restart_pods: np_namespace strategy targets the namespace where the scope lives" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl_calls"
+  kubectl() {
+    echo "kubectl $*" >> "$KUBECTL_CALLS"
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id=scope-123"*) echo -n "payments" ;;
+      *"-n payments"*)
+        case "$*" in "get deployment"*) echo "my-deployment" ;; esac
+        ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../restart_pods"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl rollout restart -n payments deployment/my-deployment"
+  assert_contains "$output" "✅ Deployment restart completed successfully"
+}

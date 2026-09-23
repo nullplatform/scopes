@@ -195,3 +195,26 @@ teardown() {
   assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'default-namespace'..."
   assert_contains "$output" "   Namespace: default-namespace"
 }
+
+@test "pause_autoscaling: np_namespace strategy targets the namespace where the scope lives" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  kubectl() {
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id=scope-123"*) echo -n "payments" ;;
+      *"-n payments"*)
+        case "$*" in
+          "get hpa"*"-o json"*) echo '{"spec":{"minReplicas":2,"maxReplicas":10}}' ;;
+          "get deployment"*) echo "5" ;;
+        esac
+        ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'payments'..."
+  assert_contains "$output" "   Namespace: payments"
+}

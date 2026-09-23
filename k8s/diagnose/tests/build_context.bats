@@ -453,3 +453,20 @@ run_build_context() {
 
   unset POD_LOG_TAIL_LINES
 }
+
+@test "build_context: np_namespace strategy diagnoses the namespace where the scope lives" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  eval "original_kubectl() $(declare -f kubectl | tail -n +2)"
+  export -f original_kubectl
+  kubectl() {
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id=scope-123"*) echo -n "payments" ;;
+      *) original_kubectl "$@" ;;
+    esac
+  }
+  export -f kubectl
+
+  run_build_context
+
+  assert_equal "$NAMESPACE" "payments"
+}

@@ -30,6 +30,8 @@ Configuration for Kubernetes cluster settings.
 |----------|-------------|------------------------------|
 | **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `cluster.namespace` |
 | **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `cluster.create_namespace_if_not_exist` |
+| **K8S_NAMESPACE_STRATEGY** | `static` (all scopes in `K8S_NAMESPACE`), `np_namespace` (one k8s namespace per nullplatform namespace, named after its slug) or `np_account_namespace` (same, prefixed with the account slug). With a dynamic strategy, existing scopes stay where they are, the k8s namespace is pinned to the nullplatform namespace id (label `namespace_id`) so renames keep it, and `K8S_NAMESPACE` becomes a reserved name. Requires cluster-wide permissions for the agent | `cluster.namespace_strategy` |
+| **K8S_RESERVED_NAMESPACES** | Space-separated k8s namespaces a dynamic strategy must never use (`kube-*` and `K8S_NAMESPACE` are always reserved) | - |
 
 ### Networking
 

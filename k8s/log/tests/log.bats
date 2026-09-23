@@ -20,6 +20,10 @@ setup() {
   chmod +x "$STUB_ROOT/log/kube-logger-go/bin/$platform/exec-$arch"
 
   export SERVICE_PATH="$STUB_ROOT"
+
+  # Never reach a real cluster: by default the scope is not found in any namespace
+  kubectl() { return 0; }
+  export -f kubectl
   export APPLICATION_ID="26611171"
   export SCOPE_ID="2075362883"
 
@@ -85,4 +89,40 @@ teardown() {
   run bash "$LOG_SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" != *"--start-time"* ]]
+}
+
+# =============================================================================
+# Namespace discovery (one k8s namespace per nullplatform namespace)
+# =============================================================================
+@test "log: passes the namespace where the scope lives to kube-logger" {
+  kubectl() {
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id=2075362883"*) echo -n "payments" ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace payments --application-id 26611171 --scope-id 2075362883"
+}
+
+@test "log: uses the namespace of the application pods when there is no scope_id" {
+  unset SCOPE_ID
+  kubectl() {
+    case "$*" in
+      "get pods -A -l nullplatform=true,application_id=26611171"*) echo -n "payments payments" ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace payments --application-id 26611171"
+}
+
+@test "log: falls back to the static namespace when the workload is not found" {
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace nullplatform --application-id 26611171 --scope-id 2075362883"
 }

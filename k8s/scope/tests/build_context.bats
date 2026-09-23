@@ -387,3 +387,128 @@ teardown() {
   assert_equal "$(echo "$CONTEXT" | jq -r .alb_name)" "scope-alb-public"
   assert_equal "$GATEWAY_NAME" "scope-gw-public"
 }
+
+# =============================================================================
+# K8S_NAMESPACE_STRATEGY - one k8s namespace per nullplatform namespace
+# =============================================================================
+mock_dynamic_cluster() {
+  # Empty cluster: no scope resources, no pinned namespace, target namespace missing.
+  # MOCK_OWNER_AFTER_RACE simulates a namespace created concurrently by another owner.
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl_calls"
+  kubectl() {
+    echo "kubectl $*" >> "$KUBECTL_CALLS"
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id="*) ;;
+      "get namespace -l nullplatform=true,namespace_id=300 -o jsonpath="*) echo -n "${MOCK_PINNED_NAMESPACE:-}" ;;
+      "get namespace ${MOCK_PINNED_NAMESPACE:-__none__}") return 0 ;;
+      "get namespace test-namespace -o jsonpath="*)
+        if [ -f "$BATS_TEST_TMPDIR/create_attempted" ] && [ -n "${MOCK_OWNER_AFTER_RACE:-}" ]; then
+          echo -n "$MOCK_OWNER_AFTER_RACE"
+        else
+          return 1
+        fi
+        ;;
+      "get namespace test-namespace") return 1 ;;
+      "create -f -")
+        touch "$BATS_TEST_TMPDIR/create_attempted"
+        cat > "$BATS_TEST_TMPDIR/created_namespace.yaml"
+        [ -n "${MOCK_OWNER_AFTER_RACE:-}" ] && { echo 'Error from server (AlreadyExists): namespaces "test-namespace" already exists' >&2; return 1; }
+        return 0
+        ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+@test "build_context: np_namespace strategy creates the namespace owned by the nullplatform namespace" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  mock_dynamic_cluster
+
+  run bash -c 'source "$SCRIPT" && echo "K8S_NS_IN_CONTEXT=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "🔍 Validating namespace 'test-namespace' exists..."
+  assert_contains "$output" "📝 Creating namespace 'test-namespace'..."
+  assert_contains "$output" "✅ Namespace 'test-namespace' created successfully"
+  assert_contains "$output" "K8S_NS_IN_CONTEXT=test-namespace"
+
+  local expected_manifest='apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-namespace
+  labels:
+    nullplatform: "true"
+    namespace_id: "300"
+    account_id: "200"
+  annotations:
+    nullplatform.com/namespace-name: "test-namespace"'
+  assert_equal "$(cat "$BATS_TEST_TMPDIR/created_namespace.yaml")" "$expected_manifest"
+}
+
+@test "build_context: np_namespace strategy refreshes the namespace-name annotation on owned namespaces" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export MOCK_PINNED_NAMESPACE="payments"
+  mock_dynamic_cluster
+
+  run bash -c 'source "$SCRIPT" && echo "K8S_NS_IN_CONTEXT=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Namespace 'payments' exists"
+  assert_contains "$output" "K8S_NS_IN_CONTEXT=payments"
+  assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl annotate namespace -l nullplatform=true,namespace_id=300 --overwrite nullplatform.com/namespace-name=test-namespace"
+}
+
+@test "build_context: static strategy does not label or annotate namespaces with nullplatform ids" {
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl_calls"
+  kubectl() { echo "kubectl $*" >> "$KUBECTL_CALLS"; return 0; }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  if grep -q "namespace_id" "$KUBECTL_CALLS"; then
+    echo "static strategy must not touch namespace_id labels: $(cat "$KUBECTL_CALLS")"
+    return 1
+  fi
+}
+
+@test "build_context: fails with full details when the namespace cannot be resolved" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  mock_dynamic_cluster
+  export CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "kube-system"')
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Namespace 'kube-system' is reserved and cannot host applications"
+  assert_contains "$output" "   ❌ Could not resolve the k8s namespace for scope test-scope-123 (strategy: np_namespace)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   • The nullplatform namespace name maps to a reserved or already taken k8s namespace"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Rename the nullplatform namespace, or use K8S_NAMESPACE_STRATEGY=np_account_namespace"
+  assert_contains "$output" "   • To adopt an existing k8s namespace: kubectl label namespace <name> nullplatform=true namespace_id=300"
+}
+
+@test "build_context: fails when a concurrent creation leaves the namespace owned by someone else" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export MOCK_OWNER_AFTER_RACE="999"
+  mock_dynamic_cluster
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "📝 Creating namespace 'test-namespace'..."
+  assert_contains "$output" "   ❌ Namespace 'test-namespace' was created concurrently by nullplatform namespace_id=999 (expected 300)"
+}
+
+@test "build_context: tolerates a concurrent creation by the same nullplatform namespace" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export MOCK_OWNER_AFTER_RACE="300"
+  mock_dynamic_cluster
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Namespace 'test-namespace' created successfully"
+}

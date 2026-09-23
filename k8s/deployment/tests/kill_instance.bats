@@ -285,3 +285,35 @@ teardown() {
   assert_contains "$output" "⚠️  Pod deletion timeout reached"
   assert_contains "$output" "⚠️  Pod still exists after deletion attempt"
 }
+
+@test "kill_instance: np_namespace strategy targets the namespace where the scope lives" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl_calls"
+  eval "original_kubectl() $(declare -f kubectl | tail -n +2)"
+  export -f original_kubectl
+  kubectl() {
+    echo "kubectl $*" >> "$KUBECTL_CALLS"
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id=scope-123"*) echo -n "payments" ;;
+      *) original_kubectl "$@" ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Namespace: payments"
+  assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl get deployment,serviceaccount,service -A -l scope_id=scope-123"
+}
+
+@test "kill_instance: np_namespace strategy reports a missing scope_id before resolving the namespace" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.tags.scope_id)')
+  unset SCOPE_ID NP_ACTION_CONTEXT
+
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ scope_id not found in context"
+}

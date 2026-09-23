@@ -1,8 +1,7 @@
 #!/bin/bash
 
-NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
-  .providers["container-orchestration"].cluster.namespace // $default
-')
+source "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/resolve_k8s_namespace"
+NAMESPACE=$(resolve_k8s_namespace "$SCOPE_ID") || NAMESPACE=$(static_k8s_namespace)
 
 SCOPE_LABEL_SELECTOR="scope_id=$SCOPE_ID"
 LABEL_SELECTOR="$SCOPE_LABEL_SELECTOR"

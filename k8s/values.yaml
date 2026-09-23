@@ -6,6 +6,7 @@ provider_categories:
 configuration:
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
+  K8S_NAMESPACE_STRATEGY: static # static | np_namespace | np_account_namespace
   DOMAIN: nullapps.io
 #  PRIVATE_DOMAIN: nullapps.io
   USE_ACCOUNT_SLUG: false

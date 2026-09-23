@@ -1,0 +1,190 @@
+#!/bin/bash
+
+# Resolves the k8s namespace where a scope's workloads live.
+#
+# K8S_NAMESPACE_STRATEGY (env or scope-configurations.cluster.namespace_strategy):
+#   static               - one shared namespace (current behaviour, default)
+#   np_namespace         - one k8s namespace per nullplatform namespace: <namespace-slug>
+#   np_account_namespace - same, prefixed by account to avoid collisions: <account-slug>-<namespace-slug>
+#
+# Usage: resolve_k8s_namespace [scope_id]   (scope_id defaults to .scope.id in CONTEXT)
+#
+# Resolution order for dynamic strategies:
+#   1. the namespace where the scope's resources already live (legacy scopes stay put)
+#   2. the k8s namespace pinned to the nullplatform namespace id (survives renames)
+#   3. a new name computed from the strategy, validated against reserved names and collisions
+#
+# resolve_k8s_namespace never creates anything: scope/build_context calls
+# create_owned_k8s_namespace when the resolved namespace does not exist yet.
+
+source "$(dirname "${BASH_SOURCE[0]}")/get_config_value"
+
+DEFAULT_RESERVED_K8S_NAMESPACES="default kube-system kube-public kube-node-lease nullplatform istio-system gateways cert-manager external-dns"
+
+short_hash() {
+  if command -v sha1sum >/dev/null 2>&1; then
+    echo -n "$1" | sha1sum | cut -c1-6
+  else
+    echo -n "$1" | shasum | cut -c1-6
+  fi
+}
+
+sanitize_k8s_namespace_name() {
+  local raw="$1" name
+  name=$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
+
+  if [ ${#name} -gt 63 ]; then
+    name="${name:0:56}"
+    name="${name%%-}"
+    name="$name-$(short_hash "$raw")"
+  fi
+
+  echo "$name"
+}
+
+find_scope_namespace() {
+  local scope_id="$1" namespaces
+
+  [ -z "$scope_id" ] && return 0
+
+  namespaces=$(kubectl get deployment,serviceaccount,service -A -l "scope_id=$scope_id" \
+    -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null) || return 0
+
+  echo "${namespaces%% *}"
+}
+
+find_application_namespace() {
+  local application_id="$1" namespaces
+
+  [ -z "$application_id" ] && return 0
+
+  namespaces=$(kubectl get pods -A -l "nullplatform=true,application_id=$application_id" \
+    -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null) || return 0
+
+  echo "${namespaces%% *}"
+}
+
+static_k8s_namespace() {
+  get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+}
+
+k8s_namespace_strategy() {
+  get_config_value \
+    --env K8S_NAMESPACE_STRATEGY \
+    --provider '.providers["scope-configurations"].cluster.namespace_strategy' \
+    --default "static"
+}
+
+# Id of a nullplatform entity (account, namespace, ...) from CONTEXT, falling back to the scope nrn
+context_entity_id() {
+  echo "$CONTEXT" | jq -r --arg entity "$1" '
+    .[$entity].id // (.scope.nrn // "" | try capture($entity + "=(?<id>\\d+)").id catch empty) // empty'
+}
+
+# Creates the namespace with its ownership labels in a single call, so a concurrent
+# creation never observes it unlabelled. Tolerates a race with the same owner.
+create_owned_k8s_namespace() {
+  local namespace="$1" np_namespace_id="$2" account_id="$3" display_name="$4" create_error owner
+
+  if create_error=$(kubectl create -f - 2>&1 >/dev/null <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $namespace
+  labels:
+    nullplatform: "true"
+    namespace_id: "$np_namespace_id"
+    account_id: "$account_id"
+  annotations:
+    nullplatform.com/namespace-name: "$display_name"
+EOF
+  ); then
+    return 0
+  fi
+
+  if ! owner=$(kubectl get namespace "$namespace" -o jsonpath='{.metadata.labels.namespace_id}' 2>/dev/null); then
+    echo "❌ Failed to create namespace '$namespace': $create_error" >&2
+    return 1
+  fi
+
+  [ "$owner" = "$np_namespace_id" ] && return 0
+
+  echo "❌ Namespace '$namespace' was created concurrently by nullplatform namespace_id=${owner:-none} (expected $np_namespace_id)" >&2
+  return 1
+}
+
+resolve_k8s_namespace() {
+  local strategy static_namespace scope_id np_namespace_id np_namespace_slug account_slug namespace owner reserved
+
+  strategy=$(k8s_namespace_strategy)
+  static_namespace=$(static_k8s_namespace)
+
+  case "$strategy" in
+    static)
+      echo "$static_namespace"
+      return 0
+      ;;
+    np_namespace|np_account_namespace)
+      ;;
+    *)
+      echo "❌ Unknown K8S_NAMESPACE_STRATEGY '$strategy' (valid: static, np_namespace, np_account_namespace)" >&2
+      return 1
+      ;;
+  esac
+
+  scope_id="${1:-$(echo "$CONTEXT" | jq -r '.scope.id // empty')}"
+  namespace=$(find_scope_namespace "$scope_id")
+  if [ -n "$namespace" ]; then
+    echo "$namespace"
+    return 0
+  fi
+
+  np_namespace_id=$(context_entity_id namespace)
+
+  namespace=$(kubectl get namespace -l "nullplatform=true,namespace_id=$np_namespace_id" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+  namespace="${namespace%% *}"
+  if [ -n "$namespace" ]; then
+    echo "$namespace"
+    return 0
+  fi
+
+  np_namespace_slug=$(echo "$CONTEXT" | jq -r '.namespace.slug // empty')
+  account_slug=$(echo "$CONTEXT" | jq -r '.account.slug // empty')
+
+  if [ -z "$np_namespace_slug" ]; then
+    echo "❌ Cannot compute the k8s namespace: nullplatform namespace slug not found in context" >&2
+    return 1
+  fi
+
+  if [ "$strategy" = "np_account_namespace" ]; then
+    namespace=$(sanitize_k8s_namespace_name "$account_slug-$np_namespace_slug")
+  else
+    namespace=$(sanitize_k8s_namespace_name "$np_namespace_slug")
+  fi
+
+  for reserved in ${K8S_RESERVED_NAMESPACES:-$DEFAULT_RESERVED_K8S_NAMESPACES} "$static_namespace"; do
+    if [ "$namespace" = "$reserved" ] || [[ "$namespace" == kube-* ]]; then
+      echo "❌ Namespace '$namespace' is reserved and cannot host applications" >&2
+      return 1
+    fi
+  done
+
+  if owner=$(kubectl get namespace "$namespace" -o jsonpath='{.metadata.labels.namespace_id}' 2>/dev/null); then
+    if [ -z "$owner" ]; then
+      echo "❌ Namespace '$namespace' already exists and is not managed by nullplatform; refusing to adopt it" >&2
+      return 1
+    fi
+    if [ "$owner" != "$np_namespace_id" ]; then
+      echo "❌ Namespace '$namespace' already belongs to nullplatform namespace_id=$owner (expected $np_namespace_id). Use K8S_NAMESPACE_STRATEGY=np_account_namespace to avoid collisions across accounts" >&2
+      return 1
+    fi
+  fi
+
+  echo "$namespace"
+}

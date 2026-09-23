@@ -12,7 +12,10 @@ if [[ -n "$DEPLOYMENT_ID" && "$DEPLOYMENT_ID" != "null" ]]; then
  LABEL_SELECTOR="$LABEL_SELECTOR,deployment_id=$DEPLOYMENT_ID"
 fi
 
-PODS=$(kubectl get pods -n "$K8S_NAMESPACE" -l "$LABEL_SELECTOR" -o json)
+# Pods may live outside the static namespace (K8S_NAMESPACE_STRATEGY): search every namespace,
+# falling back to the static one when the agent cannot list cluster-wide
+PODS=$(kubectl get pods -A -l "$LABEL_SELECTOR" -o json 2>/dev/null) || \
+  PODS=$(kubectl get pods -n "$K8S_NAMESPACE" -l "$LABEL_SELECTOR" -o json)
 
 echo "$PODS" | jq --argjson limit "${LIMIT:-0}" '{
  results: (if $limit > 0 then .items[:$limit] else .items end) | map({

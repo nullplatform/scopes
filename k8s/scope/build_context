@@ -2,14 +2,27 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
+source "$SCRIPT_DIR/../utils/resolve_k8s_namespace"
 
-K8S_NAMESPACE=$(get_config_value \
-  --env NAMESPACE_OVERRIDE \
-  --env K8S_NAMESPACE \
-  --provider '.providers["scope-configurations"].cluster.namespace' \
-  --provider '.providers["container-orchestration"].cluster.namespace' \
-  --default "nullplatform"
-)
+K8S_NAMESPACE_STRATEGY=$(k8s_namespace_strategy)
+NP_NAMESPACE_ID=$(context_entity_id namespace)
+NP_ACCOUNT_ID=$(context_entity_id account)
+NAMESPACE_ERROR_FILE=$(mktemp)
+
+if ! K8S_NAMESPACE=$(resolve_k8s_namespace 2>"$NAMESPACE_ERROR_FILE"); then
+  log error "$(cat "$NAMESPACE_ERROR_FILE")"
+  log error "   ❌ Could not resolve the k8s namespace for scope $(echo "$CONTEXT" | jq -r .scope.id) (strategy: $K8S_NAMESPACE_STRATEGY)"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • The nullplatform namespace name maps to a reserved or already taken k8s namespace"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Rename the nullplatform namespace, or use K8S_NAMESPACE_STRATEGY=np_account_namespace"
+  log error "   • To adopt an existing k8s namespace: kubectl label namespace <name> nullplatform=true namespace_id=$NP_NAMESPACE_ID"
+  log error ""
+  rm -f "$NAMESPACE_ERROR_FILE"
+  exit 1
+fi
 
 # General configuration
 DNS_TYPE=$(get_config_value \
@@ -121,9 +134,16 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   if [ "$CREATE_K8S_NAMESPACE_IF_NOT_EXIST" = "true" ]; then
     log debug "📝 Creating namespace '$K8S_NAMESPACE'..."
 
-    kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
-      kubectl label -f - nullplatform=true --dry-run=client -o yaml | \
-      kubectl apply -f -
+    if [ "$K8S_NAMESPACE_STRATEGY" = "static" ]; then
+      kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
+        kubectl label -f - nullplatform=true --dry-run=client -o yaml | \
+        kubectl apply -f -
+    elif ! create_owned_k8s_namespace "$K8S_NAMESPACE" "$NP_NAMESPACE_ID" "$NP_ACCOUNT_ID" \
+        "$(echo "$CONTEXT" | jq -r '.namespace.slug')" 2>"$NAMESPACE_ERROR_FILE"; then
+      log error "   $(cat "$NAMESPACE_ERROR_FILE")"
+      rm -f "$NAMESPACE_ERROR_FILE"
+      exit 1
+    fi
 
     log info "   ✅ Namespace '$K8S_NAMESPACE' created successfully"
     if command -v np_scope_produces >/dev/null 2>&1; then
@@ -145,6 +165,14 @@ else
   if command -v np_step_skip >/dev/null 2>&1; then
     np_step_skip "namespace '$K8S_NAMESPACE' already exists"
   fi
+fi
+rm -f "$NAMESPACE_ERROR_FILE"
+
+# Keep the current nullplatform namespace name visible on owned namespaces (it can be renamed).
+# The label selector never matches the shared static namespace.
+if [ "$K8S_NAMESPACE_STRATEGY" != "static" ]; then
+  kubectl annotate namespace -l "nullplatform=true,namespace_id=$NP_NAMESPACE_ID" --overwrite \
+    "nullplatform.com/namespace-name=$(echo "$CONTEXT" | jq -r '.namespace.slug')" >/dev/null 2>&1 || true
 fi
 
 USE_ACCOUNT_SLUG=$(get_config_value \

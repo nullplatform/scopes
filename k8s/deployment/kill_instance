@@ -45,10 +45,6 @@ if [[ -z "$SCOPE_ID" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
     SCOPE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.tags.scope_id // empty')
 fi
 
-K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
-  .providers["container-orchestration"].cluster.namespace // $default
-' 2>/dev/null || echo "nullplatform")
-
 if [[ -z "$SCOPE_ID" ]]; then
     log error "❌ scope_id not found in context"
     log error "💡 Possible causes:"
@@ -58,6 +54,9 @@ if [[ -z "$SCOPE_ID" ]]; then
     log error "   - Verify the action is invoked with proper scope context"
     exit 1
 fi
+
+source "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/resolve_k8s_namespace"
+K8S_NAMESPACE=$(resolve_k8s_namespace "$SCOPE_ID")
 
 log debug "📋 Scope ID: $SCOPE_ID"
 log debug "📋 Namespace: $K8S_NAMESPACE"

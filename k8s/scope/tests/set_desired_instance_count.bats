@@ -401,3 +401,26 @@ teardown() {
   assert_contains "$output" "📋 Namespace: default-namespace"
   assert_contains "$output" "🔍 Looking for deployment 'd-scope-123-deploy-456' in namespace 'default-namespace'..."
 }
+
+@test "set_desired_instance_count: np_namespace strategy targets the namespace where the scope lives" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  kubectl() {
+    case "$*" in
+      "get deployment,serviceaccount,service -A -l scope_id=scope-123"*) echo -n "payments" ;;
+      "get deployment d-scope-123-deploy-456 -n payments") return 0 ;;
+      "get deployment d-scope-123-deploy-456 -n payments -o jsonpath"*)
+        if [[ "$*" == *"readyReplicas"* ]]; then echo "5"; else echo "3"; fi
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n payments") return 1 ;;
+      *"-n payments"*) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../set_desired_instance_count"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Namespace: payments"
+  assert_contains "$output" "🔍 Looking for deployment 'd-scope-123-deploy-456' in namespace 'payments'..."
+}
