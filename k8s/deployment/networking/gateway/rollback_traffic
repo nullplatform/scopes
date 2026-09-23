@@ -3,37 +3,10 @@
 
 log debug "🔍 Rolling back traffic to previous deployment..."
 
-export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
-export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+np_naming_apply_to_context || exit 1
 
 log debug "📋 Current deployment: $NEW_DEPLOYMENT_ID"
 log debug "📋 Rollback target: $DEPLOYMENT_ID"
-
-ORIGINAL_CONTEXT="$CONTEXT"
-
-CONTEXT=$(echo "$CONTEXT" | jq \
-  --arg deployment_id "$DEPLOYMENT_ID" \
-  '.deployment.id = $deployment_id')
-
-RESOLVED_NAMES=$(np_naming_resolve) || exit 1
-
-CONTEXT=$(echo "$CONTEXT" | jq --argjson names "$RESOLVED_NAMES" '
-  .names.deployment = $names.deployment
-  | .names.service = $names.service
-  | .names.hpa = $names.hpa
-  | .names.pdb = $names.pdb
-  | .names.secret = $names.secret
-  | .names.secret_files = $names.secret_files
-  | .names.cronjob = $names.cronjob
-  | .scope.capabilities.additional_ports = (
-      (.scope.capabilities.additional_ports // []) as $old
-      | ($names.additional_ports // []) as $new
-      | [ $old[] as $o
-          | (($new[] | select(.port == $o.port and .type == $o.type) | .service_name) // $o.service_name) as $svc
-          | $o + {service_name: $svc}
-        ]
-    )
-')
 
 log debug "📝 Creating ingress for rollback deployment..."
 
