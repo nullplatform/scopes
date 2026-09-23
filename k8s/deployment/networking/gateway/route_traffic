@@ -1,5 +1,7 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../../../utils/route_kind"
 
 log debug "🔍 Creating $INGRESS_VISIBILITY ingress..."
 
@@ -30,4 +32,6 @@ fi
 
 rm "$CONTEXT_PATH"
 
-log info "✅ Ingress template created: $INGRESS_FILE"
+ROUTE_KIND=$(route_kind "$INGRESS_FILE")
+
+log info "✅ ${ROUTE_KIND:-Routing} template created: $INGRESS_FILE"

@@ -1,19 +1,27 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/route_kind"
 
-log debug "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
+# Verify the resource that was actually rendered, not the one DNS_TYPE implies:
+# Route53 installs can route through Gateway API and external-dns installs
+# through an Ingress.
+INGRESS_FILE="${INGRESS_FILE:-$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml}"
+ROUTE_KIND=$(route_kind "$INGRESS_FILE")
 
-case "$DNS_TYPE" in
-  route53)
+log debug "🔍 Verifying networking reconciliation for kind: ${ROUTE_KIND:-unknown}"
+
+case "$ROUTE_KIND" in
+  Ingress)
     source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
     ;;
-  external_dns)
+  HTTPRoute)
     source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
     ;;
   *)
-    log warn "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"
+    log warn "⚠️ Networking reconciliation not available for kind: ${ROUTE_KIND:-unknown}, skipping"
     if command -v np_step_skip >/dev/null 2>&1; then
-      np_step_skip "no networking verification for DNS type '$DNS_TYPE'"
+      np_step_skip "no networking verification for kind '${ROUTE_KIND:-unknown}'"
     fi
     ;;
 esac

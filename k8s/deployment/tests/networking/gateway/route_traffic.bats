@@ -45,7 +45,7 @@ metadata:
       esac
     done
     # Write mock output
-    echo "# Generated ingress" > "$out_file"
+    printf 'apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: my-app-ingress\n' > "$out_file"
     return 0
   }
   export -f gomplate
@@ -145,4 +145,47 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
 
   [ "$status" -eq 0 ]
+}
+
+# =============================================================================
+# Rendered Kind Reporting
+# =============================================================================
+@test "route_traffic: names HTTPRoute in the success message when that is what was rendered" {
+  gomplate() {
+    local out_file=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --out) out_file="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    printf 'apiVersion: gateway.networking.k8s.io/v1\nkind: HTTPRoute\nspec:\n  parentRefs:\n    - kind: Gateway\n' > "$out_file"
+    return 0
+  }
+  export -f gomplate
+
+  run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ HTTPRoute template created: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml"
+}
+
+@test "route_traffic: falls back to a neutral label when the render has no kind" {
+  gomplate() {
+    local out_file=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --out) out_file="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    echo "# no kind here" > "$out_file"
+    return 0
+  }
+  export -f gomplate
+
+  run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Routing template created: $OUTPUT_DIR/ingress-scope-123-deploy-456.yaml"
 }
