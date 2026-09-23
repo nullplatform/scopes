@@ -1,0 +1,24 @@
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-d-123456-789012
+  namespace: nullplatform
+  labels:
+    name: pdb-d-123456-789012
+    app.kubernetes.io/part-of: payments-checkout-api
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: production
+    app.kubernetes.io/name: production
+  annotations:
+    nullplatform.com/managed-by: nullplatform
+    nullplatform.com/account: acme
+    nullplatform.com/namespace: payments
+    nullplatform.com/application: checkout-api
+    nullplatform.com/scope: production
+    nullplatform.com/deployment-id: "789012"
+spec:
+  maxUnavailable: 25%
+  selector:
+    matchLabels:
+      app: d-123456-789012
