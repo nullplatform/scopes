@@ -5,6 +5,8 @@ source "$SCRIPT_DIR/../utils/get_config_value"
 source "$SCRIPT_DIR/../utils/resolve_k8s_namespace"
 
 K8S_NAMESPACE_STRATEGY=$(k8s_namespace_strategy)
+K8S_STATIC_NAMESPACE=$(static_k8s_namespace)
+export K8S_STATIC_NAMESPACE
 NP_NAMESPACE_ID=$(context_entity_id namespace)
 NP_ACCOUNT_ID=$(context_entity_id account)
 NAMESPACE_ERROR_FILE=$(mktemp)

@@ -1331,3 +1331,32 @@ EOF
   assert_contains "$output" "📝 Syncing pull secret 'regcred' from 'registry-creds' to 'default-namespace'..."
   assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl apply -n default-namespace -f -"
 }
+
+@test "image pull secrets: copies from the static namespace even after the scope namespace replaced K8S_NAMESPACE" {
+  setup_full_build_context
+  export K8S_NAMESPACE="nullplatform"
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export IMAGE_PULL_SECRETS='{"ENABLED": true, "SECRETS": ["regcred"]}'
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.namespace)')
+  export KUBECTL_CALLS="$BATS_TEST_TMPDIR/kubectl_calls"
+  kubectl() {
+    echo "kubectl $*" >> "$KUBECTL_CALLS"
+    case "$*" in
+      "get deployment,serviceaccount,service -A"*) ;;
+      "get namespace -l nullplatform=true,namespace_id=300"*) echo -n "test-namespace" ;;
+      "get namespace test-namespace") return 0 ;;
+      "get secret regcred -n nullplatform -o json") echo '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"regcred","namespace":"nullplatform"},"data":{}}' ;;
+      "get secret "*) return 1 ;;
+      "get service"*) return 1 ;;
+      "apply -n "*) cat >/dev/null ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Syncing pull secret 'regcred' from 'nullplatform' to 'test-namespace'..."
+  assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl apply -n test-namespace -f -"
+}

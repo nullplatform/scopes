@@ -64,8 +64,11 @@ find_application_namespace() {
   echo "${namespaces%% *}"
 }
 
+# K8S_STATIC_NAMESPACE is captured by scope/build_context before it replaces K8S_NAMESPACE
+# with the scope's namespace, so later steps in the same shell still see the static one.
 static_k8s_namespace() {
   get_config_value \
+    --env K8S_STATIC_NAMESPACE \
     --env NAMESPACE_OVERRIDE \
     --env K8S_NAMESPACE \
     --provider '.providers["scope-configurations"].cluster.namespace' \
