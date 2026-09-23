@@ -3,6 +3,49 @@
 # Shared resource validation functions for scope workflows.
 # Loaded as a workflow step, exports functions for subsequent steps.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! type -t np_naming_lookup >/dev/null 2>&1; then source "$SCRIPT_DIR/../naming/resolve_names"; fi
+
+require_resource() {
+  local kind="$1"
+  local namespace="$2"
+  local deployment_id="$3"
+  local out_var="$4"
+  local human_kind not_found_cause status name
+
+  case "$kind" in
+    deployment)
+      human_kind="deployment"
+      not_found_cause="The deployment was not created yet or was deleted"
+      ;;
+    hpa)
+      human_kind="HPA"
+      not_found_cause="Autoscaling is not configured for this deployment"
+      ;;
+  esac
+
+  status=0
+  name=$(np_naming_lookup "$kind" "$namespace" "$deployment_id") || status=$?
+
+  if [ "$status" -eq 2 ]; then
+    log error "❌ No $human_kind found for deployment $deployment_id in namespace '$namespace'"
+    log error "💡 Possible causes:"
+    log error "   - $not_found_cause"
+    log error "🔧 How to fix:"
+    log error "   • Verify the $human_kind exists: kubectl get $kind -n $namespace -l deployment_id=$deployment_id"
+    exit 1
+  elif [ "$status" -ne 0 ]; then
+    log error "❌ Could not check the cluster for the $human_kind of deployment $deployment_id"
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading $kind in namespace '$namespace'"
+    log error "🔧 How to fix:"
+    log error "   • Verify cluster connectivity and RBAC: kubectl auth can-i get $kind -n $namespace"
+    exit 1
+  fi
+
+  eval "$out_var=\"\$name\""
+}
 
 find_deployment_by_label() {
   local scope_id="$1"

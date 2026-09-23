@@ -13,6 +13,8 @@ setup() {
   export -f log
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
   export -f np_naming_lookup
+  source "$PROJECT_ROOT/k8s/scope/require_resource"
+  export -f require_resource
 
   # Default environment
   export K8S_NAMESPACE="default-namespace"

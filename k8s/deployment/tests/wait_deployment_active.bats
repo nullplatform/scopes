@@ -10,6 +10,8 @@ setup() {
   export -f log
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
   export -f np_naming_lookup
+  source "$PROJECT_ROOT/k8s/scope/require_resource"
+  export -f require_resource
 
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export K8S_NAMESPACE="test-namespace"
