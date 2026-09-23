@@ -311,3 +311,36 @@ np_naming_roles_patterned() {
 	log error "❌ Naming strategy '$1' is not available yet"
 	return 1
 }
+
+np_naming_lookup() {
+	local kind="$1" namespace="$2" deployment_id="$3" found
+	found="$(kubectl get "$kind" -n "$namespace" -l "deployment_id=$deployment_id" \
+		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+	if [ -z "$found" ]; then return 1; fi
+	echo "$found"
+}
+
+np_naming_discover_blue() {
+	local namespace="$1" blue_id="$2" main_port="$3"
+
+	if [ -z "$blue_id" ] || [ "$blue_id" = "null" ]; then
+		jq -n '{deployment: "", service: "", ports: {}}'
+		return 0
+	fi
+
+	local services deployments
+	services="$(kubectl get service -n "$namespace" -l "deployment_id=$blue_id" -o json 2>/dev/null)"
+	if [ -z "$services" ]; then services='{"items":[]}'; fi
+	deployments="$(kubectl get deployment -n "$namespace" -l "deployment_id=$blue_id" -o json 2>/dev/null)"
+	if [ -z "$deployments" ]; then deployments='{"items":[]}'; fi
+
+	jq -n --argjson svc "$services" --argjson dep "$deployments" --argjson main "$main_port" '
+		{
+			deployment: ($dep.items[0].metadata.name // ""),
+			service: ([$svc.items[] | select(.spec.ports[0].port == $main) | .metadata.name] | first // ""),
+			ports: ([$svc.items[]
+				| select(.spec.ports[0].port != $main)
+				| {key: ((.metadata.labels.port_type // "grpc") + "-" + (.spec.ports[0].port|tostring)),
+				   value: .metadata.name}] | from_entries)
+		}'
+}

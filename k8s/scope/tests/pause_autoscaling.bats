@@ -11,8 +11,8 @@ setup() {
   source "$PROJECT_ROOT/testing/assertions.sh"
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
-  source "$PROJECT_ROOT/k8s/scope/require_resource"
-  export -f require_hpa require_deployment find_deployment_by_label
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f np_naming_lookup
 
   # Default environment
   export K8S_NAMESPACE="default-namespace"
@@ -43,8 +43,8 @@ teardown() {
 @test "pause_autoscaling: fails when HPA does not exist" {
   kubectl() {
     case "$*" in
-      "get hpa"*)
-        return 1
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo ""
         ;;
     esac
   }
@@ -53,13 +53,40 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'provider-namespace'..."
-  assert_contains "$output" "❌ HPA 'hpa-d-scope-123-deploy-456' not found in namespace 'provider-namespace'"
+  assert_contains "$output" "❌ No HPA found for deployment deploy-456 in namespace 'provider-namespace'"
   assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The HPA may not exist or autoscaling is not configured for this deployment"
+  assert_contains "$output" "   - Autoscaling is not configured for this deployment"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• Verify the HPA exists: kubectl get hpa -n provider-namespace"
-  assert_contains "$output" "• Check that autoscaling is configured for scope scope-123"
+  assert_contains "$output" "   • Verify the HPA exists: kubectl get hpa -n provider-namespace -l deployment_id=deploy-456"
+}
+
+# =============================================================================
+# Deployment Not Found
+# =============================================================================
+@test "pause_autoscaling: fails when deployment does not exist" {
+  kubectl() {
+    case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o json")
+        echo '{"spec":{"minReplicas":3,"maxReplicas":15}}'
+        ;;
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo ""
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ No deployment found for deployment deploy-456 in namespace 'provider-namespace'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The deployment was not created yet or was deleted"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify the deployment exists: kubectl get deployment -n provider-namespace -l deployment_id=deploy-456"
 }
 
 # =============================================================================
@@ -68,11 +95,14 @@ teardown() {
 @test "pause_autoscaling: complete successful pause flow" {
   kubectl() {
     case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
       "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o json")
         echo '{"spec":{"minReplicas":3,"maxReplicas":15}}'
         ;;
-      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace")
-        return 0
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         echo "7"
@@ -90,7 +120,6 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'provider-namespace'..."
   assert_contains "$output" "📋 Current HPA configuration:"
   assert_contains "$output" "   Min replicas: 3"
   assert_contains "$output" "   Max replicas: 15"
@@ -106,11 +135,14 @@ teardown() {
 @test "pause_autoscaling: stores original config in annotation" {
   kubectl() {
     case "$*" in
-      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace")
-        return 0
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
         ;;
       "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o json")
         echo '{"spec":{"minReplicas":2,"maxReplicas":10}}'
+        ;;
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
         echo "5"
@@ -139,6 +171,12 @@ teardown() {
     case "$*" in
       *"-n provider-namespace"*)
         case "$*" in
+          "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+            echo "hpa-d-scope-123-deploy-456"
+            ;;
+          "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+            echo "d-scope-123-deploy-456"
+            ;;
           "get hpa"*"-o json"*)
             echo '{"spec":{"minReplicas":2,"maxReplicas":10}}'
             ;;
@@ -160,7 +198,6 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'provider-namespace'..."
   assert_contains "$output" "   Namespace: provider-namespace"
 }
 
@@ -171,6 +208,12 @@ teardown() {
     case "$*" in
       *"-n default-namespace"*)
         case "$*" in
+          "get hpa -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+            echo "hpa-d-scope-123-deploy-456"
+            ;;
+          "get deployment -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+            echo "d-scope-123-deploy-456"
+            ;;
           "get hpa"*"-o json"*)
             echo '{"spec":{"minReplicas":2,"maxReplicas":10}}'
             ;;
@@ -192,6 +235,5 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'default-namespace'..."
   assert_contains "$output" "   Namespace: default-namespace"
 }

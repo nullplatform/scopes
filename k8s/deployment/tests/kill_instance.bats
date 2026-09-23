@@ -8,6 +8,8 @@ setup() {
   source "$PROJECT_ROOT/testing/assertions.sh"
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f np_naming_lookup
 
   export K8S_NAMESPACE="test-namespace"
   export SCOPE_ID="scope-123"
@@ -52,7 +54,9 @@ setup() {
             return 0
             ;;
           deployment)
-            if [[ "$*" == *"replicas"* ]]; then
+            if [[ "$*" == *"-l deployment_id="* ]]; then
+              echo "d-scope-123-deploy-456"
+            elif [[ "$*" == *"replicas"* ]]; then
               echo "3"
             elif [[ "$*" == *"readyReplicas"* ]]; then
               echo "2"
@@ -212,7 +216,9 @@ teardown() {
             return 0
             ;;
           deployment)
-            if [[ "$*" == *"replicas"* ]]; then
+            if [[ "$*" == *"-l deployment_id="* ]]; then
+              echo "d-scope-123-deploy-456"
+            elif [[ "$*" == *"replicas"* ]]; then
               echo "3"
             fi
             return 0
@@ -261,7 +267,9 @@ teardown() {
             return 0
             ;;
           deployment)
-            if [[ "$*" == *"replicas"* ]]; then
+            if [[ "$*" == *"-l deployment_id="* ]]; then
+              echo "d-scope-123-deploy-456"
+            elif [[ "$*" == *"replicas"* ]]; then
               echo "3"
             fi
             return 0

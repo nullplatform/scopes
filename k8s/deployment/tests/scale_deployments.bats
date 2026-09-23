@@ -35,10 +35,21 @@ setup() {
 
   # Mock kubectl
   kubectl() {
-    KUBECTL_CALLS="$KUBECTL_CALLS|$*"
+    local args="$*"
+    KUBECTL_CALLS="$KUBECTL_CALLS|$args"
+    case "$args" in
+      *"-l deployment_id="*"-o jsonpath={.items[0].metadata.name}")
+        local id="${args#*-l deployment_id=}"
+        id="${id%% *}"
+        echo "d-$SCOPE_ID-$id"
+        ;;
+    esac
     return 0
   }
   export -f kubectl
+
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f np_naming_lookup
 
   # Mock wait_blue_deployment_active
   export NP_OUTPUT_DIR="$(mktemp -d)"
@@ -153,10 +164,20 @@ run_scale_deployments() {
 # =============================================================================
 @test "scale_deployments: fails when green deployment scale fails" {
   kubectl() {
-    if [[ "$*" == *"deploy-new"* ]]; then
-      return 1  # Fail for green deployment
-    fi
-    return 0
+    local args="$*"
+    case "$args" in
+      *"-l deployment_id="*"-o jsonpath={.items[0].metadata.name}")
+        local id="${args#*-l deployment_id=}"
+        id="${id%% *}"
+        echo "d-$SCOPE_ID-$id"
+        ;;
+      "scale deployment d-scope-123-deploy-new"*)
+        return 1  # Fail for green deployment
+        ;;
+      *)
+        return 0
+        ;;
+    esac
   }
   export -f kubectl
 
@@ -171,10 +192,20 @@ run_scale_deployments() {
 
 @test "scale_deployments: fails when blue deployment scale fails" {
   kubectl() {
-    if [[ "$*" == *"deploy-old"* ]]; then
-      return 1  # Fail for blue deployment
-    fi
-    return 0
+    local args="$*"
+    case "$args" in
+      *"-l deployment_id="*"-o jsonpath={.items[0].metadata.name}")
+        local id="${args#*-l deployment_id=}"
+        id="${id%% *}"
+        echo "d-$SCOPE_ID-$id"
+        ;;
+      "scale deployment d-scope-123-deploy-old"*)
+        return 1  # Fail for blue deployment
+        ;;
+      *)
+        return 0
+        ;;
+    esac
   }
   export -f kubectl
 

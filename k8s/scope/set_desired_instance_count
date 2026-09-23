@@ -29,21 +29,26 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
+DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
+    log error "❌ No deployment found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
+    log error "💡 Possible causes:"
+    log error "   - The deployment was not created yet or was deleted"
+    log error "🔧 How to fix:"
+    log error "   • Verify the deployment exists: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
+    exit 1
+}
 
-HPA_NAME="hpa-d-$SCOPE_ID-$DEPLOYMENT_ID"
+HPA_NAME="$(np_naming_lookup hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID" 2>/dev/null)" || HPA_NAME=""
 
 log debug "📋 Deployment: $DEPLOYMENT_NAME"
 log debug "📋 Namespace: $K8S_NAMESPACE"
-
-require_deployment "$DEPLOYMENT_NAME" "$K8S_NAMESPACE" "$SCOPE_ID"
 
 CURRENT_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
 log debug "📋 Current replicas: $CURRENT_REPLICAS"
 
 HPA_EXISTS=false
 HPA_PAUSED=false
-if kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+if [[ -n "$HPA_NAME" ]]; then
     HPA_EXISTS=true
     log debug "📋 HPA found: $HPA_NAME"
 
