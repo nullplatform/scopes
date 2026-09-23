@@ -90,22 +90,27 @@ np_naming_resolve_path() {
 	echo "$CONTEXT" | jq -r "$1 // \"\""
 }
 
-np_naming_validate_pattern() {
-	local pattern="$1" required="$2"
-	local rest="$pattern" path first_path="" first_literal="" literal
+np_name_render() {
+	local budget="$1" pattern="$2" required="${3:-}"
+	local rest="$pattern" literal path value
+	local first_path="" first_literal="" first_value=""
 	local literal_total=0 fixed_total=0 flex_count=0 seen_placeholder=false
+	local overhead=0
+	local -a flex=() order=() literals=()
 
-	case "$pattern" in
-		*"{.$required}"*) : ;;
-		*)
-			log error "❌ Naming pattern '$pattern' does not contain {.$required}"
-			log error "💡 Possible causes:"
-			log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
-			log error "🔧 How to fix:"
-			log error "   • Add {.$required} to the pattern"
-			return 1
-			;;
-	esac
+	if [ -n "$required" ]; then
+		case "$pattern" in
+			*"{.$required}"*) : ;;
+			*)
+				log error "❌ Naming pattern '$pattern' does not contain {.$required}"
+				log error "💡 Possible causes:"
+				log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
+				log error "🔧 How to fix:"
+				log error "   • Add {.$required} to the pattern"
+				return 1
+				;;
+		esac
+	fi
 
 	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
 		literal="${BASH_REMATCH[1]}"
@@ -134,7 +139,9 @@ np_naming_validate_pattern() {
 			return 1
 		fi
 
-		local value
+		overhead=$((overhead + ${#literal}))
+		literals+=("$literal")
+
 		value="$(np_naming_resolve_path "$path")"
 		if [ -z "$value" ]; then
 			log error "❌ Naming path {$path} resolves to an empty value"
@@ -143,17 +150,24 @@ np_naming_validate_pattern() {
 			return 1
 		fi
 
+		if [ -z "$first_path" ]; then first_path="$path"; first_value="$value"; fi
+
 		literal_total=$((literal_total + ${#literal}))
 		if [[ "$value" =~ ^[0-9]+$ ]]; then
 			fixed_total=$((fixed_total + ${#value}))
+			overhead=$((overhead + ${#value}))
+			order+=("FIXED:$value")
 		else
 			flex_count=$((flex_count + 1))
+			flex+=("$value")
+			order+=("FLEX")
 		fi
 
-		if [ -z "$first_path" ]; then first_path="$path"; fi
 		seen_placeholder=true
 	done
+	overhead=$((overhead + ${#rest}))
 	literal_total=$((literal_total + ${#rest}))
+	literals+=("$rest")
 
 	if [[ -n "$rest" && ! "$rest" =~ ^[a-z0-9-]+$ ]]; then
 		log error "❌ Naming pattern '$pattern' has an invalid trailing literal '$rest'"
@@ -163,7 +177,7 @@ np_naming_validate_pattern() {
 	fi
 
 	local head="$first_literal"
-	if [ -z "$head" ]; then head="$(np_naming_resolve_path "$first_path")"; fi
+	if [ -z "$head" ]; then head="$first_value"; fi
 
 	case "$head" in
 		[a-z]*) : ;;
@@ -176,11 +190,11 @@ np_naming_validate_pattern() {
 	esac
 
 	if [ "$flex_count" -gt 0 ]; then
-		local budget="${NAMING_MAX_LENGTH:-46}"
-		local available=$((budget - literal_total - fixed_total))
+		local validate_budget="${NAMING_MAX_LENGTH:-46}"
+		local available=$((validate_budget - literal_total - fixed_total))
 		local minimum=$((flex_count * 3))
 		if [ "$available" -lt "$minimum" ]; then
-			log error "❌ Naming pattern '$pattern' consumes most of the $budget-character naming budget in fixed text, leaving nothing for the slugs"
+			log error "❌ Naming pattern '$pattern' consumes most of the $validate_budget-character naming budget in fixed text, leaving nothing for the slugs"
 			log error "💡 Possible causes:"
 			log error "   - The pattern's literals and fixed ids leave fewer than 3 characters per slug placeholder"
 			log error "🔧 How to fix:"
@@ -188,37 +202,6 @@ np_naming_validate_pattern() {
 			return 1
 		fi
 	fi
-}
-
-np_name_render() {
-	local budget="$1" pattern="$2"
-	local rest="$pattern" literal path value
-	local overhead=0
-	local -a flex=() order=() literals=()
-
-	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
-		literal="${BASH_REMATCH[1]}"
-		path="${BASH_REMATCH[2]}"
-		rest="${BASH_REMATCH[3]}"
-		overhead=$((overhead + ${#literal}))
-		literals+=("$literal")
-		value="$(np_naming_resolve_path "$path")"
-		if [ -z "$value" ]; then
-			log error "❌ Naming path {$path} resolves to an empty value"
-			log error "🔧 How to fix:"
-			log error "   • Ensure this field is present in the context, or remove {$path} from the pattern"
-			return 1
-		fi
-		if [[ "$value" =~ ^[0-9]+$ ]]; then
-			overhead=$((overhead + ${#value}))
-			order+=("FIXED:$value")
-		else
-			flex+=("$value")
-			order+=("FLEX")
-		fi
-	done
-	overhead=$((overhead + ${#rest}))
-	literals+=("$rest")
 
 	local segs
 	segs="$(np_trim_segments "$budget" "$overhead" "${flex[@]}")" || return 1
@@ -241,6 +224,11 @@ np_name_render() {
 	out="$out${literals[$literal_i]}"
 
 	echo "$out"
+}
+
+np_naming_validate_pattern() {
+	local pattern="$1" required="$2"
+	np_name_render "${NAMING_MAX_LENGTH:-46}" "$pattern" "$required" > /dev/null
 }
 
 np_naming_strategy() {
@@ -379,10 +367,8 @@ np_naming_roles_patterned() {
 			--default "$NP_NAMING_SCOPE_PATTERN_DEFAULT")"
 	fi
 
-	np_naming_validate_pattern "$scope_pattern" "scope.id" || return 1
-
 	local base_s base_d=""
-	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern")" || return 1
+	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern" "scope.id")" || return 1
 
 	local existing discover_status
 	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$base_s")"
@@ -434,8 +420,7 @@ np_naming_roles_patterned() {
 	fi
 
 	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
-		np_naming_validate_pattern "$deployment_pattern" "deployment.id" || return 1
-		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern")" || return 1
+		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern" "deployment.id")" || return 1
 	fi
 
 	np_naming_emit \
