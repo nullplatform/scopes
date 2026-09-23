@@ -69,69 +69,100 @@ np_trim_segments() {
 	done
 }
 
-np_trim_name() {
-	local budget="$1" overhead="$2"; shift 2
-	local segs
-	segs="$(np_trim_segments "$budget" "$overhead" "$@")" || return 1
+NP_NAMING_PATH_PATTERN='^\.[A-Za-z0-9_]+(\.[A-Za-z0-9_]+|\["[A-Za-z0-9_-]+"\])*$'
 
-	local -a trimmed=()
-	local line
-	while IFS= read -r line; do
-		trimmed+=("$line")
-	done <<< "$segs"
-
-	local IFS=-
-	echo "${trimmed[*]}"
+np_naming_resolve_path() {
+	echo "$CONTEXT" | jq -r "$1 // \"\""
 }
 
-NP_NAME_PLACEHOLDERS="application scope namespace account deployment_id scope_id application_id namespace_id"
-NP_NAME_FIXED_PLACEHOLDERS="deployment_id scope_id application_id namespace_id"
+np_name_render() {
+	local budget="$1" pattern="$2" required="${3:-}"
+	local rest="$pattern" literal path value
+	local first_path="" first_literal="" first_value=""
+	local literal_total=0 fixed_total=0 flex_count=0 seen_placeholder=false
+	local overhead=0
+	local -a flex=() order=() literals=()
 
-np_name_value() {
-	local upper
-	upper="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
-	eval "echo \"\${NP_NAME_${upper}:-}\""
-}
+	if [ -n "$required" ]; then
+		case "$pattern" in
+			*"{.$required}"*) : ;;
+			*)
+				log error "❌ Naming pattern '$pattern' does not contain {.$required}"
+				log error "💡 Possible causes:"
+				log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
+				log error "🔧 How to fix:"
+				log error "   • Add {.$required} to the pattern"
+				return 1
+				;;
+		esac
+	fi
 
-np_name_is_fixed() {
-	case " $NP_NAME_FIXED_PLACEHOLDERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
-}
-
-np_name_is_known() {
-	case " $NP_NAME_PLACEHOLDERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac
-}
-
-np_naming_validate_pattern() {
-	local pattern="$1" required="$2"
-	local rest="$pattern" placeholder first_placeholder="" first_literal=""
-
-	case "$pattern" in
-		*"{$required}"*) : ;;
-		*)
-			log error "❌ Naming pattern '$pattern' does not contain {$required}"
-			log error "💡 Possible causes:"
-			log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
-			log error "🔧 How to fix:"
-			log error "   • Add {$required} to the pattern"
-			return 1
-			;;
-	esac
-
-	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
-		if [ -z "$first_placeholder" ]; then first_literal="${BASH_REMATCH[1]}"; fi
-		placeholder="${BASH_REMATCH[2]}"
+	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
+		literal="${BASH_REMATCH[1]}"
+		path="${BASH_REMATCH[2]}"
 		rest="${BASH_REMATCH[3]}"
-		if ! np_name_is_known "$placeholder"; then
-			log error "❌ Unknown naming placeholder {$placeholder}"
+		if [ -z "$first_path" ]; then first_literal="$literal"; fi
+
+		if $seen_placeholder; then
+			if [ "$literal" != "-" ]; then
+				log error "❌ Naming pattern '$pattern' uses '$literal' between placeholders"
+				log error "🔧 How to fix:"
+				log error "   • Separate placeholders with a single hyphen"
+				return 1
+			fi
+		elif [[ -n "$literal" && ! "$literal" =~ ^[a-z0-9-]+$ ]]; then
+			log error "❌ Naming pattern '$pattern' has an invalid leading literal '$literal'"
 			log error "🔧 How to fix:"
-			log error "   • Valid placeholders: {application} {scope} {namespace} {account} {deployment_id} {scope_id} {application_id} {namespace_id}"
+			log error "   • Use only lowercase letters, digits and hyphens before the first placeholder"
 			return 1
 		fi
-		if [ -z "$first_placeholder" ]; then first_placeholder="$placeholder"; fi
+
+		if ! [[ "$path" =~ $NP_NAMING_PATH_PATTERN ]]; then
+			log error "❌ Naming pattern '$pattern' has an unsafe path {$path}"
+			log error "🔧 How to fix:"
+			log error "   • Use dotted field access, e.g. {.scope.capabilities.main_http_port}"
+			return 1
+		fi
+
+		overhead=$((overhead + ${#literal}))
+		literals+=("$literal")
+
+		value="$(np_naming_resolve_path "$path")"
+		if [ -z "$value" ]; then
+			log error "❌ Naming path {$path} resolves to an empty value"
+			log error "🔧 How to fix:"
+			log error "   • Ensure this field is present in the context, or remove {$path} from the pattern"
+			return 1
+		fi
+
+		if [ -z "$first_path" ]; then first_path="$path"; first_value="$value"; fi
+
+		literal_total=$((literal_total + ${#literal}))
+		if [[ "$value" =~ ^[0-9]+$ ]]; then
+			fixed_total=$((fixed_total + ${#value}))
+			overhead=$((overhead + ${#value}))
+			order+=("FIXED:$value")
+		else
+			flex_count=$((flex_count + 1))
+			flex+=("$value")
+			order+=("FLEX")
+		fi
+
+		seen_placeholder=true
 	done
+	overhead=$((overhead + ${#rest}))
+	literal_total=$((literal_total + ${#rest}))
+	literals+=("$rest")
+
+	if [[ -n "$rest" && ! "$rest" =~ ^[a-z0-9-]+$ ]]; then
+		log error "❌ Naming pattern '$pattern' has an invalid trailing literal '$rest'"
+		log error "🔧 How to fix:"
+		log error "   • Use only lowercase letters, digits and hyphens after the last placeholder"
+		return 1
+	fi
 
 	local head="$first_literal"
-	if [ -z "$head" ]; then head="$(np_name_value "$first_placeholder")"; fi
+	if [ -z "$head" ]; then head="$first_value"; fi
 
 	case "$head" in
 		[a-z]*) : ;;
@@ -142,35 +173,20 @@ np_naming_validate_pattern() {
 			return 1
 			;;
 	esac
-}
 
-np_name_render() {
-	local budget="$1" pattern="$2"
-	local rest="$pattern" literal placeholder value
-	local overhead=0
-	local -a flex=() order=()
-
-	while [[ "$rest" =~ ^([^{]*)\{([a-z_]+)\}(.*)$ ]]; do
-		literal="${BASH_REMATCH[1]}"
-		placeholder="${BASH_REMATCH[2]}"
-		rest="${BASH_REMATCH[3]}"
-		overhead=$((overhead + ${#literal}))
-		value="$(np_name_value "$placeholder")"
-		if np_name_is_fixed "$placeholder"; then
-			overhead=$((overhead + ${#value}))
-			order+=("FIXED:$value")
-		else
-			if [ -z "$value" ]; then
-				log error "❌ Naming placeholder {$placeholder} resolves to an empty value"
-				log error "🔧 How to fix:"
-				log error "   • Ensure this entity has a slug in this context, or remove {$placeholder} from the pattern"
-				return 1
-			fi
-			flex+=("$value")
-			order+=("FLEX")
+	if [ "$flex_count" -gt 0 ]; then
+		local validate_budget="${NAMING_MAX_LENGTH:-46}"
+		local available=$((validate_budget - literal_total - fixed_total))
+		local minimum=$((flex_count * 3))
+		if [ "$available" -lt "$minimum" ]; then
+			log error "❌ Naming pattern '$pattern' consumes most of the $validate_budget-character naming budget in fixed text, leaving nothing for the slugs"
+			log error "💡 Possible causes:"
+			log error "   - The pattern's literals and fixed ids leave fewer than 3 characters per slug placeholder"
+			log error "🔧 How to fix:"
+			log error "   • Shorten the pattern's literals or increase the naming budget"
+			return 1
 		fi
-	done
-	overhead=$((overhead + ${#rest}))
+	fi
 
 	local segs
 	segs="$(np_trim_segments "$budget" "$overhead" "${flex[@]}")" || return 1
@@ -181,16 +197,23 @@ np_name_render() {
 		trimmed_flex+=("$line")
 	done <<< "$segs"
 
-	local out="" item flex_i=0
+	local out="" item flex_i=0 literal_i=0
 	for item in "${order[@]}"; do
-		if [ -n "$out" ]; then out="$out-"; fi
+		out="$out${literals[$literal_i]}"
+		literal_i=$((literal_i + 1))
 		case "$item" in
 			FIXED:*) out="$out${item#FIXED:}" ;;
 			FLEX)    out="$out${trimmed_flex[$flex_i]}"; flex_i=$((flex_i + 1)) ;;
 		esac
 	done
+	out="$out${literals[$literal_i]}"
 
 	echo "$out"
+}
+
+np_naming_validate_pattern() {
+	local pattern="$1" required="$2"
+	np_name_render "${NAMING_MAX_LENGTH:-46}" "$pattern" "$required" > /dev/null
 }
 
 np_naming_strategy() {
@@ -257,30 +280,33 @@ np_naming_roles_ids() {
 	dns_app="${dns_app%-}"
 	dns_scope="${dns_scope%-}"
 
-	np_naming_emit \
-		"$base_d" \
-		"${base_d:+hpa-$base_d}" \
-		"${base_d:+pdb-$base_d}" \
-		"${d:+s-$s-d-$d}" \
-		"${d:+s-$s-d-$d-files}" \
-		"${d:+job-$s-$d}" \
-		"$scope_base-$visibility" \
-		"k8s-$dns_app-$dns_scope-$s-dns" \
-		"d-$s" \
-		"$scope_base" \
-		"${blue:+d-$s-$blue}" \
-		"ids" "$visibility"
+	np_naming_emit "$(jq -n \
+		--arg deployment "$base_d" \
+		--arg hpa "${base_d:+hpa-$base_d}" \
+		--arg pdb "${base_d:+pdb-$base_d}" \
+		--arg secret "${d:+s-$s-d-$d}" \
+		--arg secret_files "${d:+s-$s-d-$d-files}" \
+		--arg cronjob "${d:+job-$s-$d}" \
+		--arg ingress "$scope_base-$visibility" \
+		--arg dns "k8s-$dns_app-$dns_scope-$s-dns" \
+		--arg cert "d-$s" \
+		--arg ingress_base "$scope_base" \
+		--arg blue "${blue:+d-$s-$blue}" \
+		--arg strategy "ids" \
+		--arg visibility "$visibility" \
+		'{deployment:$deployment, hpa:$hpa, pdb:$pdb, secret:$secret, secret_files:$secret_files,
+		  cronjob:$cronjob, ingress:$ingress, dns:$dns, cert:$cert, ingress_base:$ingress_base,
+		  blue:$blue, strategy:$strategy, visibility:$visibility}')"
 }
 
 np_naming_emit() {
-	local deployment="$1" hpa="$2" pdb="$3" secret="$4" secret_files="$5" \
-	      cronjob="$6" ingress="$7" dns="$8" cert="$9" ingress_base="${10}" \
-	      blue="${11}" strategy="${12}" visibility="${13}"
+	local fields="$1"
 
 	local ports
 	ports="$(echo "$CONTEXT" | jq -c \
-		--arg base_d "$deployment" --arg scope_base "$ingress_base" \
-		--arg visibility "$visibility" --arg strategy "$strategy" --arg blue_d "$blue" '
+		--argjson f "$fields" '
+		($f.deployment) as $base_d | ($f.ingress_base) as $scope_base |
+		($f.visibility) as $visibility | ($f.strategy) as $strategy | ($f.blue) as $blue_d |
 		[ (.scope.capabilities.additional_ports // [])[]
 		  | . + {
 		      service_name: (if $base_d == "" then "" else
@@ -293,31 +319,223 @@ np_naming_emit() {
 		    } ]')"
 
 	jq -n \
-		--arg deployment "$deployment" --arg service "$deployment" \
-		--arg hpa "$hpa" --arg pdb "$pdb" --arg secret "$secret" \
-		--arg secret_files "$secret_files" --arg cronjob "$cronjob" \
-		--arg scope_ingress "$ingress" --arg scope_dns "$dns" --arg serving_cert "$cert" \
-		--arg blue "$blue" \
+		--argjson f "$fields" \
 		--argjson additional_ports "$ports" \
-		'{deployment: $deployment, service: $service, hpa: $hpa, pdb: $pdb,
-		  secret: $secret, secret_files: $secret_files, cronjob: $cronjob,
-		  scope_ingress: $scope_ingress, scope_dns: $scope_dns,
-		  serving_cert: $serving_cert,
-		  blue_deployment: $blue, blue_service: $blue,
+		'{deployment: $f.deployment, service: $f.deployment, hpa: $f.hpa, pdb: $f.pdb,
+		  secret: $f.secret, secret_files: $f.secret_files, cronjob: $f.cronjob,
+		  scope_ingress: $f.ingress, scope_dns: $f.dns,
+		  serving_cert: $f.cert,
+		  blue_deployment: $f.blue, blue_service: $f.blue,
 		  additional_ports: $additional_ports}'
 }
 
+NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT="{.application.slug}-{.scope.slug}-{.deployment.id}"
+NP_NAMING_SCOPE_PATTERN_DEFAULT="{.application.slug}-{.scope.slug}-{.scope.id}"
+NP_NAMING_SCOPE_BUDGET=52
+
 np_naming_roles_patterned() {
-	log error "❌ Naming strategy '$1' is not available yet"
-	return 1
+	local strategy="$1"
+	local deployment_pattern="$NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT"
+	local scope_pattern="$NP_NAMING_SCOPE_PATTERN_DEFAULT"
+
+	if [ "$strategy" = "custom" ]; then
+		deployment_pattern="$(get_config_value \
+			--provider '.providers["scope-configurations"].naming.deployment_pattern' \
+			--provider '.providers["container-orchestration"].naming.deployment_pattern' \
+			--env NAMING_DEPLOYMENT_PATTERN \
+			--default "$NP_NAMING_DEPLOYMENT_PATTERN_DEFAULT")"
+		scope_pattern="$(get_config_value \
+			--provider '.providers["scope-configurations"].naming.scope_pattern' \
+			--provider '.providers["container-orchestration"].naming.scope_pattern' \
+			--env NAMING_SCOPE_PATTERN \
+			--default "$NP_NAMING_SCOPE_PATTERN_DEFAULT")"
+	fi
+
+	local base_s base_d=""
+	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern" "scope.id")" || return 1
+
+	local existing discover_status
+	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$base_s")"
+	discover_status=$?
+
+	case "$discover_status" in
+		0)
+			log info "✅ Keeping the existing scope object name '$existing'" >&2
+			base_s="$existing"
+			;;
+		2) ;;
+		*)
+			log error "❌ Could not check the cluster for the scope's existing Kubernetes object name"
+			log error ""
+			log error "💡 Possible causes:"
+			log error "   - The cluster API server is unreachable"
+			log error "   - RBAC denies reading ingress/httproute in namespace '${K8S_NAMESPACE:-nullplatform}'"
+			log error "🔧 How to fix:"
+			log error "   • Verify cluster connectivity and RBAC for ingress/httproute"
+			log error "   • Retry once the API server is reachable"
+			return 1
+			;;
+	esac
+
+	local base_dns="$base_s-dns"
+	if [ "${DNS_TYPE:-}" = "external_dns" ]; then
+		local existing_dns dns_discover_status
+		existing_dns="$(np_naming_discover_dns "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
+		dns_discover_status=$?
+
+		case "$dns_discover_status" in
+			0)
+				log info "✅ Keeping the existing scope DNS object name '$existing_dns'" >&2
+				base_dns="$existing_dns"
+				;;
+			2) ;;
+			*)
+				log error "❌ Could not check the cluster for the scope's existing DNSEndpoint name"
+				log error ""
+				log error "💡 Possible causes:"
+				log error "   - The cluster API server is unreachable"
+				log error "   - RBAC denies reading dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
+				log error "🔧 How to fix:"
+				log error "   • Verify cluster connectivity and RBAC for dnsendpoint"
+				log error "   • Retry once the API server is reachable"
+				return 1
+				;;
+		esac
+	fi
+
+	if [ -n "$NP_NAME_DEPLOYMENT_ID" ]; then
+		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern" "deployment.id")" || return 1
+	fi
+
+	np_naming_emit "$(jq -n \
+		--arg deployment "$base_d" \
+		--arg hpa "${base_d:+hpa-$base_d}" \
+		--arg pdb "${base_d:+pdb-$base_d}" \
+		--arg secret "${base_d:+$base_d-env}" \
+		--arg secret_files "${base_d:+$base_d-files}" \
+		--arg cronjob "${base_d:+job-$base_d}" \
+		--arg ingress "$base_s" \
+		--arg dns "$base_dns" \
+		--arg cert "$base_s" \
+		--arg ingress_base "$base_s" \
+		--arg blue "" \
+		--arg strategy "$strategy" \
+		--arg visibility "" \
+		'{deployment:$deployment, hpa:$hpa, pdb:$pdb, secret:$secret, secret_files:$secret_files,
+		  cronjob:$cronjob, ingress:$ingress, dns:$dns, cert:$cert, ingress_base:$ingress_base,
+		  blue:$blue, strategy:$strategy, visibility:$visibility}')"
 }
 
 np_naming_lookup() {
-	local kind="$1" namespace="$2" deployment_id="$3" found
+	local kind="$1" namespace="$2" deployment_id="$3"
+	local found status
 	found="$(kubectl get "$kind" -n "$namespace" -l "deployment_id=$deployment_id" \
-		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-	if [ -z "$found" ]; then return 1; fi
+		-o jsonpath='{.items[0].metadata.name}' 2>&1)"
+	status=$?
+
+	if [ "$status" -ne 0 ]; then
+		case "$found" in
+			*"doesn't have a resource type"*) return 2 ;;
+			*) return 1 ;;
+		esac
+	fi
+
+	if [ -z "$found" ]; then
+		return 2
+	fi
+
 	echo "$found"
+}
+
+np_naming_list_by_label() {
+	local kind="$1" namespace="$2" label="$3"
+	local out status
+	out="$(kubectl get "$kind" -n "$namespace" -l "$label" -o jsonpath='{.items[*].metadata.name}' 2>&1)"
+	status=$?
+
+	if [ "$status" -ne 0 ]; then
+		case "$out" in
+			*"doesn't have a resource type"*) return 2 ;;
+			*) return 1 ;;
+		esac
+	fi
+
+	if [ -z "$out" ]; then
+		return 2
+	fi
+
+	echo "$out"
+}
+
+np_naming_pick_main() {
+	local names="$1" exclude="$2"
+	local name
+	for name in $names; do
+		case " $exclude " in
+			*" $name "*) ;;
+			*) echo "$name"; return 0 ;;
+		esac
+	done
+	return 2
+}
+
+np_naming_port_exclusions() {
+	local scope_id="$1" current_base="$2"
+	local visibility legacy_base
+	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
+	legacy_base="k-8-s-$NP_NAME_SCOPE-$scope_id"
+
+	echo "$CONTEXT" | jq -r \
+		--arg legacy "$legacy_base" --arg visibility "$visibility" --arg current "$current_base" '
+		(.scope.capabilities.additional_ports // [])[] |
+		(if .type == "HTTP" then "http" else "grpc" end) as $t |
+		"\($legacy)-\($t)-\(.port)-\($visibility)",
+		"\($current)-\($t)-\(.port)"
+	' | tr '\n' ' '
+}
+
+np_naming_discover_scope() {
+	local namespace="$1" scope_id="$2" current_base="$3"
+	local exclude names status
+
+	exclude="$(np_naming_port_exclusions "$scope_id" "$current_base")"
+
+	names="$(np_naming_list_by_label ingress "$namespace" "scope_id=$scope_id")"
+	status=$?
+	case "$status" in
+		0) np_naming_pick_main "$names" "$exclude" && return 0 ;;
+		1) return 1 ;;
+	esac
+
+	names="$(np_naming_list_by_label httproute "$namespace" "scope_id=$scope_id")"
+	status=$?
+	case "$status" in
+		0) np_naming_pick_main "$names" "$exclude" && return 0 ;;
+		1) return 1 ;;
+	esac
+
+	return 2
+}
+
+np_naming_discover_dns() {
+	local namespace="$1" scope_id="$2"
+	local out status
+	out="$(kubectl get dnsendpoint -n "$namespace" -l "scope_id=$scope_id" \
+		-o jsonpath='{.items[0].metadata.name}' 2>&1)"
+	status=$?
+
+	if [ "$status" -ne 0 ]; then
+		case "$out" in
+			*"doesn't have a resource type"*) return 2 ;;
+			*) return 1 ;;
+		esac
+	fi
+
+	if [ -z "$out" ]; then
+		return 2
+	fi
+
+	echo "$out"
 }
 
 np_naming_discover_blue() {
@@ -340,7 +558,38 @@ np_naming_discover_blue() {
 			service: ([$svc.items[] | select(.spec.ports[0].port == $main) | .metadata.name] | first // ""),
 			ports: ([$svc.items[]
 				| select(.spec.ports[0].port != $main)
-				| {key: ((.metadata.labels.port_type // "grpc") + "-" + (.spec.ports[0].port|tostring)),
+				| {key: (.spec.ports[0].port|tostring),
 				   value: .metadata.name}] | from_entries)
 		}'
+}
+
+np_naming_apply_to_context() {
+	export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
+	export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
+
+	ORIGINAL_CONTEXT="$CONTEXT"
+
+	CONTEXT=$(echo "$CONTEXT" | jq \
+		--arg deployment_id "$DEPLOYMENT_ID" \
+		'.deployment.id = $deployment_id')
+
+	RESOLVED_NAMES=$(np_naming_resolve) || return 1
+
+	CONTEXT=$(echo "$CONTEXT" | jq --argjson names "$RESOLVED_NAMES" '
+		.names.deployment = $names.deployment
+		| .names.service = $names.service
+		| .names.hpa = $names.hpa
+		| .names.pdb = $names.pdb
+		| .names.secret = $names.secret
+		| .names.secret_files = $names.secret_files
+		| .names.cronjob = $names.cronjob
+		| .scope.capabilities.additional_ports = (
+			(.scope.capabilities.additional_ports // []) as $old
+			| ($names.additional_ports // []) as $new
+			| [ $old[] as $o
+				| (($new[] | select(.port == $o.port and .type == $o.type) | .service_name) // $o.service_name) as $svc
+				| $o + {service_name: $svc}
+			]
+		)
+	')
 }

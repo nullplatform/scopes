@@ -1303,12 +1303,6 @@ EOF
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
 
-# =============================================================================
-# Blue discovery: names.blue_deployment / names.blue_service / per-port
-# blue_service_name are overwritten by np_naming_discover_blue when the
-# cluster is reachable, and left untouched otherwise.
-# =============================================================================
-
 @test "blue discovery: overwrites blue deployment and service names when found" {
   setup_full_build_context
   CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
@@ -1363,6 +1357,30 @@ EOF
   assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "true"
 }
 
+@test "blue discovery: finds an HTTP additional port's blue service, which carries no port_type label" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9015,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[
+        {"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}},
+        {"metadata":{"name":"http-blue-svc"},"spec":{"ports":[{"port":9015}]}}
+      ]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" "http-blue-svc"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["http-9015"]')" "true"
+}
+
 @test "blue discovery: per-port blue_service_name is untouched and the port is marked absent when not found" {
   setup_full_build_context
   set_additional_ports '[{"port":9014,"type":"GRPC"}]'
@@ -1378,10 +1396,13 @@ EOF
   }
   export -f kubectl
 
-  source "$SCRIPT"
+  local log_output
+  { source "$SCRIPT"; } > "$BATS_TEST_TMPDIR/blue_discovery.log"
+  log_output="$(cat "$BATS_TEST_TMPDIR/blue_discovery.log")"
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" ""
   assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "false"
+  assert_contains "$log_output" "🔍 No blue deployment service for additional port grpc-9014 — its traffic will route entirely to the green deployment"
 }
 
 @test "blue discovery: blue_additional_port_services is empty without an active blue deployment" {

@@ -1,9 +1,7 @@
 #!/bin/bash
 
 
-SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
-
-HTTPROUTE_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
+HTTPROUTE_NAME=$(echo "$CONTEXT" | jq -r '.names.scope_ingress')
 MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-120}
 CHECK_INTERVAL=${CHECK_INTERVAL:-10}
 elapsed=0

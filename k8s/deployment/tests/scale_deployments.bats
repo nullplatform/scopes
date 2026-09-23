@@ -50,6 +50,8 @@ setup() {
 
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
   export -f np_naming_lookup
+  source "$PROJECT_ROOT/k8s/scope/require_resource"
+  export -f require_resource
 
   # Mock wait_blue_deployment_active
   export NP_OUTPUT_DIR="$(mktemp -d)"
@@ -216,6 +218,67 @@ run_scale_deployments() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ Failed to scale blue deployment"
+}
+
+@test "scale_deployments: fails distinctly when the green deployment lookup itself fails" {
+  kubectl() {
+    local args="$*"
+    case "$args" in
+      "get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID -o jsonpath={.items[0].metadata.name}")
+        echo "Error from server (Forbidden): deployments.apps is forbidden"
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c "source '$PROJECT_ROOT/testing/assertions.sh'; \
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' \
+    DEPLOYMENT_ID='$DEPLOYMENT_ID' DEPLOY_STRATEGY='$DEPLOY_STRATEGY' CONTEXT='$CONTEXT'; \
+    source '$PROJECT_ROOT/k8s/deployment/scale_deployments'"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the deployment of deployment $DEPLOYMENT_ID"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading deployment in namespace '$K8S_NAMESPACE'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get deployment -n $K8S_NAMESPACE"
+}
+
+@test "scale_deployments: fails distinctly when the blue deployment lookup itself fails" {
+  kubectl() {
+    local args="$*"
+    case "$args" in
+      "get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID -o jsonpath={.items[0].metadata.name}")
+        echo "d-$SCOPE_ID-$DEPLOYMENT_ID"
+        ;;
+      "get deployment -n $K8S_NAMESPACE -l deployment_id=deploy-old -o jsonpath={.items[0].metadata.name}")
+        echo "Error from server (Forbidden): deployments.apps is forbidden"
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c "source '$PROJECT_ROOT/testing/assertions.sh'; \
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' \
+    DEPLOYMENT_ID='$DEPLOYMENT_ID' DEPLOY_STRATEGY='$DEPLOY_STRATEGY' CONTEXT='$CONTEXT'; \
+    source '$PROJECT_ROOT/k8s/deployment/scale_deployments'"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the deployment of deployment deploy-old"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading deployment in namespace '$K8S_NAMESPACE'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get deployment -n $K8S_NAMESPACE"
 }
 
 # =============================================================================
