@@ -10,14 +10,24 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-HPA_NAME=$(np_naming_lookup hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
+HPA_LOOKUP_STATUS=0
+HPA_NAME=$(np_naming_lookup hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || HPA_LOOKUP_STATUS=$?
+if [ "$HPA_LOOKUP_STATUS" -eq 2 ]; then
   log error "❌ No HPA found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
   log error "💡 Possible causes:"
   log error "   - Autoscaling is not configured for this deployment"
   log error "🔧 How to fix:"
   log error "   • Verify the HPA exists: kubectl get hpa -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
   exit 1
-}
+elif [ "$HPA_LOOKUP_STATUS" -ne 0 ]; then
+  log error "❌ Could not check the cluster for the HPA of deployment $DEPLOYMENT_ID"
+  log error "💡 Possible causes:"
+  log error "   - The cluster API server is unreachable"
+  log error "   - RBAC denies reading hpa in namespace '$K8S_NAMESPACE'"
+  log error "🔧 How to fix:"
+  log error "   • Verify cluster connectivity and RBAC: kubectl auth can-i get hpa -n $K8S_NAMESPACE"
+  exit 1
+fi
 
 CURRENT_CONFIG=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o json)
 CURRENT_MIN=$(echo "$CURRENT_CONFIG" | jq -r '.spec.minReplicas')
@@ -27,14 +37,24 @@ log debug "📋 Current HPA configuration:"
 log debug "   Min replicas: $CURRENT_MIN"
 log debug "   Max replicas: $CURRENT_MAX"
 
-DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
+DEPLOYMENT_LOOKUP_STATUS=0
+DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || DEPLOYMENT_LOOKUP_STATUS=$?
+if [ "$DEPLOYMENT_LOOKUP_STATUS" -eq 2 ]; then
   log error "❌ No deployment found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
   log error "💡 Possible causes:"
   log error "   - The deployment was not created yet or was deleted"
   log error "🔧 How to fix:"
   log error "   • Verify the deployment exists: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
   exit 1
-}
+elif [ "$DEPLOYMENT_LOOKUP_STATUS" -ne 0 ]; then
+  log error "❌ Could not check the cluster for the deployment of deployment $DEPLOYMENT_ID"
+  log error "💡 Possible causes:"
+  log error "   - The cluster API server is unreachable"
+  log error "   - RBAC denies reading deployment in namespace '$K8S_NAMESPACE'"
+  log error "🔧 How to fix:"
+  log error "   • Verify cluster connectivity and RBAC: kubectl auth can-i get deployment -n $K8S_NAMESPACE"
+  exit 1
+fi
 CURRENT_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
 
 log debug "📋 Current deployment replicas: $CURRENT_REPLICAS"

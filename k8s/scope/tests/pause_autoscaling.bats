@@ -60,6 +60,28 @@ teardown() {
   assert_contains "$output" "   • Verify the HPA exists: kubectl get hpa -n provider-namespace -l deployment_id=deploy-456"
 }
 
+@test "pause_autoscaling: fails distinctly when the HPA lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "Error from server (Forbidden): hpas.autoscaling is forbidden"
+        return 1
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the HPA of deployment deploy-456"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading hpa in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get hpa -n provider-namespace"
+}
+
 @test "pause_autoscaling: fails when deployment does not exist" {
   kubectl() {
     case "$*" in
@@ -84,6 +106,34 @@ teardown() {
   assert_contains "$output" "   - The deployment was not created yet or was deleted"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "   • Verify the deployment exists: kubectl get deployment -n provider-namespace -l deployment_id=deploy-456"
+}
+
+@test "pause_autoscaling: fails distinctly when the deployment lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o json")
+        echo '{"spec":{"minReplicas":3,"maxReplicas":15}}'
+        ;;
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "Error from server (Forbidden): deployments.apps is forbidden"
+        return 1
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the deployment of deployment deploy-456"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading deployment in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get deployment -n provider-namespace"
 }
 
 # =============================================================================

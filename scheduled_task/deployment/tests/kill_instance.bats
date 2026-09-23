@@ -271,6 +271,56 @@ teardown() {
   assert_contains "$output" "⚠️  Pod does not belong to expected scheduled task job-scope-123-deploy-456 (continuing anyway)"
 }
 
+@test "kill_instance: distinguishes a failed cronjob lookup from a real ownership mismatch" {
+  kubectl() {
+    case "$1" in
+      get)
+        case "$2" in
+          pod)
+            if [[ "$*" == *"-o jsonpath"* ]]; then
+              if [[ "$*" == *"phase"* ]]; then
+                echo "Running"
+              elif [[ "$*" == *"nodeName"* ]]; then
+                echo "node-1"
+              elif [[ "$*" == *"startTime"* ]]; then
+                echo "2024-01-01T00:00:00Z"
+              elif [[ "$*" == *"ownerReferences"* ]]; then
+                echo "job-scope-123-deploy-456-abc"
+              fi
+              return 0
+            fi
+            [[ -f "$KILL_STATE" ]] && return 1
+            return 0
+            ;;
+          cronjob)
+            if [[ "$*" == *"-l deployment_id="* ]]; then
+              echo "Error from server (Forbidden): cronjobs.batch is forbidden"
+              return 1
+            fi
+            return 0
+            ;;
+        esac
+        ;;
+      delete)
+        touch "$KILL_STATE"
+        return 0
+        ;;
+      wait)
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  Could not check the cluster for the cronjob of deployment deploy-456 (unreachable API server or RBAC denies reading cronjob in namespace 'test-namespace') — skipping ownership verification"
+  assert_contains "$output" "⚠️  Could not verify pod ownership"
+  [[ "$output" != *"Pod does not belong to expected scheduled task"* ]]
+}
+
 @test "kill_instance: targets the resolved CronJob name from a label lookup, not a constructed one" {
   kubectl() {
     case "$1" in

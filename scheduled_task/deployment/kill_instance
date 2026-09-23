@@ -81,10 +81,21 @@ POD_START_TIME=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath=
 
 log debug "📋 Pod: $INSTANCE_ID | Status: $POD_STATUS | Node: $POD_NODE | Started: $POD_START_TIME"
 
-CRONJOB_NAME="$(np_naming_lookup cronjob "$K8S_NAMESPACE" "$DEPLOYMENT_ID" 2>/dev/null)" || CRONJOB_NAME=""
+CRONJOB_LOOKUP_STATUS=0
+CRONJOB_NAME="$(np_naming_lookup cronjob "$K8S_NAMESPACE" "$DEPLOYMENT_ID")" || CRONJOB_LOOKUP_STATUS=$?
+CRONJOB_LOOKUP_FAILED=false
+if [ "$CRONJOB_LOOKUP_STATUS" -eq 1 ]; then
+    log warn "⚠️  Could not check the cluster for the cronjob of deployment $DEPLOYMENT_ID (unreachable API server or RBAC denies reading cronjob in namespace '$K8S_NAMESPACE') — skipping ownership verification"
+    CRONJOB_NAME=""
+    CRONJOB_LOOKUP_FAILED=true
+elif [ "$CRONJOB_LOOKUP_STATUS" -eq 2 ]; then
+    CRONJOB_NAME=""
+fi
 
 POD_JOB=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
-if [[ -n "$POD_JOB" ]]; then
+if [[ "$CRONJOB_LOOKUP_FAILED" == "true" ]]; then
+    log warn "⚠️  Could not verify pod ownership"
+elif [[ -n "$POD_JOB" ]]; then
     JOB_CRONJOB=$(kubectl get job "$POD_JOB" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
     log debug "📋 Pod ownership: Job=$POD_JOB -> CronJob=$JOB_CRONJOB"
 

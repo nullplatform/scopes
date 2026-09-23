@@ -60,6 +60,28 @@ teardown() {
   assert_contains "$output" "   • Verify the HPA exists: kubectl get hpa -n provider-namespace -l deployment_id=deploy-456"
 }
 
+@test "resume_autoscaling: fails distinctly when the HPA lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "Error from server (Forbidden): hpas.autoscaling is forbidden"
+        return 1
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../resume_autoscaling"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the HPA of deployment deploy-456"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading hpa in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get hpa -n provider-namespace"
+}
+
 # =============================================================================
 # HPA Already Active (idempotent)
 # =============================================================================

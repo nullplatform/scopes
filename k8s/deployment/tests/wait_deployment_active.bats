@@ -249,6 +249,28 @@ teardown() {
   assert_contains "$output" "   • Verify the deployment exists: kubectl get deployment -n test-namespace -l deployment_id=deploy-456"
 }
 
+@test "wait_deployment_active: fails distinctly when the deployment lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+        echo "Error from server (Forbidden): deployments.apps is forbidden"
+        return 1
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the deployment of deployment deploy-456"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading deployment in namespace 'test-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get deployment -n test-namespace"
+}
+
 # =============================================================================
 # Replica Status Display Tests
 # =============================================================================

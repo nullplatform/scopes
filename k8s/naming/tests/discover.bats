@@ -28,10 +28,24 @@ golden_name() {
 	assert_equal "$output" "hpa-d-123456-789012"
 }
 
-@test "np_naming_lookup: fails and stays silent when nothing matches" {
+@test "np_naming_lookup: not-found returns 2 and stays silent" {
 	kubectl() { [ "$1" = "get" ] && [ "$2" = "hpa" ] && echo ""; }
 	run np_naming_lookup hpa nullplatform 789012
-	[ "$status" -ne 0 ]
+	[ "$status" -eq 2 ]
+	assert_equal "$output" ""
+}
+
+@test "np_naming_lookup: an unregistered resource type is not-found, not a failure" {
+	kubectl() { echo "error: the server doesn't have a resource type \"$2\""; return 1; }
+	run np_naming_lookup hpa nullplatform 789012
+	[ "$status" -eq 2 ]
+	assert_equal "$output" ""
+}
+
+@test "np_naming_lookup: a failed lookup returns 1, distinct from not-found" {
+	kubectl() { echo "Error from server (Forbidden): ..."; return 1; }
+	run np_naming_lookup hpa nullplatform 789012
+	[ "$status" -eq 1 ]
 	assert_equal "$output" ""
 }
 
