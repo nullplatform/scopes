@@ -12,7 +12,7 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
-  export -f np_naming_lookup
+  export -f np_naming_lookup np_naming_list_by_label
 
   export K8S_NAMESPACE="test-namespace"
   export SCOPE_ID="scope-123"

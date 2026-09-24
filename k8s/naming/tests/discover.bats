@@ -29,7 +29,15 @@ golden_name() {
 }
 
 @test "np_naming_lookup: not-found returns 2 and stays silent" {
-	kubectl() { [ "$1" = "get" ] && [ "$2" = "hpa" ] && echo ""; }
+	kubectl() {
+		case "$*" in
+			*"items[0]"*)
+				echo 'error: error executing jsonpath "{.items[0].metadata.name}": array index out of bounds: index 0, length 0'
+				return 1
+				;;
+			*) echo "" ;;
+		esac
+	}
 	run np_naming_lookup hpa nullplatform 789012
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
@@ -239,7 +247,15 @@ golden_name() {
 }
 
 @test "np_naming_discover_dns: returns not-found when nothing matches" {
-	kubectl() { echo ""; }
+	kubectl() {
+		case "$*" in
+			*"items[0]"*)
+				echo 'error: error executing jsonpath "{.items[0].metadata.name}": array index out of bounds: index 0, length 0'
+				return 1
+				;;
+			*) echo "" ;;
+		esac
+	}
 	run np_naming_discover_dns nullplatform 123456
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""

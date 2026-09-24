@@ -38,7 +38,7 @@ setup() {
     local args="$*"
     KUBECTL_CALLS="$KUBECTL_CALLS|$args"
     case "$args" in
-      *"-l deployment_id="*"-o jsonpath={.items[0].metadata.name}")
+      *"-l deployment_id="*"-o jsonpath={.items[*].metadata.name}")
         local id="${args#*-l deployment_id=}"
         id="${id%% *}"
         echo "d-$SCOPE_ID-$id"
@@ -49,7 +49,7 @@ setup() {
   export -f kubectl
 
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
-  export -f np_naming_lookup
+  export -f np_naming_lookup np_naming_list_by_label
   source "$PROJECT_ROOT/k8s/scope/require_resource"
   export -f require_resource
 
@@ -168,7 +168,7 @@ run_scale_deployments() {
   kubectl() {
     local args="$*"
     case "$args" in
-      *"-l deployment_id="*"-o jsonpath={.items[0].metadata.name}")
+      *"-l deployment_id="*"-o jsonpath={.items[*].metadata.name}")
         local id="${args#*-l deployment_id=}"
         id="${id%% *}"
         echo "d-$SCOPE_ID-$id"
@@ -196,7 +196,7 @@ run_scale_deployments() {
   kubectl() {
     local args="$*"
     case "$args" in
-      *"-l deployment_id="*"-o jsonpath={.items[0].metadata.name}")
+      *"-l deployment_id="*"-o jsonpath={.items[*].metadata.name}")
         local id="${args#*-l deployment_id=}"
         id="${id%% *}"
         echo "d-$SCOPE_ID-$id"
@@ -224,7 +224,7 @@ run_scale_deployments() {
   kubectl() {
     local args="$*"
     case "$args" in
-      "get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID -o jsonpath={.items[*].metadata.name}")
         echo "Error from server (Forbidden): deployments.apps is forbidden"
         return 1
         ;;
@@ -253,10 +253,10 @@ run_scale_deployments() {
   kubectl() {
     local args="$*"
     case "$args" in
-      "get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID -o jsonpath={.items[*].metadata.name}")
         echo "d-$SCOPE_ID-$DEPLOYMENT_ID"
         ;;
-      "get deployment -n $K8S_NAMESPACE -l deployment_id=deploy-old -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n $K8S_NAMESPACE -l deployment_id=deploy-old -o jsonpath={.items[*].metadata.name}")
         echo "Error from server (Forbidden): deployments.apps is forbidden"
         return 1
         ;;

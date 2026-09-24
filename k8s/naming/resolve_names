@@ -460,23 +460,12 @@ np_naming_roles_patterned() {
 
 np_naming_lookup() {
 	local kind="$1" namespace="$2" deployment_id="$3"
-	local found status
-	found="$(kubectl get "$kind" -n "$namespace" -l "deployment_id=$deployment_id" \
-		-o jsonpath='{.items[0].metadata.name}' 2>&1)"
+	local names status
+	names="$(np_naming_list_by_label "$kind" "$namespace" "deployment_id=$deployment_id")"
 	status=$?
 
-	if [ "$status" -ne 0 ]; then
-		case "$found" in
-			*"doesn't have a resource type"*) return 2 ;;
-			*) return 1 ;;
-		esac
-	fi
-
-	if [ -z "$found" ]; then
-		return 2
-	fi
-
-	echo "$found"
+	[ "$status" -eq 0 ] && echo "${names%% *}"
+	return "$status"
 }
 
 np_naming_list_by_label() {
@@ -578,23 +567,12 @@ np_naming_discover_scope() {
 
 np_naming_discover_dns() {
 	local namespace="$1" scope_id="$2"
-	local out status
-	out="$(kubectl get dnsendpoint -n "$namespace" -l "scope_id=$scope_id" \
-		-o jsonpath='{.items[0].metadata.name}' 2>&1)"
+	local names status
+	names="$(np_naming_list_by_label dnsendpoint "$namespace" "scope_id=$scope_id")"
 	status=$?
 
-	if [ "$status" -ne 0 ]; then
-		case "$out" in
-			*"doesn't have a resource type"*) return 2 ;;
-			*) return 1 ;;
-		esac
-	fi
-
-	if [ -z "$out" ]; then
-		return 2
-	fi
-
-	echo "$out"
+	[ "$status" -eq 0 ] && echo "${names%% *}"
+	return "$status"
 }
 
 np_naming_discover_blue() {

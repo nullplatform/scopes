@@ -9,7 +9,7 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
-  export -f np_naming_lookup
+  export -f np_naming_lookup np_naming_list_by_label
   source "$PROJECT_ROOT/k8s/scope/require_resource"
   export -f require_resource
 
@@ -34,7 +34,7 @@ setup() {
   # Mock kubectl - deployment ready by default
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n test-namespace -o json")
@@ -131,7 +131,7 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n test-namespace -o json")
@@ -215,7 +215,7 @@ teardown() {
 @test "wait_deployment_active: fails when K8s deployment not found" {
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment"*"-o json"*)
@@ -234,7 +234,7 @@ teardown() {
 @test "wait_deployment_active: fails when no deployment matches the deployment id" {
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo ""
         ;;
     esac
@@ -254,7 +254,7 @@ teardown() {
 @test "wait_deployment_active: fails distinctly when the deployment lookup itself fails" {
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "Error from server (Forbidden): deployments.apps is forbidden"
         return 1
         ;;
@@ -363,7 +363,7 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment"*"-o json"*)
@@ -399,7 +399,7 @@ teardown() {
 @test "wait_deployment_active: collects and displays deployment events" {
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment"*"-o json"*)
@@ -542,7 +542,7 @@ teardown() {
 
     kubectl() {
       case \"\$*\" in
-        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}\")
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
           echo 'd-scope-123-deploy-456'
           ;;
         \"get deployment\"*\"-o json\"*)
@@ -591,7 +591,7 @@ teardown() {
 
     kubectl() {
       case \"\$*\" in
-        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}\")
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
           echo 'd-scope-123-deploy-456'
           ;;
         \"get deployment\"*\"-o json\"*)
@@ -650,7 +650,7 @@ teardown() {
 
     kubectl() {
       case \"\$*\" in
-        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}\")
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
           echo 'd-scope-123-deploy-456'
           ;;
         \"get deployment\"*\"-o json\"*)
@@ -698,7 +698,7 @@ teardown() {
 
     kubectl() {
       case \"\$*\" in
-        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}\")
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
           echo 'd-scope-123-deploy-456'
           ;;
         \"get deployment\"*\"-o json\"*)
@@ -751,7 +751,7 @@ teardown() {
 
     kubectl() {
       case \"\$*\" in
-        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}\")
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
           echo 'd-scope-123-deploy-456'
           ;;
         \"get deployment\"*\"-o json\"*)
@@ -798,7 +798,7 @@ teardown() {
   # to now() — prevents stale events from previous workflow retries leaking through.
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment"*"-o json"*)
@@ -849,7 +849,7 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment"*"-o json"*)
@@ -958,7 +958,7 @@ teardown() {
 @test "wait_deployment_active: a failed count report never fails the deployment" {
   kubectl() {
     case "$*" in
-      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
       "get deployment"*"-o json"*)
