@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - k8s scopes can name Kubernetes objects `checkout-api-production-789012` instead of `d-123456-789012`
 - k8s scopes can define their own object naming pattern with `naming.strategy: custom` and `naming.deployment_pattern`
 - A `custom` naming pattern missing its uniqueness id now gets it appended automatically instead of failing the deploy
+- Fix: manually triggering a scheduled task now reports an unreachable cluster or RBAC denial separately from a missing CronJob, instead of wrongly telling you to redeploy
 
 ## [1.17.0] - 2026-09-11
 - Fix: turning off the health check on a k8s, azure or azure-aro scope now removes the liveness, readiness and startup probes from every container of the pod
