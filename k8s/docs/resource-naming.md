@@ -66,11 +66,15 @@ The deployment budget defaults to 46 rather than Kubernetes' 63-character object
 
 Switching a scope's `NAMING_STRATEGY` (or editing a `custom` pattern) does not rename objects that already exist. Before computing a scope-scoped name, `np_naming_roles_patterned` looks for an existing Ingress or HTTPRoute carrying the scope's `scope_id` label (`np_naming_discover_scope`); if one is found, its name is kept as-is instead of being recomputed from the new pattern.
 
-This asymmetry is deliberate and only applies to scope-scoped names. Deployment-scoped names (Deployment, HPA, PDB, Secret, CronJob) are always computed fresh from the current strategy — a deployment already gets a new set of objects per deployment, so there is nothing to freeze.
+This asymmetry is deliberate and only applies to scope-scoped names. Deployment-scoped names (Deployment, Service, HPA, PDB, Secret, CronJob) for a *newly created* deployment are always computed fresh from the current strategy — a deployment already gets a new set of objects per deployment, so there is nothing to freeze there.
+
+The blue deployment during a rollback or during finalize's cleanup is the one exception: `np_naming_apply_to_context` (used by `build_blue_deployment` and `rollback_traffic`) discovers the blue's live object names by `deployment_id` label instead of recomputing them from whatever strategy is active now, falling back to the `ids` formula only when discovery finds nothing. Without this, a blue created under one strategy and rolled back to after a strategy change would route traffic to, or try to delete, an object that was never created.
 
 ## Known limitations
 
 scheduled_task's `cronjob.*` metrics (`execution_count`, `success_count`, `failure_count`, `cpu_usage`, `memory_usage`) match Prometheus series by parsing the scope id back out of the job/pod name with a `job-${SCOPE_ID}-.*` regex. Under `qualified` or `custom`, job and pod names carry the application and scope slugs instead of that fixed shape, so the regex stops matching and these metrics return no data.
+
+Freezing (both the scope's main object and its per-port objects) only checks two name generations: the hardcoded `ids` formula and the currently active pattern. Nothing persists a scope's naming history, so a scope that has moved through more than one strategy change (e.g. `ids` → `qualified` → `custom`) can still orphan a per-port object named under an intermediate generation — it matches neither the legacy formula nor the current one, so a fresh name gets computed and applied alongside the untouched, now-unreferenced original. Closing this properly needs persisted per-object name history, which this design deliberately does not keep.
 
 ## Implementation Map
 
