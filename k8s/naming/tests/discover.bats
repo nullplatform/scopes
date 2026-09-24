@@ -85,6 +85,13 @@ golden_name() {
 	assert_equal "$output" "d-123456-789011-http-9091"
 }
 
+@test "np_naming_discover_blue: the istio Service carries a deployment_id label like the plain one" {
+	local istio_deployment_id plain_deployment_id
+	istio_deployment_id="$(yq -N '.metadata.labels.deployment_id' "$GOLDEN_DIR/k8s-istio-service.yaml")"
+	plain_deployment_id="$(yq -N 'select(document_index == 0) | .metadata.labels.deployment_id' "$GOLDEN_DIR/k8s-service.yaml")"
+	assert_equal "$istio_deployment_id" "$plain_deployment_id"
+}
+
 @test "np_naming_discover_blue: returns empty fields when nothing matches" {
 	kubectl() { echo '{"items":[]}'; }
 	result="$(np_naming_discover_blue nullplatform 789011 8080)"
