@@ -287,6 +287,15 @@ golden_name() {
 	assert_equal "$output" "$qualified_name"
 }
 
+@test "qualified: keeps an existing per-port ingress name instead of renaming it" {
+	export NAMING_STRATEGY=qualified
+	local legacy_port_name="k-8-s-production-123456-grpc-9090-internet-facing"
+	kubectl() { [ "$2" = "ingress" ] && echo "$legacy_port_name"; return 0; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r '.additional_ports[0].ingress_name' <<< "$names"
+	assert_equal "$output" "$legacy_port_name"
+}
+
 @test "qualified: computes a scope ingress name when none exists" {
 	export NAMING_STRATEGY=qualified
 	kubectl() { echo ""; }

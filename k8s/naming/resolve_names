@@ -404,7 +404,8 @@ np_naming_roles_patterned() {
 		base_d="$(np_name_render "${NAMING_MAX_LENGTH:-46}" "$deployment_pattern" "deployment.id")" || return 1
 	fi
 
-	np_naming_emit "$(jq -n \
+	local emitted
+	emitted="$(np_naming_emit "$(jq -n \
 		--arg deployment "$base_d" \
 		--arg hpa "${base_d:+hpa-$base_d}" \
 		--arg pdb "${base_d:+pdb-$base_d}" \
@@ -420,7 +421,41 @@ np_naming_roles_patterned() {
 		--arg visibility "" \
 		'{deployment:$deployment, hpa:$hpa, pdb:$pdb, secret:$secret, secret_files:$secret_files,
 		  cronjob:$cronjob, ingress:$ingress, dns:$dns, cert:$cert, ingress_base:$ingress_base,
-		  blue:$blue, strategy:$strategy, visibility:$visibility}')"
+		  blue:$blue, strategy:$strategy, visibility:$visibility}')")"
+
+	local overrides="{}" port port_type key existing_port port_discover_status
+	while IFS=$'\t' read -r port port_type; do
+		[ -z "$port" ] && continue
+		existing_port="$(np_naming_discover_port "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$base_s" "$port_type" "$port")"
+		port_discover_status=$?
+		key="$(echo "$port_type" | tr '[:upper:]' '[:lower:]')-$port"
+
+		case "$port_discover_status" in
+			0)
+				log info "✅ Keeping the existing per-port ingress name '$existing_port'" >&2
+				overrides="$(echo "$overrides" | jq --arg key "$key" --arg name "$existing_port" '. + {($key): $name}')"
+				;;
+			2) ;;
+			*)
+				log error "❌ Could not check the cluster for the existing per-port Kubernetes object name"
+				log error ""
+				log error "💡 Possible causes:"
+				log error "   - The cluster API server is unreachable"
+				log error "   - RBAC denies reading ingress in namespace '${K8S_NAMESPACE:-nullplatform}'"
+				log error "🔧 How to fix:"
+				log error "   • Verify cluster connectivity and RBAC for ingress"
+				log error "   • Retry once the API server is reachable"
+				return 1
+				;;
+		esac
+	done < <(echo "$emitted" | jq -r '.additional_ports[]? | [(.port|tostring), .type] | @tsv')
+
+	echo "$emitted" | jq --argjson overrides "$overrides" '
+		.additional_ports |= map(
+			((.type | ascii_downcase) + "-" + (.port|tostring)) as $key
+			| if ($overrides[$key] // "") != "" then . + {ingress_name: $overrides[$key]} else . end
+		)
+	'
 }
 
 np_naming_lookup() {
@@ -489,6 +524,33 @@ np_naming_port_exclusions() {
 		"\($legacy)-\($t)-\(.port)-\($visibility)",
 		"\($current)-\($t)-\(.port)"
 	' | tr '\n' ' '
+}
+
+np_naming_discover_port() {
+	local namespace="$1" scope_id="$2" current_base="$3" port_type="$4" port="$5"
+	local visibility legacy_base t legacy_name current_name names status name
+
+	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
+	legacy_base="k-8-s-$NP_NAME_SCOPE-$scope_id"
+	if [ "$port_type" = "HTTP" ]; then t="http"; else t="grpc"; fi
+	legacy_name="$legacy_base-$t-$port-$visibility"
+	current_name="$current_base-$t-$port"
+
+	names="$(np_naming_list_by_label ingress "$namespace" "scope_id=$scope_id")"
+	status=$?
+	case "$status" in
+		0)
+			for name in $names; do
+				case "$name" in
+					"$legacy_name"|"$current_name") echo "$name"; return 0 ;;
+				esac
+			done
+			return 2
+			;;
+		1) return 1 ;;
+	esac
+
+	return 2
 }
 
 np_naming_discover_scope() {
