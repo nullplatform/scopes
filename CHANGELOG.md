@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - k8s scopes can now name Kubernetes objects after the application and scope slugs (`checkout-api-production-789012`) instead of numeric ids, via the container-orchestration provider's `naming.strategy`
 - k8s scopes can define their own object naming pattern with `naming.strategy: custom` and `naming.deployment_pattern`
+- A `custom` naming pattern missing its uniqueness id now gets it appended automatically instead of failing the deploy
 
 ## [1.17.0] - 2026-09-11
 - Fix: turning off the health check on a k8s, azure or azure-aro scope now removes the liveness, readiness and startup probes from every container of the pod

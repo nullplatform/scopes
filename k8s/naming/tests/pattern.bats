@@ -20,14 +20,46 @@ setup() {
 	[ "$status" -eq 0 ]
 }
 
-@test "np_naming_validate_pattern: rejects a pattern without its discriminant" {
+@test "np_naming_validate_pattern: accepts a pattern missing its discriminant by appending it" {
 	run np_naming_validate_pattern "{.application.slug}-{.scope.slug}" "deployment.id"
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "❌ Naming pattern '{.application.slug}-{.scope.slug}' does not contain {.deployment.id}"
-	assert_contains "$output" "💡 Possible causes:"
-	assert_contains "$output" "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
-	assert_contains "$output" "🔧 How to fix:"
-	assert_contains "$output" "   • Add {.deployment.id} to the pattern"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_name_render: appends the deployment discriminant when the pattern omits it" {
+	result="$(np_name_render 46 "{.application.slug}-{.scope.slug}" "deployment.id" 2>/dev/null)"
+	assert_equal "$result" "checkout-api-production-789012"
+}
+
+@test "np_name_render: appends the scope discriminant when the pattern omits it" {
+	result="$(np_name_render 52 "{.application.slug}-{.scope.slug}" "scope.id" 2>/dev/null)"
+	assert_equal "$result" "checkout-api-production-123456"
+}
+
+@test "np_name_render: reports the appended discriminant on stderr" {
+	run np_name_render 46 "{.application.slug}-{.scope.slug}" "deployment.id"
+	assert_contains "$output" "⚠️  Naming pattern does not contain {.deployment.id}; appended it, effective pattern is '{.application.slug}-{.scope.slug}-{.deployment.id}'"
+}
+
+@test "np_name_render: leaves a pattern that already carries its discriminant unchanged" {
+	result="$(np_name_render 46 "{.application.slug}-{.deployment.id}-{.scope.slug}" "deployment.id" 2>/dev/null)"
+	assert_equal "$result" "checkout-api-789012-production"
+}
+
+@test "np_name_render: emits no warning when the discriminant is already present" {
+	run np_name_render 46 "{.application.slug}-{.deployment.id}-{.scope.slug}" "deployment.id"
+	[ "$status" -eq 0 ]
+	case "$output" in
+		*"appended it"*) false ;;
+		*) true ;;
+	esac
+}
+
+@test "np_name_render: the appended discriminant survives trimming under budget" {
+	export CONTEXT="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-long.json")"
+	result="$(np_name_render 46 "{.application.slug}-{.scope.slug}" "deployment.id" 2>/dev/null)"
+	assert_equal "$result" "customer-notificati-production-canary-e-789012"
+	[ "${#result}" -le 46 ]
+	assert_contains "$result" "789012"
 }
 
 @test "np_naming_validate_pattern: rejects a pipe in the path" {
@@ -215,10 +247,22 @@ setup() {
 	assert_equal "$output" "payments-checkout-api-789012"
 }
 
-@test "custom: a pattern without the discriminant aborts" {
+@test "custom: a pattern without the discriminant renders instead of aborting" {
 	export NAMING_STRATEGY=custom
 	export CONTEXT="$(echo "$CONTEXT" | jq '.providers["scope-configurations"].naming.deployment_pattern = "{.application.slug}-{.scope.slug}"')"
-	run np_naming_resolve
-	[ "$status" -ne 0 ]
-	assert_contains "$output" "❌ Naming pattern '{.application.slug}-{.scope.slug}' does not contain {.deployment.id}"
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r .deployment <<< "$names"
+	assert_equal "$output" "checkout-api-production-789012"
+}
+
+@test "custom: appending the discriminant is reported on stderr while stdout stays valid JSON" {
+	export NAMING_STRATEGY=custom
+	export CONTEXT="$(echo "$CONTEXT" | jq '.providers["scope-configurations"].naming.deployment_pattern = "{.application.slug}-{.scope.slug}"')"
+	local err_file
+	err_file="$(mktemp)"
+	names="$(np_naming_resolve 2>"$err_file")"
+	assert_contains "$(cat "$err_file")" "⚠️  Naming pattern does not contain {.deployment.id}; appended it, effective pattern is '{.application.slug}-{.scope.slug}-{.deployment.id}'"
+	run jq empty <<< "$names"
+	[ "$status" -eq 0 ]
+	rm -f "$err_file"
 }
