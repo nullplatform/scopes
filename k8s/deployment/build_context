@@ -140,7 +140,9 @@ fi
 # imagePullSecrets are namespace-local: copy them when the scope deploys outside the
 # namespace that holds them (K8S_NAMESPACE_STRATEGY other than static)
 source "$SERVICE_PATH/utils/sync_image_pull_secrets"
-sync_image_pull_secrets "$IMAGE_PULL_SECRETS" "$K8S_NAMESPACE" || exit 1
+if [ "$SERVICE_ACTION" != "delete-deployment" ]; then
+  sync_image_pull_secrets "$IMAGE_PULL_SECRETS" "$K8S_NAMESPACE" || exit 1
+fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
 
