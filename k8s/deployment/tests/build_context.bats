@@ -1318,7 +1318,7 @@ EOF
     case "$1 $2" in
       "get namespace") return 0 ;;
       "get service")   return 1 ;;
-      "get secret")    echo '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"regcred","namespace":"registry-creds"},"data":{}}' ;;
+      "get secret")    echo '{"apiVersion":"v1","kind":"Secret","type":"kubernetes.io/dockerconfigjson","metadata":{"name":"regcred","namespace":"registry-creds"},"data":{}}' ;;
       "apply -n")      cat >/dev/null ;;
       *)               return 0 ;;
     esac
@@ -1345,7 +1345,7 @@ EOF
       "get deployment,serviceaccount,service -A"*) ;;
       "get namespace -l nullplatform=true,namespace_id=300"*) echo -n "test-namespace" ;;
       "get namespace test-namespace") return 0 ;;
-      "get secret regcred -n nullplatform -o json") echo '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"regcred","namespace":"nullplatform"},"data":{}}' ;;
+      "get secret regcred -n nullplatform -o json") echo '{"apiVersion":"v1","kind":"Secret","type":"kubernetes.io/dockerconfigjson","metadata":{"name":"regcred","namespace":"nullplatform"},"data":{}}' ;;
       "get secret "*) return 1 ;;
       "get service"*) return 1 ;;
       "apply -n "*) cat >/dev/null ;;

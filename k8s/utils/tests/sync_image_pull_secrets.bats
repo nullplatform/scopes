@@ -26,8 +26,8 @@ setup() {
         [[ " $MOCK_MISSING_SECRETS " == *" $name "* ]] && { echo "Error from server (NotFound)" >&2; return 1; }
         local config
         config=$(jq -cn --arg r "$MOCK_REGISTRY" '{auths: {($r): {auth: "dXNlcjpwYXNz"}}}' | base64 | tr -d '\n')
-        jq -n --arg name "$name" --arg ns "$namespace" --arg config "$config" '{
-          apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
+        jq -n --arg name "$name" --arg ns "$namespace" --arg config "$config" --arg type "${MOCK_SECRET_TYPE:-kubernetes.io/dockerconfigjson}" '{
+          apiVersion: "v1", kind: "Secret", type: $type,
           metadata: {
             name: $name, namespace: $ns, uid: "abc", resourceVersion: "42",
             creationTimestamp: "2026-01-01T00:00:00Z", managedFields: [{manager: "kubectl"}],
@@ -185,4 +185,23 @@ teardown() {
   assert_contains "$output" "   • The agent cannot create secrets in namespace 'payments'"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "   • Grant the agent create/patch on secrets cluster-wide, or set IMAGE_PULL_SECRETS_SYNC=false and sync them externally"
+}
+
+@test "sync_image_pull_secrets: skips secrets that are not image pull secrets" {
+  export MOCK_SECRET_TYPE="Opaque"
+
+  run sync_image_pull_secrets "$PULL_SECRETS_CONFIG" "payments"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  Secret 'regcred' in namespace 'nullplatform' is of type 'Opaque', not an image pull secret; skipping it"
+  assert_file_not_exists "$APPLIED_DIR/regcred.json"
+}
+
+@test "sync_image_pull_secrets: copies legacy dockercfg pull secrets" {
+  export MOCK_SECRET_TYPE="kubernetes.io/dockercfg"
+
+  run sync_image_pull_secrets "$PULL_SECRETS_CONFIG" "payments"
+
+  [ "$status" -eq 0 ]
+  assert_file_exists "$APPLIED_DIR/regcred.json"
 }
