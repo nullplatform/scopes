@@ -165,6 +165,58 @@ MOCK_SCRIPT
   export SERVICE_TEMPLATE="$SERVICE_PATH/deployment/templates/service.yaml.tpl"
   export PDB_TEMPLATE="$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
 
+  kubectl() { echo '{"items":[]}'; }
+  export -f kubectl
+
+  source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
+
+  rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/deployment-$SCOPE_ID-789011.yaml")"
+  assert_equal "$rendered_name" "d-123456-789011"
+}
+
+@test "build_blue_deployment: discovers the blue's real name after a strategy change, instead of recomputing it" {
+  local raw_context
+  raw_context="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
+
+  export NAMING_STRATEGY="qualified"
+
+  # The blue was created back when the strategy was "ids"; its live Deployment
+  # and Service are still named d-123456-789011, and carry no trace of
+  # "qualified". Scope-level discovery (ingress/httproute) finds nothing, which
+  # is irrelevant here since this test only asserts on the blue's own name.
+  kubectl() {
+    case "$1 $2" in
+      "get deployment") echo '{"items":[{"metadata":{"name":"d-123456-789011"}}]}' ;;
+      "get service")    echo '{"items":[{"metadata":{"name":"d-123456-789011"},"spec":{"ports":[{"port":8080}]}}]}' ;;
+      *)                echo "" ;;
+    esac
+  }
+  export -f kubectl
+
+  local resolved_names
+  resolved_names="$(CONTEXT="$raw_context" np_naming_resolve 2>/dev/null)"
+
+  export CONTEXT="$(echo "$raw_context" | jq \
+    --argjson names "$resolved_names" \
+    '. + {names: ($names | del(.additional_ports))}
+     | if ($names.additional_ports | length) > 0
+       then .scope.capabilities.additional_ports = $names.additional_ports
+       else . end
+     | .scope.current_active_deployment = "789011"')"
+
+  export SCOPE_ID="$(echo "$CONTEXT" | jq -r .scope.id)"
+  export DEPLOYMENT_ID="$(echo "$CONTEXT" | jq -r .deployment.id)"
+  export K8S_NAMESPACE="$(echo "$CONTEXT" | jq -r .k8s_namespace)"
+  export SERVICE_PATH="$PROJECT_ROOT/k8s"
+  export OUTPUT_DIR="$BATS_TEST_TMPDIR/output"
+  mkdir -p "$OUTPUT_DIR"
+  export DEPLOYMENT_TEMPLATE="$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
+  export SECRET_TEMPLATE="$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
+  export SECRET_FILES_TEMPLATE="$SERVICE_PATH/deployment/templates/secret-files.yaml.tpl"
+  export SCALING_TEMPLATE="$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
+  export SERVICE_TEMPLATE="$SERVICE_PATH/deployment/templates/service.yaml.tpl"
+  export PDB_TEMPLATE="$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
+
   source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
 
   rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/deployment-$SCOPE_ID-789011.yaml")"

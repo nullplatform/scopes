@@ -572,9 +572,24 @@ np_naming_apply_to_context() {
 
 	RESOLVED_NAMES=$(np_naming_resolve) || return 1
 
-	CONTEXT=$(echo "$CONTEXT" | jq --argjson names "$RESOLVED_NAMES" '
-		.names.deployment = $names.deployment
-		| .names.service = $names.service
+	local namespace main_port scope_id fallback discovered
+	namespace="$(echo "$CONTEXT" | jq -r '.k8s_namespace // "nullplatform"')"
+	main_port="$(echo "$CONTEXT" | jq -r '.main_http_port // 8080')"
+	scope_id="$(echo "$CONTEXT" | jq -r '.scope.id // ""')"
+
+	fallback=""
+	if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "null" ]; then
+		fallback="d-$scope_id-$DEPLOYMENT_ID"
+	fi
+
+	discovered="$(np_naming_discover_blue "$namespace" "$DEPLOYMENT_ID" "$main_port")"
+
+	CONTEXT=$(echo "$CONTEXT" | jq \
+		--argjson names "$RESOLVED_NAMES" \
+		--argjson discovered "$discovered" \
+		--arg fallback "$fallback" '
+		.names.deployment = (if $discovered.deployment != "" then $discovered.deployment else $fallback end)
+		| .names.service = (if $discovered.service != "" then $discovered.service else $fallback end)
 		| .names.hpa = $names.hpa
 		| .names.pdb = $names.pdb
 		| .names.secret = $names.secret
@@ -584,7 +599,10 @@ np_naming_apply_to_context() {
 			(.scope.capabilities.additional_ports // []) as $old
 			| ($names.additional_ports // []) as $new
 			| [ $old[] as $o
-				| (($new[] | select(.port == $o.port and .type == $o.type) | .service_name) // $o.service_name) as $svc
+				| ($o.port|tostring) as $port_key
+				| (if ($discovered.ports[$port_key] // "") != "" then $discovered.ports[$port_key]
+				   elif $fallback != "" then $fallback + "-" + (if $o.type == "HTTP" then "http" else "grpc" end) + "-" + $port_key
+				   else (($new[] | select(.port == $o.port and .type == $o.type) | .service_name) // $o.service_name) end) as $svc
 				| $o + {service_name: $svc}
 			]
 		)
