@@ -77,25 +77,22 @@ np_naming_resolve_path() {
 
 np_name_render() {
 	local budget="$1" pattern="$2" required="${3:-}"
-	local rest="$pattern" literal path value
-	local first_path="" first_literal="" first_value=""
-	local literal_total=0 fixed_total=0 flex_count=0 seen_placeholder=false
-	local overhead=0
-	local -a flex=() order=() literals=()
 
 	if [ -n "$required" ]; then
 		case "$pattern" in
 			*"{.$required}"*) : ;;
 			*)
-				log error "❌ Naming pattern '$pattern' does not contain {.$required}"
-				log error "💡 Possible causes:"
-				log error "   - Without a unique id, a new deployment overwrites the previous one and rollback is lost"
-				log error "🔧 How to fix:"
-				log error "   • Add {.$required} to the pattern"
-				return 1
+				pattern="$pattern-{.$required}"
+				log warn "⚠️  Naming pattern does not contain {.$required}; appended it, effective pattern is '$pattern'" >&2
 				;;
 		esac
 	fi
+
+	local rest="$pattern" literal path value
+	local first_path="" first_literal="" first_value=""
+	local literal_total=0 fixed_total=0 flex_count=0 seen_placeholder=false
+	local overhead=0
+	local -a flex=() order=() literals=()
 
 	while [[ "$rest" =~ ^([^{]*)\{([^}]*)\}(.*)$ ]]; do
 		literal="${BASH_REMATCH[1]}"

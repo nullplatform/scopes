@@ -39,7 +39,7 @@ naming.deployment_pattern: "{.namespace.slug}-{.application.slug}-{.deployment.i
 deployment:                  payments-checkout-api-789012
 ```
 
-A custom pattern must contain its discriminant in the canonical dotted form — `{.deployment.id}` for the deployment pattern, `{.scope.id}` for the scope pattern — without it, a new deployment would overwrite the previous one's objects. Placeholders must be separated by a single hyphen; any other literal between two placeholders is rejected, as is a pattern whose fixed literals and ids leave fewer than 3 characters for each remaining slug.
+A custom pattern should contain its discriminant in the canonical dotted form — `{.deployment.id}` for the deployment pattern, `{.scope.id}` for the scope pattern — since without a unique id, a new deployment would overwrite the previous one's objects. When the discriminant is present, anywhere in the pattern, it is rendered exactly as written. When it is absent, it is appended (`-{.deployment.id}` or `-{.scope.id}`) as a fixed segment that is never trimmed, and a line on stderr reports the append and the effective pattern used — this never fails silently. Placeholders must be separated by a single hyphen; any other literal between two placeholders is rejected, as is a pattern whose fixed literals and ids leave fewer than 3 characters for each remaining slug.
 
 Only dotted field access and bracketed quoted keys are accepted inside `{...}` — roughly `.foo.bar` or `.foo["bar-baz"]` — never arbitrary jq (no pipes, filters or variable bindings). The path is rejected before it is ever evaluated, since it is interpolated into a jq program.
 
