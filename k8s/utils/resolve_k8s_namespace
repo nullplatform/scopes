@@ -48,7 +48,14 @@ find_scope_namespace() {
   [ -z "$scope_id" ] && return 0
 
   namespaces=$(kubectl get deployment,serviceaccount,service -A -l "scope_id=$scope_id" \
-    -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null) || return 0
+    -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null) || namespaces=""
+
+  # The DNSEndpoint outlives delete-deployment. Queried on its own: a single kubectl call
+  # fails as a whole on clusters without the external-dns CRD.
+  if [ -z "$namespaces" ]; then
+    namespaces=$(kubectl get dnsendpoints.externaldns.k8s.io -A -l "scope_id=$scope_id" \
+      -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null) || return 0
+  fi
 
   echo "${namespaces%% *}"
 }

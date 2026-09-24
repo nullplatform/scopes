@@ -17,6 +17,8 @@ setup() {
   export MOCK_EXISTING_NAMESPACE=""
   export MOCK_EXISTING_NAMESPACE_OWNER=""
   export MOCK_DISCOVERY_FORBIDDEN=""
+  export MOCK_DNS_NAMESPACE=""
+  export MOCK_NO_DNS_CRD=""
 
   kubectl() {
     echo "kubectl $*" >> "$KUBECTL_CALLS"
@@ -24,6 +26,10 @@ setup() {
       "get deployment,serviceaccount,service -A -l scope_id="*)
         [ -n "$MOCK_DISCOVERY_FORBIDDEN" ] && { echo "Error from server (Forbidden)" >&2; return 1; }
         echo -n "$MOCK_SCOPE_NAMESPACE"
+        ;;
+      "get dnsendpoints.externaldns.k8s.io -A -l scope_id="*)
+        [ -n "$MOCK_NO_DNS_CRD" ] && { echo "error: the server doesn't have a resource type \"dnsendpoints\"" >&2; return 1; }
+        echo -n "$MOCK_DNS_NAMESPACE"
         ;;
       "get namespace -l nullplatform=true,namespace_id="*)
         echo -n "$MOCK_PINNED_NAMESPACE"
@@ -322,4 +328,33 @@ with_strategy_provider() {
 
   [ "$status" -eq 0 ]
   assert_equal "$output" "payments"
+}
+
+@test "find_scope_namespace: finds a scope whose only remaining resource is its DNSEndpoint" {
+  export MOCK_DNS_NAMESPACE="nullplatform"
+
+  run find_scope_namespace "7"
+
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "nullplatform"
+  assert_contains "$(cat "$KUBECTL_CALLS")" "kubectl get dnsendpoints.externaldns.k8s.io -A -l scope_id=7"
+}
+
+@test "find_scope_namespace: tolerates a cluster without the DNSEndpoint CRD" {
+  export MOCK_NO_DNS_CRD="true"
+
+  run find_scope_namespace "7"
+
+  [ "$status" -eq 0 ]
+  assert_empty "$output"
+}
+
+@test "resolve_k8s_namespace: a legacy scope keeps its namespace in delete-scope after delete-deployment" {
+  export K8S_NAMESPACE_STRATEGY="np_namespace"
+  export MOCK_DNS_NAMESPACE="nullplatform"
+
+  run resolve_k8s_namespace
+
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "nullplatform"
 }
