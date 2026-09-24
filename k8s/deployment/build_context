@@ -372,11 +372,16 @@ fi
 
 log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
 
+BLUE_NAME_FALLBACK=""
+if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
+  BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
+fi
+
 DISCOVERED_BLUE=$(np_naming_discover_blue "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" "$MAIN_HTTP_PORT")
 
-CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" '
-  .names.blue_deployment = (if $blue.deployment != "" then $blue.deployment else .names.blue_deployment end)
-  | .names.blue_service = (if $blue.service != "" then $blue.service else .names.blue_service end)
+CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" --arg fallback "$BLUE_NAME_FALLBACK" '
+  .names.blue_deployment = (if $blue.deployment != "" then $blue.deployment else $fallback end)
+  | .names.blue_service = (if $blue.service != "" then $blue.service else $fallback end)
   | if (.scope.capabilities.additional_ports | type) == "array" then
       .scope.capabilities.additional_ports |= map(
         (.port|tostring) as $port_key

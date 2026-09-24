@@ -1325,7 +1325,7 @@ EOF
 
 @test "blue discovery: leaves the formula's names intact when discovery finds nothing" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.blue_deployment_id = "789011" | .scope.current_active_deployment = "789011"')
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
 
   source "$SCRIPT"
 
