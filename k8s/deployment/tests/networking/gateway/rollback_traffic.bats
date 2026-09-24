@@ -15,7 +15,7 @@ setup() {
     np_naming_validate_pattern \
     np_naming_resolve_path np_name_render np_naming_strategy np_naming_resolve np_naming_roles_ids \
     np_naming_emit np_naming_roles_patterned np_naming_lookup np_naming_discover_blue \
-    np_naming_discover_scope np_naming_apply_to_context
+    np_naming_discover_scope np_naming_discover_secrets np_naming_apply_to_context
   unset NAMING_STRATEGY
 
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
@@ -37,6 +37,18 @@ setup() {
 
   # Create a mock template
   echo 'kind: Ingress' > "$TEMPLATE"
+
+  # np_naming_apply_to_context discovers the blue's live object names by
+  # label; without a mock these calls hit whatever kubectl is actually on
+  # PATH. Default to "not found" everywhere so every test falls back to the
+  # deterministic ids-formula name unless it sets up its own kubectl mock.
+  kubectl() {
+    case "$1 $2" in
+      "get deployment"|"get service") echo '{"items":[]}' ;;
+      *)                              echo "" ;;
+    esac
+  }
+  export -f kubectl
 
   # Mock gomplate
   gomplate() {

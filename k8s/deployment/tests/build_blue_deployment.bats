@@ -15,7 +15,7 @@ setup() {
     np_naming_validate_pattern \
     np_naming_resolve_path np_name_render np_naming_strategy np_naming_resolve np_naming_roles_ids \
     np_naming_emit np_naming_roles_patterned np_naming_lookup np_naming_discover_blue \
-    np_naming_discover_scope np_naming_apply_to_context
+    np_naming_discover_scope np_naming_discover_secrets np_naming_apply_to_context
   unset NAMING_STRATEGY
 
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
@@ -121,6 +121,14 @@ MOCK_SCRIPT
   # Set SERVICE_PATH to our mock directory
   export SERVICE_PATH="$mock_dir"
 
+  kubectl() {
+    case "$1 $2" in
+      "get deployment"|"get service") echo '{"items":[]}' ;;
+      *)                              echo "" ;;
+    esac
+  }
+  export -f kubectl
+
   # Run the actual build_blue_deployment script
   source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
 
@@ -165,13 +173,102 @@ MOCK_SCRIPT
   export SERVICE_TEMPLATE="$SERVICE_PATH/deployment/templates/service.yaml.tpl"
   export PDB_TEMPLATE="$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
 
-  kubectl() { echo '{"items":[]}'; }
+  kubectl() {
+    case "$1 $2" in
+      "get deployment"|"get service") echo '{"items":[]}' ;;
+      *)                              echo "" ;;
+    esac
+  }
   export -f kubectl
 
   source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
 
   rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/deployment-$SCOPE_ID-789011.yaml")"
   assert_equal "$rendered_name" "d-123456-789011"
+}
+
+# =============================================================================
+# Discovers the blue's hpa/pdb/secret/secret_files, not just deployment/service
+#
+# The blue was created under "ids" (hpa-d-123456-789011, pdb-d-123456-789011,
+# s-123456-d-789011, s-123456-d-789011-files); the strategy has since switched
+# to "qualified". np_naming_apply_to_context must discover each live object's
+# real name instead of recomputing it from the pattern now active, the same
+# way it already does for deployment and service.
+# =============================================================================
+setup_strategy_change_full() {
+  local raw_context
+  raw_context="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full.json")"
+
+  export NAMING_STRATEGY="qualified"
+
+  kubectl() {
+    case "$1 $2" in
+      "get deployment") echo '{"items":[{"metadata":{"name":"d-123456-789011"}}]}' ;;
+      "get service")    echo '{"items":[{"metadata":{"name":"d-123456-789011"},"spec":{"ports":[{"port":8080}]}}]}' ;;
+      "get hpa")        echo "hpa-d-123456-789011" ;;
+      "get pdb")        echo "pdb-d-123456-789011" ;;
+      "get secret")     echo "s-123456-d-789011 s-123456-d-789011-files" ;;
+      *)                echo "" ;;
+    esac
+  }
+  export -f kubectl
+
+  local resolved_names
+  resolved_names="$(CONTEXT="$raw_context" np_naming_resolve 2>/dev/null)"
+
+  export CONTEXT="$(echo "$raw_context" | jq \
+    --argjson names "$resolved_names" \
+    '. + {names: ($names | del(.additional_ports))}
+     | if ($names.additional_ports | length) > 0
+       then .scope.capabilities.additional_ports = $names.additional_ports
+       else . end
+     | .scope.current_active_deployment = "789011"')"
+
+  export SCOPE_ID="$(echo "$CONTEXT" | jq -r .scope.id)"
+  export DEPLOYMENT_ID="$(echo "$CONTEXT" | jq -r .deployment.id)"
+  export K8S_NAMESPACE="$(echo "$CONTEXT" | jq -r .k8s_namespace)"
+  export SERVICE_PATH="$PROJECT_ROOT/k8s"
+  export OUTPUT_DIR="$BATS_TEST_TMPDIR/output"
+  mkdir -p "$OUTPUT_DIR"
+  export DEPLOYMENT_TEMPLATE="$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
+  export SECRET_TEMPLATE="$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
+  export SECRET_FILES_TEMPLATE="$SERVICE_PATH/deployment/templates/secret-files.yaml.tpl"
+  export SCALING_TEMPLATE="$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
+  export SERVICE_TEMPLATE="$SERVICE_PATH/deployment/templates/service.yaml.tpl"
+  export PDB_TEMPLATE="$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
+}
+
+@test "build_blue_deployment: discovers the blue's hpa name after a strategy change" {
+  setup_strategy_change_full
+  source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
+
+  rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/scaling-$SCOPE_ID-789011.yaml")"
+  assert_equal "$rendered_name" "hpa-d-123456-789011"
+}
+
+@test "build_blue_deployment: discovers the blue's pdb name after a strategy change" {
+  setup_strategy_change_full
+  source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
+
+  rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/pdb-$SCOPE_ID-789011.yaml")"
+  assert_equal "$rendered_name" "pdb-d-123456-789011"
+}
+
+@test "build_blue_deployment: discovers the blue's secret name after a strategy change" {
+  setup_strategy_change_full
+  source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
+
+  rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/secret-$SCOPE_ID-789011.yaml")"
+  assert_equal "$rendered_name" "s-123456-d-789011"
+}
+
+@test "build_blue_deployment: discovers the blue's secret_files name after a strategy change" {
+  setup_strategy_change_full
+  source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
+
+  rendered_name="$(yq -N '.metadata.name' "$OUTPUT_DIR/secret-files-$SCOPE_ID-789011.yaml")"
+  assert_equal "$rendered_name" "s-123456-d-789011-files"
 }
 
 @test "build_blue_deployment: discovers the blue's real name after a strategy change, instead of recomputing it" {

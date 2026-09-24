@@ -622,6 +622,33 @@ np_naming_discover_blue() {
 		}'
 }
 
+np_naming_discover_secrets() {
+	local namespace="$1" blue_id="$2"
+
+	if [ -z "$blue_id" ] || [ "$blue_id" = "null" ]; then
+		jq -n '{secret: "", secret_files: ""}'
+		return 0
+	fi
+
+	local names status secret="" secret_files="" name
+	names="$(np_naming_list_by_label secret "$namespace" "deployment_id=$blue_id")"
+	status=$?
+
+	case "$status" in
+		0)
+			for name in $names; do
+				case "$name" in
+					*-files) secret_files="$name" ;;
+					*) secret="$name" ;;
+				esac
+			done
+			;;
+		1) return 1 ;;
+	esac
+
+	jq -n --arg secret "$secret" --arg secret_files "$secret_files" '{secret: $secret, secret_files: $secret_files}'
+}
+
 np_naming_apply_to_context() {
 	export NEW_DEPLOYMENT_ID=$DEPLOYMENT_ID
 	export DEPLOYMENT_ID=$(echo "$CONTEXT" | jq .scope.current_active_deployment -r)
@@ -640,23 +667,61 @@ np_naming_apply_to_context() {
 	scope_id="$(echo "$CONTEXT" | jq -r '.scope.id // ""')"
 
 	fallback=""
+	local hpa_fallback="" pdb_fallback="" secret_fallback="" secret_files_fallback="" cronjob_fallback=""
 	if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "null" ]; then
 		fallback="d-$scope_id-$DEPLOYMENT_ID"
+		hpa_fallback="hpa-$fallback"
+		pdb_fallback="pdb-$fallback"
+		secret_fallback="s-$scope_id-d-$DEPLOYMENT_ID"
+		secret_files_fallback="$secret_fallback-files"
+		cronjob_fallback="job-$scope_id-$DEPLOYMENT_ID"
 	fi
 
 	discovered="$(np_naming_discover_blue "$namespace" "$DEPLOYMENT_ID" "$main_port")"
 
+	local hpa_name="" pdb_name="" cronjob_name="" lookup_status
+	if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "null" ]; then
+		hpa_name="$(np_naming_lookup hpa "$namespace" "$DEPLOYMENT_ID")"; lookup_status=$?
+		if [ "$lookup_status" -eq 1 ]; then
+			log error "❌ Could not check the cluster for the existing hpa Kubernetes object name"
+			return 1
+		fi
+
+		pdb_name="$(np_naming_lookup pdb "$namespace" "$DEPLOYMENT_ID")"; lookup_status=$?
+		if [ "$lookup_status" -eq 1 ]; then
+			log error "❌ Could not check the cluster for the existing pdb Kubernetes object name"
+			return 1
+		fi
+
+		cronjob_name="$(np_naming_lookup cronjob "$namespace" "$DEPLOYMENT_ID")"; lookup_status=$?
+		if [ "$lookup_status" -eq 1 ]; then
+			log error "❌ Could not check the cluster for the existing cronjob Kubernetes object name"
+			return 1
+		fi
+	fi
+
+	local secrets
+	secrets="$(np_naming_discover_secrets "$namespace" "$DEPLOYMENT_ID")" || {
+		log error "❌ Could not check the cluster for the existing secret Kubernetes object names"
+		return 1
+	}
+
 	CONTEXT=$(echo "$CONTEXT" | jq \
 		--argjson names "$RESOLVED_NAMES" \
 		--argjson discovered "$discovered" \
-		--arg fallback "$fallback" '
+		--argjson secrets "$secrets" \
+		--arg fallback "$fallback" \
+		--arg hpa "$hpa_name" --arg hpa_fallback "$hpa_fallback" \
+		--arg pdb "$pdb_name" --arg pdb_fallback "$pdb_fallback" \
+		--arg cronjob "$cronjob_name" --arg cronjob_fallback "$cronjob_fallback" \
+		--arg secret_fallback "$secret_fallback" --arg secret_files_fallback "$secret_files_fallback" '
 		.names.deployment = (if $discovered.deployment != "" then $discovered.deployment else $fallback end)
 		| .names.service = (if $discovered.service != "" then $discovered.service else $fallback end)
-		| .names.hpa = $names.hpa
-		| .names.pdb = $names.pdb
-		| .names.secret = $names.secret
-		| .names.secret_files = $names.secret_files
-		| .names.cronjob = $names.cronjob
+		| .names.hpa = (if $hpa != "" then $hpa else $hpa_fallback end)
+		| .names.pdb = (if $pdb != "" then $pdb else $pdb_fallback end)
+		| .names.secret = (if $secrets.secret != "" then $secrets.secret else $secret_fallback end)
+		| .names.secret_files = (if $secrets.secret_files != "" then $secrets.secret_files else $secret_files_fallback end)
+		| .names.cronjob = (if $cronjob != "" then $cronjob else $cronjob_fallback end)
 		| .scope.capabilities.additional_ports = (
 			(.scope.capabilities.additional_ports // []) as $old
 			| ($names.additional_ports // []) as $new
