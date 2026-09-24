@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- k8s scopes can now name Kubernetes objects after the application and scope slugs (`checkout-api-production-789012`) instead of numeric ids, via the container-orchestration provider's `naming.strategy`
+- k8s scopes can name Kubernetes objects `checkout-api-production-789012` instead of `d-123456-789012`
 - k8s scopes can define their own object naming pattern with `naming.strategy: custom` and `naming.deployment_pattern`
 - A `custom` naming pattern missing its uniqueness id now gets it appended automatically instead of failing the deploy
 
