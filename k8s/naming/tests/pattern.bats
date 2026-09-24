@@ -36,8 +36,8 @@ setup() {
 }
 
 @test "np_name_render: reports the appended discriminant on stderr" {
-	run np_name_render 46 "{.application.slug}-{.scope.slug}" "deployment.id"
-	assert_contains "$output" "⚠️  Naming pattern does not contain {.deployment.id}; appended it, effective pattern is '{.application.slug}-{.scope.slug}-{.deployment.id}'"
+	warn_line="$(np_name_render 46 "{.application.slug}-{.scope.slug}" "deployment.id" 2>&1 1>/dev/null)"
+	assert_equal "$warn_line" "⚠️  Naming pattern does not contain {.deployment.id}; appended it, effective pattern is '{.application.slug}-{.scope.slug}-{.deployment.id}'"
 }
 
 @test "np_name_render: leaves a pattern that already carries its discriminant unchanged" {
@@ -258,10 +258,11 @@ setup() {
 @test "custom: appending the discriminant is reported on stderr while stdout stays valid JSON" {
 	export NAMING_STRATEGY=custom
 	export CONTEXT="$(echo "$CONTEXT" | jq '.providers["scope-configurations"].naming.deployment_pattern = "{.application.slug}-{.scope.slug}"')"
+	kubectl() { echo ""; }
 	local err_file
 	err_file="$(mktemp)"
 	names="$(np_naming_resolve 2>"$err_file")"
-	assert_contains "$(cat "$err_file")" "⚠️  Naming pattern does not contain {.deployment.id}; appended it, effective pattern is '{.application.slug}-{.scope.slug}-{.deployment.id}'"
+	assert_equal "$(cat "$err_file")" "⚠️  Naming pattern does not contain {.deployment.id}; appended it, effective pattern is '{.application.slug}-{.scope.slug}-{.deployment.id}'"
 	run jq empty <<< "$names"
 	[ "$status" -eq 0 ]
 	rm -f "$err_file"
