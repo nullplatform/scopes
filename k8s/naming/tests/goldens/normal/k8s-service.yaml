@@ -108,3 +108,58 @@ spec:
 
 
 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-123456-789012-http-8081
+  namespace: nullplatform
+  labels:
+    name: d-123456-789012-http-8081
+    app.kubernetes.io/part-of: payments-checkout-api
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: production
+    app.kubernetes.io/name: production
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+    deployment_id: "789012"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: d-123456-http-8081
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '10'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '2'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/success-codes: 200-299
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+spec:
+  ports:
+    - protocol: TCP
+      port: 8081
+      targetPort: 18081
+  selector:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+    deployment_id: "789012"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
+
+
+
