@@ -138,7 +138,7 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
 
     if [ "$K8S_NAMESPACE_STRATEGY" = "static" ]; then
       kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
-        kubectl label -f - nullplatform=true --dry-run=client -o yaml | \
+        kubectl label --local -f - nullplatform=true --dry-run=client -o yaml | \
         kubectl apply -f -
     elif ! create_owned_k8s_namespace "$K8S_NAMESPACE" "$NP_NAMESPACE_ID" "$NP_ACCOUNT_ID" \
         "$(echo "$CONTEXT" | jq -r '.namespace.slug')" 2>"$NAMESPACE_ERROR_FILE"; then
