@@ -35,7 +35,8 @@ get_config_value() {
   for jq_path in "${providers[@]}"; do
     if [ -n "$jq_path" ]; then
       local provider_value
-      provider_value=$(echo "$CONTEXT" | jq -r "$jq_path // empty")
+      # select, not `// empty`: jq's alternative operator also drops false
+      provider_value=$(echo "$CONTEXT" | jq -r "($jq_path) | select(. != null)")
       if [ -n "$provider_value" ] && [ "$provider_value" != "null" ]; then
         echo "$provider_value"
         return 0

@@ -20,6 +20,8 @@ Configuration variables follow a priority hierarchy:
 
 **Important Note**: The order of arguments in `get_config_value` does NOT affect priority. The function always respects the order: providers > env var > default, regardless of the order in which arguments are passed.
 
+A provider only falls through when its value is missing or `null`. A boolean `false` is a value: it wins over later providers, env vars and the default.
+
 ## Configuration Variables
 
 ### Cluster
