@@ -277,7 +277,8 @@ np_naming_roles_ids() {
 	dns_app="${dns_app%-}"
 	dns_scope="${dns_scope%-}"
 
-	np_naming_emit "$(jq -n \
+	local emitted
+	emitted="$(np_naming_emit "$(jq -n \
 		--arg deployment "$base_d" \
 		--arg hpa "${base_d:+hpa-$base_d}" \
 		--arg pdb "${base_d:+pdb-$base_d}" \
@@ -293,7 +294,57 @@ np_naming_roles_ids() {
 		--arg visibility "$visibility" \
 		'{deployment:$deployment, hpa:$hpa, pdb:$pdb, secret:$secret, secret_files:$secret_files,
 		  cronjob:$cronjob, ingress:$ingress, dns:$dns, cert:$cert, ingress_base:$ingress_base,
-		  blue:$blue, strategy:$strategy, visibility:$visibility}')"
+		  blue:$blue, strategy:$strategy, visibility:$visibility}')")"
+
+	emitted="$(np_naming_freeze_scope "$emitted" "$scope_base")" || return 1
+
+	np_naming_freeze_ports "$emitted"
+}
+
+np_naming_freeze_scope() {
+	local emitted="$1" scope_base="$2"
+	local namespace="${K8S_NAMESPACE:-nullplatform}"
+
+	local existing discover_status
+	existing="$(np_naming_discover_scope "$namespace" "$NP_NAME_SCOPE_ID")"
+	discover_status=$?
+
+	case "$discover_status" in
+		0)
+			case "$existing" in
+				"$scope_base"-*) ;;
+				*)
+					log info "✅ Keeping the existing scope object name '$existing'" >&2
+					emitted="$(echo "$emitted" | jq --arg name "$existing" '.scope_ingress = $name')"
+					;;
+			esac
+			;;
+		2) ;;
+		*)
+			np_naming_discover_error "the scope's existing Kubernetes object name" "ingress/httproute"
+			return 1
+			;;
+	esac
+
+	if [ "${DNS_TYPE:-}" = "external_dns" ]; then
+		local existing_dns dns_discover_status
+		existing_dns="$(np_naming_discover_dns "$namespace" "$NP_NAME_SCOPE_ID")"
+		dns_discover_status=$?
+
+		case "$dns_discover_status" in
+			0)
+				log info "✅ Keeping the existing scope DNS object name '$existing_dns'" >&2
+				emitted="$(echo "$emitted" | jq --arg name "$existing_dns" '.scope_dns = $name')"
+				;;
+			2) ;;
+			*)
+				np_naming_discover_error "the scope's existing DNSEndpoint name" "dnsendpoint"
+				return 1
+				;;
+		esac
+	fi
+
+	echo "$emitted"
 }
 
 np_naming_emit() {
@@ -352,7 +403,7 @@ np_naming_roles_patterned() {
 	base_s="$(np_name_render "$NP_NAMING_SCOPE_BUDGET" "$scope_pattern" "scope.id")" || return 1
 
 	local existing discover_status
-	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$base_s")"
+	existing="$(np_naming_discover_scope "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID")"
 	discover_status=$?
 
 	case "$discover_status" in
@@ -362,14 +413,7 @@ np_naming_roles_patterned() {
 			;;
 		2) ;;
 		*)
-			log error "❌ Could not check the cluster for the scope's existing Kubernetes object name"
-			log error ""
-			log error "💡 Possible causes:"
-			log error "   - The cluster API server is unreachable"
-			log error "   - RBAC denies reading ingress/httproute in namespace '${K8S_NAMESPACE:-nullplatform}'"
-			log error "🔧 How to fix:"
-			log error "   • Verify cluster connectivity and RBAC for ingress/httproute"
-			log error "   • Retry once the API server is reachable"
+			np_naming_discover_error "the scope's existing Kubernetes object name" "ingress/httproute"
 			return 1
 			;;
 	esac
@@ -387,14 +431,7 @@ np_naming_roles_patterned() {
 				;;
 			2) ;;
 			*)
-				log error "❌ Could not check the cluster for the scope's existing DNSEndpoint name"
-				log error ""
-				log error "💡 Possible causes:"
-				log error "   - The cluster API server is unreachable"
-				log error "   - RBAC denies reading dnsendpoint in namespace '${K8S_NAMESPACE:-nullplatform}'"
-				log error "🔧 How to fix:"
-				log error "   • Verify cluster connectivity and RBAC for dnsendpoint"
-				log error "   • Retry once the API server is reachable"
+				np_naming_discover_error "the scope's existing DNSEndpoint name" "dnsendpoint"
 				return 1
 				;;
 		esac
@@ -423,10 +460,29 @@ np_naming_roles_patterned() {
 		  cronjob:$cronjob, ingress:$ingress, dns:$dns, cert:$cert, ingress_base:$ingress_base,
 		  blue:$blue, strategy:$strategy, visibility:$visibility}')")"
 
+	np_naming_freeze_ports "$emitted"
+}
+
+np_naming_discover_error() {
+	local what="$1" kinds="$2"
+
+	log error "❌ Could not check the cluster for $what"
+	log error ""
+	log error "💡 Possible causes:"
+	log error "   - The cluster API server is unreachable"
+	log error "   - RBAC denies reading $kinds in namespace '${K8S_NAMESPACE:-nullplatform}'"
+	log error "🔧 How to fix:"
+	log error "   • Verify cluster connectivity and RBAC for $kinds"
+	log error "   • Retry once the API server is reachable"
+}
+
+np_naming_freeze_ports() {
+	local emitted="$1"
+
 	local overrides="{}" port port_type key existing_port port_discover_status
 	while IFS=$'\t' read -r port port_type; do
 		[ -z "$port" ] && continue
-		existing_port="$(np_naming_discover_port "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$base_s" "$port_type" "$port")"
+		existing_port="$(np_naming_discover_port "${K8S_NAMESPACE:-nullplatform}" "$NP_NAME_SCOPE_ID" "$port_type" "$port")"
 		port_discover_status=$?
 		key="$(echo "$port_type" | tr '[:upper:]' '[:lower:]')-$port"
 
@@ -437,14 +493,7 @@ np_naming_roles_patterned() {
 				;;
 			2) ;;
 			*)
-				log error "❌ Could not check the cluster for the existing per-port Kubernetes object name"
-				log error ""
-				log error "💡 Possible causes:"
-				log error "   - The cluster API server is unreachable"
-				log error "   - RBAC denies reading ingress in namespace '${K8S_NAMESPACE:-nullplatform}'"
-				log error "🔧 How to fix:"
-				log error "   • Verify cluster connectivity and RBAC for ingress"
-				log error "   • Retry once the API server is reachable"
+				np_naming_discover_error "the existing per-port Kubernetes object name" "ingress"
 				return 1
 				;;
 		esac
@@ -489,41 +538,46 @@ np_naming_list_by_label() {
 }
 
 np_naming_pick_main() {
-	local names="$1" exclude="$2"
+	local names="$1"
 	local name
 	for name in $names; do
-		case " $exclude " in
-			*" $name "*) ;;
-			*) echo "$name"; return 0 ;;
-		esac
+		if ! np_naming_is_port_name "$name"; then
+			echo "$name"
+			return 0
+		fi
 	done
 	return 2
 }
 
-np_naming_port_exclusions() {
-	local scope_id="$1" current_base="$2"
-	local visibility legacy_base
+np_naming_port_suffixes() {
+	local visibility
 	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
-	legacy_base="k-8-s-$NP_NAME_SCOPE-$scope_id"
 
-	echo "$CONTEXT" | jq -r \
-		--arg legacy "$legacy_base" --arg visibility "$visibility" --arg current "$current_base" '
+	echo "$CONTEXT" | jq -r --arg visibility "$visibility" '
 		(.scope.capabilities.additional_ports // [])[] |
 		(if .type == "HTTP" then "http" else "grpc" end) as $t |
-		"\($legacy)-\($t)-\(.port)-\($visibility)",
-		"\($current)-\($t)-\(.port)"
-	' | tr '\n' ' '
+		"-\($t)-\(.port)",
+		"-\($t)-\(.port)-\($visibility)"
+	'
+}
+
+np_naming_is_port_name() {
+	local name="$1" suffix
+	while IFS= read -r suffix; do
+		[ -z "$suffix" ] && continue
+		case "$name" in
+			*"$suffix") return 0 ;;
+		esac
+	done < <(np_naming_port_suffixes)
+	return 1
 }
 
 np_naming_discover_port() {
-	local namespace="$1" scope_id="$2" current_base="$3" port_type="$4" port="$5"
-	local visibility legacy_base t legacy_name current_name names status name
+	local namespace="$1" scope_id="$2" port_type="$3" port="$4"
+	local visibility t names status name
 
 	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
-	legacy_base="k-8-s-$NP_NAME_SCOPE-$scope_id"
 	if [ "$port_type" = "HTTP" ]; then t="http"; else t="grpc"; fi
-	legacy_name="$legacy_base-$t-$port-$visibility"
-	current_name="$current_base-$t-$port"
 
 	names="$(np_naming_list_by_label ingress "$namespace" "scope_id=$scope_id")"
 	status=$?
@@ -531,7 +585,7 @@ np_naming_discover_port() {
 		0)
 			for name in $names; do
 				case "$name" in
-					"$legacy_name"|"$current_name") echo "$name"; return 0 ;;
+					*"-$t-$port"|*"-$t-$port-$visibility") echo "$name"; return 0 ;;
 				esac
 			done
 			return 2
@@ -543,22 +597,20 @@ np_naming_discover_port() {
 }
 
 np_naming_discover_scope() {
-	local namespace="$1" scope_id="$2" current_base="$3"
-	local exclude names status
-
-	exclude="$(np_naming_port_exclusions "$scope_id" "$current_base")"
+	local namespace="$1" scope_id="$2"
+	local names status
 
 	names="$(np_naming_list_by_label ingress "$namespace" "scope_id=$scope_id")"
 	status=$?
 	case "$status" in
-		0) np_naming_pick_main "$names" "$exclude" && return 0 ;;
+		0) np_naming_pick_main "$names" && return 0 ;;
 		1) return 1 ;;
 	esac
 
 	names="$(np_naming_list_by_label httproute "$namespace" "scope_id=$scope_id")"
 	status=$?
 	case "$status" in
-		0) np_naming_pick_main "$names" "$exclude" && return 0 ;;
+		0) np_naming_pick_main "$names" && return 0 ;;
 		1) return 1 ;;
 	esac
 

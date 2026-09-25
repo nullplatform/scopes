@@ -12,9 +12,10 @@ setup() {
 	export KUBECTL_LOG="$BATS_TEST_TMPDIR/kubectl.log"
 	kubectl() {
 		echo "$*" >> "$KUBECTL_LOG"
-		if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then
-			return 0
-		fi
+		case "$1 $2" in
+			"get namespace") return 0 ;;
+			"get ingress"|"get httproute"|"get dnsendpoint") echo ""; return 0 ;;
+		esac
 		return 1
 	}
 	export -f kubectl

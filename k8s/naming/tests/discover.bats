@@ -129,14 +129,14 @@ golden_name() {
 @test "np_naming_discover_scope: keeps the legacy name when the live Ingress is blue-green shaped" {
 	local name; name="$(golden_name k8s-blue-green-ingress.yaml 0)"
 	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	assert_equal "$output" "$name"
 }
 
 @test "np_naming_discover_scope: keeps the legacy name when the live Ingress is initial shaped" {
 	local name; name="$(golden_name k8s-initial-ingress.yaml 0)"
 	kubectl() { [ "$2" = "ingress" ] && echo "$name"; }
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	assert_equal "$output" "$name"
 }
 
@@ -148,7 +148,7 @@ golden_name() {
 			httproute) echo "" ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
@@ -161,7 +161,7 @@ golden_name() {
 			httproute) echo "" ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
@@ -171,7 +171,7 @@ golden_name() {
 	main_name="$(golden_name k8s-blue-green-ingress.yaml 0)"
 	port_name="$(golden_name k8s-blue-green-ingress.yaml 1)"
 	kubectl() { [ "$2" = "ingress" ] && echo "$port_name $main_name"; }
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	assert_equal "$output" "$main_name"
 }
 
@@ -184,7 +184,7 @@ golden_name() {
 			httproute) echo "" ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456 "$current"
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
@@ -197,20 +197,20 @@ golden_name() {
 			httproute) echo "$name" ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	assert_equal "$output" "$name"
 }
 
 @test "np_naming_discover_scope: returns not-found when neither Ingress nor HTTPRoute exist" {
 	kubectl() { echo ""; }
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
 
 @test "np_naming_discover_scope: fails loudly when the Ingress lookup fails, instead of computing a fresh name" {
 	kubectl() { [ "$2" = "ingress" ] && { echo "Error from server (Forbidden): ..."; return 1; }; }
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 1 ]
 	assert_equal "$output" ""
 }
@@ -222,7 +222,7 @@ golden_name() {
 			httproute) echo "Error from server (Forbidden): ..."; return 1 ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 1 ]
 	assert_equal "$output" ""
 }
@@ -234,7 +234,7 @@ golden_name() {
 			httproute) echo "error: the server doesn't have a resource type \"httproute\""; return 1 ;;
 		esac
 	}
-	run np_naming_discover_scope nullplatform 123456 ""
+	run np_naming_discover_scope nullplatform 123456
 	[ "$status" -eq 2 ]
 	assert_equal "$output" ""
 }
@@ -310,6 +310,70 @@ golden_name() {
 	names="$(np_naming_resolve 2>/dev/null)"
 	run jq -r '.additional_ports[0].ingress_name' <<< "$names"
 	assert_equal "$output" "$legacy_port_name"
+}
+
+@test "ids: keeps a qualified-era scope ingress name when the strategy changes back to ids" {
+	export NAMING_STRATEGY=ids
+	local qualified_name="checkout-api-production-123456"
+	kubectl() { [ "$2" = "ingress" ] && echo "$qualified_name"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r .scope_ingress <<< "$names"
+	assert_equal "$output" "$qualified_name"
+}
+
+@test "ids: keeps a qualified-era per-port ingress name when the strategy changes back to ids" {
+	export NAMING_STRATEGY=ids
+	kubectl() { [ "$2" = "ingress" ] && echo "checkout-api-production-123456 checkout-api-production-123456-grpc-9090"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r '.additional_ports[0].ingress_name' <<< "$names"
+	assert_equal "$output" "checkout-api-production-123456-grpc-9090"
+}
+
+@test "ids: keeps a qualified-era DNSEndpoint name when the strategy changes back to ids" {
+	export NAMING_STRATEGY=ids
+	export DNS_TYPE=external_dns
+	kubectl() {
+		case "$2" in
+			dnsendpoint) echo "checkout-api-production-123456-dns" ;;
+			ingress) echo "checkout-api-production-123456" ;;
+		esac
+	}
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r .scope_dns <<< "$names"
+	assert_equal "$output" "checkout-api-production-123456-dns"
+}
+
+@test "ids: a visibility change still renames the scope ingress, as the ids formula dictates" {
+	export NAMING_STRATEGY=ids
+	kubectl() { [ "$2" = "ingress" ] && echo "k-8-s-production-123456-internal"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r .scope_ingress <<< "$names"
+	assert_equal "$output" "k-8-s-production-123456-internet-facing"
+}
+
+@test "ids: an ids-era name from another visibility does not freeze the per-port ingress either" {
+	export NAMING_STRATEGY=ids
+	kubectl() { [ "$2" = "ingress" ] && echo "k-8-s-production-123456-internal k-8-s-production-123456-grpc-9090-internal"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	run jq -r '.additional_ports[0].ingress_name' <<< "$names"
+	assert_equal "$output" "k-8-s-production-123456-grpc-9090-internet-facing"
+}
+
+@test "ids: computes the formula names when the cluster has no scope objects" {
+	export NAMING_STRATEGY=ids
+	kubectl() { echo ""; }
+	names="$(np_naming_resolve)"
+	assert_equal "$(jq -r .scope_ingress <<< "$names")" "k-8-s-production-123456-internet-facing"
+	assert_equal "$(jq -r '.additional_ports[0].ingress_name' <<< "$names")" "k-8-s-production-123456-grpc-9090-internet-facing"
+	assert_equal "$(jq -r .deployment <<< "$names")" "d-123456-789012"
+}
+
+@test "ids: a frozen ingress name does not freeze the deployment or the cert name" {
+	export NAMING_STRATEGY=ids
+	kubectl() { [ "$2" = "ingress" ] && echo "checkout-api-production-123456"; }
+	names="$(np_naming_resolve 2>/dev/null)"
+	assert_equal "$(jq -r .deployment <<< "$names")" "d-123456-789012"
+	assert_equal "$(jq -r .serving_cert <<< "$names")" "d-123456"
 }
 
 @test "qualified: computes a scope ingress name when none exists" {
