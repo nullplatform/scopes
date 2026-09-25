@@ -228,6 +228,15 @@ _render_context() {
     }
   },
   "deployment": {"id": "deploy-456"},
+  "names": {
+    "deployment": "d-scope-123-deploy-456",
+    "service": "d-scope-123-deploy-456",
+    "hpa": "hpa-d-scope-123-deploy-456",
+    "pdb": "pdb-d-scope-123-deploy-456",
+    "secret": "s-scope-123-d-deploy-456",
+    "secret_files": "s-scope-123-d-deploy-456-files",
+    "serving_cert": "d-scope-123"
+  },
   "k8s_namespace": "ns-test",
   "k8s_modifiers": {},
   "asset": {"url": "example.com/app:latest"},

@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.deployment }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}

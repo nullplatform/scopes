@@ -25,14 +25,19 @@ _context() {
     "capabilities": {
       "main_http_port": 8080,
       "additional_ports": [
-        {"port": 8081, "type": "HTTP", "traffic_manager_port": 18081},
-        {"port": 9012, "type": "GRPC", "traffic_manager_port": 19012}
+        {"port": 8081, "type": "HTTP", "traffic_manager_port": 18081, "service_name": "d-scope-123-deploy-456-http-8081", "blue_service_name": "d-scope-123-deploy-123-http-8081", "ingress_name": "k-8-s-scopeslug-scope-123-http-8081-internal"},
+        {"port": 9012, "type": "GRPC", "traffic_manager_port": 19012, "service_name": "d-scope-123-deploy-456-grpc-9012", "blue_service_name": "d-scope-123-deploy-123-grpc-9012", "ingress_name": "k-8-s-scopeslug-scope-123-grpc-9012-internal"}
       ]
     }
   },
   "deployment": {"id": "deploy-456", "strategy_data": {"desired_switched_traffic": 50}},
   "blue_deployment_id": "deploy-123",
   "blue_additional_port_services": {"http-8081": true, "grpc-9012": true},
+  "names": {
+    "deployment": "d-scope-123-deploy-456",
+    "scope_ingress": "k-8-s-scopeslug-scope-123-internal",
+    "blue_service": "d-scope-123-deploy-123"
+  },
   "k8s_namespace": "ns-test",
   "k8s_modifiers": {},
   "alb_name": "k8s-test-alb",

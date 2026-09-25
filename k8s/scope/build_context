@@ -241,6 +241,24 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson modifiers "$K8S_MODIFIERS" \
           '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain}')
 
+source "$SCRIPT_DIR/../naming/resolve_names"
+
+NAMING_MAX_LENGTH=$(get_config_value \
+  --env NAMING_MAX_LENGTH \
+  --provider '.providers["scope-configurations"].naming.max_length' \
+  --provider '.providers["container-orchestration"].naming.max_length' \
+  --default "46"
+)
+export NAMING_MAX_LENGTH
+
+RESOLVED_NAMES=$(np_naming_resolve) || exit 1
+
+CONTEXT=$(echo "$CONTEXT" | jq --argjson names "$RESOLVED_NAMES" '
+  . + {names: ($names | del(.additional_ports))}
+  | if ($names.additional_ports | length) > 0
+    then .scope.capabilities.additional_ports = $names.additional_ports
+    else . end')
+
 export CONTEXT
 export REGION
 export DOMAIN

@@ -1,7 +1,7 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: k-8-s-{{ .scope.slug }}-{{ .scope.id }}-{{ .ingress_visibility }}
+  name: {{ .names.scope_ingress }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"
@@ -57,7 +57,7 @@ spec:
     - backendRefs:
         - group: ""
           kind: Service
-          name: d-{{ .scope.id }}-{{ .deployment.id }}
+          name: {{ .names.deployment }}
           port: {{ .main_http_port }}
           weight: 1
       matches:
