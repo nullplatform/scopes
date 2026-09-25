@@ -17,7 +17,9 @@ PODS=$(kubectl get pods -n "$K8S_NAMESPACE" -l "$LABEL_SELECTOR" -o json)
 echo "$PODS" | jq --argjson limit "${LIMIT:-0}" '
 def application_entry($entries):
   ($entries // []) as $all
-  | (($all | map(select(.name == "application")) | first) // $all[0] // {});
+  | (first($all[] | select(.name == "application")) // $all[0] // {});
+def millicpu($value):
+  if $value then ($value | gsub("m$"; "") | tonumber / 1000) else 0 end;
 {
  results: (if $limit > 0 then .items[:$limit] else .items end) | map(
    application_entry(.spec.containers) as $app |
@@ -30,8 +32,8 @@ def application_entry($entries):
      ip: (.status.podIP // "pending"),
      dns: (if .status.podIP then "\(.status.podIP).\(.metadata.namespace).pod.cluster.local" else "pending" end),
      cpu: {
-       requested: (if $app.resources.requests.cpu then ($app.resources.requests.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end),
-       limit: (if $app.resources.limits.cpu then ($app.resources.limits.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end)
+       requested: millicpu($app.resources.requests.cpu),
+       limit: millicpu($app.resources.limits.cpu)
      },
      memory: {
        requested: ($app.resources.requests.memory // "0Mi"),
