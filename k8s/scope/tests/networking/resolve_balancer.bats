@@ -56,6 +56,7 @@ teardown() {
   rm -f "$MOCK_RULES_FILE"
   unset ALB_NAME
   unset ADDITIONAL_BALANCERS
+  unset MOCK_ALIAS_PREFIX
 }
 
 # =============================================================================
@@ -83,6 +84,40 @@ mock_route53_alb() {
     esac
   }
   export -f aws"
+}
+
+# Sets up an aws mock where each hosted zone holds its own Route53 record.
+# Args: "zone_id=alb_name" pairs. Zones not listed have no record.
+# MOCK_ALIAS_PREFIX (optional) is prepended to the alias target, e.g. "dualstack.".
+mock_route53_zones() {
+  > "$MOCK_RULES_FILE"
+  for pair in "$@"; do
+    echo "${pair%%=*} ${pair#*=}" >> "$MOCK_RULES_FILE"
+  done
+
+  aws() {
+    local zone="" prev=""
+    for arg in "$@"; do
+      if [ "$prev" = "--hosted-zone-id" ]; then zone="$arg"; fi
+      prev="$arg"
+    done
+    case "$*" in
+      *list-resource-record-sets*)
+        local alb
+        alb=$(grep "^${zone} " "$MOCK_RULES_FILE" | awk '{print $2}')
+        if [ -z "$alb" ]; then echo "None"; return 0; fi
+        echo "${MOCK_ALIAS_PREFIX:-}${alb}-123.us-east-1.elb.amazonaws.com."
+        ;;
+      *describe-load-balancers*--names*)
+        return 1
+        ;;
+      *describe-load-balancers*)
+        awk '{print $2}' "$MOCK_RULES_FILE" | jq -R '{LoadBalancerName: ., DNSName: (. + "-123.us-east-1.elb.amazonaws.com")}' | jq -s '{LoadBalancers: .}'
+        ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f aws
 }
 
 # Handles the three elbv2 describe-* calls used by get_alb_rule_count.
@@ -311,6 +346,78 @@ mock_alb_rules() {
   source "$SCRIPT"
 
   assert_equal "$ALB_NAME" "co-balancer-public"
+}
+
+# =============================================================================
+# Route53 lookup — hosted zone order and alias normalization
+# =============================================================================
+@test "resolve_balancer: internal scope finds Route53 record that only exists in the private zone" {
+  export INGRESS_VISIBILITY="internal"
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["scope-configurations"].networking.additional_private_balancers = ["alb-extra-1"]
+  ')
+  mock_route53_zones "Z0987654321=alb-from-private-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-private-dns"
+}
+
+@test "resolve_balancer: internet-facing scope falls back to the private zone when the public zone has no record" {
+  export INGRESS_VISIBILITY="internet-facing"
+  mock_route53_zones "Z0987654321=alb-from-private-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-private-dns"
+}
+
+@test "resolve_balancer: internal scope prefers the private zone record over the public one" {
+  export INGRESS_VISIBILITY="internal"
+  mock_route53_zones "Z1234567890=alb-from-public-dns" "Z0987654321=alb-from-private-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-private-dns"
+}
+
+@test "resolve_balancer: internet-facing scope prefers the public zone record over the private one" {
+  export INGRESS_VISIBILITY="internet-facing"
+  mock_route53_zones "Z1234567890=alb-from-public-dns" "Z0987654321=alb-from-private-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-public-dns"
+}
+
+@test "resolve_balancer: looks up the private zone when it is the only one configured" {
+  export INGRESS_VISIBILITY="internet-facing"
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["cloud-providers"].networking.hosted_public_zone_id)')
+  mock_route53_zones "Z0987654321=alb-from-private-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-private-dns"
+}
+
+@test "resolve_balancer: matches a Route53 alias that has the dualstack prefix" {
+  export INGRESS_VISIBILITY="internal"
+  export MOCK_ALIAS_PREFIX="dualstack."
+  mock_route53_zones "Z0987654321=alb-from-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-dns"
+}
+
+@test "resolve_balancer: matches a dualstack alias regardless of case" {
+  export INGRESS_VISIBILITY="internal"
+  export MOCK_ALIAS_PREFIX="DualStack."
+  mock_route53_zones "Z0987654321=alb-from-dns"
+
+  source "$SCRIPT"
+
+  assert_equal "$ALB_NAME" "alb-from-dns"
 }
 
 # =============================================================================
