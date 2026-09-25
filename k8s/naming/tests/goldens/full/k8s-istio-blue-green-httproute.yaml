@@ -1,0 +1,43 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: k-8-s-production-123456-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+  annotations:
+spec:
+  hostnames:
+    - checkout.example.com
+    - www.checkout.example.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gateway-public
+      namespace: gateways
+  rules:
+    - backendRefs:
+        # Blue deployment (old version)
+        - group: ""
+          kind: Service
+          name: d-123456-789011
+          port: 8080
+          weight: 0
+        # Green deployment (new version)
+        - group: ""
+          kind: Service
+          name: d-123456-789012
+          port: 8080
+          weight: 100
+      matches:
+        - path:
+            type: PathPrefix
+            value: /

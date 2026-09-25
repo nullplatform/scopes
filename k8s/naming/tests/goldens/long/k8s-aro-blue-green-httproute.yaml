@@ -1,0 +1,30 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: k-8-s-production-canary-eu-west-123456-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: customer-notifications-dispatcher
+    application_id: "111"
+    scope: production-canary-eu-west
+    scope_id: "123456"
+    deployment-strategy: "blue-green"
+  annotations:
+    route.openshift.io/deployment-strategy: "blue-green"
+spec:
+  host: checkout.example.com
+  to:
+    kind: Service
+    name: d-123456-789011
+    weight: 0
+  port:
+    targetPort: 80
+  alternateBackends:
+    - kind: Service
+      name: d-123456-789012
+      weight: 100
