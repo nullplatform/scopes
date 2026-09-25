@@ -81,7 +81,7 @@ POD_START_TIME=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath=
 
 log debug "📋 Pod: $INSTANCE_ID | Status: $POD_STATUS | Node: $POD_NODE | Started: $POD_START_TIME"
 
-DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
+DEPLOYMENT_NAME="$(np_naming_lookup deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID" 2>/dev/null)" || DEPLOYMENT_NAME=""
 
 POD_DEPLOYMENT=$(kubectl get pod "$INSTANCE_ID" -n "$K8S_NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || echo "")
 if [[ -n "$POD_DEPLOYMENT" ]]; then
