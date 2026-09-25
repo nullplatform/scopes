@@ -9,7 +9,7 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
-  export -f np_naming_lookup
+  export -f np_naming_lookup np_naming_list_by_label
 
   export K8S_NAMESPACE="test-namespace"
   export SCOPE_ID="scope-123"
@@ -240,6 +240,57 @@ teardown() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "⚠️  Pod does not belong to expected deployment d-scope-123-deploy-456"
+}
+
+@test "kill_instance: distinguishes a failed deployment lookup from a real ownership mismatch" {
+  kubectl() {
+    case "$1" in
+      get)
+        case "$2" in
+          pod)
+            if [[ "$*" == *"-o jsonpath"* ]]; then
+              if [[ "$*" == *"phase"* ]]; then
+                echo "Running"
+              elif [[ "$*" == *"nodeName"* ]]; then
+                echo "node-1"
+              elif [[ "$*" == *"startTime"* ]]; then
+                echo "2024-01-01T00:00:00Z"
+              elif [[ "$*" == *"ownerReferences"* ]]; then
+                echo "my-replicaset-abc"
+              fi
+            fi
+            return 0
+            ;;
+          replicaset)
+            echo "d-scope-123-deploy-456"
+            return 0
+            ;;
+          deployment)
+            if [[ "$*" == *"-l deployment_id="* ]]; then
+              echo "Error from server (Forbidden): deployments.apps is forbidden"
+              return 1
+            fi
+            return 0
+            ;;
+        esac
+        ;;
+      delete)
+        return 0
+        ;;
+      wait)
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  Could not check the cluster for the deployment of deployment deploy-456 (unreachable API server or RBAC denies reading deployment in namespace 'test-namespace') — skipping ownership verification"
+  assert_contains "$output" "⚠️  Could not verify pod ownership"
+  [[ "$output" != *"Pod does not belong to expected deployment"* ]]
 }
 
 @test "kill_instance: warns when pod still exists after deletion" {

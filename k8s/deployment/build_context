@@ -372,15 +372,20 @@ fi
 
 log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
 
+BLUE_NAME_FALLBACK=""
+if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
+  BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
+fi
+
 DISCOVERED_BLUE=$(np_naming_discover_blue "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" "$MAIN_HTTP_PORT")
 
-CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" '
-  .names.blue_deployment = (if $blue.deployment != "" then $blue.deployment else .names.blue_deployment end)
-  | .names.blue_service = (if $blue.service != "" then $blue.service else .names.blue_service end)
+CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" --arg fallback "$BLUE_NAME_FALLBACK" '
+  .names.blue_deployment = (if $blue.deployment != "" then $blue.deployment else $fallback end)
+  | .names.blue_service = (if $blue.service != "" then $blue.service else $fallback end)
   | if (.scope.capabilities.additional_ports | type) == "array" then
       .scope.capabilities.additional_ports |= map(
-        (((.type | ascii_downcase) + "-" + (.port|tostring))) as $key
-        | if ($blue.ports[$key] // "") != "" then . + {blue_service_name: $blue.ports[$key]} else . end
+        (.port|tostring) as $port_key
+        | if ($blue.ports[$port_key] // "") != "" then . + {blue_service_name: $blue.ports[$port_key]} else . end
       )
     else . end
 ')
@@ -388,9 +393,15 @@ CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" '
 BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$CONTEXT" | jq -c --argjson blue "$DISCOVERED_BLUE" '
   [ (.scope.capabilities.additional_ports // [])[]
     | ((.type | ascii_downcase) + "-" + (.port|tostring)) as $key
-    | {key: $key, value: (($blue.ports[$key] // "") != "")}
+    | (.port|tostring) as $port_key
+    | {key: $key, value: (($blue.ports[$port_key] // "") != "")}
   ] | from_entries
 ')
+
+while IFS= read -r missing_port_key; do
+  [ -z "$missing_port_key" ] && continue
+  log debug "🔍 No blue deployment service for additional port $missing_port_key — its traffic will route entirely to the green deployment"
+done < <(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq -r 'to_entries[] | select(.value == false) | .key')
 
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \

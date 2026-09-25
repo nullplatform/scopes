@@ -85,7 +85,6 @@ spec:
 {{ range .scope.capabilities.additional_ports }}
 {{- $port := .port }}
 {{- $port_type := .type }}
-{{- $service_name := .service_name }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

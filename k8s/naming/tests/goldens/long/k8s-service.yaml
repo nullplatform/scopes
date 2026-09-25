@@ -5,7 +5,7 @@ metadata:
   namespace: nullplatform
   labels:
     name: d-123456-789012
-    app.kubernetes.io/part-of: payments-checkout-api
+    app.kubernetes.io/part-of: payments-customer-notifications-dispatcher
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: production-canary-eu-west
     app.kubernetes.io/name: production-canary-eu-west
@@ -60,7 +60,7 @@ metadata:
   namespace: nullplatform
   labels:
     name: d-123456-789012-grpc-9090
-    app.kubernetes.io/part-of: payments-checkout-api
+    app.kubernetes.io/part-of: payments-customer-notifications-dispatcher
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: production-canary-eu-west
     app.kubernetes.io/name: production-canary-eu-west

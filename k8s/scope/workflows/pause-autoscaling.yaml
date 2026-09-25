@@ -13,16 +13,17 @@ steps:
         parameters:
           level: string
           message: string
-  - name: load naming
+  - name: load resource helpers
     type: script
-    file: "$SERVICE_PATH/naming/resolve_names"
+    file: "$SERVICE_PATH/scope/require_resource"
     output:
-      - name: np_naming_lookup
+      - name: require_resource
         type: function
         parameters:
           kind: string
           namespace: string
           deployment_id: string
+          out_var: string
   - name: pause autoscaling
     type: script
     file: "$SERVICE_PATH/scope/pause_autoscaling"

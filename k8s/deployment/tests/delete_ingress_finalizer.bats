@@ -16,7 +16,10 @@ setup() {
       "slug": "my-app",
       "id": 123
     },
-    "ingress_visibility": "internet-facing"
+    "ingress_visibility": "internet-facing",
+    "names": {
+      "scope_ingress": "k-8-s-my-app-123-internet-facing"
+    }
   }'
 
   kubectl() {
@@ -50,6 +53,20 @@ teardown() {
   assert_contains "$output" "📋 Ingress name: k-8-s-my-app-123-internet-facing"
   assert_contains "$output" "📝 Removing finalizers from ingress k-8-s-my-app-123-internet-facing..."
   assert_contains "$output" "✅ Finalizers removed from ingress k-8-s-my-app-123-internet-facing"
+}
+
+@test "delete_ingress_finalizer: targets the resolved ingress name from context, not a constructed one" {
+  export CONTEXT='{
+    "scope": {"slug": "my-app", "id": 123},
+    "ingress_visibility": "internet-facing",
+    "names": {"scope_ingress": "checkout-api-production-123456"}
+  }'
+
+  run bash "$BATS_TEST_DIRNAME/../delete_ingress_finalizer"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Ingress name: checkout-api-production-123456"
+  assert_contains "$output" "✅ Finalizers removed from ingress checkout-api-production-123456"
 }
 
 # =============================================================================

@@ -9,6 +9,12 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
 
+  source "$PROJECT_ROOT/k8s/utils/get_config_value"
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f get_config_value
+  export -f $(declare -F | awk '{print $3}' | grep '^np_')
+  unset NAMING_STRATEGY
+
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export DEPLOYMENT_ID="deploy-new-123"
   export OUTPUT_DIR="$BATS_TEST_TMPDIR"
@@ -28,6 +34,18 @@ setup() {
 
   # Create a mock template
   echo 'kind: Ingress' > "$TEMPLATE"
+
+  # np_naming_apply_to_context discovers the blue's live object names by
+  # label; without a mock these calls hit whatever kubectl is actually on
+  # PATH. Default to "not found" everywhere so every test falls back to the
+  # deterministic ids-formula name unless it sets up its own kubectl mock.
+  kubectl() {
+    case "$1 $2" in
+      "get deployment"|"get service") echo '{"items":[]}' ;;
+      *)                              echo "" ;;
+    esac
+  }
+  export -f kubectl
 
   # Mock gomplate
   gomplate() {
@@ -118,4 +136,34 @@ MOCK_SCRIPT
   source "$BATS_TEST_TMPDIR/captured_values"
   assert_equal "$CAPTURED_DEPLOYMENT_ID" "deploy-old-456"
   assert_equal "$CAPTURED_CONTEXT_DEPLOYMENT_ID" "deploy-old-456"
+}
+
+@test "rollback_traffic: points the rendered ingress at the blue deployment's own service, not green's" {
+  unset -f gomplate
+
+  local raw_context
+  raw_context="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
+
+  local resolved_names
+  resolved_names="$(CONTEXT="$raw_context" np_naming_resolve)"
+
+  export CONTEXT="$(echo "$raw_context" | jq \
+    --argjson names "$resolved_names" \
+    '. + {names: ($names | del(.additional_ports))}
+     | if ($names.additional_ports | length) > 0
+       then .scope.capabilities.additional_ports = $names.additional_ports
+       else . end
+     | .scope.current_active_deployment = "789011"')"
+
+  export SCOPE_ID="$(echo "$CONTEXT" | jq -r .scope.id)"
+  export DEPLOYMENT_ID="$(echo "$CONTEXT" | jq -r .deployment.id)"
+  export INGRESS_VISIBILITY="$(echo "$CONTEXT" | jq -r .ingress_visibility)"
+  export TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/initial-ingress.yaml.tpl"
+  export OUTPUT_DIR="$BATS_TEST_TMPDIR"
+
+  source "$PROJECT_ROOT/k8s/deployment/networking/gateway/rollback_traffic"
+
+  local backend
+  backend="$(yq -N 'select(document_index == 0) | .spec.rules[0].http.paths[0].backend.service.name' "$OUTPUT_DIR/ingress-$SCOPE_ID-789011.yaml")"
+  assert_equal "$backend" "d-123456-789011"
 }

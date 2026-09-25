@@ -5,10 +5,19 @@ metadata:
   namespace: nullplatform
   labels:
     name: d-123456-789012
-    app.kubernetes.io/part-of: payments-checkout-api
+    app.kubernetes.io/part-of: payments-customer-notifications-dispatcher
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: production-canary-eu-west
     app.kubernetes.io/name: production-canary-eu-west
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: customer-notifications-dispatcher
+    application_id: "111"
+    scope: production-canary-eu-west
+    scope_id: "123456"
+    deployment_id: "789012"
   annotations:
 spec:
   ports:
