@@ -31,14 +31,18 @@
             "type": "string",
             "order": 2,
             "title": "Private domain name",
-            "description": "Zone used for scopes whose visibility is private. Left unset, private scopes fall back to the public zone above."
+            "description": "Zone used for scopes whose visibility is private. Left unset, private scopes take the private zone of a cloud provider the account holds, and otherwise fall back to the public zone above."
           },
           "application_domain": {
-            "type": "boolean",
+            "type": "string",
+            "enum": [
+              "true",
+              "false"
+            ],
             "order": 3,
             "title": "Prefix scope domains with the account slug",
             "description": "Whether a scope's domain carries the account slug as a label. Like the zone itself, on a cluster with a cloud behind it this comes from the cloud provider, and without one there is nowhere else to state it.",
-            "default": false
+            "default": "false"
           }
         }
       }
