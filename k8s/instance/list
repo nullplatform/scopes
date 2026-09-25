@@ -14,8 +14,15 @@ fi
 
 PODS=$(kubectl get pods -n "$K8S_NAMESPACE" -l "$LABEL_SELECTOR" -o json)
 
-echo "$PODS" | jq --argjson limit "${LIMIT:-0}" '{
- results: (if $limit > 0 then .items[:$limit] else .items end) | map({
+echo "$PODS" | jq --argjson limit "${LIMIT:-0}" '
+def application_entry($entries):
+  ($entries // []) as $all
+  | (($all | map(select(.name == "application")) | first) // $all[0] // {});
+{
+ results: (if $limit > 0 then .items[:$limit] else .items end) | map(
+   application_entry(.spec.containers) as $app |
+   application_entry(.status.containerStatuses) as $app_status |
+   {
    id: .metadata.name,
    selector: .metadata.labels,
    details: {
@@ -23,14 +30,14 @@ echo "$PODS" | jq --argjson limit "${LIMIT:-0}" '{
      ip: (.status.podIP // "pending"),
      dns: (if .status.podIP then "\(.status.podIP).\(.metadata.namespace).pod.cluster.local" else "pending" end),
      cpu: {
-       requested: (if .spec.containers[0].resources.requests.cpu then (.spec.containers[0].resources.requests.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end),
-       limit: (if .spec.containers[0].resources.limits.cpu then (.spec.containers[0].resources.limits.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end)
+       requested: (if $app.resources.requests.cpu then ($app.resources.requests.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end),
+       limit: (if $app.resources.limits.cpu then ($app.resources.limits.cpu | gsub("m$"; "") | tonumber / 1000) else 0 end)
      },
      memory: {
-       requested: (.spec.containers[0].resources.requests.memory // "0Mi"),
-       limit: (.spec.containers[0].resources.limits.memory // "0Mi")
+       requested: ($app.resources.requests.memory // "0Mi"),
+       limit: ($app.resources.limits.memory // "0Mi")
      },
-     architecture: (.status.containerStatuses[0].image | if test("arm64|aarch64") then "arm64" else "x86" end)
+     architecture: (($app_status.image // "") | if test("arm64|aarch64") then "arm64" else "x86" end)
    },
    state: .status.phase,
    launch_time: .metadata.creationTimestamp,
