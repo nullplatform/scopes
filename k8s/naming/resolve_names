@@ -549,27 +549,9 @@ np_naming_pick_main() {
 	return 2
 }
 
-np_naming_port_suffixes() {
-	local visibility
-	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
-
-	echo "$CONTEXT" | jq -r --arg visibility "$visibility" '
-		(.scope.capabilities.additional_ports // [])[] |
-		(if .type == "HTTP" then "http" else "grpc" end) as $t |
-		"-\($t)-\(.port)",
-		"-\($t)-\(.port)-\($visibility)"
-	'
-}
-
 np_naming_is_port_name() {
-	local name="$1" suffix
-	while IFS= read -r suffix; do
-		[ -z "$suffix" ] && continue
-		case "$name" in
-			*"$suffix") return 0 ;;
-		esac
-	done < <(np_naming_port_suffixes)
-	return 1
+	local name="$1"
+	[[ "$name" =~ -(http|grpc)-[0-9]+(-.+)?$ ]]
 }
 
 np_naming_discover_port() {

@@ -189,6 +189,72 @@ golden_name() {
 	assert_equal "$output" ""
 }
 
+@test "np_naming_discover_scope: an orphaned per-port Ingress, no longer in additional_ports, does not become the main one" {
+	local orphan_name; orphan_name="$(golden_name k8s-blue-green-ingress.yaml 2)"
+	kubectl() {
+		case "$2" in
+			ingress) echo "$orphan_name" ;;
+			httproute) echo "" ;;
+		esac
+	}
+	run np_naming_discover_scope nullplatform 123456
+	[ "$status" -eq 2 ]
+	assert_equal "$output" ""
+}
+
+@test "np_naming_discover_scope: the main Ingress is picked out from an orphaned per-port sibling" {
+	local main_name orphan_name
+	main_name="$(golden_name k8s-blue-green-ingress.yaml 0)"
+	orphan_name="$(golden_name k8s-blue-green-ingress.yaml 2)"
+	kubectl() { [ "$2" = "ingress" ] && echo "$orphan_name $main_name"; }
+	run np_naming_discover_scope nullplatform 123456
+	assert_equal "$output" "$main_name"
+}
+
+@test "np_naming_discover_scope: an orphaned grpc port with no visibility suffix does not become the main one" {
+	local current="checkout-api-production-123456"
+	local orphan_name="$current-grpc-9999"
+	kubectl() {
+		case "$2" in
+			ingress) echo "$orphan_name" ;;
+			httproute) echo "" ;;
+		esac
+	}
+	run np_naming_discover_scope nullplatform 123456
+	[ "$status" -eq 2 ]
+	assert_equal "$output" ""
+}
+
+@test "np_naming_is_port_name: matches a currently declared http per-port name" {
+	run np_naming_is_port_name "k-8-s-production-123456-http-8081-internet-facing"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_is_port_name: matches a currently declared grpc per-port name" {
+	run np_naming_is_port_name "k-8-s-production-123456-grpc-9090-internet-facing"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_is_port_name: matches an orphaned http per-port name with no visibility suffix" {
+	run np_naming_is_port_name "k-8-s-production-123456-http-7777"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_is_port_name: matches an orphaned grpc per-port name with a visibility suffix" {
+	run np_naming_is_port_name "k-8-s-production-123456-grpc-7777-internal"
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_is_port_name: does not misclassify a main Ingress name" {
+	run np_naming_is_port_name "k-8-s-production-123456-internet-facing"
+	[ "$status" -eq 1 ]
+}
+
+@test "np_naming_is_port_name: a scope slug containing a hyphen and digits is not misclassified" {
+	run np_naming_is_port_name "k-8-s-api-v2-123456-internet-facing"
+	[ "$status" -eq 1 ]
+}
+
 @test "np_naming_discover_scope: falls through to HTTPRoute when the Ingress does not exist" {
 	local name; name="$(golden_name k8s-istio-initial-httproute.yaml 0)"
 	kubectl() {
