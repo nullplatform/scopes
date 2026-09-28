@@ -213,22 +213,50 @@ teardown() {
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================
-@test "traffic container: uses websocket2 for web_sockets, latest for http" {
-  # web_sockets protocol
-  SCOPE_TRAFFIC_PROTOCOL="web_sockets"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
+resolve_traffic_container_version() {
+  local protocol="$1"
+  if [[ "$protocol" == "web_sockets" ]]; then
+    echo "websocket2"
+  else
+    get_config_value \
+      --provider '.providers["container-orchestration"].traffic_manager.version' \
+      --default "latest"
   fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "websocket2"
+}
 
-  # http protocol
-  SCOPE_TRAFFIC_PROTOCOL="http"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
-  fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "latest"
+@test "traffic container: uses websocket2 for web_sockets, latest for http" {
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "latest"
+}
+
+@test "traffic container: http protocol uses container-orchestration provider version when set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "1.8.0"
+}
+
+@test "traffic container: web_sockets protocol ignores container-orchestration provider version" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+}
+
+@test "traffic container: provider version flows into the default image when no full-image override is set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+  unset TRAFFIC_CONTAINER_IMAGE
+
+  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http")
+  result=$(get_config_value \
+    --env TRAFFIC_CONTAINER_IMAGE \
+    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
+    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
+  )
+  assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0"
 }
 
 # =============================================================================
@@ -947,6 +975,51 @@ set_additional_ports() {
   assert_equal "$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports')" "[]"
 }
 
+# -----------------------------------------------------------------------------
+# Additional port ceiling: port + 10000 has to stay a valid TCP port.
+# -----------------------------------------------------------------------------
+
+@test "additional port ceiling: rejects a port whose sidecar would exceed 65535" {
+  setup_full_build_context
+  set_additional_ports '[{"port":60000,"type":"HTTP"}]'
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ Additional port 60000 is too high: its traffic-manager sidecar would need port 70000
+
+💡 Possible causes:
+   - Every additional port reserves both <port> (application) and <port>+10000 (its sidecar)
+   - Ports above 55535 push the sidecar past the maximum TCP port 65535
+
+🔧 How to fix:
+   • Choose an additional port of 55535 or lower
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "additional port ceiling: applies to GRPC entries too" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9090,"type":"HTTP"},{"port":60001,"type":"GRPC"}]'
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Additional port 60001 is too high: its traffic-manager sidecar would need port 70001"
+}
+
+@test "additional port ceiling: accepts the boundary value 55535" {
+  setup_full_build_context
+  set_additional_ports '[{"port":55535,"type":"GRPC"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].traffic_manager_port')" "65535"
+}
+
 # =============================================================================
 # Capability limits normalization
 # These tests source the real deployment/build_context and assert on the
@@ -1064,7 +1137,7 @@ set_capabilities() {
 
 @test "main_traffic_manager_port: read from container-orchestration provider" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 10080')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 10080')
 
   source "$SCRIPT"
 
@@ -1074,7 +1147,7 @@ set_capabilities() {
 @test "main_traffic_manager_port: scope-configurations takes priority over container-orchestration" {
   setup_full_build_context
   CONTEXT=$(echo "$CONTEXT" | jq '
-    .providers["container-orchestration"].cluster.main_traffic_manager_port = 10080
+    .providers["container-orchestration"].traffic_manager.port = 10080
     | .providers["scope-configurations"].deployment.main_traffic_manager_port = 11080
   ')
 
@@ -1094,7 +1167,7 @@ set_capabilities() {
 
 @test "main_traffic_manager_port: rejects non-numeric value" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = "not-a-port"')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = "not-a-port"')
 
   run source "$SCRIPT"
 
@@ -1112,7 +1185,7 @@ EOF
 
 @test "main_traffic_manager_port: accepts a privileged port other than 80" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 90')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 90')
 
   source "$SCRIPT"
 
@@ -1121,7 +1194,7 @@ EOF
 
 @test "main_traffic_manager_port: rejects port above 65535" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 70000')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 70000')
 
   run source "$SCRIPT"
 
@@ -1139,7 +1212,7 @@ EOF
 
 @test "main_traffic_manager_port: rejects port 0" {
   setup_full_build_context
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 0')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 0')
 
   run source "$SCRIPT"
 
@@ -1159,7 +1232,7 @@ EOF
   setup_full_build_context
   CONTEXT=$(echo "$CONTEXT" | jq '
     .scope.capabilities.main_http_port = 10080
-    | .providers["container-orchestration"].cluster.main_traffic_manager_port = 10080
+    | .providers["container-orchestration"].traffic_manager.port = 10080
   ')
 
   run source "$SCRIPT"
@@ -1181,7 +1254,7 @@ EOF
 @test "main_traffic_manager_port: rejects collision with an additional port" {
   setup_full_build_context
   set_additional_ports '[{"port":10080,"type":"HTTP"}]'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 10080')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 10080')
 
   run source "$SCRIPT"
 
@@ -1202,7 +1275,7 @@ EOF
 @test "main_traffic_manager_port: rejects collision with an additional port's sidecar port" {
   setup_full_build_context
   set_additional_ports '[{"port":8081,"type":"HTTP"}]'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 18081')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 18081')
 
   run source "$SCRIPT"
 
@@ -1223,7 +1296,7 @@ EOF
 @test "main_traffic_manager_port: accepts 10080 alongside unrelated additional ports" {
   setup_full_build_context
   set_additional_ports '[{"port":9090,"type":"HTTP"},{"port":9014,"type":"GRPC"}]'
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.main_traffic_manager_port = 10080')
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 10080')
 
   source "$SCRIPT"
 

@@ -4,7 +4,8 @@
 #
 # Resolution priority (when DNS_TYPE is route53):
 #   1. Route53 — if a DNS record already exists for the scope domain,
-#      use the ALB it points to (ensures DNS/ingress consistency)
+#      use the ALB it points to (ensures DNS/ingress consistency). Both
+#      hosted zones are searched, the one matching the visibility first.
 #   2. Load balancing — when additional balancers are configured, pick
 #      the ALB with the fewest HTTPS listener rules
 #   3. Provider config — base ALB from scope-configurations or
@@ -90,23 +91,32 @@ get_alb_rule_count() {
   echo "$rules_json" | jq '[.Rules[] | select(.IsDefault == false)] | length'
 }
 
-# Looks up the Route53 A-record alias for the scope domain, then resolves
-# the ALB DNS name back to an ALB name.
-# Returns the ALB name on stdout, or non-zero exit if not found.
-get_alb_from_route53() {
-  local domain="$1"
-  local region="$2"
-
-  local zone_id
-  zone_id=$(echo "$CONTEXT" | jq -r '
-    .providers["cloud-providers"].networking.hosted_public_zone_id //
-    .providers["cloud-providers"].networking.hosted_zone_id //
-    empty
-  ') || return 1
-
-  if [ -z "$zone_id" ]; then
-    return 1
+# Prints the hosted zone ids to search for the scope's record, one per line,
+# the zone matching the scope visibility first: internal scopes are served
+# from the private zone, internet-facing ones from the public zone. The other
+# zone is kept as a fallback, since a record may exist in only one of them.
+get_route53_zone_ids() {
+  local first="hosted_public_zone_id"
+  local second="hosted_zone_id"
+  if [ "$INGRESS_VISIBILITY" = "internal" ]; then
+    first="hosted_zone_id"
+    second="hosted_public_zone_id"
   fi
+
+  echo "$CONTEXT" | jq -r --arg first "$first" --arg second "$second" '
+    .providers["cloud-providers"].networking as $net
+    | [$net[$first], $net[$second]]
+    | map(select(. != null and . != ""))
+    | .[]
+  '
+}
+
+# Prints the A-record alias target for the domain in the given hosted zone.
+# Returns non-zero if the zone has no alias record for the domain.
+get_route53_alias() {
+  local zone_id="$1"
+  local domain="$2"
+  local region="$3"
 
   # Use --start-record-name to jump directly to the record instead of
   # scanning from the beginning (list-resource-record-sets does not
@@ -125,16 +135,36 @@ get_alb_from_route53() {
     return 1
   fi
 
-  # Strip trailing dot from DNS name
-  alias_dns="${alias_dns%.}"
+  echo "$alias_dns"
+}
 
-  # Reverse-lookup: find ALB name from its DNS name (case-insensitive match)
+# Looks up the Route53 A-record alias for the scope domain, then resolves
+# the ALB DNS name back to an ALB name.
+# Returns the ALB name on stdout, or non-zero exit if not found.
+get_alb_from_route53() {
+  local domain="$1"
+  local region="$2"
+
+  local zone_id alias_dns=""
+  for zone_id in $(get_route53_zone_ids); do
+    alias_dns=$(get_route53_alias "$zone_id" "$domain" "$region") && break
+    alias_dns=""
+  done
+
+  if [ -z "$alias_dns" ]; then
+    return 1
+  fi
+
+  # Reverse-lookup: find ALB name from its DNS name (case-insensitive match).
+  # The alias is normalized to the ALB DNSName form first: no trailing dot and
+  # no "dualstack." prefix, which Route53 adds to aliases created from the console.
   local alb_name
   alb_name=$(aws elbv2 describe-load-balancers \
     --region "$region" \
     --output json 2>/dev/null \
-    | jq -r --arg dns "$alias_dns" \
-      '.LoadBalancers[] | select(.DNSName | ascii_downcase == ($dns | ascii_downcase)) | .LoadBalancerName' \
+    | jq -r --arg dns "$alias_dns" '
+      ($dns | ascii_downcase | rtrimstr(".") | ltrimstr("dualstack.")) as $target
+      | .LoadBalancers[] | select(.DNSName | ascii_downcase == $target) | .LoadBalancerName' \
     | head -1) || return 1
 
   if [ -z "$alb_name" ]; then

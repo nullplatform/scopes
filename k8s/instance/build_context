@@ -6,4 +6,9 @@ export APPLICATION_ID=$(echo "$ARGUMENTS" | jq -r 'if (.application_id | type) =
 export SCOPE_ID=$(echo "$ARGUMENTS" | jq -r 'if (.scope_id | type) == "array" then .scope_id[0] else .scope_id end')
 export DEPLOYMENT_ID=$(echo "$ARGUMENTS" | jq -r 'if (.deployment_id | type) == "array" then .deployment_id[0] else .deployment_id end')
 
-export LIMIT=${LIMIT:-10}
+REQUEST_LIMIT=$(echo "$ARGUMENTS" | jq -r '(if (.limit | type) == "array" then .limit[0] else .limit end) // empty')
+LIMIT="${REQUEST_LIMIT:-$LIMIT}"
+if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+  LIMIT=""
+fi
+export LIMIT

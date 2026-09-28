@@ -196,7 +196,7 @@ spec:
   ports:
     - protocol: TCP
       port: {{ .port }}
-      targetPort: {{ .port }}
+      targetPort: {{ .traffic_manager_port }}
   selector:
     nullplatform: "true"
     account: {{ $.account.slug }}

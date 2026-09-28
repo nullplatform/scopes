@@ -2,10 +2,24 @@ include:
   - "$SERVICE_PATH/values.yaml"
 configuration:
   INGRESS_TEMPLATE: "$INITIAL_INGRESS_PATH"
+trace:
+  title: Roll back deployment
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE", "@context:providers.scope-configurations.deployment.deployment_strategy"]
+  default: false
+  job:
+    name: k8s-deployment-rollback
+    namespace: "@context:scope.provider"
+    labels:
+      entity: deployment
+      operation: rollback
+      scope.provider: "@context:scope.provider"
+  groups:
+    - {key: finalize, title: Finalize}
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -15,6 +29,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
@@ -25,6 +40,7 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
+    trace: false
     output:
       - name: CONTEXT
         type: environment
@@ -41,7 +57,16 @@ steps:
   - name: update blue deployment
     type: script
     file: "$SERVICE_PATH/deployment/scale_deployments"
+    trace:
+      title: Restore previous deployment
+      description: Scales the previous version back up to full capacity.
+      flavors: [rolling]
+      group: finalize
   - name: rollback traffic
+    trace:
+      title: Restore traffic routing
+      description: Rewrites the routing rules to send traffic back to the previous version.
+      group: finalize
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/rollback_traffic"
     configuration:
@@ -51,6 +76,10 @@ steps:
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
   - name: apply traffic
+    trace:
+      title: Apply routing
+      description: Puts the restored routing live.
+      group: finalize
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
@@ -65,6 +94,7 @@ steps:
         # the failed deployment is deleted below. Weights cannot express this state.
         EXPECT_SINGLE_TARGET_GROUP: true
   - name: build deployment
+    trace: false
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"
     output:
@@ -81,6 +111,10 @@ steps:
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
   - name: delete deployment
+    trace:
+      title: Remove new deployment
+      description: Deletes the version being rolled back, now that nothing routes to it.
+      group: finalize
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
@@ -93,5 +127,6 @@ steps:
       configuration:
         DEPLOYMENT: green
   - name: print_deployment_error_hints
+    trace: false
     type: script
     file: "$SERVICE_PATH/deployment/print_failed_deployment_hints"

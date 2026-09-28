@@ -6,7 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: k8s scopes on Route53 keep the ALB their DNS record points to on every deployment, instead of silently falling back to least-loaded selection and moving the ingress to another ALB (which can leave the scope without traffic). The record is now looked up in both hosted zones, the one matching the scope visibility first, and aliases with the `dualstack.` prefix (as created from the AWS console) are matched
 - Add a "Run once" option to scheduled task scopes: the task runs a single time when the scope is deployed instead of on a recurring schedule, and the deployment waits for it to finish
+
+## [1.17.0] - 2026-09-11
+- Fix: turning off the health check on a k8s, azure or azure-aro scope now removes the liveness, readiness and startup probes from every container of the pod
+- Fix: k8s scopes that have both a custom domain and additional ports now deploy, instead of failing with "Failed to build ingress template"
+
+## [1.16.3] - 2026-09-08
+- Add: remove resource level restriction for `elasticloadbalancing:Describe*` permissions as AWS does not support it.
+- Fix: k8s deployment logs no longer show a "np_trace_flush: command not found" error when tracing is disabled
+
+## [1.16.2] - 2026-09-08
+- Fix: the scheduled-task worker image now runs the k8s scope with the scheduled_task overlay (`NP_OVERRIDES_PATH`), like the legacy channel does — it previously executed the overlay's partial workflows as the whole scope — and ships aws-cli, which the k8s scripts need from the assume_role step onwards
+- The publish pipeline now registers every scope image artifact with its release tag, so packages can resolve a worker image by tag (`lookup = true` + `meta.tag`) instead of copying digests around
+- Publish pipeline fixes: image names corrected to the existing ECR repositories (scopes/scheduled-task, scopes/containers-datadog — v1.16.1's images were recovered via backfill), a `workflow_dispatch` recovery path that publishes an existing tag building the tag's own commit, and the GitHub release upsert no longer fails when the job has no checkout
+
+## [1.16.1] - 2026-09-02
+- Fix: the Instances tab of the performance view now shows every pod of a k8s scope. The instance list had a hard cap of 10 that nothing could override, so a scope with 20 pods showed only the first 10 and the table had no next page. A `limit` in the request is honored, the `LIMIT` env var on the agent stays as the operator override, and with neither every pod is returned
+
+## [1.16.0] - 2026-09-02
+- k8s scopes now show live, step-by-step progress in the dashboard when a scope is created, updated or deleted, and for every deployment action (deploy, switch traffic, finalize, rollback, delete, diagnose, kill instance, restart pods, pause/resume autoscaling, set instance count): each step with its duration, and long waits (load balancer, DNS, instance health) saying what they are waiting for. Requires `NP_API_KEY` on the agent; without it everything works as before
+- Failed k8s deployments now explain why on the step that failed, and what to do about it: image pull errors with the registry's message, out-of-memory kills, crash exit codes with the application's last log lines, and failing health checks with the path and response detected
+- k8s **diagnose** now shows what each check found (summary, severity, affected pods, recommended action) instead of a list of green steps
+- k8s scopes can now pin the traffic-manager sidecar version cluster-wide via the container-orchestration provider's `traffic_manager.version`, instead of only per-scope
+- Publish containers and scheduled task scopes as docker images
+- Remove unused cloudwatch annotations from deployment objects
+- Fix: log queries on k8s scopes now return the time range that was selected, instead of the most recent lines whatever range was chosen
+- Fix: paging through logs on k8s scopes no longer repeats lines already shown, and now reaches the end of the selected range
+- Fix: diagnose on k8s scopes no longer fails to publish its results when a check collects application logs
+
+## [1.15.1] - 2026-08-12
+- Fix: gRPC additional ports on k8s scopes now leave the declared port free for the application, so a gRPC server can bind the port configured in the scope instead of failing to start with "address already in use". gRPC ports now work the same way HTTP ones already did
+- k8s scopes now reject an additional port above 55535 at deploy time, with a message explaining the limit, instead of starting a deployment whose traffic sidecar could never come up
+- k8s scopes with gRPC additional ports now require traffic-manager image `1.7.0` or newer; on older images the gRPC sidecar never starts and the deployment stays unhealthy
 
 ## [1.15.0] - 2026-08-10
 - Fix: **finalize** and **rollback** on blue/green k8s scopes now wait until the load balancer sends all traffic to the surviving deployment before deleting the other one, preventing the 5xx window that happened when it was deleted mid-switch (these actions may take slightly longer as a result)

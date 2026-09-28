@@ -70,3 +70,8 @@ case "$DNS_TYPE" in
 esac
 
 log info "✅ DNS records managed successfully"
+
+if [ "${ACTION:-}" = "CREATE" ] && [ -n "${SCOPE_DOMAIN:-}" ] \
+  && command -v np_scope_produces >/dev/null 2>&1; then
+	np_scope_produces "dns-record:$SCOPE_DOMAIN" dns_record "$SCOPE_DOMAIN"
+fi

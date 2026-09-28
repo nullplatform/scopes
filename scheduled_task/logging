@@ -38,4 +38,317 @@ log() {
       echo "$message"
     fi
   fi
+
+  if [ "$msg_num" -ge 3 ]; then
+    _np_scopes_trace_error "$message" || true
+  fi
 }
+
+_np_scopes_node() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 1
+  [ -n "${NP_TRACE:-}" ] || return 1
+  if [ -n "${_NP_SCOPES_SUBSTEP:-}" ]; then
+    if [ "${_NP_SCOPES_SUBSTEP_UNDER:-}" = "$NP_TRACE" ]; then
+      printf '%s' "$_NP_SCOPES_SUBSTEP"
+      return 0
+    fi
+    _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
+  fi
+  local _nd_node _nd_under _nd_cached
+  if [ -n "${NP_TRACE_DIR:-}" ] && [ -f "$NP_TRACE_DIR/scopes_adopted" ]; then
+    IFS=' ' read -r _nd_under _nd_cached < "$NP_TRACE_DIR/scopes_adopted" 2>/dev/null || true
+    if [ "$_nd_under" = "$NP_TRACE" ] && [ -n "$_nd_cached" ]; then
+      printf '%s' "$_nd_cached"
+      return 0
+    fi
+  fi
+  _nd_node=$(np_trace_adopt 2>/dev/null) || return 1
+  [ -n "$_nd_node" ] || return 1
+  if [ -n "${NP_TRACE_DIR:-}" ]; then
+    printf '%s %s' "$NP_TRACE" "$_nd_node" > "$NP_TRACE_DIR/scopes_adopted" 2>/dev/null || true
+  fi
+  printf '%s' "$_nd_node"
+  return 0
+}
+
+_np_scopes_trace_error() {
+  local _lt_node _lt_message
+  _lt_node=$(_np_scopes_node) || return 0
+  _lt_message="$1"
+  _lt_message="${_lt_message#"${_lt_message%%[![:space:]]*}"}"
+  case "$_lt_message" in "❌ "*) _lt_message="${_lt_message#❌ }" ;; esac
+  if [ "${_NP_SCOPES_ERRED_ON:-}" = "${NP_TRACE:-}" ] && [ -n "${_NP_SCOPES_ERR_MESSAGE:-}" ]; then
+    if [ -n "${_NP_SCOPES_ERR_HINTS:-}" ]; then
+      _NP_SCOPES_ERR_HINTS="$_NP_SCOPES_ERR_HINTS,$(np__json_str "$_lt_message")"
+    else
+      _NP_SCOPES_ERR_HINTS="$(np__json_str "$_lt_message")"
+    fi
+    np_trace_error "$_lt_node" --message "$_NP_SCOPES_ERR_MESSAGE" \
+      --details "{\"hints\":[$_NP_SCOPES_ERR_HINTS]}"
+    return 0
+  fi
+  np_trace_error "$_lt_node" --message "$_lt_message" ${2:+--code "$2"}
+  if [ -z "${_NP_SCOPES_TRAP_REPORT:-}" ] && command -v np_step_error >/dev/null 2>&1; then
+    np_step_error "$_lt_message"
+  fi
+  _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  _NP_SCOPES_LAST_REASON="$_lt_message"
+  _NP_SCOPES_ERR_MESSAGE="$_lt_message"
+  _NP_SCOPES_ERR_HINTS=""
+  return 0
+}
+
+# np_scope_step_begin <key> [--iteration N] [--attempt N] [--title <text>]
+np_scope_step_begin() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 0
+  [ -n "${NP_TRACE:-}" ] || return 0
+  local _sb_key="${1:-}" _sb_title="" _sb_parent _sb_h
+  shift || true
+  local _sb_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) _sb_title="${2:-}"; shift 2 ;;
+      *) _sb_args+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] && np_scope_step_end 0
+  _sb_parent=$(np_trace_adopt 2>/dev/null) || return 0
+  [ -n "$_sb_parent" ] || return 0
+  _sb_h=$(np_trace_step "$_sb_parent" "$_sb_key" ${_sb_args[@]+"${_sb_args[@]}"})
+  [ -n "$_sb_h" ] || return 0
+  [ -n "$_sb_title" ] && np_trace_explain "$_sb_h" --title "$_sb_title"
+  _NP_SCOPES_SUBSTEP="$_sb_h"
+  _NP_SCOPES_SUBSTEP_UNDER="$NP_TRACE"
+  return 0
+}
+
+# np_scope_step_end [rc] [message]
+np_scope_step_end() {
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] || return 0
+  local _se_h="$_NP_SCOPES_SUBSTEP" _se_rc="${1:-0}"
+  _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
+  if [ "$_se_rc" -eq 0 ] 2>/dev/null; then
+    np_trace_complete "$_se_h"
+  else
+    if [ -n "${2:-}" ]; then
+      np_trace_fail "$_se_h" "$2"
+    elif [ "${_NP_SCOPES_ERRED_ON:-}" != "${NP_TRACE:-}" ]; then
+      np_trace_fail "$_se_h" "phase exited with status $_se_rc"
+    else
+      np_trace_fail "$_se_h"
+    fi
+    _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  fi
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# np_scope_step_timeout [message]
+np_scope_step_timeout() {
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] || return 0
+  local _st_h="$_NP_SCOPES_SUBSTEP"
+  _NP_SCOPES_SUBSTEP="" _NP_SCOPES_SUBSTEP_UNDER=""
+  [ -n "${1:-}" ] && np_trace_error "$_st_h" --message "$1"
+  np_trace_timeout "$_st_h"
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# np_scope_wait_heartbeat <what> <elapsed_s> <timeout_s> [state] [k=v ...]
+np_scope_wait_heartbeat() {
+  local _hb_node
+  _hb_node=$(_np_scopes_node) || return 0
+  local _hb_what="${1:-}" _hb_timeout="${3:-0}"
+  case "$_hb_timeout" in
+    '' | *[!0-9]*) np_trace_signal "$_hb_node" "$_hb_what" wait ;;
+    *) np_trace_signal "$_hb_node" "$_hb_what" wait --timeout-ms $(( _hb_timeout * 1000 )) ;;
+  esac
+  np_trace_waiting "$_hb_node"
+  NP_TRACE_FLUSH_TIMEOUT=2 np_trace_flush
+  return 0
+}
+
+# np_scope_produces <dataset-id> [<name> <uri>]
+# np_scope_consumes <dataset-id> [<name> <uri>]
+np_scope_produces() {
+  command -v np_trace_produces >/dev/null 2>&1 || return 0
+  local _pd_node
+  _pd_node=$(_np_scopes_node) || return 0
+  np_trace_produces "$_pd_node" "$1" ${2:+--name "$2"} ${3:+--uri "$3"}
+  return 0
+}
+
+np_scope_consumes() {
+  command -v np_trace_consumes >/dev/null 2>&1 || return 0
+  local _cd_node
+  _cd_node=$(_np_scopes_node) || return 0
+  np_trace_consumes "$_cd_node" "$1" ${2:+--name "$2"} ${3:+--uri "$3"}
+  return 0
+}
+
+# np_scope_affordance <json-object-or-array>
+np_scope_affordance() {
+  command -v np_trace_affordances >/dev/null 2>&1 || return 0
+  local _ad_node
+  _ad_node=$(_np_scopes_node) || return 0
+  np_trace_affordances "$_ad_node" "$1"
+  return 0
+}
+
+# np_scope_progress <current> <target> [unit]
+np_scope_progress() {
+  command -v np_trace_progress >/dev/null 2>&1 || return 0
+  local _pg_node
+  _pg_node=$(_np_scopes_node) || return 0
+  np_trace_progress "$_pg_node" "$1" "$2" "${3:-}"
+  return 0
+}
+
+# np_scope_output <name> <json> / np_scope_input <name> <json>
+np_scope_output() {
+  command -v np_trace_output >/dev/null 2>&1 || return 0
+  local _ot_node
+  _ot_node=$(_np_scopes_node) || return 0
+  np_trace_output "$_ot_node" "$1" "$2"
+  return 0
+}
+
+np_scope_input() {
+  command -v np_trace_input >/dev/null 2>&1 || return 0
+  local _in_node
+  _in_node=$(_np_scopes_node) || return 0
+  np_trace_input "$_in_node" "$1" "$2"
+  return 0
+}
+
+# np_scope_explain --title T [--what W] [--severity ok|warn|error] ...
+np_scope_explain() {
+  command -v np_trace_explain >/dev/null 2>&1 || return 0
+  local _ex_node
+  _ex_node=$(_np_scopes_node) || return 0
+  np_trace_explain "$_ex_node" "$@"
+  return 0
+}
+
+# np_scope_error <message> [<json-details>]
+np_scope_error() {
+  command -v np_trace_error >/dev/null 2>&1 || return 0
+  local _sr_node
+  _sr_node=$(_np_scopes_node) || return 0
+  np_trace_error "$_sr_node" --message "$1" ${2:+--details "$2"}
+  _NP_SCOPES_ERRED_ON="${NP_TRACE:-}"
+  return 0
+}
+
+# np_scope_labels <k=v ...>
+np_scope_labels() {
+  command -v np_trace_labels >/dev/null 2>&1 || return 0
+  local _lb_node
+  _lb_node=$(_np_scopes_node) || return 0
+  np_trace_labels "$_lb_node" "$@"
+  return 0
+}
+
+# np_scope_k8s_applied <namespace> <kubectl-apply-output>
+np_scope_k8s_applied() {
+  command -v np_trace_produces >/dev/null 2>&1 || return 0
+  local _ka_ns="$1" _ka_line _ka_kind _ka_name
+  [ -n "$_ka_ns" ] || return 0
+  while IFS= read -r _ka_line; do
+    [ -n "$_ka_line" ] || continue
+    _ka_kind="${_ka_line%%/*}"
+    _ka_name="${_ka_line#*/}"
+    _ka_name="${_ka_name%% *}"
+    case "$_ka_kind" in
+      deployment.apps|deployment)
+        np_scope_produces "k8s-deployment:$_ka_ns/$_ka_name" deployment "$_ka_name" ;;
+      service)
+        np_scope_produces "k8s-service:$_ka_ns/$_ka_name" service "$_ka_name" ;;
+      ingress.networking.k8s.io|ingress)
+        np_scope_produces "k8s-ingress:$_ka_ns/$_ka_name" ingress "$_ka_name" ;;
+    esac
+  done <<< "$2"
+  return 0
+}
+
+
+# np_scope_k8s_deleted <namespace> <kubectl-delete-output>
+np_scope_k8s_deleted() {
+  command -v np_trace_output >/dev/null 2>&1 || return 0
+  local _kd_ns="$1" _kd_node _kd_line _kd_kind _kd_name
+  [ -n "$_kd_ns" ] || return 0
+  _kd_node=$(_np_scopes_node) || return 0
+  while IFS= read -r _kd_line; do
+    [ -n "$_kd_line" ] || continue
+    case "$_kd_line" in
+      *" deleted") ;;
+      *) continue ;;
+    esac
+    _kd_kind="${_kd_line%%[ /]*}"
+    _kd_name="${_kd_line#*\"}"
+    _kd_name="${_kd_name%%\"*}"
+    [ -n "$_kd_name" ] || continue
+    case "$_kd_kind" in
+      deployment.apps|deployment)
+        np_trace_output "$_kd_node" removed-deployment --uri "$_kd_name" ;;
+      service)
+        np_trace_output "$_kd_node" removed-service --uri "$_kd_name" ;;
+      ingress.networking.k8s.io|ingress)
+        np_trace_output "$_kd_node" removed-ingress --uri "$_kd_name" ;;
+    esac
+  done <<< "$2"
+  return 0
+}
+
+_np_scopes_on_err() {
+  _NP_SCOPES_LAST_ERR="$BASH_COMMAND (exit ${1:-1})"
+}
+
+_np_scopes_error_on_run() {
+  command -v np_trace_adopt >/dev/null 2>&1 || return 0
+  [ -n "${NP_TRACE:-}" ] || return 0
+  local _ru_rest="${NP_TRACE#*|}"
+  local _ru_version="${NP_TRACE%%|*}" _ru_trace="${_ru_rest%%|*}" _ru_run="${_ru_rest#*|}"
+  case "$_ru_run" in
+    *~*) _ru_run="${_ru_run%~*}" ;;
+    *) return 0 ;;
+  esac
+  local _ru_node
+  _ru_node=$(np_trace_adopt "${_ru_version}|${_ru_trace}|${_ru_run}" 2>/dev/null) || return 0
+  [ -n "$_ru_node" ] || return 0
+  np_trace_error "$_ru_node" --message "$1"
+  return 0
+}
+
+_np_scopes_on_exit() {
+  local _ex_rc="${1:-0}"
+  local _ex_reason="${_NP_SCOPES_LAST_REASON:-${_NP_SCOPES_LAST_ERR:-workflow shell exited with status $_ex_rc}}"
+  if [ "$_ex_rc" -ne 0 ] && [ "${_NP_SCOPES_ERRED_ON:-}" != "${NP_TRACE:-}" ]; then
+    _NP_SCOPES_TRAP_REPORT=1
+    _np_scopes_trace_error "$_ex_reason" || true
+    _NP_SCOPES_TRAP_REPORT=""
+  fi
+  if [ "$_ex_rc" -ne 0 ]; then
+    _np_scopes_error_on_run "$_ex_reason" || true
+  fi
+  [ -n "${_NP_SCOPES_SUBSTEP:-}" ] && np_scope_step_end "$_ex_rc" || true
+  np_trace_flush
+}
+
+_NP_SCOPES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_NP_SCOPES_SDK="$_NP_SCOPES_ROOT/vendor/catalog-tracing-sh/nptrace.sh"
+if [ -z "${NP_TRACE_LOADED:-}" ] \
+  && [ -f "$_NP_SCOPES_SDK" ] \
+  && [ -n "${NP_API_KEY:-}" ] \
+  && [ -n "${NP_TRACE:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$_NP_SCOPES_SDK"
+  np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" --no-trap
+  trap '_np_scopes_on_err $?' ERR
+  trap '_np_scopes_on_exit $?' EXIT
+elif [ -z "${NP_TRACE_LOADED:-}" ] \
+  && [ -n "${NP_TRACE:-}" ] \
+  && [ -n "${NP_API_KEY:-}" ] \
+  && [ ! -f "$_NP_SCOPES_SDK" ]; then
+  log warn "⚠️  tracing SDK not bundled (vendor/catalog-tracing-sh/nptrace.sh missing) — scope-side tracing disabled for this run"
+fi

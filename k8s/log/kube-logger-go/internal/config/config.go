@@ -19,6 +19,7 @@ func ParseFlags() types.Config {
 	flag.StringVar(&config.NextPageToken, "next-page-token", "", "Pagination token")
 	flag.StringVar(&config.FilterPattern, "filter", "", "Filter pattern")
 	flag.StringVar(&config.StartTime, "start-time", "", "Start time (ISO format)")
+	flag.StringVar(&config.EndTime, "end-time", "", "End time (ISO format)")
 	flag.StringVar(&config.InstanceID, "instance-id", "", "Instance ID")
 
 	// Short flags

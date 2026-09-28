@@ -10,6 +10,7 @@ configuration:
 #  PRIVATE_DOMAIN: nullapps.io
   USE_ACCOUNT_SLUG: false
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
+  K8S_FLAVOR: eks # The cluster variant (eks | aks | aro | gke) — independent of DNS_TYPE
   ALB_RECONCILIATION_ENABLED: false
   ALB_MAX_CAPACITY: 75
   # 100 is the max target groups for ALB. Keeps 2 free for emergencies

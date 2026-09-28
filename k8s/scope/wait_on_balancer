@@ -18,6 +18,11 @@ case "$DNS_TYPE" in
 
     log debug "📋 Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
 
+    if command -v np_scope_step_begin >/dev/null 2>&1; then
+        np_scope_step_begin wait-dns-endpoint --title "Wait for ExternalDNS to process $DNS_ENDPOINT_NAME"
+        np_scope_wait_heartbeat "dns-endpoint" 0 "$((MAX_ITERATIONS * 10))" "pending"
+    fi
+
     while true; do
         iteration=$((iteration + 1))
         if [ $iteration -gt $MAX_ITERATIONS ]; then
@@ -31,6 +36,9 @@ case "$DNS_TYPE" in
             log error "   • Check DNSEndpoint resources: kubectl get dnsendpoint -A"
             log error "   • Check ExternalDNS logs: kubectl logs -n external-dns -l app=external-dns --tail=50"
             log error ""
+            if command -v np_scope_step_timeout >/dev/null 2>&1; then
+                np_scope_step_timeout "DNSEndpoint $DNS_ENDPOINT_NAME not processed after $((MAX_ITERATIONS * 10))s"
+            fi
             exit 1
         fi
 
@@ -44,9 +52,17 @@ case "$DNS_TYPE" in
             break
         fi
 
+        if [ $((iteration % 3)) -eq 0 ] && command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+            np_scope_wait_heartbeat "dns-endpoint" "$((iteration * 10))" "$((MAX_ITERATIONS * 10))" "pending"
+        fi
+
         log debug "📋 DNSEndpoint not yet processed, waiting 10s..."
         sleep 10
     done
+
+    if command -v np_scope_step_end >/dev/null 2>&1; then
+        np_scope_step_end 0
+    fi
 
     log info ""
     log info "✨ ExternalDNS setup completed successfully"
@@ -54,9 +70,15 @@ case "$DNS_TYPE" in
   route53|azure)
     log debug "📋 DNS Type $DNS_TYPE - DNS should already be configured"
     log debug "📋 Skipping DNS wait check"
+    if command -v np_step_skip >/dev/null 2>&1; then
+      np_step_skip "DNS already configured for type '$DNS_TYPE'"
+    fi
     ;;
   *)
     log debug "📋 Unknown DNS type: $DNS_TYPE"
     log debug "📋 Skipping DNS wait check"
+    if command -v np_step_skip >/dev/null 2>&1; then
+      np_step_skip "no DNS wait for type '$DNS_TYPE'"
+    fi
     ;;
 esac

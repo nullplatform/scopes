@@ -2,10 +2,24 @@ include:
   - "$SERVICE_PATH/values.yaml"
 configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
+trace:
+  title: Switch traffic
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  default: false
+  job:
+    name: k8s-deployment-switch-traffic
+    namespace: "@context:scope.provider"
+    labels:
+      entity: deployment
+      operation: switch-traffic
+      scope.provider: "@context:scope.provider"
+  groups:
+    - {key: switching-traffic, title: Switching traffic}
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -15,6 +29,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
@@ -25,6 +40,7 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
+    trace: false
     output:
       - name: CONTEXT
         type: environment
@@ -45,11 +61,16 @@ steps:
       name: wait deployment active
       type: script
       file: "$SERVICE_PATH/deployment/wait_deployment_active"
+      trace:
+        key: switch-instances-check
+        title: Verify scaled instances
+        group: switching-traffic
       configuration:
         TIMEOUT: DEPLOYMENT_MAX_WAIT_IN_SECONDS
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
+    trace: false
     configuration:
       type: ingress
       TEMPLATE: "$INGRESS_TEMPLATE"
@@ -63,9 +84,14 @@ steps:
   - name: apply traffic
     type: script
     file: "$SERVICE_PATH/apply_templates"
+    trace:
+      key: traffic-switch
+      title: Switch traffic
+      group: switching-traffic
     configuration:
       ACTION: apply
       DRY_RUN: false
+      TRACE_TRAFFIC_SWITCH: true
     post:
       name: post_apply_checks
       type: workflow
@@ -73,8 +99,13 @@ steps:
         - name: verify_networking_reconciliation
           type: script
           file: "$SERVICE_PATH/deployment/verify_networking_reconciliation"
+          trace:
+            title: Verify networking
+            group: switching-traffic
+            flavors: [route53, external_dns]
           configuration:
             VERIFY_WEIGHTS: true
         - name: publish_alb_metrics
           type: script
           file: "$SERVICE_PATH/deployment/publish_alb_metrics"
+          trace: false
