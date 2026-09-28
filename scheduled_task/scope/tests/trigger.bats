@@ -101,31 +101,20 @@ teardown() {
 }
 
 # =============================================================================
-# Error: deployed but no CronJob found
+# Error: deployed but neither a CronJob nor a previous Job exists
 # =============================================================================
-@test "trigger: fails with a clear message when no CronJob exists for the scope" {
-  kubectl() {
-    case "$*" in
-      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
-        echo ""
-        return 0
-        ;;
-      *)
-        return 0
-        ;;
-    esac
-  }
+@test "trigger: fails with a clear message when no CronJob or previous Job exists" {
+  # No CronJob and no Job for the scope.
+  kubectl() { echo ""; return 0; }
   export -f kubectl
 
   run bash "$BATS_TEST_DIRNAME/../trigger"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ No CronJob found for scope 'scope-123' in namespace 'provider-namespace'"
+  assert_contains "$output" "❌ No CronJob or previous Job found for scope 'scope-123' in namespace 'provider-namespace'"
   assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The scope's scheduled job may not have been created yet, or the deployment is still in progress"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• Verify the CronJob exists: kubectl get cronjob -n provider-namespace -l scope_id=scope-123"
-  assert_contains "$output" "• Redeploy the scope if the CronJob is missing"
+  assert_contains "$output" "• Verify a job exists: kubectl get job -n provider-namespace -l scope_id=scope-123"
 }
 
 @test "trigger: fails with a cluster-unreadable message when the CronJob lookup errors, without advising a redeploy" {
@@ -154,6 +143,117 @@ teardown() {
 
   [[ "$output" != *"No CronJob found"* ]]
   [[ "$output" != *"Redeploy the scope"* ]]
+}
+
+@test "trigger: fails with a cluster-unreadable message when the Job lookup errors, without advising a redeploy" {
+  kubectl() {
+    case "$*" in
+      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
+        echo ""
+        return 0
+        ;;
+      "get job -n provider-namespace -l scope_id=scope-123 --sort-by=.metadata.creationTimestamp -o jsonpath={.items[-1:].metadata.name}")
+        echo "Error from server (Forbidden): jobs.batch is forbidden" >&2
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the scope's previous Job in namespace 'provider-namespace'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "- The cluster API server is unreachable"
+  assert_contains "$output" "- RBAC denies reading job in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Verify cluster connectivity and RBAC: kubectl auth can-i get job -n provider-namespace"
+
+  [[ "$output" != *"No CronJob or previous Job found"* ]]
+  [[ "$output" != *"Redeploy the scope"* ]]
+}
+
+# =============================================================================
+# Run-once: no CronJob, clone the most recent Job into a fresh one
+# =============================================================================
+@test "trigger: run-once re-runs by cloning the last Job of the scope" {
+  export CREATED_MANIFEST="$(mktemp)"
+
+  kubectl() {
+    case "$*" in
+      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
+        echo ""  # run-once scope: no CronJob
+        return 0
+        ;;
+      "get job -n provider-namespace -l scope_id=scope-123 --sort-by=.metadata.creationTimestamp -o jsonpath={.items[-1:].metadata.name}")
+        echo "job-scope-123-old"
+        return 0
+        ;;
+      "get job job-scope-123-old -n provider-namespace -o json")
+        cat <<'JSON'
+{
+  "apiVersion": "batch/v1",
+  "kind": "Job",
+  "metadata": {
+    "name": "job-scope-123-old",
+    "namespace": "provider-namespace",
+    "uid": "abc-uid",
+    "resourceVersion": "12345",
+    "creationTimestamp": "2026-01-01T00:00:00Z",
+    "labels": {
+      "scope_id": "scope-123",
+      "controller-uid": "abc-uid",
+      "batch.kubernetes.io/controller-uid": "abc-uid",
+      "job-name": "job-scope-123-old"
+    }
+  },
+  "spec": {
+    "backoffLimit": 0,
+    "selector": { "matchLabels": { "controller-uid": "abc-uid" } },
+    "template": {
+      "metadata": {
+        "creationTimestamp": null,
+        "labels": { "scope_id": "scope-123", "controller-uid": "abc-uid", "job-name": "job-scope-123-old" }
+      },
+      "spec": { "containers": [ { "name": "application", "image": "x" } ], "restartPolicy": "OnFailure" }
+    }
+  },
+  "status": { "succeeded": 1 }
+}
+JSON
+        return 0
+        ;;
+      "create -n provider-namespace -f -")
+        cat > "$CREATED_MANIFEST"
+        return 0
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Re-running job job-scope-123-old as job-scope-123-1700000000"
+  assert_contains "$output" "✅ The job job-scope-123-1700000000 was triggered, you can follow the execution from the logs screen"
+
+  # The cloned manifest carries the new name and is stripped of the fields the
+  # API would reject on create.
+  local manifest="$(cat "$CREATED_MANIFEST")"
+  assert_contains "$manifest" "job-scope-123-1700000000"
+  ! grep -q "controller-uid" "$CREATED_MANIFEST"
+  ! grep -q "job-scope-123-old" "$CREATED_MANIFEST"
+  ! grep -q "selector" "$CREATED_MANIFEST"
+  ! grep -q '"status"' "$CREATED_MANIFEST"
+
+  rm -f "$CREATED_MANIFEST"
 }
 
 # =============================================================================

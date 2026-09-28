@@ -110,6 +110,10 @@ steps:
       - name: SERVICE_TEMPLATE_PATH
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: print_deployment_error_hints
+    trace: false
+    type: script
+    file: "$SERVICE_PATH/deployment/print_failed_deployment_hints"
   - name: delete deployment
     trace:
       title: Remove new deployment
@@ -126,7 +130,3 @@ steps:
       file: "$SERVICE_PATH/deployment/delete_cluster_objects"
       configuration:
         DEPLOYMENT: green
-  - name: print_deployment_error_hints
-    trace: false
-    type: script
-    file: "$SERVICE_PATH/deployment/print_failed_deployment_hints"
