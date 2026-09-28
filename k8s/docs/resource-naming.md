@@ -24,9 +24,18 @@ Names objects from the application and scope slugs plus the numeric id, so an ob
 
 ```
 deployment:     checkout-api-production-789012
-hpa:            hpa-checkout-api-production-789012
+service:        checkout-api-production-789012
+hpa:            checkout-api-production-789012
+pdb:            checkout-api-production-789012
+cronjob:        checkout-api-production-789012
+secret:         checkout-api-production-789012
+secret_files:   checkout-api-production-789012-files
 scope_ingress:  checkout-api-production-123456
 ```
+
+Every deployment-level object shares one name. This is safe because a Kubernetes name only has to be unique per (namespace, kind), not globally: a Deployment, a Service, an HPA, a PodDisruptionBudget, a CronJob and a Secret can all share one name without colliding, since each is a different kind.
+
+The one exception is the pair of Secrets a scope creates: `secret.yaml.tpl` and `secret-files.yaml.tpl` are both `kind: Secret`, so `secret_files` keeps its `-files` suffix — dropping it would make the two collide. Per-port Services and Ingresses keep their `-http-<port>`/`-grpc-<port>` suffix for the same reason: the main Service and an additional-port Service are both `kind: Service`.
 
 Deployment names use `{.application.slug}-{.scope.slug}-{.deployment.id}`; scope-level names (ingress, HTTPRoute, cert) use `{.application.slug}-{.scope.slug}-{.scope.id}`. Long slugs are trimmed evenly to fit the naming budget — the numeric id is never trimmed.
 

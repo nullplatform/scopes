@@ -444,11 +444,11 @@ np_naming_roles_patterned() {
 	local emitted
 	emitted="$(np_naming_emit "$(jq -n \
 		--arg deployment "$base_d" \
-		--arg hpa "${base_d:+hpa-$base_d}" \
-		--arg pdb "${base_d:+pdb-$base_d}" \
-		--arg secret "${base_d:+$base_d-env}" \
+		--arg hpa "$base_d" \
+		--arg pdb "$base_d" \
+		--arg secret "$base_d" \
 		--arg secret_files "${base_d:+$base_d-files}" \
-		--arg cronjob "${base_d:+job-$base_d}" \
+		--arg cronjob "$base_d" \
 		--arg ingress "$base_s" \
 		--arg dns "$base_dns" \
 		--arg cert "$base_s" \

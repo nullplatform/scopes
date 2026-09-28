@@ -22,14 +22,33 @@ setup() {
 	assert_equal "$output" "checkout-api-production-789012"
 }
 
-@test "qualified: renders hpa, pdb and secret from the same base" {
+@test "qualified: renders deployment, hpa, pdb and secret as the same name" {
 	export NAMING_STRATEGY=qualified
 	names="$(np_naming_resolve)"
-	run jq -r '.hpa, .pdb, .secret, .secret_files' <<< "$names"
-	assert_equal "$(echo "$output" | sed -n 1p)" "hpa-checkout-api-production-789012"
-	assert_equal "$(echo "$output" | sed -n 2p)" "pdb-checkout-api-production-789012"
-	assert_equal "$(echo "$output" | sed -n 3p)" "checkout-api-production-789012-env"
-	assert_equal "$(echo "$output" | sed -n 4p)" "checkout-api-production-789012-files"
+	run jq -r '.deployment, .hpa, .pdb, .secret' <<< "$names"
+	assert_equal "$(echo "$output" | sed -n 1p)" "checkout-api-production-789012"
+	assert_equal "$(echo "$output" | sed -n 2p)" "checkout-api-production-789012"
+	assert_equal "$(echo "$output" | sed -n 3p)" "checkout-api-production-789012"
+	assert_equal "$(echo "$output" | sed -n 4p)" "checkout-api-production-789012"
+}
+
+@test "qualified: renders cronjob as the same name as deployment" {
+	export NAMING_STRATEGY=qualified
+	names="$(np_naming_resolve)"
+	run jq -r '.deployment, .cronjob' <<< "$names"
+	assert_equal "$(echo "$output" | sed -n 1p)" "checkout-api-production-789012"
+	assert_equal "$(echo "$output" | sed -n 2p)" "checkout-api-production-789012"
+}
+
+@test "qualified: secret_files keeps the -files suffix so it never collides with secret" {
+	export NAMING_STRATEGY=qualified
+	names="$(np_naming_resolve)"
+	run jq -r '.secret, .secret_files' <<< "$names"
+	local secret secret_files
+	secret="$(echo "$output" | sed -n 1p)"
+	secret_files="$(echo "$output" | sed -n 2p)"
+	assert_equal "$secret_files" "checkout-api-production-789012-files"
+	[ "$secret" != "$secret_files" ]
 }
 
 @test "qualified: drops visibility from the scope ingress name" {
