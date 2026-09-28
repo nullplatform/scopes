@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: k8s rollbacks now show why the rolled-back deployment failed (image pull error, crash loop, OOM, failed health check), instead of always printing the generic "Application Startup Issue Detected" hints
 - Fix: k8s scopes on Route53 keep the ALB their DNS record points to on every deployment, instead of silently falling back to least-loaded selection and moving the ingress to another ALB (which can leave the scope without traffic). The record is now looked up in both hosted zones, the one matching the scope visibility first, and aliases with the `dualstack.` prefix (as created from the AWS console) are matched
 
 ## [1.17.0] - 2026-09-11
