@@ -149,6 +149,14 @@ MOCK_SCRIPT
   local raw_context
   raw_context="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
 
+  kubectl() {
+    case "$1 $2" in
+      "get deployment"|"get service") echo '{"items":[]}' ;;
+      *)                              echo "" ;;
+    esac
+  }
+  export -f kubectl
+
   local resolved_names
   resolved_names="$(CONTEXT="$raw_context" np_naming_resolve)"
 
@@ -172,14 +180,6 @@ MOCK_SCRIPT
   export SCALING_TEMPLATE="$SERVICE_PATH/deployment/templates/scaling.yaml.tpl"
   export SERVICE_TEMPLATE="$SERVICE_PATH/deployment/templates/service.yaml.tpl"
   export PDB_TEMPLATE="$SERVICE_PATH/deployment/templates/pdb.yaml.tpl"
-
-  kubectl() {
-    case "$1 $2" in
-      "get deployment"|"get service") echo '{"items":[]}' ;;
-      *)                              echo "" ;;
-    esac
-  }
-  export -f kubectl
 
   source "$PROJECT_ROOT/k8s/deployment/build_blue_deployment"
 

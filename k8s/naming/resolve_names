@@ -614,16 +614,24 @@ np_naming_discover_blue() {
 
 	if [ -z "$blue_id" ] || [ "$blue_id" = "null" ]; then
 		jq -n '{deployment: "", service: "", ports: {}}'
-		return 0
+		return 2
 	fi
 
-	local services deployments
+	local services deployments svc_status dep_status
 	services="$(kubectl get service -n "$namespace" -l "deployment_id=$blue_id" -o json 2>/dev/null)"
-	if [ -z "$services" ]; then services='{"items":[]}'; fi
+	svc_status=$?
 	deployments="$(kubectl get deployment -n "$namespace" -l "deployment_id=$blue_id" -o json 2>/dev/null)"
-	if [ -z "$deployments" ]; then deployments='{"items":[]}'; fi
+	dep_status=$?
 
-	jq -n --argjson svc "$services" --argjson dep "$deployments" --argjson main "$main_port" '
+	if [ "$svc_status" -ne 0 ] || [ "$dep_status" -ne 0 ]; then
+		return 1
+	fi
+
+	[ -z "$services" ] && services='{"items":[]}'
+	[ -z "$deployments" ] && deployments='{"items":[]}'
+
+	local result
+	result="$(jq -n --argjson svc "$services" --argjson dep "$deployments" --argjson main "$main_port" '
 		{
 			deployment: ($dep.items[0].metadata.name // ""),
 			service: ([$svc.items[] | select(.spec.ports[0].port == $main) | .metadata.name] | first // ""),
@@ -631,7 +639,13 @@ np_naming_discover_blue() {
 				| select(.spec.ports[0].port != $main)
 				| {key: (.spec.ports[0].port|tostring),
 				   value: .metadata.name}] | from_entries)
-		}'
+		}')"
+	echo "$result"
+
+	if [ "$(echo "$deployments" | jq '.items | length')" -eq 0 ] && [ "$(echo "$services" | jq '.items | length')" -eq 0 ]; then
+		return 2
+	fi
+	return 0
 }
 
 np_naming_discover_secrets() {
@@ -673,7 +687,7 @@ np_naming_apply_to_context() {
 
 	RESOLVED_NAMES=$(np_naming_resolve) || return 1
 
-	local namespace main_port scope_id fallback discovered
+	local namespace main_port scope_id fallback discovered discover_blue_status
 	namespace="$(echo "$CONTEXT" | jq -r '.k8s_namespace // "nullplatform"')"
 	main_port="$(echo "$CONTEXT" | jq -r '.main_http_port // 8080')"
 	scope_id="$(echo "$CONTEXT" | jq -r '.scope.id // ""')"
@@ -690,6 +704,18 @@ np_naming_apply_to_context() {
 	fi
 
 	discovered="$(np_naming_discover_blue "$namespace" "$DEPLOYMENT_ID" "$main_port")"
+	discover_blue_status=$?
+	if [ "$discover_blue_status" -eq 1 ]; then
+		log error "❌ Could not check the cluster for the existing blue deployment and service names"
+		log error ""
+		log error "💡 Possible causes:"
+		log error "   - The cluster API server is unreachable"
+		log error "   - RBAC denies reading service/deployment in namespace '$namespace'"
+		log error "🔧 How to fix:"
+		log error "   • Verify cluster connectivity and RBAC: kubectl get deployment -n $namespace -l deployment_id=$DEPLOYMENT_ID"
+		log error "   • Verify cluster connectivity and RBAC: kubectl get service -n $namespace -l deployment_id=$DEPLOYMENT_ID"
+		return 1
+	fi
 
 	local hpa_name="" pdb_name="" cronjob_name="" lookup_status
 	if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "null" ]; then

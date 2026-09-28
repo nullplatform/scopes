@@ -10,6 +10,8 @@ setup() {
 
 	export CONTEXT="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
 	unset NAMING_STRATEGY
+
+	kubectl() { echo ""; }
 }
 
 @test "np_naming_resolve: ids reproduces today's deployment name" {

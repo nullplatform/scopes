@@ -102,15 +102,15 @@ golden_name() {
 
 @test "np_naming_discover_blue: returns empty fields when nothing matches" {
 	kubectl() { echo '{"items":[]}'; }
-	result="$(np_naming_discover_blue nullplatform 789011 8080)"
-	run jq -r .service <<< "$result"
+	run np_naming_discover_blue nullplatform 789011 8080
+	run jq -r .service <<< "$output"
 	assert_equal "$output" ""
 }
 
 @test "np_naming_discover_blue: returns empty fields when there is no blue deployment" {
 	kubectl() { echo '{"items":[]}'; }
-	result="$(np_naming_discover_blue nullplatform '' 8080)"
-	run jq -r .service <<< "$result"
+	run np_naming_discover_blue nullplatform '' 8080
+	run jq -r .service <<< "$output"
 	assert_equal "$output" ""
 }
 
@@ -124,6 +124,51 @@ golden_name() {
 	result="$(np_naming_discover_blue nullplatform 789011 8080)"
 	run jq -r .service <<< "$result"
 	assert_equal "$output" "checkout-api-production-789011"
+}
+
+@test "np_naming_discover_blue: a found blue resolves with status 0" {
+	kubectl() {
+		case "$2" in
+			service) cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/svc-ids.json" ;;
+			deployment) echo '{"items":[]}' ;;
+		esac
+	}
+	run np_naming_discover_blue nullplatform 789011 8080
+	[ "$status" -eq 0 ]
+}
+
+@test "np_naming_discover_blue: a genuinely absent blue returns status 2, not found" {
+	kubectl() { echo '{"items":[]}'; }
+	run np_naming_discover_blue nullplatform 789011 8080
+	[ "$status" -eq 2 ]
+}
+
+@test "np_naming_discover_blue: no active blue deployment returns status 2, not found" {
+	kubectl() { echo '{"items":[]}'; }
+	run np_naming_discover_blue nullplatform '' 8080
+	[ "$status" -eq 2 ]
+}
+
+@test "np_naming_discover_blue: a failed service lookup returns status 1, distinct from not-found" {
+	kubectl() {
+		case "$2" in
+			service) echo "Error from server (Forbidden): ..." >&2; return 1 ;;
+			deployment) echo '{"items":[]}' ;;
+		esac
+	}
+	run np_naming_discover_blue nullplatform 789011 8080
+	[ "$status" -eq 1 ]
+}
+
+@test "np_naming_discover_blue: a failed deployment lookup returns status 1, distinct from not-found" {
+	kubectl() {
+		case "$2" in
+			service) echo '{"items":[]}' ;;
+			deployment) echo "Error from server (Forbidden): ..." >&2; return 1 ;;
+		esac
+	}
+	run np_naming_discover_blue nullplatform 789011 8080
+	[ "$status" -eq 1 ]
 }
 
 @test "np_naming_discover_scope: keeps the legacy name when the live Ingress is blue-green shaped" {

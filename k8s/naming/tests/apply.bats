@@ -41,3 +41,19 @@ setup() {
 	assert_equal "$(echo "$output" | sed -n 2p)" "pdb-d-123456-789012"
 	assert_equal "$(echo "$output" | sed -n 3p)" "job-123456-789012"
 }
+
+@test "np_naming_apply_to_context: aborts instead of falling back when the blue service lookup fails" {
+	kubectl() {
+		case "$*" in
+			*"get service"*) echo "Error from server (Forbidden): ..." >&2; return 1 ;;
+			*"get deployment"*) echo '{"items":[]}' ;;
+			*) echo "" ;;
+		esac
+	}
+
+	local result error_output
+	if error_output="$(np_naming_apply_to_context 2>&1 1>/dev/null)"; then result=0; else result=$?; fi
+
+	[ "$result" -eq 1 ]
+	assert_contains "$error_output" "❌ Could not check the cluster for the existing blue deployment and service names"
+}

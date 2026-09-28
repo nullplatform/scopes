@@ -1327,10 +1327,52 @@ EOF
   setup_full_build_context
   CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
 
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
   source "$SCRIPT"
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" "d-test-scope-123-789011"
   assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_service')" "d-test-scope-123-789011"
+}
+
+@test "blue discovery: aborts instead of falling back to the ids name when kubectl fails" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo "Error from server (Forbidden): ..." >&2; return 1 ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ Could not check the cluster for the existing blue deployment and service names
+
+💡 Possible causes:
+   - The cluster API server is unreachable
+   - RBAC denies reading service/deployment in namespace 'default-namespace'
+🔧 How to fix:
+   • Verify cluster connectivity and RBAC: kubectl get deployment -n default-namespace -l deployment_id=789011
+   • Verify cluster connectivity and RBAC: kubectl get service -n default-namespace -l deployment_id=789011
+EOF
+)
+  assert_contains "$output" "$expected"
 }
 
 @test "blue discovery: overwrites a per-port blue_service_name when its service is found" {

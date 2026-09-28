@@ -78,6 +78,8 @@ scheduled_task's `cronjob.*` metrics (`execution_count`, `success_count`, `failu
 
 Discovery identifies the scope's main object as the one labelled object that is not per-port shaped. A scope that already carries more than one such object — orphans left by a strategy change made before freezing existed — has no way to say which is authoritative, and the first one the API server returns is kept.
 
+Resolving a scope's existing object name lists both `ingress` and `httproute` in the target namespace. An installation whose agent RBAC has been narrowed by hand, instead of using the reference role, must allow listing both kinds or discovery fails. The reference RBAC in `agent/configure_cluster` already does.
+
 ## Implementation Map
 
 - Name resolution engine, strategies and discovery: `k8s/naming/resolve_names`

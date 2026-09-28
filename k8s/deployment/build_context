@@ -377,7 +377,24 @@ if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
   BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
 fi
 
-DISCOVERED_BLUE=$(np_naming_discover_blue "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" "$MAIN_HTTP_PORT")
+if DISCOVERED_BLUE=$(np_naming_discover_blue "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" "$MAIN_HTTP_PORT"); then
+    DISCOVER_BLUE_STATUS=0
+else
+    DISCOVER_BLUE_STATUS=$?
+fi
+
+if [ "$DISCOVER_BLUE_STATUS" -eq 1 ]; then
+    log error "❌ Could not check the cluster for the existing blue deployment and service names"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading service/deployment in namespace '$K8S_NAMESPACE'"
+    log error "🔧 How to fix:"
+    log error "   • Verify cluster connectivity and RBAC: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$BLUE_DEPLOYMENT_ID"
+    log error "   • Verify cluster connectivity and RBAC: kubectl get service -n $K8S_NAMESPACE -l deployment_id=$BLUE_DEPLOYMENT_ID"
+    log error ""
+    exit 1
+fi
 
 CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" --arg fallback "$BLUE_NAME_FALLBACK" '
   .names.blue_deployment = (if $blue.deployment != "" then $blue.deployment else $fallback end)
