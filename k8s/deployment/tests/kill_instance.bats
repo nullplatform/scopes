@@ -285,3 +285,34 @@ teardown() {
   assert_contains "$output" "⚠️  Pod deletion timeout reached"
   assert_contains "$output" "⚠️  Pod still exists after deletion attempt"
 }
+
+# =============================================================================
+# Namespace resolution - must match scope/build_context, or the action looks
+# for the scope's objects in a namespace the deployment never wrote to
+# =============================================================================
+@test "kill_instance: the scope-configurations namespace wins over container-orchestration" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {cluster: {namespace: "from-scope-config"}}')
+  export KUBECTL_ARGS_FILE="$(mktemp)"
+  kubectl() { printf '%s\n' "$*" >> "$KUBECTL_ARGS_FILE"; return 1; }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
+
+  grep -qE -- '(^| )-n from-scope-config( |$)' "$KUBECTL_ARGS_FILE"
+  ! grep -qE -- '(^| )-n test-namespace( |$)' "$KUBECTL_ARGS_FILE"
+  rm -f "$KUBECTL_ARGS_FILE"
+}
+
+@test "kill_instance: honors NAMESPACE_OVERRIDE when no provider sets a namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers)')
+  export NAMESPACE_OVERRIDE="from-channel"
+  export KUBECTL_ARGS_FILE="$(mktemp)"
+  kubectl() { printf '%s\n' "$*" >> "$KUBECTL_ARGS_FILE"; return 1; }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../kill_instance"
+
+  grep -qE -- '(^| )-n from-channel( |$)' "$KUBECTL_ARGS_FILE"
+  rm -f "$KUBECTL_ARGS_FILE"
+  unset NAMESPACE_OVERRIDE
+}

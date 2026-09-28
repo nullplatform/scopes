@@ -195,3 +195,34 @@ teardown() {
   assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'default-namespace'..."
   assert_contains "$output" "   Namespace: default-namespace"
 }
+
+# =============================================================================
+# Namespace resolution - must match scope/build_context, or the action looks
+# for the scope's objects in a namespace the deployment never wrote to
+# =============================================================================
+@test "pause_autoscaling: the scope-configurations namespace wins over container-orchestration" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {cluster: {namespace: "from-scope-config"}}')
+  export KUBECTL_ARGS_FILE="$(mktemp)"
+  kubectl() { printf '%s\n' "$*" >> "$KUBECTL_ARGS_FILE"; return 1; }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
+
+  grep -qE -- '(^| )-n from-scope-config( |$)' "$KUBECTL_ARGS_FILE"
+  ! grep -qE -- '(^| )-n provider-namespace( |$)' "$KUBECTL_ARGS_FILE"
+  rm -f "$KUBECTL_ARGS_FILE"
+}
+
+@test "pause_autoscaling: honors NAMESPACE_OVERRIDE when no provider sets a namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers)')
+  export NAMESPACE_OVERRIDE="from-channel"
+  export KUBECTL_ARGS_FILE="$(mktemp)"
+  kubectl() { printf '%s\n' "$*" >> "$KUBECTL_ARGS_FILE"; return 1; }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../pause_autoscaling"
+
+  grep -qE -- '(^| )-n from-channel( |$)' "$KUBECTL_ARGS_FILE"
+  rm -f "$KUBECTL_ARGS_FILE"
+  unset NAMESPACE_OVERRIDE
+}
