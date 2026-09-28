@@ -164,3 +164,83 @@ JSON
   local secret_files_file="$OUTPUT_DIR/secret-files-scope-123-deploy-456.yaml"
   [ ! -f "$secret_files_file" ] || [ ! -s "$secret_files_file" ]
 }
+
+# =============================================================================
+# Run-once mode — cron == "run-once" renders a Job instead of a CronJob
+# =============================================================================
+@test "build_deployment: scheduled mode renders a CronJob with a schedule" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context)"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  local deploy_file="$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  assert_contains "$(cat "$deploy_file")" "kind: CronJob"
+  assert_contains "$(cat "$deploy_file")" 'schedule: "*/5 * * * *"'
+  assert_contains "$(cat "$deploy_file")" "jobTemplate:"
+}
+
+@test "build_deployment: run-once mode renders a Job that runs on deploy" {
+  unset -f gomplate
+
+  # Default JOB_WAIT_TIMEOUT (600) drives the Job's activeDeadlineSeconds.
+  export CONTEXT="$(_render_context | jq '.scope.capabilities.cron = "run-once"')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  local deploy_file="$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  local rendered="$(cat "$deploy_file")"
+
+  # A one-shot Job, not a CronJob — none of the CronJob-only fields appear.
+  assert_contains "$rendered" "kind: Job"
+  ! grep -q "kind: CronJob" "$deploy_file"
+  ! grep -q "schedule:" "$deploy_file"
+  ! grep -q "concurrencyPolicy:" "$deploy_file"
+  ! grep -q "jobTemplate:" "$deploy_file"
+
+  # Job-only knobs: retries -> backoffLimit, timeout -> activeDeadlineSeconds,
+  # plus a TTL so finished one-shot Jobs are garbage-collected.
+  assert_contains "$rendered" "backoffLimit: 0"
+  assert_contains "$rendered" "activeDeadlineSeconds: 600"
+  assert_contains "$rendered" "ttlSecondsAfterFinished: 86400"
+
+  # The pod block is intact one level shallower (spec.template.spec).
+  assert_contains "$rendered" "name: job-scope-123-deploy-456"
+  assert_contains "$rendered" "- name: application"
+  assert_contains "$rendered" "name: s-scope-123-d-deploy-456"
+  assert_contains "$rendered" "restartPolicy: OnFailure"
+}
+
+@test "build_deployment: run-once Job keeps file-parameter volumes and mounts" {
+  unset -f gomplate
+
+  export CONTEXT="$(_render_context | jq '.scope.capabilities.cron = "run-once"')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  local deploy_file="$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  local rendered="$(cat "$deploy_file")"
+
+  assert_contains "$rendered" "- name: app-data-api-p12-cert"
+  assert_contains "$rendered" 'value: "/app-data/[2026-05-27] cert.p12"'
+  assert_contains "$rendered" 'mountPath: "/app-data/[2026-05-27] cert.p12"'
+  assert_contains "$rendered" "secretName: s-scope-123-d-deploy-456-files"
+  assert_contains "$rendered" "key: app-file-api-p12-cert"
+}
+
+@test "build_deployment: JOB_WAIT_TIMEOUT overrides the Job activeDeadlineSeconds" {
+  unset -f gomplate
+
+  export JOB_WAIT_TIMEOUT=120
+  export CONTEXT="$(_render_context | jq '.scope.capabilities.cron = "run-once"')"
+
+  run bash "$BATS_TEST_DIRNAME/../build_deployment"
+  [ "$status" -eq 0 ]
+
+  local deploy_file="$OUTPUT_DIR/deployment-scope-123-deploy-456.yaml"
+  assert_contains "$(cat "$deploy_file")" "activeDeadlineSeconds: 120"
+}
