@@ -7,7 +7,7 @@
 #
 # NP_SERVICE_PATH=k8s + NP_SCOPE_ENTRYPOINT=<repo>/entrypoint mirrors the classic
 # `.../scopes/entrypoint --service-path=k8s` the git-clone model used.
-FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.0.0
+FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.1.1
 
 # apk tooling the k8s steps call. bash, jq, np, base64, curl, ca-certs ship in
 # the base. aws-cli 2.x, gomplate and yq are packaged on alpine.
