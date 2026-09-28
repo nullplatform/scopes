@@ -1,10 +1,9 @@
 #!/bin/bash
 
 
-SCOPE_SLUG=$(echo "$CONTEXT" | jq -r .scope.slug)
 ALB_NAME=$(echo "$CONTEXT" | jq -r .alb_name)
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r .scope.domain)
-INGRESS_NAME="k-8-s-$SCOPE_SLUG-$SCOPE_ID-$INGRESS_VISIBILITY"
+INGRESS_NAME=$(echo "$CONTEXT" | jq -r '.names.scope_ingress')
 MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-120}
 CHECK_INTERVAL=${CHECK_INTERVAL:-10}
 elapsed=0

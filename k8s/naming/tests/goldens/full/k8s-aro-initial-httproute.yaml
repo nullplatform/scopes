@@ -1,0 +1,23 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: k-8-s-production-123456-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+  annotations:
+spec:
+  host: checkout.example.com
+  to:
+    kind: Service
+    name: d-123456-789012
+  port:
+    targetPort: 80

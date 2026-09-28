@@ -18,6 +18,9 @@ setup() {
   export CONTEXT='{
     "scope": {
       "slug": "my-app"
+    },
+    "names": {
+      "scope_ingress": "k-8-s-my-app-scope-123-internet-facing"
     }
   }'
 }
@@ -48,6 +51,18 @@ run_with_mock() {
   assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..."
   assert_contains "$output" "📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s"
   assert_contains "$output" "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
+}
+
+@test "verify_http_route_reconciliation: targets the resolved ingress name from context, not a constructed one" {
+  export CONTEXT='{
+    "scope": {"slug": "my-app"},
+    "names": {"scope_ingress": "checkout-api-production-123456"}
+  }'
+
+  run_with_mock '{"status":{"parents":[{"conditions":[{"type":"Accepted","status":"True","reason":"Accepted","message":"Route accepted"},{"type":"ResolvedRefs","status":"True","reason":"ResolvedRefs","message":"Refs resolved"}]}]}}'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 HTTPRoute: checkout-api-production-123456 | Namespace: test-namespace | Timeout: 1s"
 }
 
 # =============================================================================

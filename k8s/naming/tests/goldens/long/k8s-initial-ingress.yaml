@@ -1,0 +1,101 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k-8-s-production-canary-eu-west-123456-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: customer-notifications-dispatcher
+    application_id: "111"
+    scope: production-canary-eu-west
+    scope_id: "123456"
+  annotations:
+    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
+    alb.ingress.kubernetes.io/group.name: alb-public
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/load-balancer-name: alb-public
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/target-node-labels: account=acme,namespace=payments,application=customer-notifications-dispatcher,account_id=1,namespace_id=11,application_id=111,scope=production-canary-eu-west,scope_id=123456,nullplatform=true
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: alb
+  rules:
+    - host: checkout.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-123456-789012
+                port:
+                  number: 8080
+    - host: www.checkout.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-123456-789012
+                port:
+                  number: 8080
+
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k-8-s-production-canary-eu-west-123456-grpc-9090-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: customer-notifications-dispatcher
+    application_id: "111"
+    scope: production-canary-eu-west
+    scope_id: "123456"
+  annotations:
+    alb.ingress.kubernetes.io/group.name: alb-public
+    
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":9090}]'
+    alb.ingress.kubernetes.io/backend-protocol-version: GRPC
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true
+    
+    alb.ingress.kubernetes.io/load-balancer-name: alb-public
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-node-labels: account=acme,namespace=payments,application=customer-notifications-dispatcher,account_id=1,namespace_id=11,application_id=111,scope=production-canary-eu-west,scope_id=123456,nullplatform=true
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: alb
+  rules:
+    - host: checkout.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-123456-789012-grpc-9090
+                port:
+                  number: 9090
+    - host: www.checkout.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: d-123456-789012-grpc-9090
+                port:
+                  number: 9090
+
+

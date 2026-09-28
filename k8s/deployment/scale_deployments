@@ -14,8 +14,8 @@ if [ "$DEPLOY_STRATEGY" != "rolling" ]; then
 fi
 
 if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
-  GREEN_DEPLOYMENT_NAME="d-$SCOPE_ID-$GREEN_DEPLOYMENT_ID"
-  BLUE_DEPLOYMENT_NAME="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
+  require_resource deployment "$K8S_NAMESPACE" "$GREEN_DEPLOYMENT_ID" GREEN_DEPLOYMENT_NAME
+  require_resource deployment "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" BLUE_DEPLOYMENT_NAME
 
   log debug "📝 Scaling deployments for rolling strategy..."
   log debug "📋 Green deployment: $GREEN_DEPLOYMENT_NAME -> $GREEN_REPLICAS replicas"

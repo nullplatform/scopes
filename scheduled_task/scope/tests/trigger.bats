@@ -17,6 +17,9 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
 
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f np_naming_list_by_label
+
   export K8S_NAMESPACE="default-namespace"
 
   # Base CONTEXT: deployed scope with an active deployment
@@ -37,7 +40,7 @@ setup() {
   # Mock kubectl: cronjob exists, job creation succeeds
   kubectl() {
     case "$*" in
-      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[0].metadata.name}")
+      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
         echo "my-cronjob"
         return 0
         ;;
@@ -114,6 +117,66 @@ teardown() {
   assert_contains "$output" "• Verify a job exists: kubectl get job -n provider-namespace -l scope_id=scope-123"
 }
 
+@test "trigger: fails with a cluster-unreadable message when the CronJob lookup errors, without advising a redeploy" {
+  kubectl() {
+    case "$*" in
+      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
+        echo "Error from server (Forbidden): cronjobs.batch is forbidden" >&2
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the scope's CronJob in namespace 'provider-namespace'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "- The cluster API server is unreachable"
+  assert_contains "$output" "- RBAC denies reading cronjob in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Verify cluster connectivity and RBAC: kubectl auth can-i get cronjob -n provider-namespace"
+
+  [[ "$output" != *"No CronJob found"* ]]
+  [[ "$output" != *"Redeploy the scope"* ]]
+}
+
+@test "trigger: fails with a cluster-unreadable message when the Job lookup errors, without advising a redeploy" {
+  kubectl() {
+    case "$*" in
+      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
+        echo ""
+        return 0
+        ;;
+      "get job -n provider-namespace -l scope_id=scope-123 --sort-by=.metadata.creationTimestamp -o jsonpath={.items[-1:].metadata.name}")
+        echo "Error from server (Forbidden): jobs.batch is forbidden" >&2
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the scope's previous Job in namespace 'provider-namespace'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "- The cluster API server is unreachable"
+  assert_contains "$output" "- RBAC denies reading job in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Verify cluster connectivity and RBAC: kubectl auth can-i get job -n provider-namespace"
+
+  [[ "$output" != *"No CronJob or previous Job found"* ]]
+  [[ "$output" != *"Redeploy the scope"* ]]
+}
+
 # =============================================================================
 # Run-once: no CronJob, clone the most recent Job into a fresh one
 # =============================================================================
@@ -122,7 +185,7 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[0].metadata.name}")
+      "get cronjob -n provider-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}")
         echo ""  # run-once scope: no CronJob
         return 0
         ;;
@@ -304,4 +367,13 @@ JSON
   assert_equal "$status" "0"
   assert_contains "$output" "name: load logging"
   assert_contains "$output" "\$OVERRIDES_PATH/logging"
+}
+
+@test "trigger-job workflow loads np_naming_list_by_label before the trigger step" {
+  run cat "$BATS_TEST_DIRNAME/../workflows/trigger-job.yaml"
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "name: load naming"
+  assert_contains "$output" "\$SERVICE_PATH/naming/resolve_names"
+  assert_contains "$output" "np_naming_list_by_label"
 }

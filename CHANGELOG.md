@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix: diagnose on a k8s scope now attaches the application's logs to a pod stuck in not-ready, instead of the traffic sidecar's
 - Fix: k8s rollbacks now show why the rolled-back deployment failed (image pull error, crash loop, OOM, failed health check), instead of always printing the generic "Application Startup Issue Detected" hints
 - Fix: k8s scopes on Route53 keep the ALB their DNS record points to on every deployment, instead of silently falling back to least-loaded selection and moving the ingress to another ALB (which can leave the scope without traffic). The record is now looked up in both hosted zones, the one matching the scope visibility first, and aliases with the `dualstack.` prefix (as created from the AWS console) are matched
+- k8s scopes can name Kubernetes objects `checkout-api-production-789012` instead of `d-123456-789012`
+- k8s scopes can define their own object naming pattern with `naming.strategy: custom` and `naming.deployment_pattern`
+- A `custom` naming pattern missing its uniqueness id now gets it appended automatically instead of failing the deploy
+- Fix: manually triggering a scheduled task now reports an unreachable cluster or RBAC denial separately from a missing CronJob
 - Add a "Run once" option to scheduled task scopes: the task runs a single time when the scope is deployed instead of on a recurring schedule, and the deployment waits for it to finish
 
 ## [1.17.0] - 2026-09-11

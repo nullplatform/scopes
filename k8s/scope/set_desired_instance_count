@@ -29,21 +29,31 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-DEPLOYMENT_NAME="d-$SCOPE_ID-$DEPLOYMENT_ID"
+require_resource deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID" DEPLOYMENT_NAME
 
-HPA_NAME="hpa-d-$SCOPE_ID-$DEPLOYMENT_ID"
+HPA_LOOKUP_STATUS=0
+HPA_NAME="$(np_naming_lookup hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID")" || HPA_LOOKUP_STATUS=$?
+if [ "$HPA_LOOKUP_STATUS" -eq 1 ]; then
+    log error "❌ Could not check the cluster for the HPA of deployment $DEPLOYMENT_ID"
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading hpa in namespace '$K8S_NAMESPACE'"
+    log error "🔧 How to fix:"
+    log error "   • Verify cluster connectivity and RBAC: kubectl auth can-i get hpa -n $K8S_NAMESPACE"
+    exit 1
+elif [ "$HPA_LOOKUP_STATUS" -eq 2 ]; then
+    HPA_NAME=""
+fi
 
 log debug "📋 Deployment: $DEPLOYMENT_NAME"
 log debug "📋 Namespace: $K8S_NAMESPACE"
-
-require_deployment "$DEPLOYMENT_NAME" "$K8S_NAMESPACE" "$SCOPE_ID"
 
 CURRENT_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
 log debug "📋 Current replicas: $CURRENT_REPLICAS"
 
 HPA_EXISTS=false
 HPA_PAUSED=false
-if kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1; then
+if [[ -n "$HPA_NAME" ]]; then
     HPA_EXISTS=true
     log debug "📋 HPA found: $HPA_NAME"
 

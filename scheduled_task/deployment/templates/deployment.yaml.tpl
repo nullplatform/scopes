@@ -1,10 +1,10 @@
 apiVersion: batch/v1
 kind: {{ if eq .scope.capabilities.cron "run-once" }}Job{{ else }}CronJob{{ end }}
 metadata:
-  name: job-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.cronjob }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .component }}
     nullplatform: "true"
     account: "{{ .account.slug }}"
@@ -173,7 +173,7 @@ spec:
   jobTemplate:
     metadata:
       labels:
-        name: d-{{ .scope.id }}-{{ .deployment.id }}
+        name: {{ .names.deployment }}
         app.kubernetes.io/part-of: {{ .component }}
         nullplatform: "true"
         account: "{{ .account.slug }}"
@@ -204,7 +204,7 @@ spec:
       template:
         metadata:
           labels:
-            name: d-{{ .scope.id }}-{{ .deployment.id }}
+            name: {{ .names.deployment }}
             app.kubernetes.io/part-of: {{ .component }}
             nullplatform: "true"
             account: "{{ .account.slug }}"
@@ -272,7 +272,7 @@ spec:
             - name: application
               envFrom:
                 - secretRef:
-                    name: s-{{ .scope.id }}-d-{{ .deployment.id }}
+                    name: {{ .names.secret }}
         {{- if .parameters.results }}
               env:
           {{- range .parameters.results }}
@@ -314,7 +314,7 @@ spec:
               {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
             - name: {{ printf "file-%s" $key }}
               secret:
-                secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
+                secretName: {{ $.names.secret_files }}
                 items:
                 - key: {{ printf "app-file-%s" $key }}
                   path: {{ filepath.Base .destination_path | quote }}
