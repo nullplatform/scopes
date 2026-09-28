@@ -122,7 +122,7 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
     log debug "📝 Creating namespace '$K8S_NAMESPACE'..."
 
     kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
-      kubectl label -f - nullplatform=true --dry-run=client -o yaml | \
+      kubectl label --local -f - nullplatform=true --dry-run=client -o yaml | \
       kubectl apply -f -
 
     log info "   ✅ Namespace '$K8S_NAMESPACE' created successfully"
