@@ -58,7 +58,7 @@ spec:
   ports:
     - protocol: TCP
       port: {{ .main_http_port }}
-      targetPort: 80
+      targetPort: {{ .main_traffic_manager_port }}
   selector:
     nullplatform: "true"
     account: {{ .account.slug }}
@@ -196,7 +196,7 @@ spec:
   ports:
     - protocol: TCP
       port: {{ .port }}
-      targetPort: {{ .port }}
+      targetPort: {{ .traffic_manager_port }}
   selector:
     nullplatform: "true"
     account: {{ $.account.slug }}

@@ -631,9 +631,9 @@
                   "port":{
                      "type":"integer",
                      "title":"Port Number",
-                     "maximum":65535,
+                     "maximum":55535,
                      "minimum":1024,
-                     "description":"The port number to expose (1024-65535)"
+                     "description":"The port number your application binds and the scope exposes (1024-55535). Its traffic-manager sidecar takes this port plus 10000."
                   },
                   "type":{
                      "enum":[

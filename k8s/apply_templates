@@ -31,9 +31,39 @@ while IFS= read -r TEMPLATE_FILE; do
        IGNORE_NOT_FOUND="--ignore-not-found=true"
      fi
 
-     if ! kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
-       log error "   ❌ Failed to apply"
+     TRACE_STEP_KEY=""
+     if [[ "$ACTION" == "apply" ]] && command -v np_scope_step_begin >/dev/null 2>&1; then
+       case "$FILENAME" in
+         deployment-*) TRACE_STEP_KEY="create-deployment" ;;
+         secret-*)     TRACE_STEP_KEY="create-secret" ;;
+         scaling-*)    TRACE_STEP_KEY="create-hpa" ;;
+         service-*)    TRACE_STEP_KEY="create-service" ;;
+         pdb-*)        TRACE_STEP_KEY="create-pod-disruption-budget" ;;
+         ingress-*)
+           if [[ -n "${DEPLOYMENT_ID:-}" ]]; then
+             TRACE_STEP_KEY="configure-ingress"
+           else
+             TRACE_STEP_KEY="create-ingress"
+           fi ;;
+       esac
+       [[ -n "$TRACE_STEP_KEY" ]] && np_scope_step_begin "$TRACE_STEP_KEY"
      fi
+
+     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND 2>&1); then
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
+       [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
+       if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
+         np_scope_k8s_applied "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
+       fi
+       if [[ "$ACTION" == "delete" ]] && command -v np_scope_k8s_deleted >/dev/null 2>&1; then
+         np_scope_k8s_deleted "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
+       fi
+     else
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT" >&2
+       log error "   ❌ Failed to apply $FILENAME${KUBECTL_OUT:+: $KUBECTL_OUT}"
+       [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 1
+     fi
+     TRACE_STEP_KEY=""
    fi
 
    DEST_DIR="${BASE_DIR}/$ACTION"
@@ -50,6 +80,25 @@ if [[ "$DRY_RUN" == "true" ]]; then
   log debug ""
   log debug "📋 Dry run mode - no changes were made"
   exit 1
+fi
+
+if [[ "${TRACE_TRAFFIC_SWITCH:-false}" == "true" ]] && [[ -n "${CONTEXT:-}" ]] \
+  && command -v np_scope_explain >/dev/null 2>&1; then
+  TRAFFIC_TO=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 100')
+  TRAFFIC_FROM=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.switched_traffic // 0')
+  if [[ "$TRAFFIC_TO" =~ ^[0-9]+$ ]] && [[ "$TRAFFIC_FROM" =~ ^[0-9]+$ ]]; then
+    np_scope_labels "deployment.id=${DEPLOYMENT_ID:-}" "scope.id=${SCOPE_ID:-}" "action=traffic-switch"
+    np_scope_explain --title "Switch traffic for deployment ${DEPLOYMENT_ID:-}" \
+      --what "Switching blue/green traffic for deployment ${DEPLOYMENT_ID:-} from ${TRAFFIC_FROM}% to ${TRAFFIC_TO}%"
+    np_scope_affordance "{\"kind\":\"traffic-switch\",\"deployment_id\":\"${DEPLOYMENT_ID:-}\",\"current_traffic\":$TRAFFIC_TO,\"new_traffic\":$TRAFFIC_TO,\"old_traffic\":$((100 - TRAFFIC_TO)),\"target_traffic\":100}"
+    np_scope_input traffic "{\"from\":$TRAFFIC_FROM,\"desired\":$TRAFFIC_TO}"
+    np_scope_output traffic "{\"switched\":$TRAFFIC_TO}"
+    np_scope_progress "$TRAFFIC_TO" 100 percent
+  fi
+fi
+
+if command -v np_trace_flush >/dev/null 2>&1; then
+  NP_TRACE_FLUSH_TIMEOUT=5 np_trace_flush
 fi
 
 source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -22,6 +21,13 @@ func main() {
 	if cfg.Namespace == "" {
 		fmt.Fprintf(os.Stderr, "Error: namespace is required\n")
 		os.Exit(1)
+	}
+
+	for flagName, bound := range map[string]string{"start-time": cfg.StartTime, "end-time": cfg.EndTime} {
+		if bound != "" && !logs.ValidTimestamp(bound) {
+			fmt.Fprintf(os.Stderr, "Error: %s must be RFC3339, e.g. 2026-08-17T23:59:59Z (got %q)\n", flagName, bound)
+			os.Exit(1)
+		}
 	}
 
 	// Create Kubernetes client
@@ -62,21 +68,7 @@ func main() {
 	fetcher := logs.NewFetcher(clientset)
 	allLogs := fetcher.FetchConcurrently(pods, cfg)
 
-	// Sort logs by datetime
-	sort.Slice(allLogs, func(i, j int) bool {
-		return allLogs[i].DateTime < allLogs[j].DateTime
-	})
-
-	// Limit results
-	if len(allLogs) > cfg.Limit {
-		allLogs = allLogs[:cfg.Limit]
-	}
-	if len(allLogs) == 0 {
-		allLogs = []types.LogEntry{}
-	}
-
-	// Generate next page token
-	token := pagination.GenerateToken(allLogs)
+	allLogs, token := pagination.Page(allLogs, cfg.Limit, pagination.DecodeToken(cfg.NextPageToken))
 
 	response := types.Response{
 		Results:       allLogs,

@@ -57,15 +57,18 @@ func (f *Fetcher) FetchConcurrently(pods []corev1.Pod, config types.Config) []ty
 			// Determine since time for this pod
 			sinceTime := determineSinceTime(podUID, lastReadTimes, config.StartTime)
 
-			// Get pod logs
+			// Cancelling releases the producer when the processor stops at the end of the window.
+            ctx, cancel := context.WithCancel(context.Background())
+            defer cancel()
+
             logCh := make(chan string, 100)
             go func() {
                 defer close(logCh)
-                f.streamPodLogs(&p, config.Namespace, sinceTime, int64(podLimit*3072), logCh)
+                f.streamPodLogs(ctx, &p, config.Namespace, sinceTime, int64(podLimit*3072), logCh)
             }()
 
             processor := NewProcessor()
-            processedLogs := processor.ProcessLinesFromChannel(logCh, config.FilterPattern, p.Name, podUID, getLastReadTime(podUID, lastReadTimes))
+            processedLogs := processor.ProcessLinesFromChannel(logCh, config.FilterPattern, p.Name, podUID, getLastReadTime(podUID, lastReadTimes), config.EndTime)
 
             if len(processedLogs) > 0 {
                 mu.Lock()
@@ -114,8 +117,7 @@ func (f *Fetcher) getPodLogs(pod *corev1.Pod, namespace, sinceTime string, limit
 	return logContent.String()
 }
 
-func (f *Fetcher) streamPodLogs(pod *corev1.Pod, namespace, sinceTime string, limitBytes int64, logCh chan<- string) {
-    ctx := context.Background()
+func (f *Fetcher) streamPodLogs(ctx context.Context, pod *corev1.Pod, namespace, sinceTime string, limitBytes int64, logCh chan<- string) {
     opts := &corev1.PodLogOptions{
         Container:  types.DefaultContainerName,
         Timestamps: true,
@@ -136,7 +138,11 @@ func (f *Fetcher) streamPodLogs(pod *corev1.Pod, namespace, sinceTime string, li
 
     scanner := bufio.NewScanner(podLogs)
     for scanner.Scan() {
-        logCh <- scanner.Text()
+        select {
+        case logCh <- scanner.Text():
+        case <-ctx.Done():
+            return
+        }
     }
 }
 

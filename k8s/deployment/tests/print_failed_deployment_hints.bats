@@ -83,7 +83,8 @@ assert_not_contains() {
   assert_contains "$output" "📋 Reason: The container exceeded its memory limit (512Mi)"
   assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
   assert_contains "$output" "📋 Details: out of memory"
-  assert_contains "$output" "💡 Suggested fix: Increase ram_memory for scope 'my-app'"
+  assert_contains "$output" "💡 Suggested fix: Raise the RAM Memory of scope 'my-app'"
+  assert_not_contains "$output" "ram_memory"
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -229,8 +230,9 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "did not pass its health check at /health"
-  assert_contains "$output" "💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health"
+  assert_contains "$output" "📋 Reason: The application did not pass its health check at /health."
+  assert_contains "$output" "📋 Detected: Unhealthy on container api"
+  assert_contains "$output" "💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health within the readiness window."
   assert_not_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
@@ -250,13 +252,11 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  # HUMAN_MESSAGE retains the base sentence and appends the translated probe failure
-  assert_contains "$output" "did not pass its health check at /health"
-  assert_contains "$output" "Detected: Startup probe"
-  assert_contains "$output" "not yet listening"
-  # SUGGESTED_FIX is targeted: tells the user the app is not binding the port
-  assert_contains "$output" "not listening on port 8080"
-  # Generic fallback fix must NOT appear
+  assert_contains "$output" "📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — app is not yet listening on /health."
+  assert_contains "$output" "📋 Detected: Unhealthy on container api"
+  assert_contains "$output" "📋 Recent warnings:"
+  assert_contains "$output" "  • Unhealthy (×1)"
+  assert_contains "$output" "💡 Suggested fix: The container is not listening on port 8080 — verify the start command runs, the process binds to 0.0.0.0:8080, and nothing is crashing before it accepts connections."
   assert_not_contains "$output" "returns 2xx on /health within the readiness window"
 }
 
@@ -276,11 +276,9 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Detected: Startup probe"
-  assert_contains "$output" "HTTP 502"
-  # SUGGESTED_FIX cites the status code and points to app logs
-  assert_contains "$output" "responded with HTTP 502"
-  assert_contains "$output" "inspect application logs"
+  assert_contains "$output" "📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — app responded with HTTP 502 (expected 2xx)."
+  assert_contains "$output" "📋 Detected: Unhealthy on container api"
+  assert_contains "$output" "💡 Suggested fix: The app responded with HTTP 502 on /health — inspect application logs for startup errors; the process is running but /health is not returning 2xx."
 }
 
 @test "print_failed_deployment_hints: enriches Unhealthy with timeout detail and targeted fix" {
@@ -299,16 +297,14 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "Detected: Startup probe"
-  assert_contains "$output" "timed out"
-  # SUGGESTED_FIX mentions timing knobs
-  assert_contains "$output" "initialDelaySeconds"
+  assert_contains "$output" "📋 Reason: The application did not pass its health check at /health. Detected: Startup probe — request timed out on /health."
+  assert_contains "$output" "📋 Detected: Unhealthy on container api"
+  assert_contains "$output" "💡 Suggested fix: The probe timed out — the app may be slow to start, or /health is blocking. Raise the health check's Initial Delay or Timeout on scope 'my-app', or make /health lighter."
+  assert_not_contains "$output" "initialDelaySeconds"
 }
 
 @test "print_failed_deployment_hints: falls back to raw Unhealthy message when translation is impossible" {
   export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
-  # Message does not match any known probe pattern → translate_probe_message returns non-zero.
-  # The raw text must still be surfaced in the hint instead of being silently dropped.
   export ALL_EVENTS='{"items":[{"type":"Warning","reason":"Unhealthy","lastTimestamp":"2026-05-20T13:13:42Z","message":"completely unknown probe failure format from a future K8s"}]}'
 
   kubectl() {
@@ -323,10 +319,8 @@ assert_not_contains() {
   run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
 
   [ "$status" -eq 0 ]
-  # Raw message appears verbatim in the reason line
-  assert_contains "$output" "completely unknown probe failure format from a future K8s"
-  # Base sentence is still there
-  assert_contains "$output" "did not pass its health check at /health"
+  assert_contains "$output" "📋 Reason: The application did not pass its health check at /health. Detected: completely unknown probe failure format from a future K8s"
+  assert_contains "$output" "💡 Suggested fix: Ensure the app listens on port 8080 and returns 2xx on /health within the readiness window."
 }
 
 @test "print_failed_deployment_hints: Unhealthy picks the latest event when multiple are present" {
@@ -399,8 +393,6 @@ assert_not_contains() {
   # health_check_path default "/" must apply when CONTEXT is unset.
   assert_contains "$output" "health check at /."
   assert_contains "$output" "returns 2xx on /"
-  # Guard against the previous escape bug: a literal backslash in the message
-  # would indicate jq received {\} instead of {} and silently failed.
   assert_not_contains "$output" "{\\"
 }
 
@@ -487,4 +479,65 @@ assert_not_contains() {
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "📊 Progress at failure: 1/3 ready, 2/3 available"
+}
+
+@test "print_failed_deployment_hints: an OOM kill inside a crash loop is diagnosed as the OOM" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=app pod=d-1_ns(abc)"}},"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The container exceeded its memory limit (512Mi) and was terminated."
+  assert_contains "$output" "📋 Detected: OOMKilled on container app (exit 137)"
+  assert_contains "$output" "📋 Details: back-off 20s restarting failed container=app pod=d-1_ns(abc)"
+  assert_contains "$output" "💡 Suggested fix: Raise the RAM Memory of scope 'my-app', or reduce how much memory the application uses."
+  assert_not_contains "$output" "The container started and crashed repeatedly."
+}
+
+@test "print_failed_deployment_hints: a plain non-zero exit in a crash loop keeps its startup-log advice" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off 20s restarting failed container=app"}},"lastState":{"terminated":{"reason":"Error","exitCode":1}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The container started and exited with code 1."
+  assert_contains "$output" "📋 Detected: Error on container app (exit 1)"
+  assert_contains "$output" "📋 Details: back-off 20s restarting failed container=app"
+  assert_contains "$output" "💡 Suggested fix: Review application logs for startup errors (failed dependencies, bad config, panics)."
+  assert_not_contains "$output" "Pods are failing with reason: Error"
+}
+
+@test "print_failed_deployment_hints: an evicted pod says why and what to do" {
+  export K8S_NAMESPACE="ns" DEPLOYMENT_ID="d1"
+  kubectl() {
+    case "$*" in
+      "get pods"*)
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"Evicted"}}}]}}]}'
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Reason: The pod was evicted from its node."
+  assert_contains "$output" "📋 Detected: Evicted on container app"
+  assert_contains "$output" "💡 Suggested fix: The node ran out of memory or disk. Lower the scope's resource requests, or free capacity on the cluster."
 }

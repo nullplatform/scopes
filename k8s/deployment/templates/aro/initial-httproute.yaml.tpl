@@ -48,4 +48,4 @@ spec:
     kind: Service
     name: d-{{ .scope.id }}-{{ .deployment.id }}
   port:
-    targetPort: 80
+    targetPort: {{ .main_traffic_manager_port }}

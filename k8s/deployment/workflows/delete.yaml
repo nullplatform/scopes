@@ -1,9 +1,21 @@
 include:
   - "$SERVICE_PATH/values.yaml"
+trace:
+  title: Remove deployment
+  flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]
+  default: false
+  job:
+    name: k8s-deployment-delete
+    namespace: "@context:scope.provider"
+    labels:
+      entity: deployment
+      operation: delete
+      scope.provider: "@context:scope.provider"
 steps:
   - name: load logging
     type: script
     file: "$SERVICE_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
@@ -13,6 +25,7 @@ steps:
   - name: assume role
     type: script
     file: "$SERVICE_PATH/utils/assume_role_step"
+    trace: false
     output:
       - name: AWS_ACCESS_KEY_ID
         type: environment
@@ -23,6 +36,7 @@ steps:
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
+    trace: false
     output:
       - name: CONTEXT
         type: environment

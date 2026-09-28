@@ -51,7 +51,7 @@ spec:
     name: d-{{ .scope.id }}-{{ .blue_deployment_id }}
     weight: {{ sub 100 .deployment.strategy_data.desired_switched_traffic }}
   port:
-    targetPort: 80
+    targetPort: {{ .main_traffic_manager_port }}
   alternateBackends:
     - kind: Service
       name: d-{{ .scope.id }}-{{ .deployment.id }}

@@ -55,8 +55,7 @@ find_deployment_by_label() {
   log debug "🔍 Looking for deployment with label: $label"
 
   DEPLOYMENT=$(kubectl get deployment -n "$namespace" -l "$label" -o jsonpath="{.items[0].metadata.name}" 2>&1) || {
-    log error "   ❌ Failed to find deployment with label '$label' in namespace '$namespace'"
-    log debug "📋 Kubectl error: $DEPLOYMENT"
+    log error "   ❌ Failed to find deployment with label '$label' in namespace '$namespace'${DEPLOYMENT:+: $DEPLOYMENT}"
     DEPLOYMENT=""
   }
 

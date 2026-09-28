@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT 2>/dev/null || true
 }
 
 # =============================================================================
@@ -213,22 +213,50 @@ teardown() {
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================
-@test "traffic container: uses websocket2 for web_sockets, latest for http" {
-  # web_sockets protocol
-  SCOPE_TRAFFIC_PROTOCOL="web_sockets"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
+resolve_traffic_container_version() {
+  local protocol="$1"
+  if [[ "$protocol" == "web_sockets" ]]; then
+    echo "websocket2"
+  else
+    get_config_value \
+      --provider '.providers["container-orchestration"].traffic_manager.version' \
+      --default "latest"
   fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "websocket2"
+}
 
-  # http protocol
-  SCOPE_TRAFFIC_PROTOCOL="http"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
-  fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "latest"
+@test "traffic container: uses websocket2 for web_sockets, latest for http" {
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "latest"
+}
+
+@test "traffic container: http protocol uses container-orchestration provider version when set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "1.8.0"
+}
+
+@test "traffic container: web_sockets protocol ignores container-orchestration provider version" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+}
+
+@test "traffic container: provider version flows into the default image when no full-image override is set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+  unset TRAFFIC_CONTAINER_IMAGE
+
+  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http")
+  result=$(get_config_value \
+    --env TRAFFIC_CONTAINER_IMAGE \
+    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
+    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
+  )
+  assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0"
 }
 
 # =============================================================================
@@ -947,6 +975,51 @@ set_additional_ports() {
   assert_equal "$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports')" "[]"
 }
 
+# -----------------------------------------------------------------------------
+# Additional port ceiling: port + 10000 has to stay a valid TCP port.
+# -----------------------------------------------------------------------------
+
+@test "additional port ceiling: rejects a port whose sidecar would exceed 65535" {
+  setup_full_build_context
+  set_additional_ports '[{"port":60000,"type":"HTTP"}]'
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ Additional port 60000 is too high: its traffic-manager sidecar would need port 70000
+
+💡 Possible causes:
+   - Every additional port reserves both <port> (application) and <port>+10000 (its sidecar)
+   - Ports above 55535 push the sidecar past the maximum TCP port 65535
+
+🔧 How to fix:
+   • Choose an additional port of 55535 or lower
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "additional port ceiling: applies to GRPC entries too" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9090,"type":"HTTP"},{"port":60001,"type":"GRPC"}]'
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Additional port 60001 is too high: its traffic-manager sidecar would need port 70001"
+}
+
+@test "additional port ceiling: accepts the boundary value 55535" {
+  setup_full_build_context
+  set_additional_ports '[{"port":55535,"type":"GRPC"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].traffic_manager_port')" "65535"
+}
+
 # =============================================================================
 # Capability limits normalization
 # These tests source the real deployment/build_context and assert on the
@@ -1037,4 +1110,195 @@ set_capabilities() {
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.cpu_millicores_limit')" "500"
   assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.ram_memory_limit')" "1024"
+}
+
+# =============================================================================
+# main_traffic_manager_port resolution and validation
+# The main traffic-manager sidecar's listener port. Default 80; operators move
+# it to a non-privileged port when their cluster does not allow pod-to-pod
+# traffic on 80.
+# =============================================================================
+
+@test "main_traffic_manager_port: defaults to 80 when nothing is configured" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "80"
+}
+
+@test "main_traffic_manager_port: emitted as JSON number for Go template consumption" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port | type')" "number"
+}
+
+@test "main_traffic_manager_port: read from container-orchestration provider" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 10080')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
+}
+
+@test "main_traffic_manager_port: scope-configurations takes priority over container-orchestration" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["container-orchestration"].traffic_manager.port = 10080
+    | .providers["scope-configurations"].deployment.main_traffic_manager_port = 11080
+  ')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "11080"
+}
+
+@test "main_traffic_manager_port: MAIN_TRAFFIC_MANAGER_PORT env var honoured when no provider set" {
+  setup_full_build_context
+  export MAIN_TRAFFIC_MANAGER_PORT=10080
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
+}
+
+@test "main_traffic_manager_port: rejects non-numeric value" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = "not-a-port"')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT must be a numeric value, got: 'not-a-port'
+
+🔧 How to fix:
+   • Set a numeric value in values.yaml, the scope-configurations provider, or the container-orchestration provider
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "main_traffic_manager_port: accepts a privileged port other than 80" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 90')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "90"
+}
+
+@test "main_traffic_manager_port: rejects port above 65535" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 70000')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT must be in the range 1-65535, got: '70000'
+
+🔧 How to fix:
+   • Set a valid TCP port; 10080 is the recommended value when moving off the default 80
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "main_traffic_manager_port: rejects port 0" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 0')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT must be in the range 1-65535, got: '0'
+
+🔧 How to fix:
+   • Set a valid TCP port; 10080 is the recommended value when moving off the default 80
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "main_traffic_manager_port: rejects collision with main_http_port" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '
+    .scope.capabilities.main_http_port = 10080
+    | .providers["container-orchestration"].traffic_manager.port = 10080
+  ')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT (10080) collides with main_http_port (10080)
+
+💡 Possible causes:
+   - The sidecar and the application share the pod network namespace and cannot both bind the same port
+🔧 How to fix:
+   • Choose a different MAIN_TRAFFIC_MANAGER_PORT, or change the main_http_port capability
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "main_traffic_manager_port: rejects collision with an additional port" {
+  setup_full_build_context
+  set_additional_ports '[{"port":10080,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 10080')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT (10080) collides with additional port 10080
+
+💡 Possible causes:
+   - Additional port 10080 occupies both 10080 (application) and 20080 (its sidecar)
+🔧 How to fix:
+   • Choose a MAIN_TRAFFIC_MANAGER_PORT that matches neither value, or remove the additional port
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "main_traffic_manager_port: rejects collision with an additional port's sidecar port" {
+  setup_full_build_context
+  set_additional_ports '[{"port":8081,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 18081')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ MAIN_TRAFFIC_MANAGER_PORT (18081) collides with additional port 8081
+
+💡 Possible causes:
+   - Additional port 8081 occupies both 8081 (application) and 18081 (its sidecar)
+🔧 How to fix:
+   • Choose a MAIN_TRAFFIC_MANAGER_PORT that matches neither value, or remove the additional port
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "main_traffic_manager_port: accepts 10080 alongside unrelated additional ports" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9090,"type":"HTTP"},{"port":9014,"type":"GRPC"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].traffic_manager.port = 10080')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
