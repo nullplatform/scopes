@@ -10,6 +10,7 @@ metadata:
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}
     app.kubernetes.io/name: {{ .scope.slug }}
+    deployment_id: "{{ .deployment.id }}"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}

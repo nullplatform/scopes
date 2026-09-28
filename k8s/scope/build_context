@@ -242,6 +242,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain}')
 
 source "$SCRIPT_DIR/../naming/resolve_names"
+if ! type -t require_resource >/dev/null 2>&1; then source "$SCRIPT_DIR/require_resource"; fi
 
 NAMING_MAX_LENGTH=$(get_config_value \
   --env NAMING_MAX_LENGTH \

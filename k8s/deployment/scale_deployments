@@ -14,22 +14,8 @@ if [ "$DEPLOY_STRATEGY" != "rolling" ]; then
 fi
 
 if [ "$DEPLOY_STRATEGY" = "rolling" ]; then
-  GREEN_DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$GREEN_DEPLOYMENT_ID") || {
-    log error "❌ No deployment found for deployment $GREEN_DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
-    log error "💡 Possible causes:"
-    log error "   - The deployment was not created yet or was deleted"
-    log error "🔧 How to fix:"
-    log error "   • Verify the deployment exists: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$GREEN_DEPLOYMENT_ID"
-    exit 1
-  }
-  BLUE_DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID") || {
-    log error "❌ No deployment found for deployment $BLUE_DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
-    log error "💡 Possible causes:"
-    log error "   - The deployment was not created yet or was deleted"
-    log error "🔧 How to fix:"
-    log error "   • Verify the deployment exists: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$BLUE_DEPLOYMENT_ID"
-    exit 1
-  }
+  require_resource deployment "$K8S_NAMESPACE" "$GREEN_DEPLOYMENT_ID" GREEN_DEPLOYMENT_NAME
+  require_resource deployment "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" BLUE_DEPLOYMENT_NAME
 
   log debug "📝 Scaling deployments for rolling strategy..."
   log debug "📋 Green deployment: $GREEN_DEPLOYMENT_NAME -> $GREEN_REPLICAS replicas"

@@ -12,28 +12,28 @@ teardown() {
 
 @test "golden: normal context renders byte-identically" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
-		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json" "$RENDER_DIR"
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
 	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/normal" "$RENDER_DIR"
 	[ "$status" -eq 0 ]
 }
 
 @test "golden: long context renders byte-identically" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
-		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-long.json" "$RENDER_DIR"
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-long-raw.json" "$RENDER_DIR"
 	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/long" "$RENDER_DIR"
 	[ "$status" -eq 0 ]
 }
 
 @test "golden: full context renders byte-identically" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
-		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full.json" "$RENDER_DIR"
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full-raw.json" "$RENDER_DIR"
 	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/full" "$RENDER_DIR"
 	[ "$status" -eq 0 ]
 }
 
 @test "golden: renders all fifteen templates" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
-		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json" "$RENDER_DIR"
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
 	run bash -c "ls '$RENDER_DIR' | wc -l | tr -d ' '"
 	assert_equal "$output" "15"
 }

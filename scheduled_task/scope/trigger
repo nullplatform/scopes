@@ -22,7 +22,22 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-nullplat
 
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
 
-JOB=$(kubectl get cronjob -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
+JOB_LOOKUP_STATUS=0
+JOB_NAMES=$(np_naming_list_by_label cronjob "$K8S_NAMESPACE" "scope_id=$SCOPE_ID") || JOB_LOOKUP_STATUS=$?
+JOB="${JOB_NAMES%% *}"
+
+if [ "$JOB_LOOKUP_STATUS" -eq 1 ]; then
+  log error "❌ Could not check the cluster for the scope's CronJob in namespace '$K8S_NAMESPACE'"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   - The cluster API server is unreachable"
+  log error "   - RBAC denies reading cronjob in namespace '$K8S_NAMESPACE'"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Verify cluster connectivity and RBAC: kubectl auth can-i get cronjob -n $K8S_NAMESPACE"
+  log error ""
+  exit 1
+fi
 
 if [[ -z "$JOB" ]]; then
   log error "❌ No CronJob found for scope '$SCOPE_ID' in namespace '$K8S_NAMESPACE'"

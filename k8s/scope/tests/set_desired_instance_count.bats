@@ -12,7 +12,9 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
-  export -f np_naming_lookup
+  export -f np_naming_lookup np_naming_list_by_label
+  source "$PROJECT_ROOT/k8s/scope/require_resource"
+  export -f require_resource
 
   # Default environment
   export K8S_NAMESPACE="default-namespace"
@@ -76,7 +78,7 @@ teardown() {
 @test "set_desired_instance_count: fails when deployment not found" {
   kubectl() {
     case "$*" in
-      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo ""
         ;;
       *)
@@ -97,6 +99,59 @@ teardown() {
   assert_contains "$output" "   • Verify the deployment exists: kubectl get deployment -n provider-namespace -l deployment_id=deploy-456"
 }
 
+@test "set_desired_instance_count: fails distinctly when the deployment lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "Error from server (Forbidden): deployments.apps is forbidden"
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../set_desired_instance_count"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the deployment of deployment deploy-456"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading deployment in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get deployment -n provider-namespace"
+}
+
+@test "set_desired_instance_count: fails distinctly when the HPA lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "d-scope-123-deploy-456"
+        ;;
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "Error from server (Forbidden): hpas.autoscaling is forbidden"
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../set_desired_instance_count"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not check the cluster for the HPA of deployment deploy-456"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading hpa in namespace 'provider-namespace'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get hpa -n provider-namespace"
+}
+
 # =============================================================================
 # No HPA Path - Complete Flow
 # =============================================================================
@@ -106,10 +161,10 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
-      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo ""
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
@@ -171,10 +226,10 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
-      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "hpa-d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
@@ -257,10 +312,10 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
-      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "hpa-d-scope-123-deploy-456"
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
@@ -323,10 +378,10 @@ teardown() {
 @test "set_desired_instance_count: uses namespace from provider" {
   kubectl() {
     case "$*" in
-      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
-      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo ""
         ;;
       "get deployment d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
@@ -360,10 +415,10 @@ teardown() {
 
   kubectl() {
     case "$*" in
-      "get deployment -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get deployment -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo "d-scope-123-deploy-456"
         ;;
-      "get hpa -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[0].metadata.name}")
+      "get hpa -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
         echo ""
         ;;
       *"-n default-namespace"*)

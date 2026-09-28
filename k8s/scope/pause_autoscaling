@@ -10,14 +10,7 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-HPA_NAME=$(np_naming_lookup hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
-  log error "❌ No HPA found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
-  log error "💡 Possible causes:"
-  log error "   - Autoscaling is not configured for this deployment"
-  log error "🔧 How to fix:"
-  log error "   • Verify the HPA exists: kubectl get hpa -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
-  exit 1
-}
+require_resource hpa "$K8S_NAMESPACE" "$DEPLOYMENT_ID" HPA_NAME
 
 CURRENT_CONFIG=$(kubectl get hpa "$HPA_NAME" -n "$K8S_NAMESPACE" -o json)
 CURRENT_MIN=$(echo "$CURRENT_CONFIG" | jq -r '.spec.minReplicas')
@@ -27,14 +20,7 @@ log debug "📋 Current HPA configuration:"
 log debug "   Min replicas: $CURRENT_MIN"
 log debug "   Max replicas: $CURRENT_MAX"
 
-DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
-  log error "❌ No deployment found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
-  log error "💡 Possible causes:"
-  log error "   - The deployment was not created yet or was deleted"
-  log error "🔧 How to fix:"
-  log error "   • Verify the deployment exists: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
-  exit 1
-}
+require_resource deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID" DEPLOYMENT_NAME
 CURRENT_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$K8S_NAMESPACE" -o jsonpath='{.spec.replicas}')
 
 log debug "📋 Current deployment replicas: $CURRENT_REPLICAS"

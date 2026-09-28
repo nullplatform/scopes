@@ -10,6 +10,7 @@ metadata:
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: production
     app.kubernetes.io/name: production
+    deployment_id: "789012"
   annotations:
     nullplatform.com/managed-by: nullplatform
     nullplatform.com/account: acme

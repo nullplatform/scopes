@@ -50,14 +50,7 @@ log_unhealthy_raw() {
 }
 
 MAX_ITERATIONS=$(( TIMEOUT / 10 ))
-K8S_DEPLOYMENT_NAME=$(np_naming_lookup deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID") || {
-    log error "❌ No deployment found for deployment $DEPLOYMENT_ID in namespace '$K8S_NAMESPACE'"
-    log error "💡 Possible causes:"
-    log error "   - The deployment was not created yet or was deleted"
-    log error "🔧 How to fix:"
-    log error "   • Verify the deployment exists: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$DEPLOYMENT_ID"
-    exit 1
-}
+require_resource deployment "$K8S_NAMESPACE" "$DEPLOYMENT_ID" K8S_DEPLOYMENT_NAME
 iteration=0
 LATEST_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SKIP_DEPLOYMENT_STATUS_CHECK="${SKIP_DEPLOYMENT_STATUS_CHECK:=false}"

@@ -1,0 +1,33 @@
+{
+  "account": {"id": 1, "slug": "acme"},
+  "namespace": {"id": 11, "slug": "payments"},
+  "application": {"id": 111, "slug": "customer-notifications-dispatcher"},
+  "scope": {
+    "id": 123456, "slug": "production-canary-eu-west", "domain": "checkout.example.com",
+    "domains": [{"name": "www.checkout.example.com"}],
+    "nrn": "organization=1:account=1:namespace=11:application=111",
+    "dimensions": {},
+    "current_active_deployment": "789011",
+    "capabilities": {
+      "visibility": "public", "protocol": "http", "scaling_type": "fixed",
+      "fixed_instances": 2, "main_http_port": 8080,
+      "cpu_millicores": 500, "cpu_millicores_limit": 1000,
+      "ram_memory": 512, "ram_memory_limit": 1024,
+      "health_check": {"enabled": true, "type": "http", "path": "/health", "timeout_seconds": 2,
+                       "period_seconds": 10, "initial_delay_seconds": 5},
+      "additional_ports": [{"port": 9090, "type": "GRPC"}],
+      "cron": "*/5 * * * *", "concurrency_policy": "Forbid",
+      "history_limit": 3, "retries": 2
+    }
+  },
+  "deployment": {"id": 789012, "status": "creating", "strategy_data": {"desired_switched_traffic": 100}},
+  "asset": {"url": "public.ecr.aws/acme/checkout-api:1.0.0"},
+  "parameters": {"results": []},
+  "release": {"semver": "1.0.0"},
+  "dns_zone_type": "public", "record_type": "A", "gateway_ip": "10.0.0.5",
+  "providers": {
+    "container-orchestration": {
+      "balancer": {"public_name": "alb-public", "private_name": "alb-private"}
+    }
+  }
+}

@@ -23,6 +23,17 @@ steps:
           kind: string
           namespace: string
           deployment_id: string
+  - name: load resource helpers
+    type: script
+    file: "$SERVICE_PATH/scope/require_resource"
+    output:
+      - name: require_resource
+        type: function
+        parameters:
+          kind: string
+          namespace: string
+          deployment_id: string
+          out_var: string
   - name: set desired instance count
     type: script
     file: "$SERVICE_PATH/scope/set_desired_instance_count"

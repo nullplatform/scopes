@@ -17,7 +17,7 @@ setup() {
   export SCOPE_ID="scope-123"
   export SCOPE_DOMAIN="myapp.example.com"
   export K8S_NAMESPACE="test-ns"
-  export CONTEXT='{"scope":{"slug":"my-scope"},"application":{"slug":"my-app"}}'
+  export CONTEXT='{"scope":{"slug":"my-scope"},"application":{"slug":"my-app"},"names":{"scope_dns":"k8s-my-app-my-scope-scope-123-dns"}}'
   export OUTPUT_DIR="$(mktemp -d)"
 
   # Mock kubectl - default: gateway returns IP
@@ -222,4 +222,29 @@ teardown() {
   assert_contains "$output" "📝 Deleting DNSEndpoint: k8s-my-app-my-scope-scope-123-dns in namespace test-ns"
   assert_contains "$output" "⚠️  DNSEndpoint 'k8s-my-app-my-scope-scope-123-dns' may already be deleted"
   assert_contains "$output" "✅ DNSEndpoint deletion completed"
+}
+
+@test "manage_route: DELETE - targets the resolved DNS endpoint name from context, not a constructed one" {
+  export ACTION="DELETE"
+  export CONTEXT='{"scope":{"slug":"my-scope"},"application":{"slug":"my-app"},"names":{"scope_dns":"checkout-api-production-123456-dns"}}'
+
+  kubectl() {
+    echo "kubectl $*" >> "$OUTPUT_DIR/kubectl.log"
+    case "$*" in
+      *"delete dnsendpoint checkout-api-production-123456-dns -n test-ns"*)
+        return 0
+        ;;
+      *"delete dnsendpoint"*)
+        return 1
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Deleting DNSEndpoint: checkout-api-production-123456-dns in namespace test-ns"
+  assert_contains "$output" "✅ DNSEndpoint deletion completed"
+  assert_contains "$(cat "$OUTPUT_DIR/kubectl.log")" "delete dnsendpoint checkout-api-production-123456-dns -n test-ns"
 }
