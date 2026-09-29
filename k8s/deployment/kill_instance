@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value" || {
+  echo "Error: could not load $SCRIPT_DIR/../utils/get_config_value" >&2
+  exit 1
+}
+
 
 log debug "🔍 Starting instance kill operation..."
 
@@ -45,9 +51,14 @@ if [[ -z "$SCOPE_ID" ]] && [[ -n "${NP_ACTION_CONTEXT:-}" ]]; then
     SCOPE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.tags.scope_id // empty')
 fi
 
-K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
-  .providers["container-orchestration"].cluster.namespace // $default
-' 2>/dev/null || echo "nullplatform")
+# Same chain as scope/build_context, so the action finds the objects the deployment wrote.
+K8S_NAMESPACE=$(get_config_value \
+  --env NAMESPACE_OVERRIDE \
+  --env K8S_NAMESPACE \
+  --provider '.providers["scope-configurations"].cluster.namespace' \
+  --provider '.providers["container-orchestration"].cluster.namespace' \
+  --default "nullplatform"
+)
 
 if [[ -z "$SCOPE_ID" ]]; then
     log error "❌ scope_id not found in context"
