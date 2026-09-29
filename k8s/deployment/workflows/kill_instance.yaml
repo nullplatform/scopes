@@ -13,6 +13,16 @@ steps:
         parameters:
           level: string
           message: string
+  - name: load naming
+    type: script
+    file: "$SERVICE_PATH/naming/resolve_names"
+    output:
+      - name: np_naming_lookup
+        type: function
+        parameters:
+          kind: string
+          namespace: string
+          deployment_id: string
   - name: kill instance
     type: script
     file: "$SERVICE_PATH/deployment/kill_instance"

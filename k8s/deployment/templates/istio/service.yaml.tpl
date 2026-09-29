@@ -1,14 +1,23 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.deployment }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .component }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}
     app.kubernetes.io/name: {{ .scope.slug }}
+    account: {{ .account.slug }}
+    account_id: "{{ .account.id }}"
+    namespace: {{ .namespace.slug }}
+    namespace_id: "{{ .namespace.id }}"
+    application: {{ .application.slug }}
+    application_id: "{{ .application.id }}"
+    scope: {{ .scope.slug }}
+    scope_id: "{{ .scope.id }}"
+    deployment_id: "{{ .deployment.id }}"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}

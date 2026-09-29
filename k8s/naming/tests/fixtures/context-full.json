@@ -1,0 +1,121 @@
+{
+  "account": {
+    "id": 1,
+    "slug": "acme"
+  },
+  "namespace": {
+    "id": 11,
+    "slug": "payments"
+  },
+  "application": {
+    "id": 111,
+    "slug": "checkout-api"
+  },
+  "scope": {
+    "id": 123456,
+    "slug": "production",
+    "domain": "checkout.example.com",
+    "domains": [
+      {
+        "name": "www.checkout.example.com"
+      }
+    ],
+    "nrn": "organization=1:account=1:namespace=11:application=111",
+    "dimensions": {},
+    "capabilities": {
+      "visibility": "public",
+      "protocol": "http",
+      "scaling_type": "autoscaling",
+      "fixed_instances": 2,
+      "main_http_port": 8080,
+      "cpu_millicores": 500,
+      "cpu_millicores_limit": 1000,
+      "ram_memory": 512,
+      "ram_memory_limit": 1024,
+      "health_check": {
+        "enabled": true,
+        "type": "http",
+        "path": "/health",
+        "timeout_seconds": 2,
+        "period_seconds": 10,
+        "initial_delay_seconds": 5
+      },
+      "additional_ports": [
+        {
+          "port": 9090,
+          "type": "GRPC",
+          "traffic_manager_port": 19090
+        }
+      ],
+      "cron": "*/5 * * * *",
+      "concurrency_policy": "Forbid",
+      "history_limit": 3,
+      "retries": 2,
+      "autoscaling": {
+        "min_replicas": 2,
+        "max_replicas": 10,
+        "target_cpu_utilization": 70,
+        "target_memory_enabled": true,
+        "target_memory_utilization": 80
+      }
+    }
+  },
+  "deployment": {
+    "id": 789012,
+    "status": "creating",
+    "strategy_data": {
+      "desired_switched_traffic": 100
+    }
+  },
+  "blue_deployment_id": "789011",
+  "asset": {
+    "url": "public.ecr.aws/acme/checkout-api:1.0.0"
+  },
+  "parameters": {
+    "results": [
+      {
+        "type": "file",
+        "name": "TLS Certificate",
+        "destination_path": "/etc/secrets/tls.pem",
+        "values": [
+          {
+            "value": "data:application/x-pem-file;base64,LS0tLS1CRUdJTi0tLS0t"
+          }
+        ]
+      }
+    ]
+  },
+  "release": {
+    "semver": "1.0.0"
+  },
+  "dns_zone_type": "public",
+  "record_type": "A",
+  "gateway_ip": "10.0.0.5",
+  "k8s_namespace": "nullplatform",
+  "component": "payments-checkout-api",
+  "alb_name": "alb-public",
+  "ingress_visibility": "internet-facing",
+  "base_domain": "nullapps.io",
+  "region": "us-east-1",
+  "gateway_name": "gateway-public",
+  "k8s_modifiers": {},
+  "replicas": "2",
+  "blue_replicas": "2",
+  "green_replicas": "2",
+  "main_http_port": 8080,
+  "main_traffic_manager_port": 80,
+  "traffic_image": "public.ecr.aws/nullplatform/k8s-traffic-manager:latest",
+  "pull_secrets": {
+    "ENABLED": false,
+    "SECRETS": []
+  },
+  "pdb_enabled": "true",
+  "pdb_max_unavailable": "25%",
+  "service_account_name": "",
+  "traffic_manager_config_map": "",
+  "container_memory_in_memory": "64",
+  "container_cpu_in_millicores": "93",
+  "blue_additional_port_services": {
+    "grpc-9090": true
+  }
+}

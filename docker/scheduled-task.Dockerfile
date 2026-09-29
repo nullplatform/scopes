@@ -2,7 +2,7 @@
 #
 # scheduled-task scope image — the scheduled_task scope. Leaner than containers:
 # its steps only reach for kubectl + gomplate (bash/jq/np ship in the base).
-FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.0.0
+FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.1.1
 
 # aws-cli: the k8s scope scripts this overlay runs on top of call `aws` (sts
 # assume-role first of all, then IAM and ECR); without it every action fails at

@@ -25,6 +25,9 @@ setup() {
     },
     "application": {
       "slug": "my-app"
+    },
+    "names": {
+      "scope_dns": "k8s-my-app-my-scope-scope-123-dns"
     }
   }'
 
@@ -149,10 +152,7 @@ teardown() {
   assert_contains "$output" "❌ DNSEndpoint processing timeout after 20s"
 }
 
-# =============================================================================
-# external_dns: APP_SLUG truncated to 20 chars in endpoint name
-# =============================================================================
-@test "wait_on_balancer: external_dns truncates APP_SLUG to 20 chars in endpoint name" {
+@test "wait_on_balancer: targets the resolved DNS endpoint name from context, not a constructed one" {
   export CONTEXT='{
     "scope": {
       "id": "123",
@@ -161,12 +161,15 @@ teardown() {
     },
     "application": {
       "slug": "very-long-application-name-that-exceeds-limit"
+    },
+    "names": {
+      "scope_dns": "checkout-api-production-123456-dns"
     }
   }'
 
   kubectl() {
     case "$*" in
-      "get dnsendpoint k8s-very-long-applicatio-qa-123-dns -n default-namespace -o jsonpath={.status.observedGeneration}")
+      "get dnsendpoint checkout-api-production-123456-dns -n default-namespace -o jsonpath={.status.observedGeneration}")
         echo "1"
         return 0
         ;;
@@ -181,7 +184,7 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../wait_on_balancer"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "k8s-very-long-applicatio-qa-123-dns"
+  assert_contains "$output" "checkout-api-production-123456-dns"
   assert_contains "$output" "✨ ExternalDNS setup completed successfully"
 }
 

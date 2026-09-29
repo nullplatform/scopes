@@ -9,12 +9,7 @@ iteration=0
 case "$DNS_TYPE" in
   external_dns)
     SCOPE_DOMAIN=$(echo "$CONTEXT" | jq -r '.scope.domain')
-    SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.scope.slug')
-    SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
-    APP_SLUG=$(echo "$CONTEXT" | jq -r '.application.slug')
-    APP_SLUG_SHORT="${APP_SLUG:0:20}"; APP_SLUG_SHORT="${APP_SLUG_SHORT%-}"
-    SCOPE_SLUG_SHORT="${SCOPE_SLUG:0:20}"; SCOPE_SLUG_SHORT="${SCOPE_SLUG_SHORT%-}"
-    DNS_ENDPOINT_NAME="k8s-${APP_SLUG_SHORT}-${SCOPE_SLUG_SHORT}-${SCOPE_ID}-dns"
+    DNS_ENDPOINT_NAME=$(echo "$CONTEXT" | jq -r '.names.scope_dns')
 
     log debug "📋 Checking ExternalDNS record creation for domain: $SCOPE_DOMAIN"
 

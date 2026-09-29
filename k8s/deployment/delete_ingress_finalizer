@@ -3,7 +3,7 @@
 
 log debug "🔍 Checking for ingress finalizers to remove..."
 
-INGRESS_NAME=$(echo "$CONTEXT" | jq -r '"k-8-s-" + .scope.slug + "-" + (.scope.id | tostring) + "-" + .ingress_visibility')
+INGRESS_NAME=$(echo "$CONTEXT" | jq -r '.names.scope_ingress')
 log debug "📋 Ingress name: $INGRESS_NAME"
 
 # If the scope uses ingress, remove any finalizers attached to it

@@ -1,0 +1,23 @@
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: k8s-customer-notificatio-production-canary-eu-123456-dns
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: customer-notifications-dispatcher
+    application_id: "111"
+    scope: production-canary-eu-west
+    scope_id: "123456"
+    dns/zone-type: public
+spec:
+  endpoints:
+  - dnsName: checkout.example.com
+    recordTTL: 60
+    recordType: A
+    targets:
+    - "10.0.0.5"
