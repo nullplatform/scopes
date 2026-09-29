@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.18.0] - 2026-09-29
 - Fix: the Instances tab of a k8s scope now reports the application container's CPU, memory and architecture, instead of the traffic sidecar's
 - Fix: diagnose on a k8s scope now attaches the application's logs to a pod stuck in not-ready, instead of the traffic sidecar's
 - Fix: k8s rollbacks now show why the rolled-back deployment failed (image pull error, crash loop, OOM, failed health check), instead of always printing the generic "Application Startup Issue Detected" hints
