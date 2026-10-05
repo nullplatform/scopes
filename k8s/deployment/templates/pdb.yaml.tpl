@@ -48,6 +48,7 @@ metadata:
 {{- end }}
 spec:
   maxUnavailable: {{ .pdb_max_unavailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
       name: {{ .names.deployment }}

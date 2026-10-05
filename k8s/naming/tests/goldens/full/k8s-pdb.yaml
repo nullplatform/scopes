@@ -20,6 +20,7 @@ metadata:
     nullplatform.com/deployment-id: "789012"
 spec:
   maxUnavailable: 25%
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
       name: d-123456-789012
