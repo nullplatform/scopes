@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
+
 ## [1.18.0] - 2026-09-29
 - Fix: the Instances tab of a k8s scope now reports the application container's CPU, memory and architecture, instead of the traffic sidecar's
 - Fix: diagnose on a k8s scope now attaches the application's logs to a pod stuck in not-ready, instead of the traffic sidecar's

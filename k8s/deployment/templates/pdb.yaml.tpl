@@ -50,5 +50,5 @@ spec:
   maxUnavailable: {{ .pdb_max_unavailable }}
   selector:
     matchLabels:
-      app: {{ .names.deployment }}
+      name: {{ .names.deployment }}
 {{- end }}

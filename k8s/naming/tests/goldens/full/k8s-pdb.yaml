@@ -22,4 +22,4 @@ spec:
   maxUnavailable: 25%
   selector:
     matchLabels:
-      app: d-123456-789012
+      name: d-123456-789012
