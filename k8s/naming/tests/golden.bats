@@ -31,6 +31,23 @@ teardown() {
 	[ "$status" -eq 0 ]
 }
 
+@test "golden: pdb selector matches the deployment's pod labels" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full-raw.json" "$RENDER_DIR"
+	# An unrendered PDB or an empty selector would pass the check below vacuously.
+	run yq -e '.spec.selector.matchLabels | length > 0' "$RENDER_DIR/k8s-pdb.yaml"
+	[ "$status" -eq 0 ]
+	# A selector that matches no pods is valid to the API server, so the PDB
+	# would silently protect nothing.
+	local unmatched
+	unmatched="$(yq ea -N '
+		select(fi == 0).spec.template.metadata.labels as $pod
+		| select(fi == 1).spec.selector.matchLabels
+		| to_entries | .[] | select($pod[.key] != .value) | .key
+	' "$RENDER_DIR/k8s-deployment.yaml" "$RENDER_DIR/k8s-pdb.yaml")"
+	assert_equal "$unmatched" ""
+}
+
 @test "golden: renders all fifteen templates" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
 		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
