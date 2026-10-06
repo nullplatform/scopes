@@ -20,8 +20,10 @@ export NAMESPACE
 notify_results
 
 # Collect all Kubernetes data once and store in JSON files
-# Create data directory for context files (excluded from results)
-DATA_DIR="$NP_OUTPUT_DIR/data"
+# Create data directory for context files (excluded from results). Same
+# fallback as scope/ and deployment/: without NP_OUTPUT_DIR this used to
+# resolve to /data, which only worked because the image ran as root.
+DATA_DIR="${NP_OUTPUT_DIR:-$SERVICE_PATH}/data"
 mkdir -p "$DATA_DIR"
 
 # Pods

@@ -7,5 +7,7 @@
 ARG BASE_VERSION
 FROM public.ecr.aws/nullplatform/scopes/containers:${BASE_VERSION}
 
+# Overlay only: no RUN steps, so it inherits USER 10001 from containers and
+# needs no switch of its own.
 ENV NP_PACKAGE_NAME=containers-datadog \
     NP_OVERRIDES_PATH=/app/pkg/datadog
