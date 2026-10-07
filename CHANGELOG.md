@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- k8s scopes on AKS can make their Azure DNS calls as a managed identity chosen per dimension (AKS Workload Identity), configured through the Identity & Access provider or the `CONTAINERS_AZURE_CLIENT_ID` / `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` env vars, instead of the agent's Service Principal client secret
+- Fix: the assume role step now runs only on EKS; on AKS/ARO it no longer tries `sts:AssumeRole` (which failed every workflow when the account also had an AWS IAM provider)
+- Fix: deleting a k8s scope on Azure DNS now fails with a hint when the DNS record cannot be deleted, instead of reporting success
+
 ## [1.18.0] - 2026-09-29
 - Fix: the Instances tab of a k8s scope now reports the application container's CPU, memory and architecture, instead of the traffic sidecar's
 - Fix: diagnose on a k8s scope now attaches the application's logs to a pod stuck in not-ready, instead of the traffic sidecar's

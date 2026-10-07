@@ -33,6 +33,15 @@ steps:
         type: environment
       - name: AWS_SESSION_TOKEN
         type: environment
+  - name: azure identity
+    type: script
+    file: "$SERVICE_PATH/utils/azure_identity_step"
+    trace: false
+    output:
+      - name: AZURE_CLIENT_ID
+        type: environment
+      - name: AZURE_CLIENT_SECRET
+        type: environment
   - name: build context
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
