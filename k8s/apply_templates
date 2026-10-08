@@ -9,6 +9,14 @@ log debug "📋 Action: $ACTION"
 log debug "📋 Dry run: $DRY_RUN"
 log debug ""
 
+# kubectl delete waits for finalizers with no limit by default: a controller
+# that never removes its finalizer would hang the workflow forever
+DELETE_TIMEOUT_SECONDS="${KUBECTL_DELETE_TIMEOUT_SECONDS:-300}"
+if [[ "$ACTION" == "delete" ]] && ! [[ "$DELETE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  log error "❌ KUBECTL_DELETE_TIMEOUT_SECONDS must be a positive integer, got: '$DELETE_TIMEOUT_SECONDS'"
+  exit 1
+fi
+
 APPLIED_FILES=()
 
 # Find all .yaml files that were not yet applied / deleted
@@ -25,10 +33,10 @@ while IFS= read -r TEMPLATE_FILE; do
    log debug "📝 kubectl $ACTION $FILENAME"
 
    if [[ "$DRY_RUN" == "false" ]]; then
-     IGNORE_NOT_FOUND=""
+     DELETE_FLAGS=""
 
      if [[ "$ACTION" == "delete" ]]; then
-       IGNORE_NOT_FOUND="--ignore-not-found=true"
+       DELETE_FLAGS="--ignore-not-found=true --timeout=${DELETE_TIMEOUT_SECONDS}s"
      fi
 
      TRACE_STEP_KEY=""
@@ -49,7 +57,7 @@ while IFS= read -r TEMPLATE_FILE; do
        [[ -n "$TRACE_STEP_KEY" ]] && np_scope_step_begin "$TRACE_STEP_KEY"
      fi
 
-     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND 2>&1); then
+     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $DELETE_FLAGS 2>&1); then
        [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
        [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
        if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
@@ -61,6 +69,16 @@ while IFS= read -r TEMPLATE_FILE; do
      else
        [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT" >&2
        log error "   ❌ Failed to apply $FILENAME${KUBECTL_OUT:+: $KUBECTL_OUT}"
+       if [[ "$ACTION" == "delete" ]] && [[ "$KUBECTL_OUT" == *"timed out waiting"* ]]; then
+         log error "   ⚠️  $FILENAME was not deleted within ${DELETE_TIMEOUT_SECONDS}s"
+         log error "   💡 Possible causes:"
+         log error "      - A finalizer is blocking the deletion and the controller that owns it is not removing it"
+         log error "        (for an ingress, the AWS Load Balancer Controller failing to reconcile its ALB)"
+         log error "   🔧 How to fix:"
+         log error "      - Find the objects stuck in deletion (they have a deletionTimestamp) and their finalizers in namespace ${K8S_NAMESPACE:-<namespace>}"
+         log error "      - Check the logs of the controller that owns the finalizer"
+         log error "      - Raise KUBECTL_DELETE_TIMEOUT_SECONDS if the controller only needs more time"
+       fi
        [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 1
      fi
      TRACE_STEP_KEY=""

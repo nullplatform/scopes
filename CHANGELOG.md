@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: deleting a k8s deployment whose scope has additional ports no longer hangs when the AWS Load Balancer Controller cannot reconcile the ALB. The finalizers are now removed from every additional port ingress too, not only from the main one
+- Fix: a `kubectl delete` in a k8s workflow now gives up after `KUBECTL_DELETE_TIMEOUT_SECONDS` (default 300) and explains that a finalizer may be blocking it, instead of waiting forever
 - Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
 - Fix: a k8s scope's Pod Disruption Budget lets pods that are not ready be evicted, so a scope stuck in a crash loop never blocks a node drain
 

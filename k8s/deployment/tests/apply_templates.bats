@@ -37,6 +37,7 @@ teardown() {
   unset DRY_RUN
   unset SERVICE_PATH
   unset MANIFEST_BACKUP
+  unset KUBECTL_DELETE_TIMEOUT_SECONDS
   unset -f kubectl
 }
 
@@ -159,4 +160,72 @@ teardown() {
   [ "$status" -eq 1 ]
   assert_contains "$output" "📋 Skipping empty template: empty.yaml"
   assert_contains "$output" "📋 Dry run mode - no changes were made"
+}
+
+# =============================================================================
+# Delete timeout
+# =============================================================================
+@test "apply_templates: delete waits at most 300 seconds by default" {
+  export ACTION="delete"
+  echo "apiVersion: v1" > "$OUTPUT_DIR/ingress-1-2.yaml"
+  kubectl() { echo "kubectl $*"; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--ignore-not-found=true --timeout=300s"
+}
+
+@test "apply_templates: delete honors KUBECTL_DELETE_TIMEOUT_SECONDS" {
+  export ACTION="delete"
+  export KUBECTL_DELETE_TIMEOUT_SECONDS="45"
+  echo "apiVersion: v1" > "$OUTPUT_DIR/ingress-1-2.yaml"
+  kubectl() { echo "kubectl $*"; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--timeout=45s"
+}
+
+@test "apply_templates: apply does not set a delete timeout" {
+  echo "apiVersion: v1" > "$OUTPUT_DIR/valid.yaml"
+  kubectl() { echo "kubectl $*"; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--timeout"* ]]
+}
+
+@test "apply_templates: fails on an invalid KUBECTL_DELETE_TIMEOUT_SECONDS" {
+  export ACTION="delete"
+  export KUBECTL_DELETE_TIMEOUT_SECONDS="5m"
+  echo "apiVersion: v1" > "$OUTPUT_DIR/ingress-1-2.yaml"
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ KUBECTL_DELETE_TIMEOUT_SECONDS must be a positive integer, got: '5m'"
+}
+
+@test "apply_templates: explains a delete that timed out waiting for finalizers" {
+  export ACTION="delete"
+  echo "apiVersion: v1" > "$OUTPUT_DIR/ingress-1-2.yaml"
+  kubectl() {
+    echo 'error: timed out waiting for the condition on ingresses/k-8-s-my-app-123-grpc-9010-internet-facing' >&2
+    return 1
+  }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  assert_contains "$output" "❌ Failed to apply ingress-1-2.yaml"
+  assert_contains "$output" "⚠️  ingress-1-2.yaml was not deleted within 300s"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - A finalizer is blocking the deletion and the controller that owns it is not removing it"
+  assert_contains "$output" "🔧 How to fix:"
 }

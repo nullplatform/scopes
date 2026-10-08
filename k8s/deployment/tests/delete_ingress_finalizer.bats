@@ -90,3 +90,67 @@ teardown() {
   assert_contains "$output" "📋 Ingress k-8-s-my-app-123-internet-facing not found, skipping finalizer removal"
 }
 
+
+# =============================================================================
+# Additional Ports Case
+# =============================================================================
+@test "delete_ingress_finalizer: removes finalizers from every additional port ingress" {
+  export CONTEXT='{
+    "scope": {
+      "slug": "my-app",
+      "id": 123,
+      "capabilities": {
+        "additional_ports": [
+          {"port": 9010, "type": "GRPC", "ingress_name": "k-8-s-my-app-123-grpc-9010-internet-facing"},
+          {"port": 8081, "type": "HTTP", "ingress_name": "k-8-s-my-app-123-http-8081-internet-facing"}
+        ]
+      }
+    },
+    "names": {"scope_ingress": "k-8-s-my-app-123-internet-facing"}
+  }'
+
+  run bash "$BATS_TEST_DIRNAME/../delete_ingress_finalizer"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "kubectl patch ingress k-8-s-my-app-123-internet-facing -n test-namespace"
+  assert_contains "$output" "kubectl patch ingress k-8-s-my-app-123-grpc-9010-internet-facing -n test-namespace"
+  assert_contains "$output" "kubectl patch ingress k-8-s-my-app-123-http-8081-internet-facing -n test-namespace"
+  assert_contains "$output" "✅ Finalizers removed from ingress k-8-s-my-app-123-grpc-9010-internet-facing"
+  assert_contains "$output" "✅ Finalizers removed from ingress k-8-s-my-app-123-http-8081-internet-facing"
+}
+
+@test "delete_ingress_finalizer: removes additional port finalizers when the main ingress is already gone" {
+  export CONTEXT='{
+    "scope": {
+      "slug": "my-app",
+      "id": 123,
+      "capabilities": {
+        "additional_ports": [
+          {"port": 9010, "type": "GRPC", "ingress_name": "k-8-s-my-app-123-grpc-9010-internet-facing"}
+        ]
+      }
+    },
+    "names": {"scope_ingress": "k-8-s-my-app-123-internet-facing"}
+  }'
+  kubectl() {
+    echo "kubectl $*"
+    if [ "$1" = "get" ] && [ "$3" = "k-8-s-my-app-123-internet-facing" ]; then
+      return 1
+    fi
+    return 0
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../delete_ingress_finalizer"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Ingress k-8-s-my-app-123-internet-facing not found, skipping finalizer removal"
+  assert_contains "$output" "✅ Finalizers removed from ingress k-8-s-my-app-123-grpc-9010-internet-facing"
+}
+
+@test "delete_ingress_finalizer: only patches the main ingress when the scope has no additional ports" {
+  run bash "$BATS_TEST_DIRNAME/../delete_ingress_finalizer"
+
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c '^kubectl patch ingress')" -eq 1 ]
+}
