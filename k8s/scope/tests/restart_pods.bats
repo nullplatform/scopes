@@ -235,3 +235,34 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "✅ Deployment restart completed successfully"
 }
+
+# =============================================================================
+# Namespace resolution - must match scope/build_context, or the action looks
+# for the scope's objects in a namespace the deployment never wrote to
+# =============================================================================
+@test "restart_pods: the scope-configurations namespace wins over container-orchestration" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {cluster: {namespace: "from-scope-config"}}')
+  export KUBECTL_ARGS_FILE="$(mktemp)"
+  kubectl() { printf '%s\n' "$*" >> "$KUBECTL_ARGS_FILE"; return 1; }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../restart_pods"
+
+  grep -qE -- '(^| )-n from-scope-config( |$)' "$KUBECTL_ARGS_FILE"
+  ! grep -qE -- '(^| )-n provider-namespace( |$)' "$KUBECTL_ARGS_FILE"
+  rm -f "$KUBECTL_ARGS_FILE"
+}
+
+@test "restart_pods: honors NAMESPACE_OVERRIDE when no provider sets a namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers)')
+  export NAMESPACE_OVERRIDE="from-channel"
+  export KUBECTL_ARGS_FILE="$(mktemp)"
+  kubectl() { printf '%s\n' "$*" >> "$KUBECTL_ARGS_FILE"; return 1; }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../restart_pods"
+
+  grep -qE -- '(^| )-n from-channel( |$)' "$KUBECTL_ARGS_FILE"
+  rm -f "$KUBECTL_ARGS_FILE"
+  unset NAMESPACE_OVERRIDE
+}
