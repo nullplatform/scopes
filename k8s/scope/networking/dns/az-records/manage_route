@@ -2,16 +2,23 @@
 
 set -euo pipefail
 
+source "$SERVICE_PATH/utils/azure_identity_lib"
+
 get_azure_token() {
     log debug "📡 Fetching Azure access token..."
+
+    # Projected ServiceAccount token under workload identity, client secret
+    # otherwise (see azure_grant_args in utils/azure_identity_lib).
+    azure_grant_args
 
     local token_response=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X POST \
         "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "client_id=${AZURE_CLIENT_ID}" \
-        -d "client_secret=${AZURE_CLIENT_SECRET}" \
+        "${AZURE_GRANT_ARGS[@]}" \
         -d "scope=https://management.azure.com/.default" \
-        -d "grant_type=client_credentials" 2>&1) || {
+        -d "grant_type=client_credentials" \
+        --connect-timeout 10 --max-time 30 2>&1) || {
         log error "❌ Failed to get Azure access token"
         log error ""
         log error "💡 Possible causes:"
@@ -137,7 +144,8 @@ EOF
         "${RECORD_SET_URL}" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "${RECORD_BODY}" 2>&1) || {
+        -d "${RECORD_BODY}" \
+        --connect-timeout 10 --max-time 30 2>&1) || {
         log error "❌ Failed to create Azure DNS record"
         log error ""
         log error "💡 Possible causes:"
@@ -162,6 +170,7 @@ EOF
         log error "🔧 How to fix:"
         log error "   • Verify DNS zone '$HOSTED_ZONE_NAME' exists in resource group '$HOSTED_ZONE_RG'"
         log error "   • Check Azure service principal permissions"
+        log error "   • Grant identity ${AZURE_CLIENT_ID:-unknown} the DNS Zone Contributor role on zone '$HOSTED_ZONE_NAME'"
         log error ""
         exit 1
     fi
@@ -175,9 +184,28 @@ elif [ "$ACTION" = "DELETE" ]; then
     RECORD_SET_URL="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${HOSTED_ZONE_RG}/providers/Microsoft.Network/dnsZones/${HOSTED_ZONE_NAME}/A/${SCOPE_SUBDOMAIN}?api-version=2018-05-01"
 
     log debug "📝 Deleting Azure DNS record..."
-    curl --http1.1 -s -X DELETE \
+    AZURE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X DELETE \
         "${RECORD_SET_URL}" \
-        -H "Authorization: Bearer ${ACCESS_TOKEN}"
+        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+        --connect-timeout 10 --max-time 30 2>&1)
 
-    log info "✅ DNS record deleted: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
+    http_code=$(echo "$AZURE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2)
+
+    case "${http_code:-0}" in
+        200|202|204|404)
+            log info "✅ DNS record deleted: $SCOPE_SUBDOMAIN.$HOSTED_ZONE_NAME"
+            ;;
+        *)
+            log error "❌ Azure API returned an error deleting DNS record (HTTP ${http_code:-unknown})"
+            log error ""
+            log error "💡 Possible causes:"
+            log error "   The DNS record may not exist in the expected zone, or permissions are insufficient"
+            log error ""
+            log error "🔧 How to fix:"
+            log error "   • Verify DNS zone '$HOSTED_ZONE_NAME' exists in resource group '$HOSTED_ZONE_RG'"
+            log error "   • Grant identity ${AZURE_CLIENT_ID:-unknown} the DNS Zone Contributor role on zone '$HOSTED_ZONE_NAME'"
+            log error ""
+            exit 1
+            ;;
+    esac
 fi

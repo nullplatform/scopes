@@ -33,8 +33,11 @@ setup() {
   }
   export -f kubectl
 
-  # Mock curl - default: token succeeds, DNS API succeeds
+  # Mock curl - default: token succeeds, DNS API succeeds. Every call's
+  # arguments are appended to $CURL_LOG so tests can assert the token grant.
+  export CURL_LOG="$(mktemp)"
   curl() {
+    echo "$*" >> "$CURL_LOG"
     if [[ "$*" == *"login.microsoftonline.com"* ]]; then
       echo '{"access_token":"mock-token-123","token_type":"Bearer"}'
       echo "__HTTP_CODE__:200"
@@ -42,7 +45,7 @@ setup() {
       echo '{"id":"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/dnsZones/example.com/A/myapp"}'
       echo "__HTTP_CODE__:200"
     elif [[ "$*" == *"management.azure.com"* ]] && [[ "$*" == *"DELETE"* ]]; then
-      echo ""
+      echo "__HTTP_CODE__:200"
     fi
   }
   export -f curl
@@ -137,6 +140,66 @@ setup() {
   assert_contains "$output" "🔍 Managing Azure DNS record..."
   assert_contains "$output" "📋 Action: DELETE | Gateway: gw-public | Zone: example.com"
   assert_contains "$output" "📝 Deleting Azure DNS record..."
+  assert_contains "$output" "✅ DNS record deleted: myapp.example.com"
+}
+
+# =============================================================================
+# DELETE: Azure API returns an error (not idempotent-safe)
+# =============================================================================
+@test "manage_route: DELETE fails with error details when Azure DNS API returns HTTP error" {
+  curl() {
+    echo "$*" >> "$CURL_LOG"
+    if [[ "$*" == *"login.microsoftonline.com"* ]]; then
+      echo '{"access_token":"mock-token-123","token_type":"Bearer"}'
+      echo "__HTTP_CODE__:200"
+    elif [[ "$*" == *"management.azure.com"* ]]; then
+      echo "__HTTP_CODE__:403"
+    fi
+  }
+  export -f curl
+
+  run bash "$SCRIPT" \
+    --action=DELETE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Azure API returned an error deleting DNS record (HTTP 403)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The DNS record may not exist in the expected zone, or permissions are insufficient"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify DNS zone 'example.com' exists in resource group 'dns-rg'"
+  assert_contains "$output" "   • Grant identity client-123 the DNS Zone Contributor role on zone 'example.com'"
+  [[ "$output" != *"✅ DNS record deleted"* ]]
+}
+
+# =============================================================================
+# DELETE: 404 is treated as success (idempotent)
+# =============================================================================
+@test "manage_route: DELETE treats HTTP 404 as success (idempotent)" {
+  curl() {
+    echo "$*" >> "$CURL_LOG"
+    if [[ "$*" == *"login.microsoftonline.com"* ]]; then
+      echo '{"access_token":"mock-token-123","token_type":"Bearer"}'
+      echo "__HTTP_CODE__:200"
+    elif [[ "$*" == *"management.azure.com"* ]]; then
+      echo "__HTTP_CODE__:404"
+    fi
+  }
+  export -f curl
+
+  run bash "$SCRIPT" \
+    --action=DELETE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -eq 0 ]
   assert_contains "$output" "✅ DNS record deleted: myapp.example.com"
 }
 
@@ -291,4 +354,93 @@ setup() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "📋 Subdomain: custom-sub | Zone: example.com | IP: 10.0.0.1"
   assert_contains "$output" "✅ DNS record created: custom-sub.example.com -> 10.0.0.1"
+}
+
+# =============================================================================
+# Token grant: client secret vs workload identity (projected token)
+# =============================================================================
+@test "manage_route: token request sends the client secret by default" {
+  run bash "$SCRIPT" \
+    --action=CREATE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -eq 0 ]
+  sent=$(cat "$CURL_LOG")
+  assert_contains "$sent" "client_id=client-123"
+  assert_contains "$sent" "client_secret=secret-123"
+  [[ "$sent" != *"client_assertion"* ]]
+}
+
+@test "manage_route: token request sends the projected token under workload identity" {
+  token_file=$(mktemp)
+  printf 'header.payload.signature' > "$token_file"
+  export AZURE_FEDERATED_TOKEN_FILE="$token_file"
+  export AZURE_CLIENT_ID="11111111-1111-1111-1111-111111111111"
+  export AZURE_CLIENT_SECRET=""
+
+  run bash "$SCRIPT" \
+    --action=CREATE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -eq 0 ]
+  sent=$(cat "$CURL_LOG")
+  assert_contains "$sent" "client_id=11111111-1111-1111-1111-111111111111"
+  assert_contains "$sent" "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+  assert_contains "$sent" "client_assertion@$token_file"
+  [[ "$sent" != *"client_secret="* ]]
+  assert_contains "$output" "✅ DNS record created: myapp.example.com -> 10.0.0.1"
+  rm -f "$token_file"
+}
+
+@test "manage_route: client secret is used when both secret and projected token are present" {
+  token_file=$(mktemp)
+  printf 'header.payload.signature' > "$token_file"
+  export AZURE_FEDERATED_TOKEN_FILE="$token_file"
+
+  run bash "$SCRIPT" \
+    --action=CREATE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -eq 0 ]
+  sent=$(cat "$CURL_LOG")
+  assert_contains "$sent" "client_secret=secret-123"
+  [[ "$sent" != *"client_assertion"* ]]
+  rm -f "$token_file"
+}
+
+@test "manage_route: DNS API error names the identity that lacks permissions" {
+  curl() {
+    if [[ "$*" == *"login.microsoftonline.com"* ]]; then
+      echo '{"access_token":"mock-token-123","token_type":"Bearer"}'
+      echo "__HTTP_CODE__:200"
+    elif [[ "$*" == *"management.azure.com"* ]]; then
+      echo '{"error":{"code":"AuthorizationFailed","message":"no access"}}'
+      echo "__HTTP_CODE__:403"
+    fi
+  }
+  export -f curl
+
+  run bash "$SCRIPT" \
+    --action=CREATE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Azure API returned an error creating DNS record (HTTP 403)"
+  assert_contains "$output" "   • Grant identity client-123 the DNS Zone Contributor role on zone 'example.com'"
 }

@@ -99,3 +99,37 @@ teardown() {
   assert_contains "$output" "   • The target role does not exist or does not trust the agent role"
   assert_contains "$output" "   • There is no role ARN configured for selector=containers"
 }
+
+# --- K8S_FLAVOR gating ----------------------------------------------------------
+
+@test "assume_role_step: skipped outside EKS even when an AWS role resolves" {
+  export K8S_FLAVOR="aks"
+  export AWS_CALLS="$(mktemp)"
+  aws() { echo "$*" >> "$AWS_CALLS"; echo '{"Credentials":{"AccessKeyId":"AKIA1","SecretAccessKey":"sec1","SessionToken":"tok1"}}'; }
+  export -f aws
+  logf=$(mktemp)
+  source "$STEP" >"$logf" 2>&1
+  [ -z "${AWS_ACCESS_KEY_ID:-}" ]
+  [ -z "${CONTAINERS_ASSUME_ROLE_ARN:-}" ]
+  [ ! -s "$AWS_CALLS" ]
+  assert_contains "$(cat "$logf")" "   ✅ assume_role=skipped (K8S_FLAVOR=aks)"
+  unset K8S_FLAVOR
+}
+
+@test "assume_role_step: skipped on ARO too" {
+  export K8S_FLAVOR="aro"
+  logf=$(mktemp)
+  source "$STEP" >"$logf" 2>&1
+  [ -z "${AWS_ACCESS_KEY_ID:-}" ]
+  assert_contains "$(cat "$logf")" "   ✅ assume_role=skipped (K8S_FLAVOR=aro)"
+  unset K8S_FLAVOR
+}
+
+@test "assume_role_step: runs when K8S_FLAVOR is eks" {
+  export K8S_FLAVOR="eks"
+  logf=$(mktemp)
+  source "$STEP" >"$logf" 2>&1
+  [ "$AWS_ACCESS_KEY_ID" = "AKIA1" ]
+  assert_contains "$(cat "$logf")" "   ✅ Role assumed successfully"
+  unset K8S_FLAVOR
+}
