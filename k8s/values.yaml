@@ -29,6 +29,8 @@ configuration:
   ALB_AUTOCREATE_NAME_PREFIX: nullplatform-auto-
   ALB_AUTOCREATE_TIMEOUT_SECONDS: 300
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
+# Max seconds a kubectl delete waits for its objects (and their finalizers) to be gone
+  KUBECTL_DELETE_TIMEOUT_SECONDS: 300
   NAMING_MAX_LENGTH: 46
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
