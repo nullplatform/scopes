@@ -3,11 +3,35 @@
 
 log debug "🔍 Checking for ingress finalizers to remove..."
 
-INGRESS_NAME=$(echo "$CONTEXT" | jq -r '.names.scope_ingress')
-log debug "📋 Ingress name: $INGRESS_NAME"
+INGRESS_SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id // empty')
+if [ -z "$INGRESS_SCOPE_ID" ]; then
+  log error "❌ Could not read the scope id from the deployment context"
+  exit 1
+fi
 
-# If the scope uses ingress, remove any finalizers attached to it
-if kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" &>/dev/null; then
+INGRESS_SELECTOR="nullplatform=true,scope_id=$INGRESS_SCOPE_ID"
+log debug "📋 Looking for ingresses with labels $INGRESS_SELECTOR"
+
+if ! INGRESS_NAMES=$(kubectl get ingress -n "$K8S_NAMESPACE" -l "$INGRESS_SELECTOR" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); then
+  log error "❌ Failed to list the ingresses of scope $INGRESS_SCOPE_ID in namespace $K8S_NAMESPACE"
+  log error "💡 Possible causes:"
+  log error "   - The cluster is unreachable"
+  log error "   - Insufficient permissions to list ingress resources"
+  log error "🔧 How to fix:"
+  log error "   - Verify access: kubectl get ingress -n $K8S_NAMESPACE -l $INGRESS_SELECTOR"
+  log error "   - Check RBAC permissions for listing ingress resources"
+  exit 1
+fi
+
+if [ -z "$INGRESS_NAMES" ]; then
+  log debug "📋 No ingresses found for scope $INGRESS_SCOPE_ID, skipping finalizer removal"
+fi
+
+while IFS= read -r INGRESS_NAME; do
+  if [ -z "$INGRESS_NAME" ]; then
+    continue
+  fi
+
   log debug "📝 Removing finalizers from ingress $INGRESS_NAME..."
   if ! kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge; then
     log error "❌ Failed to remove finalizers from ingress $INGRESS_NAME"
@@ -20,6 +44,4 @@ if kubectl get ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" &>/dev/null; then
     exit 1
   fi
   log info "✅ Finalizers removed from ingress $INGRESS_NAME"
-else
-  log debug "📋 Ingress $INGRESS_NAME not found, skipping finalizer removal"
-fi
+done <<< "$INGRESS_NAMES"

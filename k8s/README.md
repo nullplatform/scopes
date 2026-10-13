@@ -90,6 +90,7 @@ address translation sits in front of the cluster.
 |----------|-------------|------------------------------|
 | **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `deployment.deployment_strategy` |
 | **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Maximum wait time for deployments (seconds) | `deployment.deployment_max_wait_seconds` |
+| **KUBECTL_DELETE_TIMEOUT_SECONDS** | Maximum time a `kubectl delete` waits for the objects to be gone, finalizers included (seconds, default `300`). When it runs out, the deletion is logged as failed instead of hanging the workflow | - |
 
 #### Traffic Manager
 
