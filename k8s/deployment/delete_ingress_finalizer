@@ -1,39 +1,47 @@
 #!/bin/bash
 
 
-remove_ingress_finalizers() {
-  local ingress_name="$1"
+log debug "🔍 Checking for ingress finalizers to remove..."
 
-  log debug "📋 Ingress name: $ingress_name"
+INGRESS_SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id // empty')
+if [ -z "$INGRESS_SCOPE_ID" ]; then
+  log error "❌ Could not read the scope id from the deployment context"
+  exit 1
+fi
 
-  if ! kubectl get ingress "$ingress_name" -n "$K8S_NAMESPACE" &>/dev/null; then
-    log debug "📋 Ingress $ingress_name not found, skipping finalizer removal"
-    return 0
+INGRESS_SELECTOR="nullplatform=true,scope_id=$INGRESS_SCOPE_ID"
+log debug "📋 Looking for ingresses with labels $INGRESS_SELECTOR"
+
+if ! INGRESS_NAMES=$(kubectl get ingress -n "$K8S_NAMESPACE" -l "$INGRESS_SELECTOR" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); then
+  log error "❌ Failed to list the ingresses of scope $INGRESS_SCOPE_ID in namespace $K8S_NAMESPACE"
+  log error "💡 Possible causes:"
+  log error "   - The cluster is unreachable"
+  log error "   - Insufficient permissions to list ingress resources"
+  log error "🔧 How to fix:"
+  log error "   - Verify access: kubectl get ingress -n $K8S_NAMESPACE -l $INGRESS_SELECTOR"
+  log error "   - Check RBAC permissions for listing ingress resources"
+  exit 1
+fi
+
+if [ -z "$INGRESS_NAMES" ]; then
+  log debug "📋 No ingresses found for scope $INGRESS_SCOPE_ID, skipping finalizer removal"
+fi
+
+while IFS= read -r INGRESS_NAME; do
+  if [ -z "$INGRESS_NAME" ]; then
+    continue
   fi
 
-  log debug "📝 Removing finalizers from ingress $ingress_name..."
-  if ! kubectl patch ingress "$ingress_name" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge; then
-    log error "❌ Failed to remove finalizers from ingress $ingress_name"
+  log debug "📝 Removing finalizers from ingress $INGRESS_NAME..."
+  if ! kubectl patch ingress "$INGRESS_NAME" -n "$K8S_NAMESPACE" -p '{"metadata":{"finalizers":[]}}' --type=merge; then
+    log error "❌ Failed to remove finalizers from ingress $INGRESS_NAME"
     log error "💡 Possible causes:"
     log error "   - Ingress was deleted while patching"
     log error "   - Insufficient permissions to patch ingress"
     log error "🔧 How to fix:"
-    log error "   - Verify ingress still exists: kubectl get ingress $ingress_name -n $K8S_NAMESPACE"
+    log error "   - Verify ingress still exists: kubectl get ingress $INGRESS_NAME -n $K8S_NAMESPACE"
     log error "   - Check RBAC permissions for patching ingress resources"
     exit 1
   fi
-  log info "✅ Finalizers removed from ingress $ingress_name"
-}
-
-log debug "🔍 Checking for ingress finalizers to remove..."
-
-if ! ingress_names=$(echo "$CONTEXT" | jq -r '.names.scope_ingress // empty, ((.scope.capabilities.additional_ports // [])[].ingress_name // empty)'); then
-  log error "❌ Failed to read the ingress names from the deployment context"
-  exit 1
-fi
-
-while IFS= read -r ingress_name; do
-  if [ -n "$ingress_name" ]; then
-    remove_ingress_finalizers "$ingress_name"
-  fi
-done <<< "$ingress_names"
+  log info "✅ Finalizers removed from ingress $INGRESS_NAME"
+done <<< "$INGRESS_NAMES"
