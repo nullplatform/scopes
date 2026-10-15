@@ -1,0 +1,58 @@
+#!/bin/bash
+
+
+validate_gateways() {
+  local gateways gateway_name gateway_namespace gateway_error gateway_status
+  local -a missing_gateways=()
+
+  log debug "🔍 Validating gateways referenced by the HTTPRoute..."
+
+  if [ -n "${INVALID_ADDITIONAL_GATEWAYS:-}" ]; then
+    log error "❌ Invalid additional gateways for $SCOPE_VISIBILITY scopes: $INVALID_ADDITIONAL_GATEWAYS"
+    log error "💡 Possible causes:"
+    log error "   - additional_${SCOPE_VISIBILITY}_gateways is not a list of objects with a valid Kubernetes 'name' and optional 'namespace'"
+    log error "🔧 How to fix:"
+    log error "   - Set it as a list like [{\"name\": \"my-gateway\", \"namespace\": \"gateways\"}] in the scope-configurations or container-orchestration provider"
+    exit 1
+  fi
+
+  gateways=$(echo "$CONTEXT" | jq -c '.gateways // [{name: .gateway_name, namespace: "gateways"}]')
+
+  while IFS=$'\t' read -r gateway_name gateway_namespace; do
+    gateway_status=0
+    gateway_error=$(kubectl get gateway "$gateway_name" -n "$gateway_namespace" -o name 2>&1 >/dev/null) || gateway_status=$?
+
+    if [ "$gateway_status" -eq 0 ]; then
+      log debug "✅ Gateway '$gateway_namespace/$gateway_name' exists"
+      continue
+    fi
+
+    if echo "$gateway_error" | grep -q "NotFound"; then
+      missing_gateways+=("$gateway_namespace/$gateway_name")
+      continue
+    fi
+
+    log error "❌ Could not check gateway '$gateway_namespace/$gateway_name': $gateway_error"
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading gateways in namespace '$gateway_namespace'"
+    log error "🔧 How to fix:"
+    log error "   - Verify cluster connectivity and RBAC: kubectl auth can-i get gateways -n $gateway_namespace"
+    exit 1
+  done < <(echo "$gateways" | jq -r '.[] | [.name, .namespace] | @tsv')
+
+  if [ "${#missing_gateways[@]}" -gt 0 ]; then
+    log error "❌ Gateways not found: ${missing_gateways[*]}"
+    log error "💡 Possible causes:"
+    log error "   - The gateway name or namespace is misspelled in the scope-configurations or container-orchestration provider"
+    log error "   - The gateway was not created in the cluster yet"
+    log error "🔧 How to fix:"
+    log error "   - List the gateways in the cluster: kubectl get gateways -A"
+    log error "   - Fix the gateway names and namespaces configured for $SCOPE_VISIBILITY scopes"
+    exit 1
+  fi
+
+  log info "✅ All gateways exist: $(echo "$gateways" | jq -r 'map("\(.namespace)/\(.name)") | join(", ")')"
+}
+
+validate_gateways
