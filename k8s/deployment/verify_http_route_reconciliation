@@ -9,10 +9,8 @@ elapsed=0
 log debug "🔍 Verifying HTTPRoute reconciliation..."
 log debug "📋 HTTPRoute: $HTTPROUTE_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
 
-if command -v np_scope_step_begin >/dev/null 2>&1; then
-    np_scope_step_begin verify-httproute --title "Verify HTTPRoute reconciliation ($HTTPROUTE_NAME)"
-    np_scope_wait_heartbeat "httproute-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
-fi
+np_scope_step_begin verify-httproute --title "Verify HTTPRoute reconciliation ($HTTPROUTE_NAME)"
+np_scope_wait_heartbeat "httproute-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
 
 parents_status_of() {
     echo "$1" | jq -c --arg route_namespace "$K8S_NAMESPACE" '
@@ -37,16 +35,12 @@ print_parents_conditions() {
 }
 
 trace_parents_status() {
-    if command -v np_scope_output >/dev/null 2>&1; then
-        np_scope_output gateways "$(echo "$1" | jq -c 'map({gateway, accepted: (.accepted.status // "Unknown"), resolved_refs: (.resolved.status // "Unknown")})')"
-    fi
+    np_scope_output gateways "$(echo "$1" | jq -c 'map({gateway, accepted: (.accepted.status // "Unknown"), resolved_refs: (.resolved.status // "Unknown")})')"
 }
 
 fail_reconciliation() {
     trace_parents_status "$parents_status"
-    if command -v np_scope_step_end >/dev/null 2>&1; then
-        np_scope_step_end 1 "HTTPRoute $HTTPROUTE_NAME failed to reconcile on gateway $1"
-    fi
+    np_scope_step_end 1 "HTTPRoute $HTTPROUTE_NAME failed to reconcile on gateway $1"
     exit 1
 }
 
@@ -144,24 +138,18 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         log info "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
         log info "✅ Gateways: $(echo "$parents_status" | jq -r 'map(.gateway) | join(", ")')"
         trace_parents_status "$parents_status"
-        if command -v np_scope_consumes >/dev/null 2>&1; then
-            for reconciled_gateway in $(echo "$parents_status" | jq -r '.[].gateway'); do
-                np_scope_consumes "k8s-gateway:$reconciled_gateway" gateway "$reconciled_gateway"
-            done
-        fi
-        if command -v np_scope_step_end >/dev/null 2>&1; then
-            np_scope_step_end 0
-            np_scope_explain --title "Verify networking"                 --what "HTTPRoute $HTTPROUTE_NAME reconciled — DNS routing verified"
-        fi
+        for reconciled_gateway in $(echo "$parents_status" | jq -r '.[].gateway'); do
+            np_scope_consumes "k8s-gateway:$reconciled_gateway"
+        done
+        np_scope_step_end 0
+        np_scope_explain --title "Verify networking" --what "HTTPRoute $HTTPROUTE_NAME reconciled — DNS routing verified"
         return 0
     fi
 
     log debug "📝 HTTPRoute reconciling, waiting for gateways: $pending_gateways (${elapsed}s/${MAX_WAIT_SECONDS}s)"
     echo "$parents_status" | jq -r '.[] | "   - \(.gateway): " + ([.conditions[] | "\(.type)=\(.status)"] | join(", "))'
-    if command -v np_scope_progress >/dev/null 2>&1; then
-        np_scope_progress "$(echo "$parents_status" | jq '[.[] | select(.accepted.status == "True" and .resolved.status == "True")] | length')" "$parents_count" gateways
-    fi
-    if [ $((elapsed % 30)) -eq 0 ] && command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+    np_scope_progress "$(echo "$parents_status" | jq '[.[] | select(.accepted.status == "True" and .resolved.status == "True")] | length')" "$parents_count" gateways
+    if [ $((elapsed % 30)) -eq 0 ]; then
         np_scope_wait_heartbeat "httproute-reconciliation" "$elapsed" "$MAX_WAIT_SECONDS" "reconciling"
     fi
     elapsed=$((elapsed + CHECK_INTERVAL))
@@ -181,7 +169,5 @@ trace_parents_status "$parents_status"
 log error "🔧 How to fix:"
 log error "   - Check Gateway controller logs"
 log error "   - Verify Gateway and Istio configuration"
-if command -v np_scope_step_timeout >/dev/null 2>&1; then
-    np_scope_step_timeout "HTTPRoute $HTTPROUTE_NAME not reconciled after ${MAX_WAIT_SECONDS}s"
-fi
+np_scope_step_timeout "HTTPRoute $HTTPROUTE_NAME not reconciled after ${MAX_WAIT_SECONDS}s"
 exit 1

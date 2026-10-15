@@ -2,9 +2,7 @@
 
 
 fail_gateway_validation() {
-  if command -v np_scope_step_end >/dev/null 2>&1; then
-    np_scope_step_end 1 "$1"
-  fi
+  np_scope_step_end 1 "$1"
   exit 1
 }
 
@@ -14,9 +12,7 @@ validate_gateways() {
 
   log debug "🔍 Validating gateways referenced by the HTTPRoute..."
 
-  if command -v np_scope_step_begin >/dev/null 2>&1; then
-    np_scope_step_begin validate-gateways --title "Validate gateways for $SCOPE_VISIBILITY scope"
-  fi
+  np_scope_step_begin validate-gateways --title "Validate gateways for $SCOPE_VISIBILITY scope"
 
   if [ -n "${INVALID_ADDITIONAL_GATEWAYS:-}" ]; then
     log error "❌ Invalid additional gateways for $SCOPE_VISIBILITY scopes: $INVALID_ADDITIONAL_GATEWAYS"
@@ -30,9 +26,7 @@ validate_gateways() {
   gateways=$(echo "$CONTEXT" | jq -c '.gateways // [{name: .gateway_name, namespace: "gateways"}]')
   gateway_list=$(echo "$gateways" | jq -r 'map("\(.namespace)/\(.name)") | join(", ")')
 
-  if command -v np_scope_input >/dev/null 2>&1; then
-    np_scope_input gateways "$gateways"
-  fi
+  np_scope_input gateways "$gateways"
 
   while IFS=$'\t' read -r gateway_name gateway_namespace; do
     gateway_status=0
@@ -40,9 +34,7 @@ validate_gateways() {
 
     if [ "$gateway_status" -eq 0 ]; then
       log debug "✅ Gateway '$gateway_namespace/$gateway_name' exists"
-      if command -v np_scope_consumes >/dev/null 2>&1; then
-        np_scope_consumes "k8s-gateway:$gateway_namespace/$gateway_name" gateway "$gateway_namespace/$gateway_name"
-      fi
+      np_scope_consumes "k8s-gateway:$gateway_namespace/$gateway_name"
       continue
     fi
 
@@ -68,18 +60,14 @@ validate_gateways() {
     log error "🔧 How to fix:"
     log error "   - List the gateways in the cluster: kubectl get gateways -A"
     log error "   - Fix the gateway names and namespaces configured for $SCOPE_VISIBILITY scopes"
-    if command -v np_scope_output >/dev/null 2>&1; then
-      np_scope_output missing_gateways "$(printf '%s\n' "${missing_gateways[@]}" | jq -Rnc '[inputs]')"
-    fi
+    np_scope_output missing_gateways "$(printf '%s\n' "${missing_gateways[@]}" | jq -Rnc '[inputs]')"
     fail_gateway_validation "Gateways not found: ${missing_gateways[*]}"
   fi
 
   log info "✅ All gateways exist: $gateway_list"
 
-  if command -v np_scope_step_end >/dev/null 2>&1; then
-    np_scope_explain --title "Validate gateways for $SCOPE_VISIBILITY scope" --what "All gateways exist: $gateway_list"
-    np_scope_step_end 0
-  fi
+  np_scope_explain --title "Validate gateways for $SCOPE_VISIBILITY scope" --what "All gateways exist: $gateway_list"
+  np_scope_step_end 0
 }
 
 validate_gateways

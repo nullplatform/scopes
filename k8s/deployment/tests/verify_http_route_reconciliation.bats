@@ -27,6 +27,11 @@ setup() {
 
   export ACCEPTED='{"type":"Accepted","status":"True","reason":"Accepted","message":"Route accepted"}'
   export RESOLVED='{"type":"ResolvedRefs","status":"True","reason":"ResolvedRefs","message":"Refs resolved"}'
+
+  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress; do
+    eval "$helper() { :; }"
+    export -f "$helper"
+  done
 }
 
 teardown() {
@@ -262,15 +267,6 @@ run_verify() {
   assert_contains "$output" "- Verify Gateway and Istio configuration"
 }
 
-@test "verify_http_route_reconciliation: runs without tracing helpers defined" {
-  single_gateway "$ACCEPTED" "$RESOLVED"
-
-  run_verify
-
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"command not found"* ]] || false
-}
-
 @test "verify_http_route_reconciliation: traces every reconciled gateway" {
   mock_tracing
   httproute "[$(ref gateway-public gateways), $(ref partners edge)]" \
@@ -282,8 +278,8 @@ run_verify() {
   assert_equal "$(cat "$TRACE_LOG")" 'np_scope_step_begin verify-httproute --title Verify HTTPRoute reconciliation (k-8-s-my-app-scope-123-internet-facing)
 np_scope_wait_heartbeat httproute-reconciliation 0 1 pending
 np_scope_output gateways [{"gateway":"gateways/gateway-public","accepted":"True","resolved_refs":"True"},{"gateway":"edge/partners","accepted":"True","resolved_refs":"True"}]
-np_scope_consumes k8s-gateway:gateways/gateway-public gateway gateways/gateway-public
-np_scope_consumes k8s-gateway:edge/partners gateway edge/partners
+np_scope_consumes k8s-gateway:gateways/gateway-public
+np_scope_consumes k8s-gateway:edge/partners
 np_scope_step_end 0
 np_scope_explain --title Verify networking --what HTTPRoute k-8-s-my-app-scope-123-internet-facing reconciled — DNS routing verified'
 }

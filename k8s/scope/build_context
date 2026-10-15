@@ -244,13 +244,6 @@ if ! GATEWAYS=$(echo "$ADDITIONAL_GATEWAYS" | jq -c \
 fi
 export INVALID_ADDITIONAL_GATEWAYS
 
-if command -v np_scope_output >/dev/null 2>&1; then
-  np_scope_output gateways "$(jq -nc \
-    --argjson resolved "$GATEWAYS" \
-    --arg invalid "$INVALID_ADDITIONAL_GATEWAYS" \
-    '{resolved: $resolved} + (if $invalid == "" then {} else {invalid_additional: $invalid} end)')"
-fi
-
 K8S_MODIFIERS=$(get_config_value \
   --env K8S_MODIFIERS \
   --provider '.providers["scope-configurations"].object_modifiers' \

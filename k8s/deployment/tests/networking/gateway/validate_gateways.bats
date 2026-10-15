@@ -38,6 +38,32 @@ setup() {
     echo "gateway.gateway.networking.k8s.io/$name"
   }
   export -f kubectl
+
+  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes; do
+    eval "$helper() { :; }"
+    export -f "$helper"
+  done
+}
+
+run_with_logging() {
+  run "$BASH" -c "
+    ( source '$PROJECT_ROOT/k8s/logging'; source '$SCRIPT' )
+    rc=\$?
+    for event in \"\${NP_TRACE_DIR:-/nonexistent}\"/spool/*.json \"\${NP_TRACE_DIR:-/nonexistent}\"/failed/*.json; do
+      [ -f \"\$event\" ] && cat \"\$event\" && echo
+    done
+    exit \$rc
+  "
+}
+
+trace_platform_step() {
+  export NP_TRACE="1|trace-9|deployment-42~configure-ingress@0.0"
+  export NP_API_KEY="test-key"
+  export NP_TRACE_DIR="$BATS_TEST_TMPDIR/nptrace"
+  export NP_TRACE_BASE_URL="http://127.0.0.1:1"
+  export NP_TRACE_AUTH_URL="http://127.0.0.1:1"
+  export NP_TRACE_FLUSH_TIMEOUT=1
+  export NP_TRACE_MAX_RETRIES=0
 }
 
 mock_tracing() {
@@ -133,11 +159,34 @@ get gateway partners -n edge -o name"
   [ -z "${missing_gateways:-}" ]
 }
 
-@test "validate_gateways: runs without tracing helpers defined" {
-  run bash -c 'source "$SCRIPT"'
+@test "validate_gateways: an untraced run with the real logging prints only the result" {
+  run_with_logging
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"command not found"* ]] || false
+  assert_equal "$output" "✅ All gateways exist: gateways/gateway-internal, edge/partners"
+}
+
+@test "validate_gateways: a traced run reports the validation step and the gateways it consumes" {
+  trace_platform_step
+
+  run_with_logging
+
+  [ "$status" -eq 0 ]
+  echo "$output" | grep '"status":"completed"' | grep -q 'deployment-42~configure-ingress@0.0~validate-gateways@0.0'
+  echo "$output" | grep '"edge.consumes"' | grep -q '"id":"k8s-gateway:gateways/gateway-internal"'
+  echo "$output" | grep '"edge.consumes"' | grep -q '"id":"k8s-gateway:edge/partners"'
+  echo "$output" | grep -q 'Validate gateways for private scope'
+}
+
+@test "validate_gateways: a traced run fails the validation step with the missing gateways" {
+  trace_platform_step
+  export MISSING_GATEWAYS_FIXTURE="edge/partners"
+
+  run_with_logging
+
+  [ "$status" -eq 1 ]
+  echo "$output" | grep '"status":"failed"' | grep -q 'validate-gateways@0.0'
+  echo "$output" | grep -q 'Gateways not found: edge/partners'
 }
 
 @test "validate_gateways: traces the validation step and every gateway it consumes" {
@@ -148,12 +197,11 @@ get gateway partners -n edge -o name"
   [ "$status" -eq 0 ]
   assert_equal "$(cat "$TRACE_LOG")" 'np_scope_step_begin validate-gateways --title Validate gateways for private scope
 np_scope_input gateways [{"name":"gateway-internal","namespace":"gateways"},{"name":"partners","namespace":"edge"}]
-np_scope_consumes k8s-gateway:gateways/gateway-internal gateway gateways/gateway-internal
-np_scope_consumes k8s-gateway:edge/partners gateway edge/partners
+np_scope_consumes k8s-gateway:gateways/gateway-internal
+np_scope_consumes k8s-gateway:edge/partners
 np_scope_explain --title Validate gateways for private scope --what All gateways exist: gateways/gateway-internal, edge/partners
 np_scope_step_end 0'
 }
-
 @test "validate_gateways: fails the trace step listing the missing gateways" {
   mock_tracing
   export MISSING_GATEWAYS_FIXTURE="gateways/gateway-internal edge/partners"
