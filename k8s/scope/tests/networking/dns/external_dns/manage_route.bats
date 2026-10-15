@@ -344,3 +344,38 @@ teardown() {
   assert_contains "$output" "✅ DNSEndpoint deletion completed"
   assert_contains "$(cat "$OUTPUT_DIR/kubectl.log")" "delete dnsendpoint checkout-api-production-123456-dns -n test-ns"
 }
+
+@test "manage_route: CREATE - looks up the gateway in GATEWAY_NAMESPACE" {
+  export ACTION="CREATE"
+  export GATEWAY_NAMESPACE="istio-gw"
+  export DNS_ENDPOINT_TEMPLATE="$OUTPUT_DIR/dns-endpoint.yaml.tpl"
+  echo "template content" > "$DNS_ENDPOINT_TEMPLATE"
+
+  kubectl() {
+    echo "$*" >> "$OUTPUT_DIR/kubectl.log"
+    case "$*" in
+      "get gateway gw-public -n istio-gw "*) echo "10.0.0.9" ;;
+      *) echo "" ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Gateway address: 10.0.0.9 (recordType: A)"
+  assert_contains "$(cat "$OUTPUT_DIR/kubectl.log")" "get ingress gateway-alb-gw-public -n istio-gw"
+}
+
+@test "manage_route: CREATE - unresolved address guidance names GATEWAY_NAMESPACE" {
+  export ACTION="CREATE"
+  export GATEWAY_NAMESPACE="istio-gw"
+
+  kubectl() { return 1; }
+  export -f kubectl
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "If it persists: kubectl get gateway,service -n istio-gw (or check RBAC)"
+}
