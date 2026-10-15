@@ -40,6 +40,14 @@ setup() {
   export -f kubectl
 }
 
+mock_tracing() {
+  export TRACE_LOG="$BATS_TEST_TMPDIR/trace.log"
+  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes; do
+    eval "$helper() { echo \"$helper \$*\" >> \"\$TRACE_LOG\"; }"
+    export -f "$helper"
+  done
+}
+
 @test "validate_gateways: succeeds when every gateway exists" {
   run bash -c 'source "$SCRIPT"'
 
@@ -123,4 +131,58 @@ get gateway partners -n edge -o name"
 
   [ -z "${gateway_name:-}" ]
   [ -z "${missing_gateways:-}" ]
+}
+
+@test "validate_gateways: runs without tracing helpers defined" {
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"command not found"* ]] || false
+}
+
+@test "validate_gateways: traces the validation step and every gateway it consumes" {
+  mock_tracing
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_equal "$(cat "$TRACE_LOG")" 'np_scope_step_begin validate-gateways --title Validate gateways for private scope
+np_scope_input gateways [{"name":"gateway-internal","namespace":"gateways"},{"name":"partners","namespace":"edge"}]
+np_scope_consumes k8s-gateway:gateways/gateway-internal gateway gateways/gateway-internal
+np_scope_consumes k8s-gateway:edge/partners gateway edge/partners
+np_scope_explain --title Validate gateways for private scope --what All gateways exist: gateways/gateway-internal, edge/partners
+np_scope_step_end 0'
+}
+
+@test "validate_gateways: fails the trace step listing the missing gateways" {
+  mock_tracing
+  export MISSING_GATEWAYS_FIXTURE="gateways/gateway-internal edge/partners"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$(cat "$TRACE_LOG")" 'np_scope_output missing_gateways ["gateways/gateway-internal","edge/partners"]'
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_end 1 Gateways not found: gateways/gateway-internal edge/partners"
+  [[ "$(cat "$TRACE_LOG")" != *"np_scope_consumes"* ]] || false
+}
+
+@test "validate_gateways: fails the trace step when a gateway cannot be checked" {
+  mock_tracing
+  export FORBIDDEN_GATEWAYS_FIXTURE="edge/partners"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_end 1 Could not check gateway edge/partners"
+}
+
+@test "validate_gateways: fails the trace step on invalid additional gateways" {
+  mock_tracing
+  export INVALID_ADDITIONAL_GATEWAYS='[{"namespace": "edge"}]'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_equal "$(cat "$TRACE_LOG")" "np_scope_step_begin validate-gateways --title Validate gateways for private scope
+np_scope_step_end 1 Invalid additional_private_gateways"
 }

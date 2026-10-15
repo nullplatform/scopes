@@ -54,6 +54,14 @@ single_gateway() {
   httproute "[$(ref gateway-public gateways)]" "[$(parent gateway-public gateways "$@")]"
 }
 
+mock_tracing() {
+  export TRACE_LOG="$BATS_TEST_TMPDIR/trace.log"
+  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress; do
+    eval "$helper() { echo \"$helper \$*\" >> \"\$TRACE_LOG\"; }"
+    export -f "$helper"
+  done
+}
+
 run_verify() {
   run bash -c "
     kubectl() { cat '$HTTPROUTE_FIXTURE'; return 0; }
@@ -252,4 +260,57 @@ run_verify() {
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "- Check Gateway controller logs"
   assert_contains "$output" "- Verify Gateway and Istio configuration"
+}
+
+@test "verify_http_route_reconciliation: runs without tracing helpers defined" {
+  single_gateway "$ACCEPTED" "$RESOLVED"
+
+  run_verify
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"command not found"* ]] || false
+}
+
+@test "verify_http_route_reconciliation: traces every reconciled gateway" {
+  mock_tracing
+  httproute "[$(ref gateway-public gateways), $(ref partners edge)]" \
+    "[$(parent gateway-public gateways "$ACCEPTED" "$RESOLVED"), $(parent partners edge "$ACCEPTED" "$RESOLVED")]"
+
+  run_verify
+
+  [ "$status" -eq 0 ]
+  assert_equal "$(cat "$TRACE_LOG")" 'np_scope_step_begin verify-httproute --title Verify HTTPRoute reconciliation (k-8-s-my-app-scope-123-internet-facing)
+np_scope_wait_heartbeat httproute-reconciliation 0 1 pending
+np_scope_output gateways [{"gateway":"gateways/gateway-public","accepted":"True","resolved_refs":"True"},{"gateway":"edge/partners","accepted":"True","resolved_refs":"True"}]
+np_scope_consumes k8s-gateway:gateways/gateway-public gateway gateways/gateway-public
+np_scope_consumes k8s-gateway:edge/partners gateway edge/partners
+np_scope_step_end 0
+np_scope_explain --title Verify networking --what HTTPRoute k-8-s-my-app-scope-123-internet-facing reconciled — DNS routing verified'
+}
+
+@test "verify_http_route_reconciliation: fails the trace step naming the gateway that rejected the route" {
+  mock_tracing
+  httproute "[$(ref gateway-public gateways), $(ref partners edge)]" \
+    "[$(parent gateway-public gateways "$ACCEPTED" "$RESOLVED"), $(parent partners edge '{"type":"Accepted","status":"False","reason":"NotAllowedByListeners","message":"No listener allows routes from test-namespace"}' "$RESOLVED")]"
+
+  run_verify
+
+  [ "$status" -eq 1 ]
+  assert_contains "$(cat "$TRACE_LOG")" 'np_scope_output gateways [{"gateway":"gateways/gateway-public","accepted":"True","resolved_refs":"True"},{"gateway":"edge/partners","accepted":"False","resolved_refs":"True"}]'
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_end 1 HTTPRoute k-8-s-my-app-scope-123-internet-facing failed to reconcile on gateway edge/partners"
+  [[ "$(cat "$TRACE_LOG")" != *"np_scope_consumes"* ]] || false
+}
+
+@test "verify_http_route_reconciliation: traces gateway progress while waiting and their status on timeout" {
+  mock_tracing
+  export CHECK_INTERVAL=1
+  httproute "[$(ref gateway-public gateways), $(ref partners edge)]" \
+    "[$(parent gateway-public gateways "$ACCEPTED" "$RESOLVED")]"
+
+  run_verify
+
+  [ "$status" -eq 1 ]
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_progress 1 2 gateways"
+  assert_contains "$(cat "$TRACE_LOG")" 'np_scope_output gateways [{"gateway":"gateways/gateway-public","accepted":"True","resolved_refs":"True"},{"gateway":"edge/partners","accepted":"Unknown","resolved_refs":"Unknown"}]'
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_timeout HTTPRoute k-8-s-my-app-scope-123-internet-facing not reconciled after 1s"
 }
