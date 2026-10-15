@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- k8s scopes on Istio can publish their route on additional gateways with `additional_public_gateways` / `additional_private_gateways`
+- k8s scopes on Istio honor the gateway namespace set in `gateway_namespace` or in the container-orchestration provider, instead of always using `gateways`
+- Fix: a k8s deployment on Istio now fails when a configured gateway does not exist or rejects the route, instead of reporting success
+- The trace of initial, blue/green and traffic-switch k8s deployments shows a "Configure ingress" step; on Istio it shows each gateway the route is published on, with its validation and reconciliation status
 - Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
 - Fix: a k8s scope's Pod Disruption Budget lets pods that are not ready be evicted, so a scope stuck in a crash loop never blocks a node drain
 - k8s scopes on AKS can make their Azure DNS calls as a managed identity chosen per dimension (AKS Workload Identity), configured through the Identity & Access provider or the `CONTAINERS_AZURE_CLIENT_ID` / `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` env vars, instead of the agent's Service Principal client secret

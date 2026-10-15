@@ -75,12 +75,19 @@ Gateway configuration for ingress traffic routing.
 |----------|-------------|------------------------------|
 | **PUBLIC_GATEWAY_NAME** | Public gateway name for ingress | `networking.gateway_public_name` |
 | **PRIVATE_GATEWAY_NAME** | Private/internal gateway name for ingress | `networking.gateway_private_name` |
+| **GATEWAY_NAMESPACE** | Namespace of the public and private gateways (default `gateways`). Also read from `gateway.namespace` in the container-orchestration provider | `networking.gateway_namespace` |
+| _additional public gateways_ | Extra gateways the HTTPRoute of public scopes is attached to, as a list of `{"name", "namespace"}` (namespace defaults to the gateway namespace). Also read from `gateway.additional_public_gateways` in the container-orchestration provider | `networking.additional_public_gateways` |
+| _additional private gateways_ | Same as above, for private scopes | `networking.additional_private_gateways` |
 | **GATEWAY_EXTERNAL_IP** | Address published in DNS instead of the one detected from the cluster. Set it when a NAT/VIP device fronts the gateway, so records carry the externally reachable address rather than the internal one. An IPv4 value yields an A record, a hostname a CNAME. | _environment variable_ |
 
 **Note:** `GATEWAY_EXTERNAL_IP` is read straight from the agent's environment, not from the
 `scope-configurations` provider, and only applies to the `external_dns` DNS type. Left unset,
 the address is auto-detected from the Gateway or its Service, which is correct whenever no
 address translation sits in front of the cluster.
+
+Every gateway the HTTPRoute references must exist before it is applied, and the deployment
+waits until each of them reports `Accepted` and `ResolvedRefs`. DNS records keep pointing at
+the main gateway only. The agent needs `get` on `gateways` in every namespace configured.
 
 ### Deployment
 

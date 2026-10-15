@@ -75,7 +75,10 @@ steps:
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
-    trace: false
+    trace:
+      title: Configure ingress
+      description: Renders the routing rules for the new version and checks that every gateway they attach to exists.
+      group: setting-up
     configuration:
       TEMPLATE: "$INGRESS_TEMPLATE"
     output:
