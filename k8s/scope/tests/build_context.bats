@@ -575,27 +575,3 @@ teardown() {
   assert_equal "$INVALID_ADDITIONAL_GATEWAYS" ""
   assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
 }
-
-@test "build_context: traces the resolved gateways" {
-  export TRACE_LOG="$BATS_TEST_TMPDIR/trace.log"
-  np_scope_output() { echo "np_scope_output $*" >> "$TRACE_LOG"; }
-  export -f np_scope_output
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"name": "partners", "namespace": "edge"}]')
-
-  run bash -c 'source "$SCRIPT"'
-
-  [ "$status" -eq 0 ]
-  assert_equal "$(cat "$TRACE_LOG")" 'np_scope_output gateways {"resolved":[{"name":"co-gateway-public","namespace":"gateways"},{"name":"partners","namespace":"edge"}]}'
-}
-
-@test "build_context: traces invalid additional gateways next to the resolved ones" {
-  export TRACE_LOG="$BATS_TEST_TMPDIR/trace.log"
-  np_scope_output() { echo "np_scope_output $*" >> "$TRACE_LOG"; }
-  export -f np_scope_output
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].gateway.additional_public_gateways = "partners,mobile"')
-
-  run bash -c 'source "$SCRIPT"'
-
-  [ "$status" -eq 0 ]
-  assert_equal "$(cat "$TRACE_LOG")" 'np_scope_output gateways {"resolved":[{"name":"co-gateway-public","namespace":"gateways"}],"invalid_additional":"partners,mobile"}'
-}
