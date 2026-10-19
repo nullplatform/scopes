@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Expands ${np.<key>} placeholders in every string of a JSON document using the
+# scope context. Only the literal "${np." prefix is matched, so Go template
+# syntax used by annotations (e.g. "{{ with secret ... }}") passes through.
+# Usage: expand_placeholders <json> <context_json>
+#        expand_placeholder_string <string> <context_json>
+
+# Builds the placeholder -> value map from the scope context.
+# A non-object .scope.dimensions is treated as "no dimensions".
+_np_placeholder_values() {
+  echo "$1" | jq -c '
+    {
+      account_slug: .account.slug,
+      namespace_slug: .namespace.slug,
+      application_slug: .application.slug,
+      repository_name: ((.application.repository_url // "") | sub("\\.git$"; "") | split("/") | last),
+      scope_slug: .scope.slug,
+      scope_id: (.scope.id | if . == null then null else tostring end),
+      k8s_namespace: .k8s_namespace
+    } + ((if (.scope.dimensions | type) == "object" then .scope.dimensions else {} end)
+         | with_entries(.key = "dimension.\(.key)") | map_values(tostring))'
+}
+
+# expand_placeholders <json> <context_json>: prints the expanded JSON.
+# Returns 1 if any placeholder is unknown or has no value in the context.
+expand_placeholders() {
+  local input="$1" values unknown
+  values=$(_np_placeholder_values "$2")
+  unknown=$(echo "$input" | jq -r --argjson v "$values" '
+    [.. | strings | scan("\\$\\{np\\.([a-zA-Z0-9_.-]+)\\}") | .[0]] | unique
+    | map(select(($v[.] // null) == null)) | join(", ")')
+  if [ -n "$unknown" ]; then
+    log error "   ❌ Unknown or unresolved placeholder(s): $unknown"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   A typo in the placeholder, or a dimension the scope does not have"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Supported: \${np.account_slug} \${np.namespace_slug} \${np.application_slug} \${np.repository_name} \${np.scope_slug} \${np.scope_id} \${np.k8s_namespace} \${np.dimension.<key>}"
+    log error "   • Scope dimensions: $(echo "$2" | jq -r '(if (.scope.dimensions | type) == "object" then .scope.dimensions else {} end) | keys | join(", ")')"
+    return 1
+  fi
+  echo "$input" | jq -c --argjson v "$values" '
+    walk(if type == "string"
+         then gsub("\\$\\{np\\.(?<k>[a-zA-Z0-9_.-]+)\\}"; $v[.k])
+         else . end)'
+}
+
+# expand_placeholder_string <string> <context_json>: prints the expanded string.
+expand_placeholder_string() {
+  expand_placeholders "$(jq -n --arg s "$1" '{s: $s}')" "$2" | jq -r .s
+}
