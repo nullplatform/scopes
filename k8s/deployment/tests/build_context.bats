@@ -210,6 +210,41 @@ teardown() {
   assert_empty "$SERVICE_ACCOUNT_NAME"
 }
 
+# Runs the real service account block extracted from deployment/build_context
+run_service_account_block() {
+  local block
+  block=$(sed -n '/^IAM_ENABLED=/,/^TRAFFIC_MANAGER_CONFIG_MAP=/p' "$PROJECT_ROOT/k8s/deployment/build_context" | sed '$d')
+  run bash -c "log() { echo \"\$2\" >&2; }; $block; echo \"SA=[\$SERVICE_ACCOUNT_NAME]\""
+}
+
+@test "service account: per-scope SA name is used when enabled and IAM is off" {
+  export SCOPE_ID="scope-123" IAM='{"ENABLED":false}' SERVICE_ACCOUNT_ENABLED="true" SERVICE_ACCOUNT_NAME_RESOLVED="np-scope-123"
+  run_service_account_block
+  [ "$status" -eq 0 ] || false
+  assert_contains "$output" "SA=[np-scope-123]"
+}
+
+@test "service account: IAM and per-scope SA enabled together fails" {
+  export SCOPE_ID="scope-123" IAM='{"ENABLED":true,"PREFIX":"np-role"}' SERVICE_ACCOUNT_ENABLED="true" SERVICE_ACCOUNT_NAME_RESOLVED="np-scope-123"
+  run_service_account_block
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "IAM and service_account_enabled"
+}
+
+@test "service account: empty when IAM and per-scope SA are both off" {
+  export SCOPE_ID="scope-123" IAM='{"ENABLED":false}' SERVICE_ACCOUNT_ENABLED="false" SERVICE_ACCOUNT_NAME_RESOLVED=""
+  run_service_account_block
+  [ "$status" -eq 0 ] || false
+  assert_contains "$output" "SA=[]"
+}
+
+@test "service account: IAM only keeps the <prefix>-<scope_id> name" {
+  export SCOPE_ID="scope-123" IAM='{"ENABLED":true,"PREFIX":"np-role"}' SERVICE_ACCOUNT_ENABLED="false" SERVICE_ACCOUNT_NAME_RESOLVED=""
+  run_service_account_block
+  [ "$status" -eq 0 ] || false
+  assert_contains "$output" "SA=[np-role-scope-123]"
+}
+
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================

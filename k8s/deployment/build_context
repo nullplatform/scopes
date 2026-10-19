@@ -201,8 +201,21 @@ IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 
 SERVICE_ACCOUNT_NAME=""
 
+if [[ "$IAM_ENABLED" == "true" && "${SERVICE_ACCOUNT_ENABLED:-false}" == "true" ]]; then
+  log error "   ❌ IAM and service_account_enabled are both enabled for this scope"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   Both settings define the pod service account; only one can own it"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Disable security.iam_enabled or security.service_account_enabled in scope-configurations"
+  exit 1
+fi
+
 if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+elif [[ "${SERVICE_ACCOUNT_ENABLED:-false}" == "true" ]]; then
+  SERVICE_ACCOUNT_NAME="$SERVICE_ACCOUNT_NAME_RESOLVED"
 fi
 
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
