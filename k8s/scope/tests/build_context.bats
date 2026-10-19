@@ -158,6 +158,7 @@ teardown() {
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
     "k8s_modifiers": {},
+    "service_account": {"enabled": false, "name": ""},
     "names": {
       "deployment": "",
       "service": "",
@@ -233,6 +234,7 @@ teardown() {
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
     "k8s_modifiers": {},
+    "service_account": {"enabled": false, "name": ""},
     "names": {
       "deployment": "",
       "service": "",
@@ -417,4 +419,97 @@ teardown() {
   assert_equal "$(echo "$CONTEXT" | jq -r .gateway_name)" "scope-gw-public"
   assert_equal "$(echo "$CONTEXT" | jq -r .alb_name)" "scope-alb-public"
   assert_equal "$GATEWAY_NAME" "scope-gw-public"
+}
+
+# =============================================================================
+# Placeholder expansion and service account resolution
+# =============================================================================
+set_scope_config() {
+  export CONTEXT=$(echo "$CONTEXT" | jq --argjson cfg "$1" '
+    .scope.dimensions = {"environment": "development"} |
+    .providers["scope-configurations"] = $cfg')
+}
+
+@test "build_context: expands \${np.*} placeholders in k8s_modifiers" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.application_slug}"}}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.x)" "test-app"
+}
+
+@test "build_context: leaves Go template syntax in k8s_modifiers untouched" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"vault": "{{ with secret \"kv/app\" }}{{ .Data.x }}{{ end }}"}}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.vault)" '{{ with secret "kv/app" }}{{ .Data.x }}{{ end }}'
+}
+
+@test "build_context: fails on unknown placeholder in k8s_modifiers" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.nope}"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "np.nope"
+}
+
+@test "build_context: k8s_modifiers without placeholders are unchanged" {
+  export K8S_MODIFIERS='{"deployment":{"labels":{"a":"b"},"annotations":{"c":"d"}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -cS .k8s_modifiers)" '{"deployment":{"annotations":{"c":"d"},"labels":{"a":"b"}}}'
+}
+
+@test "build_context: service_account is disabled by default" {
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":false,"name":""}'
+  assert_equal "$SERVICE_ACCOUNT_ENABLED" "false"
+  assert_equal "$SERVICE_ACCOUNT_NAME_RESOLVED" ""
+}
+
+@test "build_context: disabled service account never evaluates the name template" {
+  set_scope_config '{"security": {"service_account_name": "${np.nope}"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":false,"name":""}'
+}
+
+@test "build_context: enabled service account defaults to <app_slug>-<scope_id>" {
+  set_scope_config '{"security": {"service_account_enabled": "true"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":true,"name":"test-app-test-scope-123"}'
+  assert_equal "$SERVICE_ACCOUNT_NAME_RESOLVED" "test-app-test-scope-123"
+}
+
+@test "build_context: service account name template resolves placeholders" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.application_slug}-${np.dimension.environment}"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account.name)" "test-app-development"
+}
+
+@test "build_context: service account name ending in a dash fails with DNS-1123 message" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.application_slug}-"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "DNS-1123"
+}
+
+@test "build_context: service account name with uppercase fails with DNS-1123 message" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "My-SA"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "DNS-1123"
 }

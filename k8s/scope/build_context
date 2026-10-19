@@ -230,6 +230,43 @@ COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-
 log debug "📋 Scope: $SCOPE_ID | Visibility: $SCOPE_VISIBILITY | Domain: $SCOPE_DOMAIN"
 log debug "📋 Namespace: $K8S_NAMESPACE | Region: $REGION | Gateway: $GATEWAY_NAME | ALB: $ALB_NAME"
 
+source "$SCRIPT_DIR/../utils/expand_placeholders"
+
+# Context used to resolve ${np.*}: the scope context plus the resolved k8s namespace.
+PLACEHOLDER_CONTEXT=$(echo "$CONTEXT" | jq --arg ns "$K8S_NAMESPACE" '. + {k8s_namespace: $ns}')
+
+K8S_MODIFIERS=$(expand_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT") || exit 1
+
+SERVICE_ACCOUNT_ENABLED=$(get_config_value \
+  --env SERVICE_ACCOUNT_ENABLED \
+  --provider '.providers["scope-configurations"].security.service_account_enabled' \
+  --default "false"
+)
+SERVICE_ACCOUNT_NAME_RESOLVED=""
+if [ "$SERVICE_ACCOUNT_ENABLED" = "true" ]; then
+  SERVICE_ACCOUNT_NAME_TEMPLATE=$(get_config_value \
+    --env SERVICE_ACCOUNT_NAME_TEMPLATE \
+    --provider '.providers["scope-configurations"].security.service_account_name' \
+    --default '${np.application_slug}-${np.scope_id}'
+  )
+  SERVICE_ACCOUNT_NAME_RESOLVED=$(expand_placeholder_string "$SERVICE_ACCOUNT_NAME_TEMPLATE" "$PLACEHOLDER_CONTEXT") || exit 1
+  if [ ${#SERVICE_ACCOUNT_NAME_RESOLVED} -gt 253 ] || \
+     ! [[ "$SERVICE_ACCOUNT_NAME_RESOLVED" =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
+    log error "   ❌ Invalid service account name '$SERVICE_ACCOUNT_NAME_RESOLVED' (from '$SERVICE_ACCOUNT_NAME_TEMPLATE')"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The template resolves to uppercase characters, an empty segment or more than 253 characters"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Adjust security.service_account_name in the scope-configurations provider"
+    log error "   • It must be a DNS-1123 subdomain: lowercase alphanumerics, '-' or '.', starting and ending alphanumeric"
+    exit 1
+  fi
+else
+  SERVICE_ACCOUNT_ENABLED="false"
+fi
+export SERVICE_ACCOUNT_ENABLED SERVICE_ACCOUNT_NAME_RESOLVED
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \
           --arg k8s_namespace "$K8S_NAMESPACE" \
@@ -239,7 +276,9 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg component "$COMPONENT" \
           --arg base_domain "$DOMAIN" \
           --argjson modifiers "$K8S_MODIFIERS" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain}')
+          --argjson sa_enabled "$SERVICE_ACCOUNT_ENABLED" \
+          --arg sa_name "$SERVICE_ACCOUNT_NAME_RESOLVED" \
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain, service_account: {enabled: $sa_enabled, name: $sa_name}}')
 
 source "$SCRIPT_DIR/../naming/resolve_names"
 if ! type -t require_resource >/dev/null 2>&1; then source "$SCRIPT_DIR/require_resource"; fi
