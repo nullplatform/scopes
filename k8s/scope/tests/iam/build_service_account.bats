@@ -201,3 +201,169 @@ teardown() {
   assert_contains "$output" "• Verify template exists: ls -la /templates/service_account.yaml"
   assert_contains "$output" "• Check the template is a valid Kubernetes ServiceAccount YAML with correct gomplate expressions"
 }
+
+# =============================================================================
+# Per-scope service account (service_account_enabled) — rendered with the real
+# template, read from CONTEXT.service_account (not from env vars).
+# =============================================================================
+sa_context() {
+  local enabled="$1" name="$2"
+  jq -n --argjson enabled "$enabled" --arg name "$name" '{
+    k8s_namespace: "apps-ns",
+    account: {slug: "acc", id: 1},
+    application: {slug: "app", id: 2},
+    namespace: {slug: "ns", id: 3},
+    scope: {slug: "scope-a", id: 4},
+    k8s_modifiers: {},
+    service_account: {enabled: $enabled, name: $name}
+  }'
+}
+
+use_real_render() {
+  unset -f gomplate rm
+  export SERVICE_ACCOUNT_TEMPLATE="$PROJECT_ROOT/k8s/scope/templates/service-account.yaml.tpl"
+  export SA_FILE="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  # aws must not be reached on the non-IAM path
+  aws() { echo "aws called: $*" >&2; return 1; }
+  export -f aws
+}
+
+@test "build_service_account: IAM off + SA on renders the per-scope service account without role annotation" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_file_exists "$SA_FILE"
+  run yq -r '.metadata.name' "$SA_FILE"
+  assert_equal "$output" "app-acc-sa"
+  run yq -r '.metadata.namespace' "$SA_FILE"
+  assert_equal "$output" "apps-ns"
+  run yq -r '.metadata.labels.scope_id + "," + .metadata.labels.application_id + "," + .metadata.labels.namespace_id + "," + .metadata.labels.account_id' "$SA_FILE"
+  assert_equal "$output" "4,2,3,1"
+  run yq -r '.metadata | has("annotations")' "$SA_FILE"
+  assert_equal "$output" "false"
+  run grep -c "eks.amazonaws.com/role-arn" "$SA_FILE"
+  assert_equal "$output" "0"
+  run yq -r '.automountServiceAccountToken' "$SA_FILE"
+  assert_equal "$output" "true"
+}
+
+@test "build_service_account: IAM off + SA on does not call aws" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"aws called"* ]] || false
+}
+
+@test "build_service_account: IAM off + SA off renders nothing (unchanged behavior)" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context false "")"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 IAM is not enabled, skipping service account setup"
+  assert_file_not_exists "$SA_FILE"
+  run find "$OUTPUT_DIR" -type f
+  assert_empty "$output"
+}
+
+@test "build_service_account: a CONTEXT without service_account renders nothing" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export CONTEXT='{"k8s_namespace":"apps-ns"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: reads the service account from CONTEXT, not from SERVICE_ACCOUNT_* env vars" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export SERVICE_ACCOUNT_ENABLED=true
+  export SERVICE_ACCOUNT_NAME_RESOLVED=from-env
+  export CONTEXT="$(sa_context false "")"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: delete action renders the per-scope service account so it is removed" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export ACTION=delete
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  run yq -r '.metadata.name' "$SA_FILE"
+  assert_equal "$output" "app-acc-sa"
+}
+
+@test "build_service_account: SA enabled with an empty name fails" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true "")"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Service account is enabled but its name is empty"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: IAM on renders the IAM service account with the role annotation" {
+  unset -f gomplate rm
+  export SERVICE_ACCOUNT_TEMPLATE="$PROJECT_ROOT/k8s/scope/templates/service-account.yaml.tpl"
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+  export CONTEXT="$(sa_context false "")"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  SA_FILE="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  run yq -r '.metadata.name' "$SA_FILE"
+  assert_equal "$output" "test-prefix-test-scope-123"
+  run yq -r '.metadata.annotations["eks.amazonaws.com/role-arn"]' "$SA_FILE"
+  assert_equal "$output" "arn:aws:iam::123456789012:role/test-prefix-test-scope-123"
+}
+
+@test "build_service_account: IAM_SERVICE_ACCOUNT=skip leaves the IAM service account to the scope workflows" {
+  use_real_render
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+  export IAM_SERVICE_ACCOUNT=skip
+  export CONTEXT="$(sa_context false "")"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"aws called"* ]] || false
+  assert_contains "$output" "📋 IAM service account is managed by the scope workflows, skipping"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: IAM_SERVICE_ACCOUNT=skip still renders the per-scope service account" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export IAM_SERVICE_ACCOUNT=skip
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  run yq -r '.metadata.name' "$SA_FILE"
+  assert_equal "$output" "app-acc-sa"
+}

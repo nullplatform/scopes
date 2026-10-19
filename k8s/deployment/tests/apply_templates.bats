@@ -243,3 +243,51 @@ teardown() {
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ KUBECTL_DELETE_TIMEOUT_SECONDS must be a positive integer, got: ''"
 }
+
+# =============================================================================
+# Nothing to apply/delete closes the step as skipped, not a hollow completed
+# =============================================================================
+mock_np_step_skip() {
+  np_step_skip() { echo "np_step_skip: $*"; }
+  export -f np_step_skip
+}
+
+@test "apply_templates: no templates closes the step as skipped" {
+  mock_np_step_skip
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "np_step_skip: no manifests to apply"
+}
+
+@test "apply_templates: only empty templates closes the step as skipped" {
+  mock_np_step_skip
+  export ACTION="delete"
+  touch "$OUTPUT_DIR/empty.yaml"
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "np_step_skip: no manifests to delete"
+}
+
+@test "apply_templates: a manifest to apply does not skip the step" {
+  mock_np_step_skip
+  echo "apiVersion: v1" > "$OUTPUT_DIR/valid.yaml"
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"np_step_skip"* ]] || false
+}
+
+@test "apply_templates: no templates without np_step_skip defined is silent" {
+  unset -f np_step_skip
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"np_step_skip"* ]] || false
+  [[ "$output" != *"command not found"* ]] || false
+}
