@@ -83,6 +83,8 @@ configuration:
 #              ]
 #            }
 #      BOUNDARY_ARN: arn:aws:iam::aws:policy/AmazonS3FullAccess
+#  SERVICE_ACCOUNT_ENABLED: false
+#  SERVICE_ACCOUNT_NAME_TEMPLATE: "${np.application_slug}-${np.scope_id}"
   MANIFEST_BACKUP:
     ENABLED: false
 #    TYPE: s3

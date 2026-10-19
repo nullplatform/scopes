@@ -230,6 +230,22 @@ Requirements:
 - The managed identity holds the roles the scope needs (e.g. `DNS Zone Contributor`
   on the DNS zone).
 
+#### Service Account
+
+Runs the scope's pods with a dedicated Kubernetes ServiceAccount, without AWS IAM. Useful when workloads
+authenticate to the cluster identity (e.g. Vault Kubernetes auth) and each application needs its own identity.
+
+| Variable | Description | Scope Configuration Property |
+|----------|-------------|------------------------------|
+| **SERVICE_ACCOUNT_ENABLED** | Whether the scope runs with its own ServiceAccount (default `false`) | `security.service_account_enabled` |
+| **SERVICE_ACCOUNT_NAME_TEMPLATE** | Name of the ServiceAccount, accepts [placeholders](#placeholders) (default `${np.application_slug}-${np.scope_id}`) | `security.service_account_name` |
+
+- The resolved name must be a valid DNS-1123 subdomain (lowercase alphanumerics, `-` or `.`, at most 253 characters); otherwise the workflow fails.
+- It is mutually exclusive with `security.iam_enabled`: enabling both fails the deployment, because both define the pod service account.
+- **Ownership.** The scope manages a ServiceAccount only if it carries the label `scope_id` equal to the scope's id. If a ServiceAccount with that name already exists without the label (or with another scope's id), it is used as-is and is never modified or deleted. This lets you bring your own ServiceAccount by pre-creating it.
+- Names must be unique per scope unless the ServiceAccount is pre-created: two scopes resolving to the same name share it, and only the first one to create it owns (and deletes) it.
+- **Limitations.** Changing the name template or disabling the feature does not remove the ServiceAccount created earlier; it stays in the cluster as an orphan until removed manually or through your IaC.
+
 #### Vault
 
 HashiCorp Vault configuration for secrets management.
@@ -245,4 +261,37 @@ Advanced configuration options.
 
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
-| **K8S_MODIFIERS** | JSON string with dynamic modifications to Kubernetes objects | `object_modifiers` |
+| **K8S_MODIFIERS** | JSON string with dynamic modifications to Kubernetes objects. Supports [placeholders](#placeholders) | `object_modifiers` |
+
+#### Placeholders
+
+Every string in `object_modifiers` (and the ServiceAccount name template) can reference scope data with `${np.<key>}`.
+They are resolved when the scope context is built. An unknown or empty placeholder fails the workflow instead of rendering an empty value.
+
+| Placeholder | Value |
+|-------------|-------|
+| `${np.account_slug}` | Account slug |
+| `${np.namespace_slug}` | nullplatform namespace slug |
+| `${np.application_slug}` | Application slug |
+| `${np.repository_name}` | Last segment of the application repository URL, without `.git` |
+| `${np.scope_slug}` | Scope slug |
+| `${np.scope_id}` | Scope id |
+| `${np.k8s_namespace}` | Kubernetes namespace the scope is deployed to |
+| `${np.dimension.<key>}` | Value of the scope dimension `<key>` (e.g. `${np.dimension.environment}`) |
+
+Only the literal `${np.` prefix is expanded, so Go templates used by annotations (`{{ with secret ... }}`) are left untouched.
+
+Example: per-application annotations for the Vault Agent Injector, using the ServiceAccount as the identity.
+
+```json
+{
+  "deployment": {
+    "annotations": {
+      "vault.hashicorp.com/agent-inject": "true",
+      "vault.hashicorp.com/role": "apps",
+      "vault.hashicorp.com/agent-inject-containers": "application",
+      "vault.hashicorp.com/agent-inject-secret-secrets": "kv/data/${np.dimension.environment}/${np.namespace_slug}/${np.application_slug}/secrets"
+    }
+  }
+}
+```
