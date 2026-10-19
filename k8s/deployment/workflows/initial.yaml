@@ -52,6 +52,9 @@ steps:
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
     trace: false
+    configuration:
+      # Renders pod specs: an unresolved ${np.*} placeholder fails here.
+      STRICT_PLACEHOLDERS: true
     output:
       - name: CONTEXT
         type: environment

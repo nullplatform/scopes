@@ -74,3 +74,34 @@ step_index() {
   run grep -rl "SKIP_WHEN_EMPTY" "$PROJECT_ROOT/k8s" "$PROJECT_ROOT/scheduled_task" --include='*.yaml'
   assert_equal "$output" "$INITIAL"
 }
+
+# =============================================================================
+# STRICT_PLACEHOLDERS: only the workflows that render pod specs fail on an
+# unresolved placeholder; every other action stays tolerant.
+# =============================================================================
+build_context_strict() {
+  yq -r '.steps[] | select(.name == "build context") | (.configuration.STRICT_PLACEHOLDERS // "unset") | tostring' "$1"
+}
+
+@test "STRICT_PLACEHOLDERS is set on the build context of scope create and deployment initial" {
+  assert_equal "$(build_context_strict "$PROJECT_ROOT/k8s/scope/workflows/create.yaml")" "true"
+  assert_equal "$(build_context_strict "$INITIAL")" "true"
+}
+
+@test "STRICT_PLACEHOLDERS is not set on non-rendering workflows" {
+  for wf in k8s/scope/workflows/delete.yaml k8s/deployment/workflows/delete.yaml \
+            k8s/deployment/workflows/rollback.yaml k8s/deployment/workflows/switch_traffic.yaml \
+            k8s/deployment/workflows/finalize.yaml; do
+    assert_equal "$(build_context_strict "$PROJECT_ROOT/$wf")" "unset" "$wf"
+  done
+  run bash -c "grep -rl STRICT_PLACEHOLDERS '$PROJECT_ROOT/k8s' '$PROJECT_ROOT/scheduled_task' --include='*.yaml' | sort"
+  assert_equal "$output" "$(printf '%s\n%s' "$INITIAL" "$PROJECT_ROOT/k8s/scope/workflows/create.yaml" | sort)"
+}
+
+@test "scope update, blue_green and scheduled_task inherit the strict build context unchanged" {
+  run yq -r '.include[]' "$PROJECT_ROOT/k8s/scope/workflows/update.yaml"
+  assert_contains "$output" "scope/workflows/create.yaml"
+  run grep -rE 'name: build context' "$PROJECT_ROOT/k8s/scope/workflows/update.yaml" \
+    "$PROJECT_ROOT/k8s/deployment/workflows/blue_green.yaml" "$PROJECT_ROOT/scheduled_task"
+  assert_equal "$status" "1"
+}

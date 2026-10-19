@@ -85,3 +85,15 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"np.repository_name"* ]] || false
 }
+
+@test "unresolved_placeholders lists unknown and valueless placeholders without logging" {
+  run unresolved_placeholders '{"a":"${np.nope}","b":"${np.dimension.region}","c":"${np.application_slug}"}' "$CTX"
+  [ "$status" -eq 0 ] || false
+  [ "$output" = "np.dimension.region, np.nope" ] || false
+}
+
+@test "unresolved_placeholders prints nothing when everything resolves" {
+  run unresolved_placeholders '{"a":"${np.application_slug}","t":"{{ .x }}"}' "$CTX"
+  [ "$status" -eq 0 ] || false
+  [ -z "$output" ] || false
+}

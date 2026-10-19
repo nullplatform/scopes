@@ -24,14 +24,22 @@ _np_placeholder_values() {
          | with_entries(.key = "dimension.\(.key)") | map_values(tostring))'
 }
 
+# unresolved_placeholders <json> <context_json>: prints the unknown or valueless
+# placeholders as "np.a, np.b" (empty when everything resolves).
+unresolved_placeholders() {
+  local values
+  values=$(_np_placeholder_values "$2")
+  echo "$1" | jq -r --argjson v "$values" '
+    [.. | strings | scan("\\$\\{np\\.([a-zA-Z0-9_.-]+)\\}") | .[0]] | unique
+    | map(select(($v[.] // null) == null) | "np." + .) | join(", ")'
+}
+
 # expand_placeholders <json> <context_json>: prints the expanded JSON.
 # Returns 1 if any placeholder is unknown or has no value in the context.
 expand_placeholders() {
   local input="$1" values unknown
   values=$(_np_placeholder_values "$2")
-  unknown=$(echo "$input" | jq -r --argjson v "$values" '
-    [.. | strings | scan("\\$\\{np\\.([a-zA-Z0-9_.-]+)\\}") | .[0]] | unique
-    | map(select(($v[.] // null) == null) | "np." + .) | join(", ")')
+  unknown=$(unresolved_placeholders "$input" "$2")
   if [ -n "$unknown" ]; then
     log error "   ❌ Unknown or unresolved placeholder(s): $unknown"
     log error ""

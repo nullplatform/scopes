@@ -235,7 +235,16 @@ source "$SCRIPT_DIR/../utils/expand_placeholders"
 # Context used to resolve ${np.*}: the scope context plus the resolved k8s namespace.
 PLACEHOLDER_CONTEXT=$(echo "$CONTEXT" | jq --arg ns "$K8S_NAMESPACE" '. + {k8s_namespace: $ns}')
 
-K8S_MODIFIERS=$(expand_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT") || exit 1
+# Only workflows that render pod specs (scope create/update, deployment initial/blue-green) set
+# STRICT_PLACEHOLDERS=true; elsewhere (delete, rollback, ...) a bad placeholder warns so teardown never blocks.
+STRICT_PLACEHOLDERS="${STRICT_PLACEHOLDERS:-false}"
+
+MODIFIERS_UNRESOLVED=$(unresolved_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT")
+if [ -n "$MODIFIERS_UNRESOLVED" ] && [ "$STRICT_PLACEHOLDERS" != "true" ]; then
+  log warn "⚠️  Unresolved placeholder(s) in object_modifiers: $MODIFIERS_UNRESOLVED; left unexpanded because this action does not render pod specs"
+else
+  K8S_MODIFIERS=$(expand_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT") || exit 1
+fi
 
 SERVICE_ACCOUNT_ENABLED=$(get_config_value \
   --env SERVICE_ACCOUNT_ENABLED \
@@ -249,18 +258,32 @@ if [ "$SERVICE_ACCOUNT_ENABLED" = "true" ]; then
     --provider '.providers["scope-configurations"].security.service_account_name' \
     --default '${np.application_slug}-${np.scope_id}'
   )
-  SERVICE_ACCOUNT_NAME_RESOLVED=$(expand_placeholder_string "$SERVICE_ACCOUNT_NAME_TEMPLATE" "$PLACEHOLDER_CONTEXT") || exit 1
-  if [ ${#SERVICE_ACCOUNT_NAME_RESOLVED} -gt 253 ] || \
-     ! [[ "$SERVICE_ACCOUNT_NAME_RESOLVED" =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
-    log error "   ❌ Invalid service account name '$SERVICE_ACCOUNT_NAME_RESOLVED' (from '$SERVICE_ACCOUNT_NAME_TEMPLATE')"
-    log error ""
-    log error "💡 Possible causes:"
-    log error "   The template resolves to uppercase characters, an empty segment or more than 253 characters"
-    log error ""
-    log error "🔧 How to fix:"
-    log error "   • Adjust security.service_account_name in the scope-configurations provider"
-    log error "   • It must be a DNS-1123 subdomain: lowercase alphanumerics, '-' or '.', starting and ending alphanumeric"
-    exit 1
+  SERVICE_ACCOUNT_UNRESOLVED=$(unresolved_placeholders "$(jq -n --arg s "$SERVICE_ACCOUNT_NAME_TEMPLATE" '{s: $s}')" "$PLACEHOLDER_CONTEXT")
+  if [ -n "$SERVICE_ACCOUNT_UNRESOLVED" ] && [ "$STRICT_PLACEHOLDERS" != "true" ]; then
+    SERVICE_ACCOUNT_UNRESOLVED="unresolved placeholder(s): $SERVICE_ACCOUNT_UNRESOLVED"
+  else
+    SERVICE_ACCOUNT_UNRESOLVED=""
+    SERVICE_ACCOUNT_NAME_RESOLVED=$(expand_placeholder_string "$SERVICE_ACCOUNT_NAME_TEMPLATE" "$PLACEHOLDER_CONTEXT") || exit 1
+    if [ ${#SERVICE_ACCOUNT_NAME_RESOLVED} -gt 253 ] || \
+       ! [[ "$SERVICE_ACCOUNT_NAME_RESOLVED" =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
+      if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+        log error "   ❌ Invalid service account name '$SERVICE_ACCOUNT_NAME_RESOLVED' (from '$SERVICE_ACCOUNT_NAME_TEMPLATE')"
+        log error ""
+        log error "💡 Possible causes:"
+        log error "   The template resolves to uppercase characters, an empty segment or more than 253 characters"
+        log error ""
+        log error "🔧 How to fix:"
+        log error "   • Adjust security.service_account_name in the scope-configurations provider"
+        log error "   • It must be a DNS-1123 subdomain: lowercase alphanumerics, '-' or '.', starting and ending alphanumeric"
+        exit 1
+      fi
+      SERVICE_ACCOUNT_UNRESOLVED="invalid DNS-1123 name '$SERVICE_ACCOUNT_NAME_RESOLVED'"
+    fi
+  fi
+  if [ -n "$SERVICE_ACCOUNT_UNRESOLVED" ]; then
+    log warn "⚠️  Could not resolve the service account name from '$SERVICE_ACCOUNT_NAME_TEMPLATE' ($SERVICE_ACCOUNT_UNRESOLVED); continuing without it, so a scope delete leaves the service account in place"
+    SERVICE_ACCOUNT_ENABLED="false"
+    SERVICE_ACCOUNT_NAME_RESOLVED=""
   fi
 else
   SERVICE_ACCOUNT_ENABLED="false"

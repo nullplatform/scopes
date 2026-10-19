@@ -446,7 +446,8 @@ set_scope_config() {
   assert_equal "$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.vault)" '{{ with secret "kv/app" }}{{ .Data.x }}{{ end }}'
 }
 
-@test "build_context: fails on unknown placeholder in k8s_modifiers" {
+@test "build_context: fails on unknown placeholder in k8s_modifiers when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
   set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.nope}"}}}}'
 
   run bash -c 'source "$SCRIPT"'
@@ -496,7 +497,8 @@ set_scope_config() {
   assert_equal "$(echo "$CONTEXT" | jq -r .service_account.name)" "test-app-development"
 }
 
-@test "build_context: service account name ending in a dash fails with DNS-1123 message" {
+@test "build_context: service account name ending in a dash fails with DNS-1123 message when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
   set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.application_slug}-"}}'
 
   run bash -c 'source "$SCRIPT"'
@@ -505,11 +507,66 @@ set_scope_config() {
   assert_contains "$output" "DNS-1123"
 }
 
-@test "build_context: service account name with uppercase fails with DNS-1123 message" {
+@test "build_context: service account name with uppercase fails with DNS-1123 message when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
   set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "My-SA"}}'
 
   run bash -c 'source "$SCRIPT"'
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "DNS-1123"
+}
+
+@test "build_context: fails on an unresolved service account placeholder when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.dimension.region}-sa"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "np.dimension.region"
+}
+
+# Tolerant mode (default): actions that do not render pod specs never block on a placeholder.
+@test "build_context: tolerant mode warns and leaves k8s_modifiers unexpanded" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.nope}", "y": "${np.application_slug}"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Unresolved placeholder(s) in object_modifiers: np.nope; left unexpanded because this action does not render pod specs"
+  assert_contains "$output" 'MODS={"deployment":{"annotations":{"x":"${np.nope}","y":"${np.application_slug}"}}}'
+  [[ "$output" != *"❌"* ]] || false
+}
+
+@test "build_context: tolerant mode disables an unresolvable service account with a warning" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.dimension.region}-sa"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account) ENABLED=$SERVICE_ACCOUNT_ENABLED"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Could not resolve the service account name from '\${np.dimension.region}-sa' (unresolved placeholder(s): np.dimension.region); continuing without it, so a scope delete leaves the service account in place"
+  assert_contains "$output" 'SA={"enabled":false,"name":""} ENABLED=false'
+  [[ "$output" != *"❌"* ]] || false
+}
+
+@test "build_context: tolerant mode disables a service account with an invalid name with a warning" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "My-SA"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "(invalid DNS-1123 name 'My-SA')"
+  assert_contains "$output" 'SA={"enabled":false,"name":""}'
+}
+
+@test "build_context: tolerant mode still resolves a valid service account and modifiers" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.application_slug}"}}}, "security": {"service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account) X=$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.x)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" 'SA={"enabled":true,"name":"test-app-test-scope-123"} X=test-app'
+  [[ "$output" != *"Unresolved placeholder"* ]] || false
+  [[ "$output" != *"Could not resolve the service account"* ]] || false
 }
