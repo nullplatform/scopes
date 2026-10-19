@@ -21,6 +21,8 @@ setup() {
   touch "$SERVICE_PATH/deployment/workflows/delete.yaml"
   touch "$SERVICE_PATH/deployment/workflows/diagnose.yaml"
   touch "$SERVICE_PATH/deployment/workflows/kill_instance.yaml"
+  cp "$PROJECT_ROOT/k8s/deployment/deployment_status" "$SERVICE_PATH/deployment/"
+  export DEPLOYMENT_STATUS_READ_RETRY_SECONDS=0
 
   export NP_EXECUTED_CMD=""
   export NP_HELP_SUPPORTS_NO_PARAMS="true"
@@ -33,6 +35,10 @@ teardown() {
 
 mock_np() {
   np() {
+    if [[ "$1 $2" == "deployment read" ]]; then
+      echo "running"
+      return 0
+    fi
     if [[ "$*" == *"--help"* ]]; then
       if [ "$NP_HELP_SUPPORTS_NO_PARAMS" = "true" ]; then
         echo "  --no-params    Skip parameter fetching"
@@ -194,7 +200,7 @@ mock_np() {
 mock_np_with_status() {
   np() {
     if [[ "$1 $2" == "deployment read" ]]; then
-      [ "${NP_DEPLOYMENT_READ_FAILS:-false}" = "true" ] && return 1
+      [ "${NP_DEPLOYMENT_READ_FAILS:-false}" = "true" ] && { echo "Error connecting to API" >&2; return 1; }
       echo "$NP_DEPLOYMENT_STATUS"
       return 0
     fi
@@ -249,13 +255,40 @@ mock_np_with_status() {
   done
 }
 
-@test "deployment entrypoint: a failed status read runs the workflow instead of skipping" {
+@test "deployment entrypoint: a status read that keeps failing fails the action without running the workflow" {
   mock_np_with_status
   export SERVICE_ACTION="finalize-blue-green" NP_DEPLOYMENT_READ_FAILS="true"
 
   run bash "$BATS_TEST_DIRNAME/../entrypoint"
 
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Could not read the status of deployment deploy-456"
+  [[ "$output" != *"WORKFLOW RAN"* ]]
+}
+
+@test "deployment entrypoint: a response without a status fails the action without running the workflow" {
+  mock_np_with_status
+  export SERVICE_ACTION="start-blue-green" NP_DEPLOYMENT_STATUS="null"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "no status in the response"
+  [[ "$output" != *"WORKFLOW RAN"* ]]
+}
+
+@test "deployment entrypoint: the status is read without passing the api key" {
+  np() {
+    if [[ "$1 $2" == "deployment read" ]]; then echo "np $*" > "$BATS_TEST_TMPDIR/read.args"; echo "running"; return 0; fi
+    echo "WORKFLOW RAN: np $*"
+  }
+  export -f np
+  export SERVICE_ACTION="start-blue-green" NP_API_KEY="secret"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
   assert_contains "$output" "WORKFLOW RAN"
+  [[ "$(cat "$BATS_TEST_TMPDIR/read.args")" != *"--api-key"* ]]
 }
 
 @test "deployment entrypoint: actions without a final status never read it" {

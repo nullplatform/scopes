@@ -35,26 +35,20 @@ case "$SERVICE_ACTION" in
     ;;
 esac
 
-# The platform re-delivers an action when the agent or worker running it dies,
-# and a delivery can also arrive late. If the deployment already reached a
-# status that this action leads to, its effect is in place: end successfully
+# If the deployment already reached a status that this action leads to (a
+# re-delivered or late action), its effect is in place: end successfully
 # without running the workflow, instead of failing on an unexpected status or
-# re-applying it. Statuses that are merely incompatible (failed, another
-# action's) are left to the workflow, which rejects them as before.
-done_statuses_for() {
-  case "$1" in
-    start-initial|start-blue-green|switch-traffic) echo "finalizing finalized" ;;
-    finalize-blue-green) echo "finalized" ;;
-    rollback-deployment) echo "rolled_back cancelled" ;;
-    delete-deployment) echo "deleted" ;;
-  esac
-}
+# re-applying it. See deployment_action_applied_statuses.
+# shellcheck source=/dev/null
+source "$SERVICE_PATH/deployment/deployment_status"
 
-DONE_STATUSES=$(done_statuses_for "$SERVICE_ACTION")
-if [[ -n "$DONE_STATUSES" && -n "${DEPLOYMENT_ID:-}" ]]; then
-  # A failed read falls through to the workflow: never skip on a guess.
-  CURRENT_STATUS=$(np deployment read --id "$DEPLOYMENT_ID" ${NP_API_KEY:+--api-key "$NP_API_KEY"} --query .status 2>/dev/null) || CURRENT_STATUS=""
-  if [[ -n "$CURRENT_STATUS" && " $DONE_STATUSES " == *" $CURRENT_STATUS "* ]]; then
+if [[ -n "$(deployment_action_applied_statuses "$SERVICE_ACTION")" && -n "${DEPLOYMENT_ID:-}" ]]; then
+  CURRENT_STATUS=$(deployment_status_read)
+  case $? in
+    1) echo "❌ Could not read the status of deployment $DEPLOYMENT_ID: $CURRENT_STATUS"; exit 1 ;;
+    2) echo "❌ Could not read the status of deployment $DEPLOYMENT_ID: no status in the response"; exit 1 ;;
+  esac
+  if deployment_action_already_applied "$SERVICE_ACTION" "$CURRENT_STATUS"; then
     echo "Deployment $DEPLOYMENT_ID is already '$CURRENT_STATUS': action $SERVICE_ACTION was already applied, nothing to do"
     exit 0
   fi

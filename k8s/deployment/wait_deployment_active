@@ -4,6 +4,7 @@
 # Load probe helpers without firing the diagnostic main of the hints script.
 PRINT_HINTS_LIB_ONLY=true source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
 unset PRINT_HINTS_LIB_ONLY
+source "$SERVICE_PATH/deployment/deployment_status"
 
 # Try to print one consolidated line for a pod's grouped Unhealthy events.
 # Returns non-zero if any message cannot be parsed or if no probe kind was
@@ -308,34 +309,21 @@ while true; do
     fi
 
     log debug "📡 Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
-    D_STATUS=$(np deployment read --id "$DEPLOYMENT_ID" --api-key "$NP_API_KEY" --query .status 2>&1) || {
-        log error "   ❌ Failed to read deployment status"
-        log error "📋 NP CLI error: $D_STATUS"
-        exit 1
-    }
-
-    if [[ -z "$D_STATUS" ]] || [[ "$D_STATUS" == "null" ]]; then
-        log error "   ❌ Deployment status not found for ID $DEPLOYMENT_ID"
-        exit 1
-    fi
+    D_STATUS=$(deployment_status_read)
+    case $? in
+        1)
+            log error "   ❌ Failed to read deployment status"
+            log error "📋 NP CLI error: $D_STATUS"
+            exit 1
+            ;;
+        2)
+            log error "   ❌ Deployment status not found for ID $DEPLOYMENT_ID"
+            exit 1
+            ;;
+    esac
 
     if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
         if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
-            # The platform re-delivers an action when the agent or worker running it
-            # dies, and the first execution can still finish on its own. A start
-            # action whose deployment already moved on to finalizing/finalized was
-            # therefore completed already. Only start actions end here: this step
-            # is the last one of their workflow, whereas switch_traffic routes
-            # traffic after it, so ending successfully there would re-apply it.
-            if [[ "${SERVICE_ACTION:-}" == "start-initial" || "${SERVICE_ACTION:-}" == "start-blue-green" ]] &&
-               [[ $D_STATUS == "finalizing" || $D_STATUS == "finalized" ]]; then
-                log info "   ✅ Deployment already advanced to '$D_STATUS': '$SERVICE_ACTION' was completed by a previous execution"
-                if command -v np_scope_explain >/dev/null 2>&1; then
-                    np_scope_explain --title "$WAIT_TITLE" \
-                        --what "Deployment already $D_STATUS: a previous execution of this action completed it"
-                fi
-                exit 0
-            fi
             log error "   ❌ Deployment is no longer running (status: $D_STATUS)"
             source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
             exit 1
