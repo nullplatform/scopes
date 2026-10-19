@@ -183,3 +183,94 @@ mock_np() {
   assert_contains "$output" "--build-context"
   assert_contains "$output" "--include-secrets"
 }
+
+# =============================================================================
+# Re-delivered or late actions: deployment already past this action
+# =============================================================================
+
+# np mock: `deployment read` answers $NP_DEPLOYMENT_STATUS (or fails when
+# $NP_DEPLOYMENT_READ_FAILS is true); the workflow command echoes a marker so
+# tests can tell whether it ran.
+mock_np_with_status() {
+  np() {
+    if [[ "$1 $2" == "deployment read" ]]; then
+      [ "${NP_DEPLOYMENT_READ_FAILS:-false}" = "true" ] && return 1
+      echo "$NP_DEPLOYMENT_STATUS"
+      return 0
+    fi
+    if [[ "$*" == *"--help"* ]]; then
+      return 0
+    fi
+    echo "WORKFLOW RAN: np $*"
+  }
+  export -f np
+}
+
+@test "deployment entrypoint: late finalize-blue-green on a finalized deployment succeeds without running the workflow" {
+  mock_np_with_status
+  export SERVICE_ACTION="finalize-blue-green" NP_DEPLOYMENT_STATUS="finalized"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "already 'finalized': action finalize-blue-green was already applied"
+  [[ "$output" != *"WORKFLOW RAN"* ]]
+}
+
+@test "deployment entrypoint: re-delivered start-blue-green on a finalizing deployment is skipped" {
+  mock_np_with_status
+  export SERVICE_ACTION="start-blue-green" NP_DEPLOYMENT_STATUS="finalizing"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"WORKFLOW RAN"* ]]
+}
+
+@test "deployment entrypoint: each action is skipped only on the statuses it leads to" {
+  mock_np_with_status
+  for pair in "start-initial finalized" "switch-traffic finalizing" "switch-traffic finalized" \
+              "rollback-deployment rolled_back" "rollback-deployment cancelled" "delete-deployment deleted"; do
+    export SERVICE_ACTION="${pair% *}" NP_DEPLOYMENT_STATUS="${pair#* }"
+    run bash "$BATS_TEST_DIRNAME/../entrypoint"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"WORKFLOW RAN"* ]] || { echo "workflow ran for $pair"; return 1; }
+  done
+}
+
+@test "deployment entrypoint: the workflow runs when the status is the expected or an incompatible one" {
+  mock_np_with_status
+  for pair in "finalize-blue-green finalizing" "start-blue-green running" "start-blue-green failed" \
+              "switch-traffic running" "rollback-deployment rolling_back" "delete-deployment deleting" \
+              "finalize-blue-green rolled_back"; do
+    export SERVICE_ACTION="${pair% *}" NP_DEPLOYMENT_STATUS="${pair#* }"
+    run bash "$BATS_TEST_DIRNAME/../entrypoint"
+    assert_contains "$output" "WORKFLOW RAN"
+  done
+}
+
+@test "deployment entrypoint: a failed status read runs the workflow instead of skipping" {
+  mock_np_with_status
+  export SERVICE_ACTION="finalize-blue-green" NP_DEPLOYMENT_READ_FAILS="true"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  assert_contains "$output" "WORKFLOW RAN"
+}
+
+@test "deployment entrypoint: actions without a final status never read it" {
+  np() {
+    if [[ "$1 $2" == "deployment read" ]]; then
+      echo "UNEXPECTED STATUS READ"
+      return 0
+    fi
+    echo "WORKFLOW RAN: np $*"
+  }
+  export -f np
+  for action in diagnose-deployment kill-instance; do
+    export SERVICE_ACTION="$action"
+    run bash "$BATS_TEST_DIRNAME/../entrypoint"
+    assert_contains "$output" "WORKFLOW RAN"
+    [[ "$output" != *"UNEXPECTED STATUS READ"* ]]
+  done
+}

@@ -209,6 +209,43 @@ teardown() {
   assert_contains "$output" "⚠️  Application Startup Issue Detected"
 }
 
+@test "wait_deployment_active: start action whose deployment already advanced succeeds" {
+  for action in start-initial start-blue-green; do
+    for st in finalizing finalized; do
+      export SERVICE_ACTION="$action" D_TEST_STATUS="$st"
+      np() { echo "$D_TEST_STATUS"; }
+      export -f np
+
+      run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+      [ "$status" -eq 0 ] || { echo "$action/$st exited $status"; return 1; }
+      assert_contains "$output" "already advanced to '$st'"
+    done
+  done
+}
+
+@test "wait_deployment_active: switch-traffic still fails when the deployment advanced" {
+  export SERVICE_ACTION="switch-traffic"
+  np() { echo "finalizing"; }
+  export -f np
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Deployment is no longer running (status: finalizing)"
+}
+
+@test "wait_deployment_active: start action still fails on a status that is not a later one" {
+  export SERVICE_ACTION="start-blue-green"
+  np() { echo "cancelling"; }
+  export -f np
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Deployment is no longer running (status: cancelling)"
+}
+
 # =============================================================================
 # Kubectl Error Cases
 # =============================================================================

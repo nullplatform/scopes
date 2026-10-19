@@ -321,6 +321,21 @@ while true; do
 
     if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
         if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then
+            # The platform re-delivers an action when the agent or worker running it
+            # dies, and the first execution can still finish on its own. A start
+            # action whose deployment already moved on to finalizing/finalized was
+            # therefore completed already. Only start actions end here: this step
+            # is the last one of their workflow, whereas switch_traffic routes
+            # traffic after it, so ending successfully there would re-apply it.
+            if [[ "${SERVICE_ACTION:-}" == "start-initial" || "${SERVICE_ACTION:-}" == "start-blue-green" ]] &&
+               [[ $D_STATUS == "finalizing" || $D_STATUS == "finalized" ]]; then
+                log info "   ✅ Deployment already advanced to '$D_STATUS': '$SERVICE_ACTION' was completed by a previous execution"
+                if command -v np_scope_explain >/dev/null 2>&1; then
+                    np_scope_explain --title "$WAIT_TITLE" \
+                        --what "Deployment already $D_STATUS: a previous execution of this action completed it"
+                fi
+                exit 0
+            fi
             log error "   ❌ Deployment is no longer running (status: $D_STATUS)"
             source "$SERVICE_PATH/deployment/print_failed_deployment_hints"
             exit 1

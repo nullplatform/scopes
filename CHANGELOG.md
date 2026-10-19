@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: a k8s deployment action that arrives again after its deployment already moved past it (a re-delivery after the agent or worker died, or a late delivery) now ends successfully without re-running its workflow, instead of failing with `Invalid deployment status` or `Deployment is no longer running`. Each action is skipped only on the statuses it leads to (start and switch-traffic: finalizing/finalized; finalize: finalized; rollback: rolled_back/cancelled; delete: deleted); any other status fails as before
 - Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
 - Fix: a k8s scope's Pod Disruption Budget lets pods that are not ready be evicted, so a scope stuck in a crash loop never blocks a node drain
 - k8s scopes on AKS can make their Azure DNS calls as a managed identity chosen per dimension (AKS Workload Identity), configured through the Identity & Access provider or the `CONTAINERS_AZURE_CLIENT_ID` / `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` env vars, instead of the agent's Service Principal client secret
