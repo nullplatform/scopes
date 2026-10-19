@@ -28,17 +28,17 @@ step_index() {
 }
 
 @test "initial: ensure service account builds only the per-scope service account" {
-  run yq -r '.steps[] | select(.name == "ensure service account") | .steps[0] | [.name, .file, .configuration.ACTION, .configuration.IAM_SERVICE_ACCOUNT, (.trace | tostring)] | join("|")' "$INITIAL"
+  run yq -r '.steps[] | select(.name == "ensure service account") | .steps[0] | [.name, .file, .configuration.ACTION, .configuration.SERVICE_ACCOUNT_MODE, (.trace | tostring)] | join("|")' "$INITIAL"
 
   assert_equal "$status" "0"
-  assert_equal "$output" "build service account|\$SERVICE_PATH/scope/iam/build_service_account|create|skip|false"
+  assert_equal "$output" "build service account|\$SERVICE_PATH/scope/iam/build_service_account|create|per-scope-only|false"
 }
 
 @test "initial: ensure service account applies the rendered manifest as a traced setting-up step" {
-  run yq -r '.steps[] | select(.name == "ensure service account") | .steps[1] | [.name, .file, .configuration.ACTION, (.configuration.DRY_RUN | tostring), .trace.key, .trace.group] | join("|")' "$INITIAL"
+  run yq -r '.steps[] | select(.name == "ensure service account") | .steps[1] | [.name, .file, .configuration.ACTION, (.configuration.DRY_RUN | tostring), (.configuration.SKIP_WHEN_EMPTY | tostring), .trace.key, .trace.group] | join("|")' "$INITIAL"
 
   assert_equal "$status" "0"
-  assert_equal "$output" "apply service account|\$SERVICE_PATH/apply_templates|apply|false|apply-service-account|setting-up"
+  assert_equal "$output" "apply service account|\$SERVICE_PATH/apply_templates|apply|false|true|apply-service-account|setting-up"
 }
 
 @test "initial: inner step names do not collide with names overlays anchor on" {
@@ -68,4 +68,9 @@ step_index() {
   assert_equal "$status" "0"
   assert_contains "$output" "build service account|delete"
   assert_contains "$output" "apply|delete"
+}
+
+@test "only the deployment ensure step opts in to SKIP_WHEN_EMPTY" {
+  run grep -rl "SKIP_WHEN_EMPTY" "$PROJECT_ROOT/k8s" "$PROJECT_ROOT/scheduled_task" --include='*.yaml'
+  assert_equal "$output" "$INITIAL"
 }

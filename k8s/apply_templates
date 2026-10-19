@@ -98,9 +98,10 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 1
 fi
 
-# Nothing applied/deleted: close the step as skipped, not a hollow completed.
+# Opt-in: a step with nothing to apply/delete closes skipped, not a hollow completed.
 # (Guarded: defined by the np CLI's preamble.)
-if [[ ${#APPLIED_FILES[@]} -eq 0 ]] && command -v np_step_skip >/dev/null 2>&1; then
+if [[ "${SKIP_WHEN_EMPTY:-false}" == "true" ]] && [[ ${#APPLIED_FILES[@]} -eq 0 ]] \
+  && command -v np_step_skip >/dev/null 2>&1; then
   np_step_skip "no manifests to $ACTION"
 fi
 

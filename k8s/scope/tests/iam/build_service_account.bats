@@ -226,6 +226,26 @@ use_real_render() {
   # aws must not be reached on the non-IAM path
   aws() { echo "aws called: $*" >&2; return 1; }
   export -f aws
+  # Default: the service account does not exist yet
+  kubectl() {
+    echo "kubectl $*" >> "$BATS_TEST_TMPDIR/kubectl.log"
+    echo "Error from server (NotFound): serviceaccounts \"$4\" not found" >&2
+    return 1
+  }
+  export -f kubectl
+}
+
+# live_sa <scope_id-label|""> : the service account exists, labeled with that scope_id (none when empty)
+live_sa() {
+  export LIVE_SCOPE_ID="$1"
+  kubectl() {
+    if [ -n "$LIVE_SCOPE_ID" ]; then
+      jq -n --arg id "$LIVE_SCOPE_ID" '{kind:"ServiceAccount",metadata:{name:"app-acc-sa",labels:{scope_id:$id}}}'
+    else
+      echo '{"kind":"ServiceAccount","metadata":{"name":"app-acc-sa"}}'
+    fi
+  }
+  export -f kubectl
 }
 
 @test "build_service_account: IAM off + SA on renders the per-scope service account without role annotation" {
@@ -300,18 +320,6 @@ use_real_render() {
   assert_file_not_exists "$SA_FILE"
 }
 
-@test "build_service_account: delete action renders the per-scope service account so it is removed" {
-  use_real_render
-  export IAM='{"ENABLED":false}'
-  export ACTION=delete
-  export CONTEXT="$(sa_context true app-acc-sa)"
-
-  run bash -c 'source "$SCRIPT"'
-
-  assert_equal "$status" "0"
-  run yq -r '.metadata.name' "$SA_FILE"
-  assert_equal "$output" "app-acc-sa"
-}
 
 @test "build_service_account: SA enabled with an empty name fails" {
   use_real_render
@@ -341,10 +349,10 @@ use_real_render() {
   assert_equal "$output" "arn:aws:iam::123456789012:role/test-prefix-test-scope-123"
 }
 
-@test "build_service_account: IAM_SERVICE_ACCOUNT=skip leaves the IAM service account to the scope workflows" {
+@test "build_service_account: SERVICE_ACCOUNT_MODE=per-scope-only leaves the IAM service account to the scope workflows" {
   use_real_render
   export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
-  export IAM_SERVICE_ACCOUNT=skip
+  export SERVICE_ACCOUNT_MODE=per-scope-only
   export CONTEXT="$(sa_context false "")"
 
   run bash -c 'source "$SCRIPT"'
@@ -355,10 +363,10 @@ use_real_render() {
   assert_file_not_exists "$SA_FILE"
 }
 
-@test "build_service_account: IAM_SERVICE_ACCOUNT=skip still renders the per-scope service account" {
+@test "build_service_account: SERVICE_ACCOUNT_MODE=per-scope-only still renders the per-scope service account" {
   use_real_render
   export IAM='{"ENABLED":false}'
-  export IAM_SERVICE_ACCOUNT=skip
+  export SERVICE_ACCOUNT_MODE=per-scope-only
   export CONTEXT="$(sa_context true app-acc-sa)"
 
   run bash -c 'source "$SCRIPT"'
@@ -366,4 +374,147 @@ use_real_render() {
   assert_equal "$status" "0"
   run yq -r '.metadata.name' "$SA_FILE"
   assert_equal "$output" "app-acc-sa"
+}
+
+# =============================================================================
+# Ownership by the scope_id label (per-scope path only)
+# =============================================================================
+@test "build_service_account: absent service account is looked up read-only and rendered" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_file_exists "$SA_FILE"
+  run cat "$BATS_TEST_TMPDIR/kubectl.log"
+  assert_equal "$output" "kubectl get serviceaccount app-acc-sa -n apps-ns -o json"
+}
+
+@test "build_service_account: service account owned by this scope is rendered" {
+  use_real_render
+  live_sa 4
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  run yq -r '.metadata.labels.scope_id' "$SA_FILE"
+  assert_equal "$output" "4"
+}
+
+@test "build_service_account: service account owned by another scope is used as-is" {
+  use_real_render
+  live_sa 99
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Using existing unmanaged service account 'app-acc-sa' in namespace 'apps-ns' as-is"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: unlabeled service account is used as-is at info level" {
+  use_real_render
+  live_sa ""
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+  # info must survive a debug-filtering logger
+  log() { if [ "$1" = "debug" ]; then return 0; fi; echo "$2"; }
+  export -f log
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Using existing unmanaged service account 'app-acc-sa' in namespace 'apps-ns' as-is"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: delete renders the service account owned by this scope" {
+  use_real_render
+  live_sa 4
+  export IAM='{"ENABLED":false}'
+  export ACTION=delete
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  run yq -r '.metadata.name' "$SA_FILE"
+  assert_equal "$output" "app-acc-sa"
+}
+
+@test "build_service_account: delete leaves a foreign service account in place" {
+  use_real_render
+  live_sa 99
+  export IAM='{"ENABLED":false}'
+  export ACTION=delete
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "is not owned by scope 4, leaving it in place"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: delete leaves an unlabeled service account in place" {
+  use_real_render
+  live_sa ""
+  export IAM='{"ENABLED":false}'
+  export ACTION=delete
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: delete of an absent service account renders nothing" {
+  use_real_render
+  export IAM='{"ENABLED":false}'
+  export ACTION=delete
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Service account 'app-acc-sa' does not exist in namespace 'apps-ns', nothing to delete"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: a kubectl error other than NotFound fails" {
+  use_real_render
+  kubectl() { echo "error: You must be logged in to the server (Unauthorized)" >&2; return 1; }
+  export -f kubectl
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to read service account 'app-acc-sa' in namespace 'apps-ns': error: You must be logged in to the server (Unauthorized)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: the IAM path never looks up the service account with kubectl" {
+  use_real_render
+  aws() { echo "arn:aws:iam::123456789012:role/test-prefix-test-scope-123"; }
+  export -f aws
+  kubectl() { echo "kubectl called" >&2; return 1; }
+  export -f kubectl
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+  export CONTEXT="$(sa_context false "")"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"kubectl called"* ]] || false
 }
