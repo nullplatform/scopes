@@ -41,14 +41,14 @@ setup() {
 @test "unknown placeholder fails listing the supported ones" {
   run expand_placeholders '{"x":"${np.app_slug}"}' "$CTX"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"np.app_slug"* ]]
-  [[ "$output" == *"application_slug"* ]]
+  [[ "$output" == *"np.app_slug"* ]] || false
+  [[ "$output" == *"application_slug"* ]] || false
 }
 
 @test "missing dimension fails" {
   run expand_placeholders '{"x":"${np.dimension.region}"}' "$CTX"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"dimension.region"* ]]
+  [[ "$output" == *"dimension.region"* ]] || false
 }
 
 @test "repository_name strips .git and path" {
@@ -64,5 +64,24 @@ setup() {
   [ "$(echo "$output" | jq -r .x)" = "payments-api" ]
   run expand_placeholders '{"x":"${np.dimension.environment}"}' "$ctx"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"dimension.environment"* ]]
+  [[ "$output" == *"dimension.environment"* ]] || false
+}
+
+@test "expand_placeholder_string fails on unknown placeholder" {
+  run expand_placeholder_string '${np.app_slug}' "$CTX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"np.app_slug"* ]] || false
+}
+
+@test "repository_name ignores a trailing slash" {
+  ctx=$(echo "$CTX" | jq '.application.repository_url="https://github.com/acme/foo/"')
+  run expand_placeholder_string '${np.repository_name}' "$ctx"
+  [ "$status" -eq 0 ]; [ "$output" = "foo" ]
+}
+
+@test "missing repository_url makes repository_name fail" {
+  ctx=$(echo "$CTX" | jq 'del(.application.repository_url)')
+  run expand_placeholders '{"x":"${np.repository_name}"}' "$ctx"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"np.repository_name"* ]] || false
 }

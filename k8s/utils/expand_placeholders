@@ -14,7 +14,9 @@ _np_placeholder_values() {
       account_slug: .account.slug,
       namespace_slug: .namespace.slug,
       application_slug: .application.slug,
-      repository_name: ((.application.repository_url // "") | sub("\\.git$"; "") | split("/") | last),
+      repository_name: ((.application.repository_url | if type == "string" then . else "" end)
+                        | sub("\\.git$"; "") | sub("/+$"; "") | split("/") | last
+                        | if . == "" then null else . end),
       scope_slug: .scope.slug,
       scope_id: (.scope.id | if . == null then null else tostring end),
       k8s_namespace: .k8s_namespace
@@ -29,7 +31,7 @@ expand_placeholders() {
   values=$(_np_placeholder_values "$2")
   unknown=$(echo "$input" | jq -r --argjson v "$values" '
     [.. | strings | scan("\\$\\{np\\.([a-zA-Z0-9_.-]+)\\}") | .[0]] | unique
-    | map(select(($v[.] // null) == null)) | join(", ")')
+    | map(select(($v[.] // null) == null) | "np." + .) | join(", ")')
   if [ -n "$unknown" ]; then
     log error "   ❌ Unknown or unresolved placeholder(s): $unknown"
     log error ""
@@ -49,5 +51,7 @@ expand_placeholders() {
 
 # expand_placeholder_string <string> <context_json>: prints the expanded string.
 expand_placeholder_string() {
-  expand_placeholders "$(jq -n --arg s "$1" '{s: $s}')" "$2" | jq -r .s
+  local out
+  out=$(expand_placeholders "$(jq -n --arg s "$1" '{s: $s}')" "$2") || return 1
+  jq -r .s <<<"$out"
 }
