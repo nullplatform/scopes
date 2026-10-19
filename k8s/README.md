@@ -240,10 +240,13 @@ authenticate to the cluster identity (e.g. Vault Kubernetes auth) and each appli
 | **SERVICE_ACCOUNT_ENABLED** | Whether the scope runs with its own ServiceAccount (default `false`) | `security.service_account_enabled` |
 | **SERVICE_ACCOUNT_NAME_TEMPLATE** | Name of the ServiceAccount, accepts [placeholders](#placeholders) (default `${np.application_slug}-${np.scope_id}`) | `security.service_account_name` |
 
-- The resolved name must be a valid DNS-1123 subdomain (lowercase alphanumerics, `-` or `.`, at most 253 characters); otherwise the workflow fails.
-- It is mutually exclusive with `security.iam_enabled`: enabling both fails the deployment, because both define the pod service account.
-- **Ownership.** The scope manages a ServiceAccount only if it carries the label `scope_id` equal to the scope's id. If a ServiceAccount with that name already exists without the label (or with another scope's id), it is used as-is and is never modified or deleted. This lets you bring your own ServiceAccount by pre-creating it.
-- Names must be unique per scope unless the ServiceAccount is pre-created: two scopes resolving to the same name share it, and only the first one to create it owns (and deletes) it.
+- The resolved name must be a valid DNS-1123 subdomain (lowercase alphanumerics, `-` or `.`, at most 253 characters); otherwise scope create/update and deployments fail (see [placeholders](#placeholders) for other actions).
+- It is mutually exclusive with `security.iam_enabled`: enabling both fails scope create/update and deployments, because both define the pod service account.
+- **Ownership.** The scope manages a ServiceAccount only if it carries the label `scope_id` equal to the scope's id.
+  - Labeled with another scope's id: scope create/update and deployments fail, naming the owning scope.
+  - Without the `scope_id` label: it is used as-is, with a warning, and is never modified or deleted. This lets you bring your own ServiceAccount by pre-creating it.
+- Include `${np.scope_id}` (or another part unique per scope) in the name, unless several scopes deliberately share a pre-created, unlabeled ServiceAccount.
+- The agent reads the ServiceAccount before creating or deleting it, so it needs `get` on `serviceaccounts` in the scope namespace (the agent chart's default ClusterRole grants it).
 - **Limitations.** Changing the name template or disabling the feature does not remove the ServiceAccount created earlier; it stays in the cluster as an orphan until removed manually or through your IaC.
 
 #### Vault
@@ -266,7 +269,10 @@ Advanced configuration options.
 #### Placeholders
 
 Every string in `object_modifiers` (and the ServiceAccount name template) can reference scope data with `${np.<key>}`.
-They are resolved when the scope context is built. An unknown or empty placeholder fails the workflow instead of rendering an empty value.
+Placeholders in `object_modifiers` are resolved when the scope context is built; the ServiceAccount name template is only evaluated when `service_account_enabled` is `true`.
+
+An unknown or empty placeholder (or an invalid ServiceAccount name) fails scope create/update and deployments instead of rendering an empty value.
+Every other action (scope delete, deployment delete, rollback, switch traffic, finalize, ...) logs a warning and continues: `object_modifiers` are left unexpanded and the ServiceAccount is treated as unresolved, so a scope delete leaves it in place.
 
 | Placeholder | Value |
 |-------------|-------|
@@ -281,7 +287,7 @@ They are resolved when the scope context is built. An unknown or empty placehold
 
 Only the literal `${np.` prefix is expanded, so Go templates used by annotations (`{{ with secret ... }}`) are left untouched.
 
-Example: per-application annotations for the Vault Agent Injector, using the ServiceAccount as the identity.
+Example: per-application annotations for the Vault Agent Injector. With a per-scope [Service Account](#service-account), the pods authenticate with their ServiceAccount token.
 
 ```json
 {
