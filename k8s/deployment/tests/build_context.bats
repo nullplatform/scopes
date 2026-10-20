@@ -214,7 +214,8 @@ teardown() {
 run_service_account_block() {
   local block
   block=$(sed -n '/^IAM_ENABLED=/,/^TRAFFIC_MANAGER_CONFIG_MAP=/p' "$PROJECT_ROOT/k8s/deployment/build_context" | sed '$d')
-  run bash -c "log() { echo \"\$2\" >&2; }; $block; echo \"SA=[\$SERVICE_ACCOUNT_NAME]\""
+  [ -n "$block" ] || { echo "service account block not found in deployment/build_context" >&2; return 1; }
+  run bash -c "log() { echo \"\$1: \$2\" >&2; }; $block; echo \"SA=[\$SERVICE_ACCOUNT_NAME]\""
 }
 
 @test "service account: per-scope SA name is used when enabled and IAM is off" {
@@ -224,11 +225,19 @@ run_service_account_block() {
   assert_contains "$output" "SA=[np-scope-123]"
 }
 
-@test "service account: IAM and per-scope SA enabled together fails" {
-  export SCOPE_ID="scope-123" IAM='{"ENABLED":true,"PREFIX":"np-role"}' SERVICE_ACCOUNT_ENABLED="true" SERVICE_ACCOUNT_NAME_RESOLVED="np-scope-123"
+@test "service account: IAM and per-scope SA enabled together fails in strict mode" {
+  export SCOPE_ID="scope-123" IAM='{"ENABLED":true,"PREFIX":"np-role"}' SERVICE_ACCOUNT_ENABLED="true" SERVICE_ACCOUNT_NAME_RESOLVED="np-scope-123" STRICT_PLACEHOLDERS="true"
   run_service_account_block
   [ "$status" -ne 0 ] || false
   assert_contains "$output" "IAM and service_account_enabled"
+}
+
+@test "service account: IAM and per-scope SA enabled together warns and keeps the IAM name outside strict mode" {
+  export SCOPE_ID="scope-123" IAM='{"ENABLED":true,"PREFIX":"np-role"}' SERVICE_ACCOUNT_ENABLED="true" SERVICE_ACCOUNT_NAME_RESOLVED="np-scope-123" STRICT_PLACEHOLDERS="false"
+  run_service_account_block
+  [ "$status" -eq 0 ] || false
+  assert_contains "$output" "warn:"
+  assert_contains "$output" "SA=[np-role-scope-123]"
 }
 
 @test "service account: empty when IAM and per-scope SA are both off" {

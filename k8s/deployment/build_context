@@ -201,15 +201,22 @@ IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 
 SERVICE_ACCOUNT_NAME=""
 
+# Fail only where pod specs are rendered; rollback, delete, switch traffic and finalize keep
+# the IAM service account so a config change never blocks them.
 if [[ "$IAM_ENABLED" == "true" && "${SERVICE_ACCOUNT_ENABLED:-false}" == "true" ]]; then
-  log error "   ❌ IAM and service_account_enabled are both enabled for this scope"
-  log error ""
-  log error "💡 Possible causes:"
-  log error "   Both settings define the pod service account; only one can own it"
-  log error ""
-  log error "🔧 How to fix:"
-  log error "   • Disable security.iam_enabled or security.service_account_enabled in scope-configurations"
-  exit 1
+  if [[ "${STRICT_PLACEHOLDERS:-false}" != "true" ]]; then
+    log warn "⚠️  IAM and service_account_enabled are both enabled; keeping the IAM service account for this action"
+    SERVICE_ACCOUNT_ENABLED="false"
+  else
+    log error "   ❌ IAM and service_account_enabled are both enabled for this scope"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   Both settings define the pod service account; only one can own it"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Disable security.iam_enabled or security.service_account_enabled in scope-configurations"
+    exit 1
+  fi
 fi
 
 if [[ "$IAM_ENABLED" == "true" ]]; then

@@ -241,7 +241,7 @@ authenticate to the cluster identity (e.g. Vault Kubernetes auth) and each appli
 | **SERVICE_ACCOUNT_NAME_TEMPLATE** | Name of the ServiceAccount, accepts [placeholders](#placeholders) (default `${np.application_slug}-${np.scope_id}`) | `security.service_account_name` |
 
 - The resolved name must be a valid DNS-1123 subdomain (lowercase alphanumerics, `-` or `.`, at most 253 characters); otherwise scope create/update and deployments fail (see [placeholders](#placeholders) for other actions).
-- It is mutually exclusive with `security.iam_enabled`: enabling both fails scope create/update and deployments, because both define the pod service account.
+- It is mutually exclusive with `security.iam_enabled`: enabling both fails scope create/update and deployments, because both define the pod service account. Rollback, switch traffic, finalize and deletes only warn and keep the IAM service account, so enabling both never blocks them.
 - **Ownership.** The scope manages a ServiceAccount only if it carries the label `scope_id` equal to the scope's id.
   - Labeled with another scope's id: scope create/update and deployments fail, naming the owning scope.
   - Without the `scope_id` label: it is used as-is, with a warning, and is never modified or deleted. This lets you bring your own ServiceAccount by pre-creating it.
