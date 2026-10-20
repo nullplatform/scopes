@@ -229,6 +229,7 @@ use_real_render() {
   # Default: the service account does not exist yet
   kubectl() {
     echo "kubectl $*" >> "$BATS_TEST_TMPDIR/kubectl.log"
+    [[ " $* " == *" --ignore-not-found "* ]] && return 0
     echo "Error from server (NotFound): serviceaccounts \"$4\" not found" >&2
     return 1
   }
@@ -389,7 +390,7 @@ live_sa() {
   assert_equal "$status" "0"
   assert_file_exists "$SA_FILE"
   run cat "$BATS_TEST_TMPDIR/kubectl.log"
-  assert_equal "$output" "kubectl get serviceaccount app-acc-sa -n apps-ns -o json"
+  assert_equal "$output" "kubectl get serviceaccount app-acc-sa -n apps-ns -o json --ignore-not-found"
 }
 
 @test "build_service_account: service account owned by this scope is rendered" {
@@ -556,22 +557,70 @@ live_sa() {
   assert_equal "$output" "4"
 }
 
-@test "build_service_account: NotFound on stderr is still detected as absent" {
+@test "build_service_account: any non-zero kubectl exit is an error, even with NotFound on stderr" {
   use_real_render
   kubectl() {
-    echo "Warning: something unrelated" >&2
-    echo 'Error from server (NotFound): serviceaccounts "app-acc-sa" not found' >&2
+    echo 'Error from server (NotFound): namespaces "apps-ns" not found' >&2
     return 1
   }
   export -f kubectl
   export IAM='{"ENABLED":false}'
-  export ACTION=delete
+  export ACTION=create
   export CONTEXT="$(sa_context true app-acc-sa)"
 
   run bash -c 'source "$SCRIPT"'
 
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to read service account 'app-acc-sa' in namespace 'apps-ns'"
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: delete with a kubectl read error warns and succeeds without deleting" {
+  use_real_render
+  kubectl() { echo "error: You must be logged in to the server (Unauthorized)" >&2; return 1; }
+  export -f kubectl
+  export IAM='{"ENABLED":false}'
+  export ACTION=delete
+  export CONTEXT="$(sa_context true app-acc-sa)"
+  log() { case "$1" in debug|info) return 0 ;; esac; echo "$1: $2"; }
+  export -f log
+
+  run bash -c 'source "$SCRIPT"'
+
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 Service account 'app-acc-sa' does not exist in namespace 'apps-ns', nothing to delete"
+  assert_contains "$output" "warn: ⚠️  Could not read service account 'app-acc-sa' in namespace 'apps-ns' (error: You must be logged in to the server (Unauthorized)); leaving it in place, it may be orphaned"
+  [[ "$output" != *"❌"* ]] || false
+  assert_file_not_exists "$SA_FILE"
+}
+
+@test "build_service_account: the lookup temp file is removed on success and on error" {
+  use_real_render
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp" && mkdir -p "$TMPDIR"
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+  assert_equal "$status" "0"
+  assert_equal "$(ls -A "$TMPDIR")" ""
+
+  kubectl() { echo "boom" >&2; return 1; }
+  export -f kubectl
+  run bash -c 'source "$SCRIPT"'
+  assert_equal "$status" "1"
+  assert_equal "$(ls -A "$TMPDIR")" ""
+}
+
+@test "build_service_account: the rendering context file is removed when gomplate fails" {
+  use_real_render
+  gomplate() { echo "Error: template rendering failed" >&2; return 1; }
+  export -f gomplate
+  export IAM='{"ENABLED":false}'
+  export CONTEXT="$(sa_context true app-acc-sa)"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_file_not_exists "$OUTPUT_DIR/context-$SCOPE_ID.json"
 }
 
 @test "build_service_account: empty scope id fails on create without looking up or rendering" {
