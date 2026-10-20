@@ -6,7 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- Add per-scope service account without IAM and `${np.*}` placeholders in `k8s_modifiers`: `security.service_account_enabled` / `security.service_account_name` run the pods with a dedicated ServiceAccount (an existing unlabeled one is used as-is; one owned by another scope fails the workflow), and placeholders such as `${np.application_slug}` or `${np.dimension.environment}` are expanded in `object_modifiers`
+- Add a per-scope Kubernetes ServiceAccount without IAM: `security.service_account_enabled` / `security.service_account_name` run the pods with a dedicated ServiceAccount created and owned by the scope (an existing unlabeled one is used as-is; one owned by another scope fails the workflow). It is mutually exclusive with IAM: enabling both fails scope create/update and deployments, while other actions warn and keep the IAM ServiceAccount
+- Add `${np.*}` placeholders such as `${np.application_slug}` or `${np.dimension.environment}` in `object_modifiers` and the ServiceAccount name. An unresolved placeholder fails only scope create/update and deployment initial/blue-green; other actions drop the affected entries with a warning
 - Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
 - Fix: a k8s scope's Pod Disruption Budget lets pods that are not ready be evicted, so a scope stuck in a crash loop never blocks a node drain
 - k8s scopes on AKS can make their Azure DNS calls as a managed identity chosen per dimension (AKS Workload Identity), configured through the Identity & Access provider or the `CONTAINERS_AZURE_CLIENT_ID` / `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` env vars, instead of the agent's Service Principal client secret

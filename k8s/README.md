@@ -237,16 +237,17 @@ authenticate to the cluster identity (e.g. Vault Kubernetes auth) and each appli
 
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
-| **SERVICE_ACCOUNT_ENABLED** | Whether the scope runs with its own ServiceAccount (default `false`) | `security.service_account_enabled` |
+| **SERVICE_ACCOUNT_ENABLED** | Whether the scope runs with its own ServiceAccount: `true` or `false`, case-insensitive (default `false`; any other value logs a warning and counts as `false`) | `security.service_account_enabled` |
 | **SERVICE_ACCOUNT_NAME_TEMPLATE** | Name of the ServiceAccount, accepts [placeholders](#placeholders) (default `${np.application_slug}-${np.scope_id}`) | `security.service_account_name` |
 
-- The resolved name must be a valid DNS-1123 subdomain (lowercase alphanumerics, `-` or `.`, at most 253 characters); otherwise scope create/update and deployments fail (see [placeholders](#placeholders) for other actions).
-- It is mutually exclusive with `security.iam_enabled`: enabling both fails scope create/update and deployments, because both define the pod service account. Rollback, switch traffic, finalize and deletes only warn and keep the IAM service account, so enabling both never blocks them.
+- The resolved name must be a valid DNS-1123 subdomain (dot-separated labels of lowercase alphanumerics or `-`, each starting and ending alphanumeric, at most 253 characters); otherwise scope create/update and deployments fail (see [placeholders](#placeholders) for other actions).
+- It is mutually exclusive with IAM (`IAM.ENABLED` / `security.iam_enabled`): enabling both fails scope create/update when the scope context is built, before any step runs (so no IAM role is created), and fails deployments. Rollback, switch traffic, finalize and deletes only warn and keep the IAM service account, so enabling both never blocks them.
 - **Ownership.** The scope manages a ServiceAccount only if it carries the label `scope_id` equal to the scope's id.
   - Labeled with another scope's id: scope create/update and deployments fail, naming the owning scope.
   - Without the `scope_id` label: it is used as-is, with a warning, and is never modified or deleted. This lets you bring your own ServiceAccount by pre-creating it.
+  - Missing: the scope creates it with its `scope_id` label, so it owns it and removes it on scope delete.
 - Include `${np.scope_id}` (or another part unique per scope) in the name, unless several scopes deliberately share a pre-created, unlabeled ServiceAccount.
-- The agent reads the ServiceAccount before creating or deleting it, so it needs `get` on `serviceaccounts` in the scope namespace (the agent chart's default ClusterRole grants it).
+- The agent reads the ServiceAccount before creating or deleting it, so it needs `get` on `serviceaccounts` in the scope namespace; verify your agent's ClusterRole grants it. If the read fails, scope create/update and deployments fail; a scope delete warns, leaves the ServiceAccount in place and continues.
 - **Limitations.** Changing the name template or disabling the feature does not remove the ServiceAccount created earlier; it stays in the cluster as an orphan until removed manually or through your IaC.
 
 #### Vault
@@ -268,18 +269,23 @@ Advanced configuration options.
 
 #### Placeholders
 
-Every string in `object_modifiers` (and the ServiceAccount name template) can reference scope data with `${np.<key>}`.
+Every string value in `object_modifiers` (and the ServiceAccount name template) can reference scope data with `${np.<key>}`.
+Only values are expanded, never object keys. `<key>` is one of the names below, made of letters, digits, `_`, `.` and `-`.
 Placeholders in `object_modifiers` are resolved when the scope context is built; the ServiceAccount name template is only evaluated when `service_account_enabled` is `true`.
 
-An unknown or empty placeholder (or an invalid ServiceAccount name) fails scope create/update and deployments instead of rendering an empty value.
-Every other action (scope delete, deployment delete, rollback, switch traffic, finalize, ...) logs a warning and continues: `object_modifiers` are left unexpanded and the ServiceAccount is treated as unresolved, so a scope delete leaves it in place.
+A placeholder is unresolved when its key is unknown, its value is null or empty (e.g. a dimension the scope does not have), or it is malformed (`${np.}`, `${np.bad key}`, a missing `}`).
+
+- **Strict** (scope create/update, deployment initial and blue-green): an unresolved placeholder, or an invalid ServiceAccount name, fails the workflow instead of rendering an empty or literal value.
+- **Tolerant** (every other action: scope delete, deployment delete, rollback, switch traffic, finalize, ...): resolvable placeholders are expanded and every `object_modifiers` entry whose value still holds an unresolved placeholder is dropped (the map key or list item is removed), with one warning naming the dropped paths. A literal `${np.` never reaches a live object. An unresolvable ServiceAccount name disables the per-scope ServiceAccount for that action, so a scope delete leaves it in place.
+
+The mode is chosen by `STRICT_PLACEHOLDERS` (`true` or `false`, case-insensitive; any other value fails the step), which the built-in workflows set to `true` on the build context step of scope create and deployment initial. A custom workflow or override that replaces that step must set it too to keep failing fast; without it the step is tolerant.
 
 | Placeholder | Value |
 |-------------|-------|
 | `${np.account_slug}` | Account slug |
 | `${np.namespace_slug}` | nullplatform namespace slug |
 | `${np.application_slug}` | Application slug |
-| `${np.repository_name}` | Last segment of the application repository URL, without `.git` |
+| `${np.repository_name}` | Last segment of the application repository URL, without `.git` (HTTPS or `git@host:org/repo.git`) |
 | `${np.scope_slug}` | Scope slug |
 | `${np.scope_id}` | Scope id |
 | `${np.k8s_namespace}` | Kubernetes namespace the scope is deployed to |
