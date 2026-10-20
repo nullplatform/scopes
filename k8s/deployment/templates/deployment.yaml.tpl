@@ -9,7 +9,7 @@
               command:
                 - /bin/sh
                 - '-c'
-                - nc -z localhost {{ .app_port }} && nc -z localhost {{ .traffic_port }}
+                - (nc -z 127.0.0.1 {{ .app_port }} || nc -z ::1 {{ .app_port }}) && (nc -z 127.0.0.1 {{ .traffic_port }} || nc -z ::1 {{ .traffic_port }})
 {{- end }}
 {{- define "probe.app_tcp" }}
             tcpSocket:
