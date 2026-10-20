@@ -27,18 +27,26 @@ step_index() {
   assert_less_than "$route" "$create" "route traffic index"
 }
 
-@test "initial: ensure service account builds only the per-scope service account" {
-  run yq -r '.steps[] | select(.name == "ensure service account") | .steps[0] | [.name, .file, .configuration.ACTION, .configuration.SERVICE_ACCOUNT_MODE, (.trace | tostring)] | join("|")' "$INITIAL"
+ensure_step_field() {
+  yq -r ".steps[] | select(.name == \"ensure service account\") | .steps[$1] | $2 | tostring" "$INITIAL"
+}
 
-  assert_equal "$status" "0"
-  assert_equal "$output" "build service account|\$SERVICE_PATH/scope/iam/build_service_account|create|per-scope-only|false"
+@test "initial: ensure service account builds only the per-scope service account" {
+  assert_equal "$(ensure_step_field 0 .name)" "build service account"
+  assert_equal "$(ensure_step_field 0 .file)" '$SERVICE_PATH/scope/iam/build_service_account'
+  assert_equal "$(ensure_step_field 0 .configuration.ACTION)" "create"
+  assert_equal "$(ensure_step_field 0 .configuration.SERVICE_ACCOUNT_MODE)" "per-scope-only"
+  assert_equal "$(ensure_step_field 0 .trace)" "false"
 }
 
 @test "initial: ensure service account applies the rendered manifest as a traced setting-up step" {
-  run yq -r '.steps[] | select(.name == "ensure service account") | .steps[1] | [.name, .file, .configuration.ACTION, (.configuration.DRY_RUN | tostring), (.configuration.SKIP_WHEN_EMPTY | tostring), .trace.key, .trace.group] | join("|")' "$INITIAL"
-
-  assert_equal "$status" "0"
-  assert_equal "$output" "apply service account|\$SERVICE_PATH/apply_templates|apply|false|true|apply-service-account|setting-up"
+  assert_equal "$(ensure_step_field 1 .name)" "apply service account"
+  assert_equal "$(ensure_step_field 1 .file)" '$SERVICE_PATH/apply_templates'
+  assert_equal "$(ensure_step_field 1 .configuration.ACTION)" "apply"
+  assert_equal "$(ensure_step_field 1 .configuration.DRY_RUN)" "false"
+  assert_equal "$(ensure_step_field 1 .configuration.SKIP_WHEN_EMPTY)" "true"
+  assert_equal "$(ensure_step_field 1 .trace.key)" "apply-service-account"
+  assert_equal "$(ensure_step_field 1 .trace.group)" "setting-up"
 }
 
 @test "initial: inner step names do not collide with names overlays anchor on" {
@@ -70,9 +78,17 @@ step_index() {
   assert_contains "$output" "apply|delete"
 }
 
+# Workflow files whose steps set configuration.<key> (YAML keys only, never comments).
+workflows_setting() {
+  find "$PROJECT_ROOT/k8s" "$PROJECT_ROOT/scheduled_task" -path '*/workflows/*.yaml' | sort | while read -r wf; do
+    if [ "$(yq -r "[.. | select(tag == \"!!map\") | select(has(\"configuration\")) | .configuration | select(tag == \"!!map\") | select(has(\"$1\"))] | length" "$wf")" != "0" ]; then
+      echo "$wf"
+    fi
+  done
+}
+
 @test "only the deployment ensure step opts in to SKIP_WHEN_EMPTY" {
-  run grep -rl "SKIP_WHEN_EMPTY" "$PROJECT_ROOT/k8s" "$PROJECT_ROOT/scheduled_task" --include='*.yaml'
-  assert_equal "$output" "$INITIAL"
+  assert_equal "$(workflows_setting SKIP_WHEN_EMPTY)" "$INITIAL"
 }
 
 # =============================================================================
@@ -94,8 +110,7 @@ build_context_strict() {
             k8s/deployment/workflows/finalize.yaml; do
     assert_equal "$(build_context_strict "$PROJECT_ROOT/$wf")" "unset" "$wf"
   done
-  run bash -c "grep -rl STRICT_PLACEHOLDERS '$PROJECT_ROOT/k8s' '$PROJECT_ROOT/scheduled_task' --include='*.yaml' | sort"
-  assert_equal "$output" "$(printf '%s\n%s' "$INITIAL" "$PROJECT_ROOT/k8s/scope/workflows/create.yaml" | sort)"
+  assert_equal "$(workflows_setting STRICT_PLACEHOLDERS)" "$(printf '%s\n%s' "$INITIAL" "$PROJECT_ROOT/k8s/scope/workflows/create.yaml" | sort)"
 }
 
 @test "scope update, blue_green and scheduled_task inherit the strict build context unchanged" {
