@@ -1,63 +1,107 @@
 #!/bin/bash
 
-# Expands ${np.<key>} placeholders in every string of a JSON document using the
-# scope context. Only the literal "${np." prefix is matched, so Go template
-# syntax used by annotations (e.g. "{{ with secret ... }}") passes through.
-# Usage: expand_placeholders <json> <context_json>
-#        expand_placeholder_string <string> <context_json>
+# Expands ${np.<key>} placeholders in every string VALUE of a JSON document using
+# the scope context (object keys are never expanded). Only the literal "${np."
+# prefix is matched, so Go template syntax used by annotations
+# (e.g. "{{ with secret ... }}") passes through.
+#
+# A placeholder is unresolved when its key is unknown, its value is null or empty,
+# or it is malformed (not "${np.<key>}" with <key> in [a-zA-Z0-9_.-]).
+#
+# Public functions (callers must define `log`):
+#   expand_placeholders <json> <context_json>            strict: prints the expanded JSON, returns 1 on any unresolved placeholder
+#   expand_placeholder_string <string> <context_json>    strict, for a single string
+#   expand_resolvable_placeholders <json> <context_json> tolerant: drops every string value holding an unresolved placeholder, expands the rest
+#   unresolved_placeholders <json> <context_json>        prints the unresolved placeholders as "np.a, np.b" (malformed tokens verbatim)
+#   unresolved_placeholder_paths <json> <context_json>   prints the paths expand_resolvable_placeholders drops, e.g. deployment.annotations."a/b"
+# All of them log an error and return 1 when the document or the context is not valid JSON.
 
-# Builds the placeholder -> value map from the scope context.
-# A non-object .scope.dimensions is treated as "no dimensions".
+_NP_PLACEHOLDER_JQ_DEFS='
+  def np_tokens: [scan("\\$\\{np\\.[^}]*(?:\\}|\\z)")];
+  def np_key: (capture("\\A\\$\\{np\\.(?<k>[a-zA-Z0-9_.-]+)\\}\\z").k) // null;
+  def np_unresolved($v): np_tokens | map(select(np_key as $k | $k == null or (($v[$k] // "") == "")));
+  def np_label: (np_key | if . == null then null else "np." + . end) // .;
+  def np_path: map(if type == "number" then "[\(.)]"
+                   elif test("\\A[A-Za-z_][A-Za-z0-9_]*\\z") then ".\(.)"
+                   else ".\(tojson)" end) | join("") | ltrimstr(".");
+  def np_dropped($v): [paths(type == "string") as $p | select(getpath($p) | np_unresolved($v) | length > 0) | $p];
+  def np_expand($v): walk(if type == "string"
+                          then gsub("\\$\\{np\\.(?<k>[a-zA-Z0-9_.-]+)\\}"; $v[.k])
+                          else . end);
+'
+
+# Builds the placeholder -> value map from the scope context. Null or empty values
+# stay null (unresolved). A non-object .scope.dimensions is treated as "no dimensions".
 _np_placeholder_values() {
-  echo "$1" | jq -c '
+  local values
+  if ! values=$(echo "$1" | jq -c '
     {
       account_slug: .account.slug,
       namespace_slug: .namespace.slug,
       application_slug: .application.slug,
       repository_name: ((.application.repository_url | if type == "string" then . else "" end)
-                        | sub("\\.git$"; "") | sub("/+$"; "") | split("/") | last
-                        | if . == "" then null else . end),
+                        | sub("\\.git$"; "") | sub("/+$"; "") | (split("/") | last // "")
+                        | (split(":") | last // "")),
       scope_slug: .scope.slug,
-      scope_id: (.scope.id | if . == null then null else tostring end),
+      scope_id: .scope.id,
       k8s_namespace: .k8s_namespace
     } + ((if (.scope.dimensions | type) == "object" then .scope.dimensions else {} end)
-         | with_entries(.key = "dimension.\(.key)") | map_values(tostring))'
+         | with_entries(.key = "dimension.\(.key)"))
+    | map_values(if . == null then null else tostring end | if . == "" then null else . end)' 2>/dev/null); then
+    log error "   ❌ Could not read the scope context to resolve placeholders"
+    return 1
+  fi
+  echo "$values"
 }
 
-# unresolved_placeholders <json> <context_json>: prints the unknown or valueless
-# placeholders as "np.a, np.b" (empty when everything resolves).
+# _np_placeholder_jq <json> <values> <filter>: runs a filter with the helper defs.
+_np_placeholder_jq() {
+  local out
+  if ! out=$(echo "$1" | jq -c -r --argjson v "$2" "$_NP_PLACEHOLDER_JQ_DEFS $3" 2>/dev/null); then
+    log error "   ❌ Could not scan placeholders: the document is not valid JSON"
+    return 1
+  fi
+  echo "$out"
+}
+
 unresolved_placeholders() {
   local values
-  values=$(_np_placeholder_values "$2")
-  echo "$1" | jq -r --argjson v "$values" '
-    [.. | strings | scan("\\$\\{np\\.([a-zA-Z0-9_.-]+)\\}") | .[0]] | unique
-    | map(select(($v[.] // null) == null) | "np." + .) | join(", ")'
+  values=$(_np_placeholder_values "$2") || return 1
+  _np_placeholder_jq "$1" "$values" \
+    '[.. | strings | np_unresolved($v)[] | np_label] | unique | join(", ")'
 }
 
-# expand_placeholders <json> <context_json>: prints the expanded JSON.
-# Returns 1 if any placeholder is unknown or has no value in the context.
+unresolved_placeholder_paths() {
+  local values
+  values=$(_np_placeholder_values "$2") || return 1
+  _np_placeholder_jq "$1" "$values" '[np_dropped($v)[] | np_path] | join(", ")'
+}
+
+expand_resolvable_placeholders() {
+  local values
+  values=$(_np_placeholder_values "$2") || return 1
+  _np_placeholder_jq "$1" "$values" 'delpaths(np_dropped($v)) | np_expand($v)'
+}
+
 expand_placeholders() {
-  local input="$1" values unknown
-  values=$(_np_placeholder_values "$2")
-  unknown=$(unresolved_placeholders "$input" "$2")
+  local input="$1" values unknown supported
+  values=$(_np_placeholder_values "$2") || return 1
+  unknown=$(unresolved_placeholders "$input" "$2") || return 1
   if [ -n "$unknown" ]; then
+    supported=$(echo "$values" | jq -r '[keys_unsorted[] | select(startswith("dimension.") | not) | "${np.\(.)}"] + ["${np.dimension.<key>}"] | join(" ")')
     log error "   ❌ Unknown or unresolved placeholder(s): $unknown"
     log error ""
     log error "💡 Possible causes:"
-    log error "   A typo in the placeholder, or a dimension the scope does not have"
+    log error "   A typo in the placeholder, a malformed one, a dimension the scope does not have, or an empty value"
     log error ""
     log error "🔧 How to fix:"
-    log error "   • Supported: \${np.account_slug} \${np.namespace_slug} \${np.application_slug} \${np.repository_name} \${np.scope_slug} \${np.scope_id} \${np.k8s_namespace} \${np.dimension.<key>}"
+    log error "   • Supported: $supported"
     log error "   • Scope dimensions: $(echo "$2" | jq -r '(if (.scope.dimensions | type) == "object" then .scope.dimensions else {} end) | keys | join(", ")')"
     return 1
   fi
-  echo "$input" | jq -c --argjson v "$values" '
-    walk(if type == "string"
-         then gsub("\\$\\{np\\.(?<k>[a-zA-Z0-9_.-]+)\\}"; $v[.k])
-         else . end)'
+  _np_placeholder_jq "$input" "$values" 'np_expand($v)'
 }
 
-# expand_placeholder_string <string> <context_json>: prints the expanded string.
 expand_placeholder_string() {
   local out
   out=$(expand_placeholders "$(jq -n --arg s "$1" '{s: $s}')" "$2") || return 1
