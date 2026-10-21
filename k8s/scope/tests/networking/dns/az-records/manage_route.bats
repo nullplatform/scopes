@@ -444,3 +444,42 @@ setup() {
   assert_contains "$output" "❌ Azure API returned an error creating DNS record (HTTP 403)"
   assert_contains "$output" "   • Grant identity client-123 the DNS Zone Contributor role on zone 'example.com'"
 }
+
+@test "manage_route: CREATE reads the gateway IP from GATEWAY_NAMESPACE" {
+  export GATEWAY_NAMESPACE="istio-gw"
+  kubectl() {
+    case "$*" in
+      "get gateway gw-public -n istio-gw "*) echo "10.0.0.9" ;;
+      *) echo "" ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$SCRIPT" \
+    --action=CREATE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Gateway IP: 10.0.0.9"
+}
+
+@test "manage_route: gateway IP error names GATEWAY_NAMESPACE" {
+  export GATEWAY_NAMESPACE="istio-gw"
+  kubectl() { echo ""; }
+  export -f kubectl
+
+  run bash "$SCRIPT" \
+    --action=CREATE \
+    --resource-group=my-rg \
+    --subscription-id=sub-123 \
+    --gateway-name=gw-public \
+    --hosted-zone-name=example.com \
+    --hosted-zone-rg=dns-rg
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Check gateway status: kubectl get gateway gw-public -n istio-gw"
+}

@@ -90,12 +90,12 @@ if [ "${GATEWAY_TYPE:-istio}" = "aro_cluster" ]; then
 
     if [ -z "$GATEWAY_IP" ]; then
         log warn "⚠️  ARO router IP not found, falling back to istio gateway..."
-        GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+        GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n "${GATEWAY_NAMESPACE:-gateways}" \
             -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
     fi
 else
     log debug "📡 Getting IP from gateway '$GATEWAY_NAME'..."
-    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n gateways \
+    GATEWAY_IP=$(kubectl get gateway "$GATEWAY_NAME" -n "${GATEWAY_NAMESPACE:-gateways}" \
         -o jsonpath='{.status.addresses[?(@.type=="IPAddress")].value}' 2>/dev/null)
 fi
 
@@ -106,7 +106,7 @@ if [ -z "$GATEWAY_IP" ]; then
     log error "   The gateway may not be ready or the name is incorrect"
     log error ""
     log error "🔧 How to fix:"
-    log error "   • Check gateway status: kubectl get gateway $GATEWAY_NAME -n gateways"
+    log error "   • Check gateway status: kubectl get gateway $GATEWAY_NAME -n ${GATEWAY_NAMESPACE:-gateways}"
     log error ""
     exit 1
 fi
