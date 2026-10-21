@@ -300,7 +300,8 @@ while true; do
                 ${SUGGESTED_FIX:+--next "$SUGGESTED_FIX"}
             np_scope_error "$timeout_message" \
                 "$(jq -nc --argjson h "${ready:-0}" --argjson l "${launched:-0}" --argjson d "${desired:-0}" --arg reasons "$timeout_reasons" \
-                    '{instances: {healthy: $h, launched: $l, desired: $d}} + (if $reasons != "" then {reasons: ($reasons | split(", "))} else {} end)')"
+                    '{instances: {healthy: $h, launched: $l, desired: $d}} + (if $reasons != "" then {reasons: ($reasons | split(", "))} else {} end)')" \
+                "${FAILURE_REASON:-}"
             np_scope_step_timeout "$timeout_message"
         fi
         exit 1

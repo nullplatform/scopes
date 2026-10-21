@@ -324,6 +324,9 @@ print_generic_hints() {
 # Run the diagnostic main only when not being sourced just for the helpers.
 if [[ "${PRINT_HINTS_LIB_ONLY:-false}" != "true" ]]; then
     diagnose_failure
+    if command -v np_scope_failure >/dev/null 2>&1; then
+        np_scope_failure "$FAILURE_REASON" "$FAILURE_CONTAINER" "$FAILURE_EXIT_CODE"
+    fi
     print_specific_diagnostics
 
     if [[ -z "$SUGGESTED_FIX" ]]; then
