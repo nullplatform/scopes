@@ -774,7 +774,9 @@ teardown() {
     np_scope_explain() { echo \"EXPLAIN \$*\"; }
     np_scope_error() { echo \"ERROR \$*\"; }
     np_scope_step_timeout() { echo \"TIMEOUT \$*\"; }
-    export -f np_scope_explain np_scope_error np_scope_step_timeout
+    np_scope_failure() { echo \"FAILURE \$*\"; }
+    np_scope_labels() { echo \"LABELS \$*\"; }
+    export -f np_scope_explain np_scope_error np_scope_step_timeout np_scope_failure np_scope_labels
 
     export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"health_check\":{\"path\":\"/health-bad\"}}}}'
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -788,6 +790,8 @@ teardown() {
   assert_contains "$output" "Detected: Startup probe"
   assert_contains "$output" "HTTP 404"
   assert_contains "$output" "--next"
+  assert_contains "$output" "FAILURE Unhealthy"
+  assert_contains "$output" "LABELS failure.probe=startup failure.probe_mode=http-404"
 }
 
 @test "wait_deployment_active: a timeout traces the pods' own cause as the error code and failure labels" {

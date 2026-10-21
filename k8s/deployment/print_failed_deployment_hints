@@ -49,6 +49,23 @@ parse_probe_message() {
     printf "%s|%s|%s\n" "$probe_kind" "$probe_path" "$mode_text"
 }
 
+# Outputs a probe failure as low-cardinality trace labels:
+# "failure.probe=<startup|liveness|readiness> failure.probe_mode=<mode>", mode
+# being not-listening, http-<code>, timeout or failed. Non-zero on non-probe
+# messages.
+probe_failure_labels() {
+    local parsed kind mode
+    parsed=$(parse_probe_message "$1") || return 1
+    IFS='|' read -r kind _ mode <<< "$parsed"
+    case "$mode" in
+        "not yet listening") mode="not-listening" ;;
+        "responded HTTP "*) mode="${mode#responded HTTP }"; mode="http-${mode%% *}" ;;
+        "request timed out") mode="timeout" ;;
+        *) mode="failed" ;;
+    esac
+    printf 'failure.probe=%s failure.probe_mode=%s\n' "$(printf '%s' "$kind" | tr '[:upper:]' '[:lower:]')" "$mode"
+}
+
 # Strips the well-known "d-<scope>-<deploy>-" prefix from a pod name, leaving
 # the replicaset hash and pod suffix (the parts that distinguish replicas).
 # A leading "..." marks the truncation so the operator can tell the displayed
@@ -326,6 +343,11 @@ if [[ "${PRINT_HINTS_LIB_ONLY:-false}" != "true" ]]; then
     diagnose_failure
     if command -v np_scope_failure >/dev/null 2>&1; then
         np_scope_failure "$FAILURE_REASON" "$FAILURE_CONTAINER" "$FAILURE_EXIT_CODE"
+        if [[ "$FAILURE_REASON" == "Unhealthy" ]]; then
+            probe_labels=$(probe_failure_labels "$UNHEALTHY_MESSAGE") || probe_labels=""
+            # shellcheck disable=SC2086 # two k=v words, no spaces inside
+            [[ -n "$probe_labels" ]] && np_scope_labels $probe_labels
+        fi
     fi
     print_specific_diagnostics
 
