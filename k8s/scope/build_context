@@ -230,6 +230,113 @@ COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-
 log debug "📋 Scope: $SCOPE_ID | Visibility: $SCOPE_VISIBILITY | Domain: $SCOPE_DOMAIN"
 log debug "📋 Namespace: $K8S_NAMESPACE | Region: $REGION | Gateway: $GATEWAY_NAME | ALB: $ALB_NAME"
 
+if ! type -t expand_resolvable_placeholders >/dev/null 2>&1; then source "$SCRIPT_DIR/../utils/expand_placeholders"; fi
+
+# Only workflows that render pod specs (scope create/update, deployment initial/blue-green) set
+# STRICT_PLACEHOLDERS=true; elsewhere (delete, rollback, ...) a bad placeholder warns so teardown never blocks.
+STRICT_PLACEHOLDERS=$(echo "${STRICT_PLACEHOLDERS:-false}" | tr '[:upper:]' '[:lower:]')
+if [ "$STRICT_PLACEHOLDERS" != "true" ] && [ "$STRICT_PLACEHOLDERS" != "false" ]; then
+  log error "   ❌ Invalid STRICT_PLACEHOLDERS value '$STRICT_PLACEHOLDERS' (expected true or false)"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   A workflow or override sets STRICT_PLACEHOLDERS to an unsupported value"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set STRICT_PLACEHOLDERS: true on the build context step of workflows that render pod specs, or leave it unset"
+  exit 1
+fi
+
+# Context used to resolve ${np.*}: the scope context plus the resolved k8s namespace.
+PLACEHOLDER_CONTEXT=$(echo "$CONTEXT" | jq --arg ns "$K8S_NAMESPACE" '. + {k8s_namespace: $ns}')
+
+# Without "${np." there is nothing to expand: the modifiers pass through untouched.
+if [[ "$K8S_MODIFIERS" == *'${np.'* ]]; then
+  if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+    K8S_MODIFIERS=$(expand_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT") || exit 1
+  elif MODIFIERS_UNRESOLVED=$(unresolved_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT") && \
+       MODIFIERS_DROPPED=$(unresolved_placeholder_paths "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT") && \
+       MODIFIERS_EXPANDED=$(expand_resolvable_placeholders "$K8S_MODIFIERS" "$PLACEHOLDER_CONTEXT"); then
+    if [ -n "$MODIFIERS_UNRESOLVED" ]; then
+      log warn "⚠️  Dropped object_modifiers entries with unresolved placeholder(s) ($MODIFIERS_UNRESOLVED): $MODIFIERS_DROPPED"
+    fi
+    K8S_MODIFIERS="$MODIFIERS_EXPANDED"
+  else
+    log warn "⚠️  Could not evaluate placeholders in object_modifiers; ignoring object_modifiers for this action"
+    K8S_MODIFIERS="{}"
+  fi
+fi
+
+SERVICE_ACCOUNT_ENABLED=$(get_config_value \
+  --env SERVICE_ACCOUNT_ENABLED \
+  --provider '.providers["scope-configurations"].security.service_account_enabled' \
+  --default "false"
+)
+SERVICE_ACCOUNT_ENABLED_RAW="$SERVICE_ACCOUNT_ENABLED"
+SERVICE_ACCOUNT_ENABLED=$(echo "$SERVICE_ACCOUNT_ENABLED" | tr '[:upper:]' '[:lower:]')
+if [ "$SERVICE_ACCOUNT_ENABLED" != "true" ] && [ "$SERVICE_ACCOUNT_ENABLED" != "false" ]; then
+  log warn "⚠️  Invalid security.service_account_enabled value '$SERVICE_ACCOUNT_ENABLED_RAW' (expected true or false); treating it as false"
+  SERVICE_ACCOUNT_ENABLED="false"
+fi
+
+# IAM owns the pod service account when enabled; same source and truthiness as scope/iam/create_role.
+if [ "$SERVICE_ACCOUNT_ENABLED" = "true" ]; then
+  SCOPE_IAM_ENABLED=$(echo "${IAM-"{}"}" | jq -r .ENABLED 2>/dev/null) || SCOPE_IAM_ENABLED="false"
+  if [ -n "$SCOPE_IAM_ENABLED" ] && [ "$SCOPE_IAM_ENABLED" != "false" ] && [ "$SCOPE_IAM_ENABLED" != "null" ]; then
+    if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+      log error "   ❌ IAM and service_account_enabled are both enabled for this scope"
+      log error ""
+      log error "💡 Possible causes:"
+      log error "   Both settings define the pod service account; only one can own it"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Disable security.iam_enabled or security.service_account_enabled in scope-configurations"
+      exit 1
+    fi
+    log warn "⚠️  IAM and service_account_enabled are both enabled; the per-scope service account is ignored because IAM owns the pod service account"
+    SERVICE_ACCOUNT_ENABLED="false"
+  fi
+fi
+
+SERVICE_ACCOUNT_NAME_RESOLVED=""
+if [ "$SERVICE_ACCOUNT_ENABLED" = "true" ]; then
+  SERVICE_ACCOUNT_NAME_TEMPLATE=$(get_config_value \
+    --env SERVICE_ACCOUNT_NAME_TEMPLATE \
+    --provider '.providers["scope-configurations"].security.service_account_name' \
+    --default '${np.application_slug}-${np.scope_id}'
+  )
+  SERVICE_ACCOUNT_UNRESOLVED=""
+  if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+    SERVICE_ACCOUNT_NAME_RESOLVED=$(expand_placeholder_string "$SERVICE_ACCOUNT_NAME_TEMPLATE" "$PLACEHOLDER_CONTEXT") || exit 1
+  elif ! SERVICE_ACCOUNT_UNRESOLVED=$(unresolved_placeholders "$(jq -n --arg s "$SERVICE_ACCOUNT_NAME_TEMPLATE" '{s: $s}')" "$PLACEHOLDER_CONTEXT"); then
+    SERVICE_ACCOUNT_UNRESOLVED="placeholders could not be evaluated"
+  elif [ -n "$SERVICE_ACCOUNT_UNRESOLVED" ]; then
+    SERVICE_ACCOUNT_UNRESOLVED="unresolved placeholder(s): $SERVICE_ACCOUNT_UNRESOLVED"
+  elif ! SERVICE_ACCOUNT_NAME_RESOLVED=$(expand_placeholder_string "$SERVICE_ACCOUNT_NAME_TEMPLATE" "$PLACEHOLDER_CONTEXT"); then
+    SERVICE_ACCOUNT_UNRESOLVED="placeholders could not be evaluated"
+  fi
+  if [ -z "$SERVICE_ACCOUNT_UNRESOLVED" ] && { [ ${#SERVICE_ACCOUNT_NAME_RESOLVED} -gt 253 ] || \
+     ! [[ "$SERVICE_ACCOUNT_NAME_RESOLVED" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]]; }; then
+    if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+      log error "   ❌ Invalid service account name '$SERVICE_ACCOUNT_NAME_RESOLVED' (from '$SERVICE_ACCOUNT_NAME_TEMPLATE')"
+      log error ""
+      log error "💡 Possible causes:"
+      log error "   The template resolves to uppercase characters, an empty or dash-edged segment, or more than 253 characters"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Adjust security.service_account_name in the scope-configurations provider"
+      log error "   • It must be a DNS-1123 subdomain: dot-separated labels of lowercase alphanumerics or '-', each starting and ending alphanumeric"
+      exit 1
+    fi
+    SERVICE_ACCOUNT_UNRESOLVED="invalid DNS-1123 name '$SERVICE_ACCOUNT_NAME_RESOLVED'"
+  fi
+  if [ -n "$SERVICE_ACCOUNT_UNRESOLVED" ]; then
+    log warn "⚠️  Could not resolve the service account name from '$SERVICE_ACCOUNT_NAME_TEMPLATE' ($SERVICE_ACCOUNT_UNRESOLVED); continuing without the per-scope service account for this action (a scope delete leaves it in place)"
+    SERVICE_ACCOUNT_ENABLED="false"
+    SERVICE_ACCOUNT_NAME_RESOLVED=""
+  fi
+fi
+export SERVICE_ACCOUNT_ENABLED SERVICE_ACCOUNT_NAME_RESOLVED
+
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg ingress_visibility "$INGRESS_VISIBILITY" \
           --arg k8s_namespace "$K8S_NAMESPACE" \
@@ -239,7 +346,9 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg component "$COMPONENT" \
           --arg base_domain "$DOMAIN" \
           --argjson modifiers "$K8S_MODIFIERS" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain}')
+          --argjson sa_enabled "$SERVICE_ACCOUNT_ENABLED" \
+          --arg sa_name "$SERVICE_ACCOUNT_NAME_RESOLVED" \
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain, service_account: {enabled: $sa_enabled, name: $sa_name}}')
 
 source "$SCRIPT_DIR/../naming/resolve_names"
 if ! type -t require_resource >/dev/null 2>&1; then source "$SCRIPT_DIR/require_resource"; fi
