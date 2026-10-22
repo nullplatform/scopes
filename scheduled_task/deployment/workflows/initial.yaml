@@ -27,3 +27,7 @@ steps:
       action: replace
       type: script
       file: "$OVERRIDES_PATH/deployment/wait_job"
+      trace:
+        key: wait-for-job
+        title: Run the task
+        group: waiting-instances

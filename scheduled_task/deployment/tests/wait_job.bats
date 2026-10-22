@@ -55,7 +55,7 @@ setup() {
 }
 
 teardown() {
-  unset -f kubectl log sleep
+  unset -f kubectl log sleep np_scope_failure np_step_skip
 }
 
 # =============================================================================
@@ -106,6 +106,72 @@ teardown() {
   assert_contains "$output" "❌ Job job-scope-123-deploy-456 failed: BackoffLimitExceeded"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "• Inspect the failed run from the logs screen"
+}
+
+@test "wait_job: run-once failure - surfaces the container's own cause and traces it" {
+  kubectl() {
+    case "$*" in
+      "get job job-scope-123-deploy-456 -n provider-namespace -o json")
+        echo '{"status":{"conditions":[{"type":"Failed","status":"True","reason":"BackoffLimitExceeded","message":"Job has reached the specified backoff limit"}]}}'
+        ;;
+      "get pods -n provider-namespace -l job-name=job-scope-123-deploy-456 -o json")
+        echo '{"items":[{"status":{"containerStatuses":[{"name":"application","state":{"terminated":{"reason":"OOMKilled","exitCode":137}}}]}}]}'
+        ;;
+    esac
+    return 0
+  }
+  np_scope_failure() { echo "FAILURE $*"; }
+  export -f kubectl np_scope_failure
+
+  run bash "$BATS_TEST_DIRNAME/../wait_job"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE OOMKilled application 137"
+  assert_contains "$output" "📋 Detected: OOMKilled on container application (exit 137)"
+  assert_contains "$output" "💡 The task exceeded its memory limit"
+}
+
+@test "wait_job: run-once failure - falls back to the Job's reason when no container says why" {
+  kubectl() {
+    case "$*" in
+      "get job job-scope-123-deploy-456 -n provider-namespace -o json")
+        echo '{"status":{"conditions":[{"type":"Failed","status":"True","reason":"DeadlineExceeded","message":"Job was active longer than specified deadline"}]}}'
+        ;;
+      "get pods"*) echo '{"items":[]}' ;;
+    esac
+    return 0
+  }
+  np_scope_failure() { echo "FAILURE $*"; }
+  export -f kubectl np_scope_failure
+
+  run bash "$BATS_TEST_DIRNAME/../wait_job"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE DeadlineExceeded"
+  [[ "$output" != *"📋 Detected:"* ]]
+}
+
+@test "wait_job: scheduled mode declares the step skipped to the workflow engine" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.cron = "*/5 * * * *"')
+  np_step_skip() { echo "SKIP $*"; }
+  export -f np_step_skip
+
+  run bash "$BATS_TEST_DIRNAME/../wait_job"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "SKIP scheduled task"
+}
+
+@test "wait_job: timeout is traced as its own cause" {
+  export JOB_WAIT_TIMEOUT=5
+  kubectl() { echo '{"status":{}}'; return 0; }
+  np_scope_failure() { echo "FAILURE $*"; }
+  export -f kubectl np_scope_failure
+
+  run bash "$BATS_TEST_DIRNAME/../wait_job"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE WaitTimeout"
 }
 
 # =============================================================================

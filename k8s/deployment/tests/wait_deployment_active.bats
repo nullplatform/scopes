@@ -774,7 +774,9 @@ teardown() {
     np_scope_explain() { echo \"EXPLAIN \$*\"; }
     np_scope_error() { echo \"ERROR \$*\"; }
     np_scope_step_timeout() { echo \"TIMEOUT \$*\"; }
-    export -f np_scope_explain np_scope_error np_scope_step_timeout
+    np_scope_failure() { echo \"FAILURE \$*\"; }
+    np_scope_labels() { echo \"LABELS \$*\"; }
+    export -f np_scope_explain np_scope_error np_scope_step_timeout np_scope_failure np_scope_labels
 
     export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"health_check\":{\"path\":\"/health-bad\"}}}}'
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -788,6 +790,52 @@ teardown() {
   assert_contains "$output" "Detected: Startup probe"
   assert_contains "$output" "HTTP 404"
   assert_contains "$output" "--next"
+  assert_contains "$output" "FAILURE Unhealthy"
+  assert_contains "$output" "LABELS failure.probe=startup failure.probe_mode=http-404"
+}
+
+@test "wait_deployment_active: a timeout traces the pods' own cause as the error code and failure labels" {
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
+          echo 'd-scope-123-deploy-456'
+          ;;
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":1,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o json\")
+          echo '{\"items\":[{\"metadata\":{\"name\":\"d-scope-123-deploy-456-abc\"},\"status\":{\"containerStatuses\":[{\"name\":\"application\",\"restartCount\":3,\"state\":{\"waiting\":{\"reason\":\"CrashLoopBackOff\"}},\"lastState\":{\"terminated\":{\"reason\":\"OOMKilled\",\"exitCode\":137}}}]}}]}'
+          ;;
+        \"get pods\"*) echo 'd-scope-123-deploy-456-abc' ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo 'running'; }
+    export -f np
+
+    np_scope_explain() { :; }
+    np_scope_error() { echo \"ERROR \$*\"; }
+    np_scope_failure() { echo \"FAILURE \$*\"; }
+    np_scope_step_timeout() { :; }
+    export -f np_scope_explain np_scope_error np_scope_failure np_scope_step_timeout
+
+    export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"ram_memory\":256}}}'
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE OOMKilled application 137"
+  assert_contains "$output" "ERROR "
+  [[ "$(echo "$output" | grep '^ERROR ')" == *" OOMKilled" ]]
 }
 
 # =============================================================================

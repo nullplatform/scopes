@@ -541,3 +541,12 @@ assert_not_contains() {
   assert_contains "$output" "📋 Detected: Evicted on container app"
   assert_contains "$output" "💡 Suggested fix: The node ran out of memory or disk. Lower the scope's resource requests, or free capacity on the cluster."
 }
+
+@test "probe_failure_labels: turns a probe event into probe and mode labels" {
+  PRINT_HINTS_LIB_ONLY=true source "$BATS_TEST_DIRNAME/../print_failed_deployment_hints"
+  [ "$(probe_failure_labels 'Startup probe failed: HTTP probe failed with statuscode: 404')" = "failure.probe=startup failure.probe_mode=http-404" ]
+  [ "$(probe_failure_labels 'Readiness probe failed: Get "http://10.0.0.1:8080/health": dial tcp 10.0.0.1:8080: connect: connection refused')" = "failure.probe=readiness failure.probe_mode=not-listening" ]
+  [ "$(probe_failure_labels 'Liveness probe failed: Get "http://10.0.0.1:8080/health": context deadline exceeded')" = "failure.probe=liveness failure.probe_mode=timeout" ]
+  run probe_failure_labels 'Back-off restarting failed container'
+  [ "$status" -ne 0 ]
+}
