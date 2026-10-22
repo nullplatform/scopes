@@ -38,7 +38,8 @@ esac
 # shellcheck source=/dev/null
 source "$SERVICE_PATH/deployment/deployment_status"
 
-if [[ -n "$(deployment_action_applied_statuses "$SERVICE_ACTION")" && -n "${DEPLOYMENT_ID:-}" ]]; then
+exit_if_already_applied() {
+  [[ -n "$(deployment_action_applied_statuses "$SERVICE_ACTION")" && -n "${DEPLOYMENT_ID:-}" ]] || return 0
   deployment_status_read
   case $? in
     "$DS_OK")
@@ -56,7 +57,9 @@ if [[ -n "$(deployment_action_applied_statuses "$SERVICE_ACTION")" && -n "${DEPL
       exit 1
       ;;
   esac
-fi
+}
+
+exit_if_already_applied
 
 WORKFLOW_PATH="$SERVICE_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
 
@@ -82,6 +85,37 @@ for path in "${OVERRIDE_PATHS[@]}"; do
     CMD="$CMD --overrides $OVERRIDE_WORKFLOW_PATH"
   fi
 done
+
+LOCK_LIB="$SERVICE_PATH/deployment/deployment_lock"
+if [[ -f "$LOCK_LIB" && -n "${SCOPE_ID:-}" ]] && command -v kubectl >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  source "$LOCK_LIB"
+fi
+if command -v deployment_lock_applies >/dev/null 2>&1 && deployment_lock_applies "$SERVICE_ACTION"; then
+  export NP_DEPLOY_LOCK_HOLDER="${HOSTNAME:-worker}.$$.${RANDOM}${RANDOM}"
+  NP_DEPLOY_LOCK_NAMESPACE="$(deployment_lock_namespace)"
+  export NP_DEPLOY_LOCK_NAMESPACE
+  deployment_lock_try_acquire
+  if [ $? -eq 1 ]; then
+    LOCK_WAIT_CMD="np service workflow exec --no-output --workflow $SERVICE_PATH/deployment/workflows/lock_wait.yaml --build-context --include-secrets"
+    if np service workflow exec --help 2>&1 | grep -q "\-\-no-params"; then
+      LOCK_WAIT_CMD="$LOCK_WAIT_CMD --no-params"
+    fi
+    echo "Another action is running on scope $SCOPE_ID, waiting for it: $LOCK_WAIT_CMD"
+    eval $LOCK_WAIT_CMD || exit 1
+  fi
+
+  if deployment_lock_held; then
+    deployment_lock_renew_loop &
+    LOCK_RENEWER=$!
+    # shellcheck disable=SC2154
+    trap 'rc=$?; kill "$LOCK_RENEWER" 2>/dev/null; deployment_lock_release; exit "$rc"' EXIT
+
+    exit_if_already_applied
+  else
+    echo "Deployment lock not available on scope $SCOPE_ID: running without it"
+  fi
+fi
 
 echo "Executing command: $CMD"
 eval $CMD
