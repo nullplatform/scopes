@@ -57,6 +57,16 @@ setup() {
   assert_equal "$(wc -l < "$CALLS_FILE" | tr -d ' ')" "3"
 }
 
+@test "deployment_status_read: a CLI error reported as JSON keeps only its message" {
+  np() { echo '{"error":"request failed with status 403: Insufficient permission"}'; return 1; }
+
+  rc=0
+  deployment_status_read || rc=$?
+
+  assert_equal "$rc" "$DS_CLI_ERROR"
+  assert_equal "$DEPLOYMENT_STATUS_ERROR" "request failed with status 403: Insufficient permission"
+}
+
 @test "deployment_status_read: a response without a status returns DS_NO_STATUS" {
   for answer in '{"status":null}' '{"status":""}' '{}' '' 'running'; do
     np() { echo "$answer"; }

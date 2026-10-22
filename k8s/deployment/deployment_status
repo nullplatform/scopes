@@ -23,7 +23,7 @@ deployment_status_read() {
       DEPLOYMENT_STATUS_ERROR="no status in the response"
       rc=$DS_NO_STATUS
     else
-      DEPLOYMENT_STATUS_ERROR="$out"
+      DEPLOYMENT_STATUS_ERROR=$(jq -er '.error | select(type == "string" and length > 0)' <<<"$out" 2>/dev/null) || DEPLOYMENT_STATUS_ERROR="$out"
       rc=$DS_CLI_ERROR
     fi
     if [ "$attempt" -lt "$DEPLOYMENT_STATUS_READ_ATTEMPTS" ]; then
