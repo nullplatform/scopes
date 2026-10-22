@@ -35,6 +35,29 @@ case "$SERVICE_ACTION" in
     ;;
 esac
 
+# shellcheck source=/dev/null
+source "$SERVICE_PATH/deployment/deployment_status"
+
+if [[ -n "$(deployment_action_applied_statuses "$SERVICE_ACTION")" && -n "${DEPLOYMENT_ID:-}" ]]; then
+  deployment_status_read
+  case $? in
+    "$DS_OK")
+      if deployment_action_already_applied "$SERVICE_ACTION" "$DEPLOYMENT_STATUS"; then
+        echo "Deployment $DEPLOYMENT_ID is already '$DEPLOYMENT_STATUS': action $SERVICE_ACTION was already applied, nothing to do"
+        exit 0
+      fi
+      ;;
+    "$DS_CLI_ERROR")
+      echo "❌ Could not read the status of deployment $DEPLOYMENT_ID: $DEPLOYMENT_STATUS_ERROR"
+      exit 1
+      ;;
+    "$DS_NO_STATUS")
+      echo "❌ Could not read the status of deployment $DEPLOYMENT_ID: no status in the response"
+      exit 1
+      ;;
+  esac
+fi
+
 WORKFLOW_PATH="$SERVICE_PATH/deployment/workflows/$ACTION_TO_EXECUTE.yaml"
 
 NEEDS_PARAMS=true
