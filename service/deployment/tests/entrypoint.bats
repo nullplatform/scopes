@@ -301,3 +301,155 @@ mock_np_with_status() {
     [[ "$output" != *"UNEXPECTED STATUS READ"* ]]
   done
 }
+
+# =============================================================================
+# Deployment lock (k8s/deployment/deployment_lock)
+# =============================================================================
+
+setup_lock() {
+  export SERVICE_PATH="$BATS_TEST_TMPDIR/service-path"
+  mkdir -p "$SERVICE_PATH/deployment/workflows"
+  cp "$PROJECT_ROOT/k8s/deployment/deployment_lock" "$PROJECT_ROOT/k8s/deployment/wait_deployment_lock" "$PROJECT_ROOT/k8s/deployment/deployment_status" "$SERVICE_PATH/deployment/"
+  cp "$PROJECT_ROOT/k8s/deployment/workflows/"*.yaml "$SERVICE_PATH/deployment/workflows/"
+  export SCOPE_ID="scope-123" K8S_NAMESPACE="test-namespace"
+  export LEASE_FILE="$BATS_TEST_TMPDIR/lease.json" STATUS_FILE="$BATS_TEST_TMPDIR/deployment.status"
+  export NP_DEPLOYMENT_STATUS="running" NP_DEPLOY_LOCK_POLL_SECONDS=1 NP_DEPLOY_LOCK_WAIT_TIMEOUT=30
+  log() { echo "$2"; }
+  export -f log
+
+  kubectl() {
+    local cur new
+    echo "$*" >> "$BATS_TEST_TMPDIR/kubectl.calls"
+    case "$1" in
+      get) [ -f "$LEASE_FILE" ] || return 1; cat "$LEASE_FILE" ;;
+      create)
+        [ "${KUBECTL_FORBIDDEN:-false}" = "true" ] && return 1
+        [ -f "$LEASE_FILE" ] && return 1
+        jq '.metadata.resourceVersion = "1"' > "$LEASE_FILE" ;;
+      replace)
+        new=$(cat); cur=$(jq -r '.metadata.resourceVersion' "$LEASE_FILE")
+        [ "$(jq -r '.metadata.resourceVersion' <<<"$new")" = "$cur" ] || return 1
+        jq --arg rv "$((cur + 1))" '.metadata.resourceVersion = $rv' <<<"$new" > "$LEASE_FILE.tmp" && mv "$LEASE_FILE.tmp" "$LEASE_FILE" ;;
+      patch) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  np() {
+    if [[ "$1 $2" == "deployment read" ]]; then
+      jq -cn --arg s "$(if [ -f "$STATUS_FILE" ]; then cat "$STATUS_FILE"; else echo "$NP_DEPLOYMENT_STATUS"; fi)" '{status: $s}'
+      return 0
+    fi
+    if [[ "$*" == *"--help"* ]]; then return 0; fi
+    if [[ "$*" == *"lock_wait.yaml"* ]]; then K8S_NAMESPACE=nullplatform bash "$SERVICE_PATH/deployment/wait_deployment_lock"; return $?; fi
+    echo "WORKFLOW RAN: np $*"
+    return "${NP_WORKFLOW_RC:-0}"
+  }
+  export -f np
+}
+
+lease_held_then_released() {
+  jq -n --arg renew "$(date -u +%s)" '{
+    apiVersion: "coordination.k8s.io/v1", kind: "Lease",
+    metadata: {name: "np-deploy-lock-scope-123", namespace: "test-namespace", resourceVersion: "3",
+               annotations: {"nullplatform.com/action": "start-blue-green", "nullplatform.com/deployment-id": "deploy-456",
+                             "nullplatform.com/renew-epoch": $renew}},
+    spec: {holderIdentity: "holder-b", leaseDurationSeconds: 60}}' > "$LEASE_FILE"
+  ( sleep "$1"
+    [ -n "${2:-}" ] && echo "$2" > "$STATUS_FILE"
+    jq 'del(.spec.holderIdentity) | .metadata.resourceVersion = "4"' "$LEASE_FILE" > "$LEASE_FILE.tmp" &&
+      mv "$LEASE_FILE.tmp" "$LEASE_FILE" ) &
+}
+
+@test "deployment entrypoint: with the lock free the action runs and releases it" {
+  setup_lock
+  export SERVICE_ACTION="start-blue-green"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "WORKFLOW RAN"
+  [ "$(jq -r '.spec.holderIdentity // ""' "$LEASE_FILE")" = "" ]
+}
+
+@test "deployment entrypoint: a failed action still releases the lock" {
+  setup_lock
+  export SERVICE_ACTION="switch-traffic" NP_WORKFLOW_RC=1
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.spec.holderIdentity // ""' "$LEASE_FILE")" = "" ]
+}
+
+@test "deployment entrypoint: a duplicate waits for the original and ends without running when the deployment moved past it" {
+  setup_lock
+  export SERVICE_ACTION="finalize-blue-green"
+  lease_held_then_released 2 "finalized"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "waiting for it to finish"
+  assert_contains "$output" "lock_wait.yaml"
+  assert_contains "$output" "--no-output"
+  assert_contains "$output" "already 'finalized': action finalize-blue-green was already applied"
+  [[ "$output" != *"WORKFLOW RAN"* ]]
+}
+
+@test "deployment entrypoint: a duplicate waits for the original and runs again when the status does not show it applied" {
+  setup_lock
+  export SERVICE_ACTION="start-blue-green"
+  lease_held_then_released 2 "running"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "waiting for it to finish"
+  assert_contains "$output" "WORKFLOW RAN"
+}
+
+@test "deployment entrypoint: the wait looks at the entrypoint's lease even if the workflow resets K8S_NAMESPACE" {
+  setup_lock
+  export SERVICE_ACTION="start-blue-green"
+  lease_held_then_released 2
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Lock acquired"
+  ! grep -q -- "-n nullplatform" "$BATS_TEST_TMPDIR/kubectl.calls"
+}
+
+@test "deployment entrypoint: the next action waits for the running one, then runs" {
+  setup_lock
+  export SERVICE_ACTION="switch-traffic"
+  lease_held_then_released 2
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "waiting for it to finish"
+  assert_contains "$output" "WORKFLOW RAN"
+}
+
+@test "deployment entrypoint: when the lock cannot be used the action runs without it" {
+  setup_lock
+  export SERVICE_ACTION="start-blue-green" KUBECTL_FORBIDDEN=true
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Deployment lock not available on scope scope-123: running without it"
+  assert_contains "$output" "WORKFLOW RAN"
+}
+
+@test "deployment entrypoint: actions that do not change the scope never touch the lock" {
+  setup_lock
+  export SERVICE_ACTION="diagnose-deployment"
+
+  run bash "$BATS_TEST_DIRNAME/../entrypoint"
+
+  assert_contains "$output" "WORKFLOW RAN"
+  [ ! -f "$LEASE_FILE" ]
+}
