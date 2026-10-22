@@ -834,7 +834,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     np_scope_explain() { :; }
