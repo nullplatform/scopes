@@ -26,7 +26,7 @@ setup() {
   np() {
     case "$1" in
       deployment)
-        echo "running"
+        echo '{"status":"running"}'
         ;;
     esac
   }
@@ -83,7 +83,7 @@ teardown() {
 
 @test "wait_deployment_active: accepts waiting_for_instances status" {
   np() {
-    echo "waiting_for_instances"
+    echo '{"status":"waiting_for_instances"}'
   }
   export -f np
 
@@ -97,7 +97,7 @@ teardown() {
   export SKIP_DEPLOYMENT_STATUS_CHECK="true"
 
   np() {
-    echo "failed"  # Would fail if checked
+    echo '{"status":"failed"}'
   }
   export -f np
 
@@ -184,7 +184,7 @@ teardown() {
 
 @test "wait_deployment_active: fails when deployment status is null" {
   np() {
-    echo "null"
+    echo '{"status":null}'
   }
   export -f np
 
@@ -198,7 +198,7 @@ teardown() {
   export SKIP_DEPLOYMENT_STATUS_CHECK="false"
 
   np() {
-    echo "failed"
+    echo '{"status":"failed"}'
   }
   export -f np
 
@@ -217,7 +217,7 @@ teardown() {
       echo "Error connecting to API" >&2
       return 1
     fi
-    echo "running"
+    echo '{"status":"running"}'
   }
   export -f np
 
@@ -321,7 +321,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -359,7 +359,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -484,7 +484,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -519,7 +519,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -577,7 +577,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -629,7 +629,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -688,7 +688,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -733,7 +733,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -786,7 +786,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     np_scope_explain() { echo \"EXPLAIN \$*\"; }
@@ -945,7 +945,7 @@ teardown() {
         echo "$*" >> "$PATCH_LOG"
         ;;
       *)
-        echo "running"
+        echo '{"status":"running"}'
         ;;
     esac
   }
@@ -1002,7 +1002,7 @@ teardown() {
           echo \"\$*\" >> \"\$PATCH_LOG\"
           ;;
         *)
-          echo 'running'
+          echo '{\"status\":\"running\"}'
           ;;
       esac
     }
@@ -1054,7 +1054,7 @@ teardown() {
         return 1
         ;;
       *)
-        echo "running"
+        echo '{"status":"running"}'
         ;;
     esac
   }

@@ -1,41 +1,38 @@
 #!/bin/bash
-# =============================================================================
-# Deployment status helpers, shared by service/deployment/entrypoint and
-# wait_deployment_active. Sourced; expects DEPLOYMENT_ID.
-# =============================================================================
 
 DEPLOYMENT_STATUS_READ_ATTEMPTS="${DEPLOYMENT_STATUS_READ_ATTEMPTS:-3}"
 DEPLOYMENT_STATUS_READ_RETRY_SECONDS="${DEPLOYMENT_STATUS_READ_RETRY_SECONDS:-2}"
 
-# deployment_status_read: prints the deployment's status, retrying a few times.
-# Returns 1 when the CLI keeps failing (prints its error) and 2 when it answers
-# without a status, so a caller never mistakes a failed read for a status.
+DS_OK=0
+DS_CLI_ERROR=1
+DS_NO_STATUS=2
+
+export DEPLOYMENT_STATUS="" DEPLOYMENT_STATUS_ERROR=""
+
 deployment_status_read() {
   local out rc attempt
+  DEPLOYMENT_STATUS=""
+  DEPLOYMENT_STATUS_ERROR=""
   for ((attempt = 1; attempt <= DEPLOYMENT_STATUS_READ_ATTEMPTS; attempt++)); do
-    if out=$(np deployment read --id "$DEPLOYMENT_ID" --query .status 2>&1); then
-      if [[ -n "$out" && "$out" != "null" ]]; then
-        echo "$out"
-        return 0
+    if out=$(np deployment read --id "$DEPLOYMENT_ID" --format json 2>&1); then
+      if DEPLOYMENT_STATUS=$(jq -er '.status | select(type == "string" and length > 0)' <<<"$out" 2>/dev/null); then
+        DEPLOYMENT_STATUS_ERROR=""
+        return "$DS_OK"
       fi
-      rc=2
+      DEPLOYMENT_STATUS=""
+      DEPLOYMENT_STATUS_ERROR="no status in the response"
+      rc=$DS_NO_STATUS
     else
-      rc=1
+      DEPLOYMENT_STATUS_ERROR="$out"
+      rc=$DS_CLI_ERROR
     fi
     if [ "$attempt" -lt "$DEPLOYMENT_STATUS_READ_ATTEMPTS" ]; then
       sleep "$DEPLOYMENT_STATUS_READ_RETRY_SECONDS"
     fi
   done
-  echo "$out"
   return "$rc"
 }
 
-# deployment_action_applied_statuses <action>: the statuses a deployment only
-# reaches once <action> was applied. The platform re-delivers an action when
-# the agent or worker running it dies, and a delivery can also arrive late; on
-# these statuses the action's effect is already in place. Any other status,
-# including incompatible ones (failed, another action's), is left to the
-# workflow, which rejects them as before.
 deployment_action_applied_statuses() {
   case "$1" in
     start-initial|start-blue-green|switch-traffic) echo "finalizing finalized" ;;
@@ -45,7 +42,6 @@ deployment_action_applied_statuses() {
   esac
 }
 
-# deployment_action_already_applied <action> <status>
 deployment_action_already_applied() {
   local statuses
   statuses=$(deployment_action_applied_statuses "$1")

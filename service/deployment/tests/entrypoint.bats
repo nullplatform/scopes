@@ -36,7 +36,7 @@ teardown() {
 mock_np() {
   np() {
     if [[ "$1 $2" == "deployment read" ]]; then
-      echo "running"
+      echo '{"status":"running"}'
       return 0
     fi
     if [[ "$*" == *"--help"* ]]; then
@@ -190,18 +190,11 @@ mock_np() {
   assert_contains "$output" "--include-secrets"
 }
 
-# =============================================================================
-# Re-delivered or late actions: deployment already past this action
-# =============================================================================
-
-# np mock: `deployment read` answers $NP_DEPLOYMENT_STATUS (or fails when
-# $NP_DEPLOYMENT_READ_FAILS is true); the workflow command echoes a marker so
-# tests can tell whether it ran.
 mock_np_with_status() {
   np() {
     if [[ "$1 $2" == "deployment read" ]]; then
       [ "${NP_DEPLOYMENT_READ_FAILS:-false}" = "true" ] && { echo "Error connecting to API" >&2; return 1; }
-      echo "$NP_DEPLOYMENT_STATUS"
+      jq -cn --arg s "$NP_DEPLOYMENT_STATUS" '{status: (if $s == "null" then null else $s end)}'
       return 0
     fi
     if [[ "$*" == *"--help"* ]]; then
@@ -279,7 +272,7 @@ mock_np_with_status() {
 
 @test "deployment entrypoint: the status is read without passing the api key" {
   np() {
-    if [[ "$1 $2" == "deployment read" ]]; then echo "np $*" > "$BATS_TEST_TMPDIR/read.args"; echo "running"; return 0; fi
+    if [[ "$1 $2" == "deployment read" ]]; then echo "np $*" > "$BATS_TEST_TMPDIR/read.args"; echo '{"status":"running"}'; return 0; fi
     echo "WORKFLOW RAN: np $*"
   }
   export -f np
@@ -289,6 +282,7 @@ mock_np_with_status() {
 
   assert_contains "$output" "WORKFLOW RAN"
   [[ "$(cat "$BATS_TEST_TMPDIR/read.args")" != *"--api-key"* ]]
+  assert_contains "$(cat "$BATS_TEST_TMPDIR/read.args")" "--format json"
 }
 
 @test "deployment entrypoint: actions without a final status never read it" {

@@ -309,18 +309,19 @@ while true; do
     fi
 
     log debug "📡 Checking deployment status (attempt $iteration/$MAX_ITERATIONS)..."
-    D_STATUS=$(deployment_status_read)
+    deployment_status_read
     case $? in
-        1)
+        "$DS_CLI_ERROR")
             log error "   ❌ Failed to read deployment status"
-            log error "📋 NP CLI error: $D_STATUS"
+            log error "📋 NP CLI error: $DEPLOYMENT_STATUS_ERROR"
             exit 1
             ;;
-        2)
+        "$DS_NO_STATUS")
             log error "   ❌ Deployment status not found for ID $DEPLOYMENT_ID"
             exit 1
             ;;
     esac
+    D_STATUS="$DEPLOYMENT_STATUS"
 
     if [ "$SKIP_DEPLOYMENT_STATUS_CHECK" != true ]; then
         if [[ $D_STATUS != "running" && $D_STATUS != "waiting_for_instances" ]]; then

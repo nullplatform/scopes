@@ -1,7 +1,4 @@
 #!/usr/bin/env bats
-# =============================================================================
-# Unit tests for deployment/deployment_status
-# =============================================================================
 
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -12,44 +9,63 @@ setup() {
   source "$PROJECT_ROOT/k8s/deployment/deployment_status"
 }
 
-@test "deployment_status_read: prints the status" {
-  np() { echo "np $*" >> "$CALLS_FILE"; echo "running"; }
+@test "deployment_status_read: leaves the status in DEPLOYMENT_STATUS" {
+  np() { echo "np $*" >> "$CALLS_FILE"; echo '{"id":"deploy-456","status":"running"}'; }
 
-  run deployment_status_read
+  rc=0
+  deployment_status_read || rc=$?
 
-  [ "$status" -eq 0 ]
-  assert_equal "$output" "running"
-  assert_equal "$(cat "$CALLS_FILE")" "np deployment read --id deploy-456 --query .status"
+  assert_equal "$rc" "$DS_OK"
+  assert_equal "$DEPLOYMENT_STATUS" "running"
+  assert_equal "$DEPLOYMENT_STATUS_ERROR" ""
+  assert_equal "$(cat "$CALLS_FILE")" "np deployment read --id deploy-456 --format json"
+}
+
+@test "deployment_status_read: text printed by the CLI around the response is never taken as the status" {
+  np() { echo "A new version of np is available"; echo '{"status":"finalized"}'; }
+
+  rc=0
+  deployment_status_read || rc=$?
+
+  assert_equal "$rc" "$DS_NO_STATUS"
+  assert_equal "$DEPLOYMENT_STATUS" ""
 }
 
 @test "deployment_status_read: retries a failed read" {
   np() {
     echo x >> "$CALLS_FILE"
-    [ "$(wc -l < "$CALLS_FILE")" -ge 2 ] && { echo "finalized"; return 0; }
-    echo "Error connecting to API" >&2; return 1
+    [ "$(wc -l < "$CALLS_FILE")" -ge 2 ] && { echo '{"status":"finalized"}'; return 0; }
+    echo "Error connecting to API"; return 1
   }
 
-  run deployment_status_read
+  rc=0
+  deployment_status_read || rc=$?
 
-  [ "$status" -eq 0 ]
-  assert_equal "$output" "finalized"
+  assert_equal "$rc" "$DS_OK"
+  assert_equal "$DEPLOYMENT_STATUS" "finalized"
 }
 
-@test "deployment_status_read: returns 1 with the CLI error when every attempt fails" {
-  np() { echo x >> "$CALLS_FILE"; echo "Error connecting to API" >&2; return 1; }
+@test "deployment_status_read: a CLI that keeps failing returns DS_CLI_ERROR with its message" {
+  np() { echo x >> "$CALLS_FILE"; echo "error: request failed with status 500"; return 1; }
 
-  run deployment_status_read
+  rc=0
+  deployment_status_read || rc=$?
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "Error connecting to API"
+  assert_equal "$rc" "$DS_CLI_ERROR"
+  assert_equal "$DEPLOYMENT_STATUS" ""
+  assert_contains "$DEPLOYMENT_STATUS_ERROR" "request failed with status 500"
   assert_equal "$(wc -l < "$CALLS_FILE" | tr -d ' ')" "3"
 }
 
-@test "deployment_status_read: returns 2 when the response has no status" {
-  for answer in "" "null"; do
+@test "deployment_status_read: a response without a status returns DS_NO_STATUS" {
+  for answer in '{"status":null}' '{"status":""}' '{}' '' 'running'; do
     np() { echo "$answer"; }
-    run deployment_status_read
-    [ "$status" -eq 2 ] || { echo "answer '$answer' returned $status"; return 1; }
+
+    rc=0
+    deployment_status_read || rc=$?
+
+    [ "$rc" -eq "$DS_NO_STATUS" ] || { echo "answer '$answer' returned $rc"; return 1; }
+    assert_equal "$DEPLOYMENT_STATUS" ""
   done
 }
 
