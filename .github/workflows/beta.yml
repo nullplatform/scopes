@@ -1,0 +1,72 @@
+name: beta
+
+# Publishes a beta image from every pull request of this repository: when it is
+# opened, on each push and when it is reopened. publish-test-image-oci builds the
+# pull request head, pushes it to the image's `beta/` repository as
+# test-<branch>-<short sha> and registers it as a nullplatform oci_image artifact,
+# so the scope can be tried on a test scope before the merge.
+#
+# The beta role trusts the `pull_request` sub of the services-*/scopes*
+# repositories and can only write under beta/*, so a beta can never overwrite a
+# released image. Every published image already has its beta/ repository (the
+# dispatcher creates it with the image). Nothing deletes beta tags.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# A newer push to the same pull request supersedes the running build.
+concurrency:
+  group: beta-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  beta-containers:
+    # The template repository never publishes. Fork pull requests get no OIDC token
+    # nor secrets, and dependency bots are skipped: Dependabot gets no secrets and
+    # Renovate would publish a beta for every bump.
+    if: >-
+      ${{ !github.event.repository.is_template &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.user.type != 'Bot' }}
+    uses: nullplatform/actions-nullplatform/.github/workflows/publish-test-image-oci.yml@v1
+    with:
+      image_name: beta/scopes/containers
+      dockerfile: docker/containers.Dockerfile
+      submodules: true
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_BETA_ROLE_ARN }}
+      artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+
+  beta-scheduled-task:
+    # Same filter as the job above.
+    if: >-
+      ${{ !github.event.repository.is_template &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.user.type != 'Bot' }}
+    uses: nullplatform/actions-nullplatform/.github/workflows/publish-test-image-oci.yml@v1
+    with:
+      image_name: beta/scopes/scheduled-task
+      dockerfile: docker/scheduled-task.Dockerfile
+      submodules: true
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_BETA_ROLE_ARN }}
+      artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+
+  beta-containers-datadog:
+    # Builds on the containers beta of this same pull request, not on a release.
+    needs: beta-containers
+    uses: nullplatform/actions-nullplatform/.github/workflows/publish-test-image-oci.yml@v1
+    with:
+      image_name: beta/scopes/containers-datadog
+      dockerfile: docker/containers-datadog.Dockerfile
+      submodules: true
+      build_args: |
+        BASE_IMAGE=public.ecr.aws/nullplatform/beta/scopes/containers
+        BASE_VERSION=${{ needs.beta-containers.outputs.image_tag }}
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_BETA_ROLE_ARN }}
+      artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
