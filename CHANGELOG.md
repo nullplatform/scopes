@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Fix: searching the logs of a k8s scope over a wide time range now finds matches past the first read of each pod, instead of returning "No logs" with an empty token that ended pagination
 - k8s deployment actions on the same scope now run one at a time: an action launched while another is running waits for it instead of overlapping
 - Fix: a k8s deployment action that arrives again after its deployment already moved past it (e.g. a late finalize) now ends successfully instead of failing
 - Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains

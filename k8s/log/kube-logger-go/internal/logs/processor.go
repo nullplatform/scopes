@@ -16,69 +16,73 @@ func NewProcessor() *Processor {
 	return &Processor{}
 }
 
-// ProcessLinesFromChannel processes log lines received from a channel and returns structured log entries.
-// endTime is applied here because the Kubernetes API only accepts a lower bound (SinceTime).
-func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime, endTime string) []types.LogEntry {
-    var entries []types.LogEntry
+// ProcessLinesFromChannel reads one pod's lines from a channel and returns what the read
+// covered. endTime is applied here because the Kubernetes API only accepts a lower bound
+// (SinceTime). ScannedUpTo advances through every line inside the window, also the ones the
+// filter rejects, so the next page resumes after them instead of reading them again.
+func (p *Processor) ProcessLinesFromChannel(logCh <-chan string, filterPattern, podName, podUID, lastReadTime, endTime string) types.PodScan {
+	scan := types.PodScan{PodID: podUID, Entries: []types.LogEntry{}}
 
-    var terms []string
-    if filterPattern != "" {
-        terms = strings.Fields(filterPattern)
-    }
+	var terms []string
+	if filterPattern != "" {
+		terms = strings.Fields(filterPattern)
+	}
 
-    for line := range logCh {
-        if line == "" {
-            continue
-        }
+	for line := range logCh {
+		if line == "" {
+			continue
+		}
 
-        parts := strings.SplitN(line, " ", 2)
-        if len(parts) < 2 {
-            continue
-        }
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) < 2 {
+			continue
+		}
 
-        timestamp := parts[0]
-        message := parts[1]
+		timestamp := parts[0]
+		message := parts[1]
 
-        if !p.isValidTimestamp(timestamp) {
-            continue
-        }
+		if !p.isValidTimestamp(timestamp) {
+			continue
+		}
 
-        if lastReadTime != "" && lastReadTime != "null" && lastReadTime != "empty" {
-            if timestamp <= lastReadTime {
-                continue
-            }
-        }
+		if lastReadTime != "" && lastReadTime != "null" && lastReadTime != "empty" {
+			if timestamp <= lastReadTime {
+				continue
+			}
+		}
 
-        // The stream is chronological, so the first line past the window ends it.
-        if endTime != "" && timestamp > endTime {
-            break
-        }
+		// The stream is chronological, so the first line past the window ends it.
+		if endTime != "" && timestamp > endTime {
+			scan.Done = true
+			break
+		}
 
-        if len(terms) > 0 {
-            matches := true
-            for _, term := range terms {
-                if !strings.Contains(line, term) {
-                    matches = false
-                    break
-                }
-            }
-            if !matches {
-                continue
-            }
-        }
+		scan.ScannedUpTo = timestamp
 
-        entry := types.LogEntry{
-            Message:  message,
-            DateTime: timestamp,
-            Pod: types.PodInfo{
-                Name: podName,
-                ID:   podUID,
-            },
-        }
-        entries = append(entries, entry)
-    }
+		if len(terms) > 0 {
+			matches := true
+			for _, term := range terms {
+				if !strings.Contains(line, term) {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+		}
 
-    return entries
+		scan.Entries = append(scan.Entries, types.LogEntry{
+			Message:  message,
+			DateTime: timestamp,
+			Pod: types.PodInfo{
+				Name: podName,
+				ID:   podUID,
+			},
+		})
+	}
+
+	return scan
 }
 
 // ProcessLines processes raw log content and returns structured log entries

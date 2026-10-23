@@ -41,38 +41,57 @@ func encodeToken(data map[string]string) string {
 	return base64.StdEncoding.EncodeToString(jsonData)
 }
 
-// Page orders the entries, cuts them to the limit and returns the token that resumes after
-// the cut. The token records the newest entry kept per pod, so the cut keeps the oldest.
-func Page(entries []types.LogEntry, limit int, previous map[string]string) ([]types.LogEntry, string) {
-	sort.Slice(entries, func(i, j int) bool {
+// Page merges the pod scans, orders their entries, cuts them to the limit and returns the
+// token that resumes after what this page covered. A pod whose entries the cut dropped
+// resumes after its newest kept entry; any other pod resumes after the last line it read,
+// matched or not, so a filter that rejects a whole read still moves the search forward.
+// The token is empty only when no pod has anything left to read in the window, so an empty
+// page can still carry one: the caller asks again.
+func Page(scans []types.PodScan, limit int, previous map[string]string) ([]types.LogEntry, string) {
+	entries := []types.LogEntry{}
+	for _, scan := range scans {
+		entries = append(entries, scan.Entries...)
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].DateTime < entries[j].DateTime
 	})
-
 	if len(entries) > limit {
 		entries = entries[:limit]
 	}
-	if len(entries) == 0 {
-		entries = []types.LogEntry{}
+
+	// Entries are in time order, so the last one kept per pod is its newest.
+	keptPerPod := make(map[string]int, len(scans))
+	newestKept := make(map[string]string, len(scans))
+	for _, entry := range entries {
+		keptPerPod[entry.Pod.ID]++
+		newestKept[entry.Pod.ID] = entry.DateTime
 	}
 
-	return entries, GenerateToken(entries, previous)
-}
-
-// GenerateToken creates a pagination token from log entries. previous keeps the cursor of a
-// pod that contributed nothing to this page, so the next page resumes it instead of reading
-// it again from start_time. An empty page returns an empty token, which ends pagination.
-func GenerateToken(logs []types.LogEntry, previous map[string]string) string {
-	if len(logs) == 0 {
-		return ""
-	}
-
-	tokenData := make(map[string]string, len(previous)+len(logs))
+	cursors := make(map[string]string, len(previous)+len(scans))
 	for podID, lastRead := range previous {
-		tokenData[podID] = lastRead
-	}
-	for _, entry := range logs {
-		tokenData[entry.Pod.ID] = entry.DateTime
+		cursors[podID] = lastRead
 	}
 
-	return encodeToken(tokenData)
+	more := false
+	for _, scan := range scans {
+		if keptPerPod[scan.PodID] < len(scan.Entries) {
+			more = true
+			if newest, ok := newestKept[scan.PodID]; ok {
+				cursors[scan.PodID] = newest
+			}
+			continue
+		}
+		if scan.ScannedUpTo != "" {
+			cursors[scan.PodID] = scan.ScannedUpTo
+		}
+		if !scan.Done {
+			more = true
+		}
+	}
+
+	if !more {
+		return entries, ""
+	}
+	return entries, encodeToken(cursors)
 }
