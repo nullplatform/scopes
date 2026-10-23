@@ -1,0 +1,105 @@
+#!/bin/bash
+
+DEPLOY_LOCK_LEASE_SECONDS="${DEPLOY_LOCK_LEASE_SECONDS:-60}"
+DEPLOY_LOCK_RENEW_SECONDS="${DEPLOY_LOCK_RENEW_SECONDS:-10}"
+
+deployment_lock_name() { echo "np-deploy-lock-${SCOPE_ID}"; }
+deployment_lock_namespace() { echo "${NP_DEPLOY_LOCK_NAMESPACE:-${K8S_NAMESPACE:-nullplatform}}"; }
+
+deployment_lock_applies() {
+  case "$1" in
+    start-initial|start-blue-green|switch-traffic|rollback-deployment|finalize-blue-green|delete-deployment) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_dl_now() { date -u +%s; }
+_dl_microtime() { date -u +%Y-%m-%dT%H:%M:%S.000000Z; }
+
+_dl_get() {
+  kubectl get lease "$(deployment_lock_name)" -n "$(deployment_lock_namespace)" -o json 2>/dev/null
+}
+
+_dl_claim() {
+  jq -c \
+    --arg holder "$NP_DEPLOY_LOCK_HOLDER" \
+    --arg mt "$(_dl_microtime)" \
+    --arg now "$(_dl_now)" \
+    --arg action "${SERVICE_ACTION:-}" \
+    --arg deployment "${DEPLOYMENT_ID:-}" \
+    --argjson duration "$DEPLOY_LOCK_LEASE_SECONDS" '
+    del(.metadata.managedFields)
+    | .spec.holderIdentity = $holder
+    | .spec.leaseDurationSeconds = $duration
+    | .spec.acquireTime = $mt
+    | .spec.renewTime = $mt
+    | .metadata.annotations = ((.metadata.annotations // {}) + {
+        "nullplatform.com/action": $action,
+        "nullplatform.com/deployment-id": $deployment,
+        "nullplatform.com/renew-epoch": $now
+      })' <<<"$1"
+}
+
+deployment_lock_try_acquire() {
+  local lease holder renew now
+  if ! lease=$(_dl_get); then
+    local fresh
+    fresh=$(jq -nc --arg name "$(deployment_lock_name)" --arg ns "$(deployment_lock_namespace)" \
+      --arg scope "${SCOPE_ID:-}" \
+      '{apiVersion: "coordination.k8s.io/v1", kind: "Lease",
+        metadata: {name: $name, namespace: $ns,
+                   labels: {"nullplatform.com/managed-by": "scopes", "nullplatform.com/scope-id": $scope}},
+        spec: {}}')
+    if _dl_claim "$fresh" | kubectl create -f - >/dev/null 2>&1; then
+      return 0
+    fi
+    _dl_get >/dev/null && return 1
+    return 2
+  fi
+
+  holder=$(jq -r '.spec.holderIdentity // ""' <<<"$lease")
+  renew=$(jq -r '.metadata.annotations["nullplatform.com/renew-epoch"] // "0"' <<<"$lease")
+  now=$(_dl_now)
+
+  [ "$holder" = "$NP_DEPLOY_LOCK_HOLDER" ] && return 0
+  if [ -n "$holder" ] && [ $((now - renew)) -lt "$DEPLOY_LOCK_LEASE_SECONDS" ]; then
+    return 1
+  fi
+
+  _dl_claim "$lease" | kubectl replace -f - >/dev/null 2>&1 && return 0
+  return 1
+}
+
+deployment_lock_held() {
+  local lease
+  lease=$(_dl_get) || return 1
+  [ "$(jq -r '.spec.holderIdentity // ""' <<<"$lease")" = "$NP_DEPLOY_LOCK_HOLDER" ]
+}
+
+deployment_lock_holder_summary() {
+  local lease
+  lease=$(_dl_get) || return 0
+  jq -r '"\(.metadata.annotations["nullplatform.com/action"] // "an action") of deployment \(.metadata.annotations["nullplatform.com/deployment-id"] // "?")"' <<<"$lease"
+}
+
+deployment_lock_release() {
+  local lease
+  for _ in 1 2 3; do
+    lease=$(_dl_get) || return 0
+    [ "$(jq -r '.spec.holderIdentity // ""' <<<"$lease")" = "$NP_DEPLOY_LOCK_HOLDER" ] || return 0
+    if jq -c 'del(.metadata.managedFields) | del(.spec.holderIdentity)' <<<"$lease" |
+      kubectl replace -f - >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 0
+}
+
+deployment_lock_renew_loop() {
+  while sleep "$DEPLOY_LOCK_RENEW_SECONDS"; do
+    deployment_lock_held || continue
+    kubectl patch lease "$(deployment_lock_name)" -n "$(deployment_lock_namespace)" --type=merge \
+      -p "{\"metadata\":{\"annotations\":{\"nullplatform.com/renew-epoch\":\"$(_dl_now)\"}},\"spec\":{\"renewTime\":\"$(_dl_microtime)\"}}" \
+      >/dev/null 2>&1
+  done
+}
