@@ -90,6 +90,7 @@ address translation sits in front of the cluster.
 |----------|-------------|------------------------------|
 | **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `deployment.deployment_strategy` |
 | **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Maximum wait time for deployments (seconds) | `deployment.deployment_max_wait_seconds` |
+| **PRESTOP_SLEEP_MODE** | How the application container waits before SIGTERM so the balancer stops routing to it: `native` (kubelet sleep action, Kubernetes >= 1.30, works on images without `/bin/sleep`), `exec` (`/bin/sleep` inside the image) or `auto` (default: `native` when the cluster supports it, otherwise `exec`) | `deployment.prestop_sleep_mode` |
 | **KUBECTL_DELETE_TIMEOUT_SECONDS** | Maximum time a `kubectl delete` waits for the objects to be gone, finalizers included (seconds, default `300`). When it runs out, the deletion is logged as failed instead of hanging the workflow | - |
 
 #### Traffic Manager

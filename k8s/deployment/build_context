@@ -372,6 +372,42 @@ fi
 
 log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
 
+# How the application container waits in preStop. "exec" runs /bin/sleep inside the
+# image, which fails on images without a shell (distroless, scratch): the hook errors,
+# the container gets SIGTERM at once and the balancer keeps sending it requests.
+# "native" uses the kubelet sleep action (Kubernetes >= 1.30), independent of the image.
+# "auto" picks native when the API server supports it and falls back to exec otherwise.
+PRESTOP_SLEEP_MODE=$(get_config_value \
+  --env PRESTOP_SLEEP_MODE \
+  --provider '.providers["scope-configurations"].deployment.prestop_sleep_mode' \
+  --default "auto"
+)
+
+case "$PRESTOP_SLEEP_MODE" in
+  native|exec) ;;
+  auto)
+    K8S_SERVER_MINOR=$(kubectl version -o json 2>/dev/null \
+      | jq -r '.serverVersion | select(.major == "1") | .minor' 2>/dev/null \
+      | tr -cd '0-9' || true)
+    if [[ -n "$K8S_SERVER_MINOR" ]] && (( K8S_SERVER_MINOR >= 30 )); then
+      PRESTOP_SLEEP_MODE="native"
+    else
+      PRESTOP_SLEEP_MODE="exec"
+      log debug "🔍 Kubernetes server version unknown or older than 1.30, preStop falls back to /bin/sleep"
+    fi
+    ;;
+  *)
+    log error "❌ PRESTOP_SLEEP_MODE must be one of auto, native or exec, got: '$PRESTOP_SLEEP_MODE'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set auto (default), native (Kubernetes >= 1.30) or exec in values.yaml or the scope-configurations provider"
+    log error ""
+    exit 1
+    ;;
+esac
+
+log debug "🔍 prestop_sleep_mode resolved to ${PRESTOP_SLEEP_MODE}"
+
 BLUE_NAME_FALLBACK=""
 if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
   BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
@@ -436,6 +472,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           --arg main_http_port "$MAIN_HTTP_PORT" \
           --arg main_traffic_manager_port "$MAIN_TRAFFIC_MANAGER_PORT" \
+          --arg prestop_sleep_mode "$PRESTOP_SLEEP_MODE" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -450,7 +487,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 container_cpu_in_millicores: $container_cpu_in_millicores,
                 blue_additional_port_services: $blue_additional_port_services,
                 main_http_port: ($main_http_port | tonumber),
-                main_traffic_manager_port: ($main_traffic_manager_port | tonumber)
+                main_traffic_manager_port: ($main_traffic_manager_port | tonumber),
+                prestop_sleep_mode: $prestop_sleep_mode
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")

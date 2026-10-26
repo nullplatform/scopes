@@ -51,6 +51,9 @@ configuration:
 # port for pod-to-pod traffic BEFORE setting this — with VPC CNI custom
 # networking that is the security group in the ENIConfig CRD, not the node's.
 #  MAIN_TRAFFIC_MANAGER_PORT: 10080
+# preStop wait of the application container: auto (default), native or exec.
+# native needs Kubernetes >= 1.30; exec needs /bin/sleep in the application image.
+#  PRESTOP_SLEEP_MODE: auto
   IMAGE_PULL_SECRETS:
     ENABLED: true
     SECRETS:

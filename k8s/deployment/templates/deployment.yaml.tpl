@@ -358,10 +358,15 @@ spec:
           {{- end }}
           lifecycle:
             preStop:
+              {{- if and (has . "prestop_sleep_mode") (eq .prestop_sleep_mode "native") }}
+              sleep:
+                seconds: 16
+              {{- else }}
               exec:
                 command:
                   - /bin/sleep
                   - '16'
+              {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
