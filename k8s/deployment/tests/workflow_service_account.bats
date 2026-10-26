@@ -120,3 +120,19 @@ build_context_strict() {
     "$PROJECT_ROOT/k8s/deployment/workflows/blue_green.yaml" "$PROJECT_ROOT/scheduled_task"
   assert_equal "$status" "1"
 }
+
+# Tolerant actions may drop modifier entries or the per-scope service account, so
+# a pod spec they render must only be deleted, never applied.
+@test "tolerant workflows never apply a rendered pod spec" {
+  for wf in k8s/deployment/workflows/rollback.yaml k8s/deployment/workflows/switch_traffic.yaml \
+            k8s/deployment/workflows/finalize.yaml k8s/deployment/workflows/delete.yaml \
+            k8s/scope/workflows/delete.yaml; do
+    applied=$(yq -o=json "$PROJECT_ROOT/$wf" | jq -r '
+      [.. | objects | select((.file | type) == "string" and (.file | startswith("$SERVICE_PATH")))
+          | {file, action: (.configuration.ACTION // "")}]
+      | (map(.file | test("/(build_deployment|build_blue_deployment|scope/iam/build_service_account)$")) | index(true)) as $i
+      | if $i == null then [] else .[$i:] end
+      | map(select((.file | endswith("/apply_templates")) and .action != "delete")) | length')
+    assert_equal "$applied" "0" "$wf"
+  done
+}
