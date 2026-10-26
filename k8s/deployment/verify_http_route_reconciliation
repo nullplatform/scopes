@@ -40,6 +40,11 @@ trace_parents_status() {
 
 fail_reconciliation() {
     trace_parents_status "$parents_status"
+    if [ "$accepted_status" == "False" ]; then
+        np_scope_failure "$accepted_reason"
+    else
+        np_scope_failure "$resolved_reason"
+    fi
     np_scope_step_end 1 "HTTPRoute $HTTPROUTE_NAME failed to reconcile on gateway $1"
     exit 1
 }
@@ -166,6 +171,7 @@ httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o 
 parents_status=$(parents_status_of "$httproute_json")
 print_parents_conditions "$parents_status"
 trace_parents_status "$parents_status"
+np_scope_failure ReconcileTimeout
 log error "🔧 How to fix:"
 log error "   - Check Gateway controller logs"
 log error "   - Verify Gateway and Istio configuration"

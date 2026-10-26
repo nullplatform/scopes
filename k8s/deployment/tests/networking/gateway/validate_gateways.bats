@@ -39,7 +39,7 @@ setup() {
   }
   export -f kubectl
 
-  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes; do
+  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes np_scope_failure; do
     eval "$helper() { :; }"
     export -f "$helper"
   done
@@ -68,7 +68,7 @@ trace_platform_step() {
 
 mock_tracing() {
   export TRACE_LOG="$BATS_TEST_TMPDIR/trace.log"
-  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes; do
+  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes np_scope_failure; do
     eval "$helper() { echo \"$helper \$*\" >> \"\$TRACE_LOG\"; }"
     export -f "$helper"
   done
@@ -187,6 +187,8 @@ get gateway partners -n edge -o name"
   [ "$status" -eq 1 ]
   echo "$output" | grep '"status":"failed"' | grep -q 'validate-gateways@0.0'
   echo "$output" | grep -q 'Gateways not found: edge/partners'
+  echo "$output" | grep 'validate-gateways@0.0' | grep -q '"failure.reason":"GatewayNotFound"'
+  echo "$output" | grep '"run_id":"deployment-42"' | grep -q '"failure.reason":"GatewayNotFound"'
 }
 
 @test "validate_gateways: traces the validation step and every gateway it consumes" {
@@ -210,7 +212,8 @@ np_scope_step_end 0'
 
   [ "$status" -eq 1 ]
   assert_contains "$(cat "$TRACE_LOG")" 'np_scope_output missing_gateways ["gateways/gateway-internal","edge/partners"]'
-  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_end 1 Gateways not found: gateways/gateway-internal edge/partners"
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_failure GatewayNotFound
+np_scope_step_end 1 Gateways not found: gateways/gateway-internal edge/partners"
   [[ "$(cat "$TRACE_LOG")" != *"np_scope_consumes"* ]] || false
 }
 
@@ -221,7 +224,8 @@ np_scope_step_end 0'
   run bash -c 'source "$SCRIPT"'
 
   [ "$status" -eq 1 ]
-  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_end 1 Could not check gateway edge/partners"
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_failure GatewayCheckFailed
+np_scope_step_end 1 Could not check gateway edge/partners"
 }
 
 @test "validate_gateways: fails the trace step on invalid additional gateways" {
@@ -232,5 +236,6 @@ np_scope_step_end 0'
 
   [ "$status" -eq 1 ]
   assert_equal "$(cat "$TRACE_LOG")" "np_scope_step_begin validate-gateways --title Validate gateways for private scope
+np_scope_failure InvalidGatewayConfig
 np_scope_step_end 1 Invalid additional_private_gateways"
 }

@@ -28,7 +28,7 @@ setup() {
   export ACCEPTED='{"type":"Accepted","status":"True","reason":"Accepted","message":"Route accepted"}'
   export RESOLVED='{"type":"ResolvedRefs","status":"True","reason":"ResolvedRefs","message":"Refs resolved"}'
 
-  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress; do
+  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress np_scope_failure; do
     eval "$helper() { :; }"
     export -f "$helper"
   done
@@ -61,7 +61,7 @@ single_gateway() {
 
 mock_tracing() {
   export TRACE_LOG="$BATS_TEST_TMPDIR/trace.log"
-  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress; do
+  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress np_scope_failure; do
     eval "$helper() { echo \"$helper \$*\" >> \"\$TRACE_LOG\"; }"
     export -f "$helper"
   done
@@ -293,7 +293,8 @@ np_scope_explain --title Verify networking --what HTTPRoute k-8-s-my-app-scope-1
 
   [ "$status" -eq 1 ]
   assert_contains "$(cat "$TRACE_LOG")" 'np_scope_output gateways [{"gateway":"gateways/gateway-public","accepted":"True","resolved_refs":"True"},{"gateway":"edge/partners","accepted":"False","resolved_refs":"True"}]'
-  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_end 1 HTTPRoute k-8-s-my-app-scope-123-internet-facing failed to reconcile on gateway edge/partners"
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_failure NotAllowedByListeners
+np_scope_step_end 1 HTTPRoute k-8-s-my-app-scope-123-internet-facing failed to reconcile on gateway edge/partners"
   [[ "$(cat "$TRACE_LOG")" != *"np_scope_consumes"* ]] || false
 }
 
@@ -308,5 +309,6 @@ np_scope_explain --title Verify networking --what HTTPRoute k-8-s-my-app-scope-1
   [ "$status" -eq 1 ]
   assert_contains "$(cat "$TRACE_LOG")" "np_scope_progress 1 2 gateways"
   assert_contains "$(cat "$TRACE_LOG")" 'np_scope_output gateways [{"gateway":"gateways/gateway-public","accepted":"True","resolved_refs":"True"},{"gateway":"edge/partners","accepted":"Unknown","resolved_refs":"Unknown"}]'
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_failure ReconcileTimeout"
   assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_timeout HTTPRoute k-8-s-my-app-scope-123-internet-facing not reconciled after 1s"
 }

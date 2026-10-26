@@ -51,7 +51,7 @@ metadata:
   }
   export -f gomplate
 
-  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes; do
+  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes np_scope_failure; do
     eval "$helper() { :; }"
     export -f "$helper"
   done
