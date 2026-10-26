@@ -9,6 +9,9 @@ CRON=$(echo "$CONTEXT" | jq -r '.scope.capabilities.cron // empty')
 
 if [[ "$CRON" != "run-once" ]]; then
   log debug "🔍 Not a run-once deployment (cron='$CRON'), nothing to wait for"
+  if command -v np_step_skip >/dev/null 2>&1; then
+    np_step_skip "scheduled task — runs on its cron schedule, nothing to wait for"
+  fi
   exit 0
 fi
 
@@ -45,7 +48,27 @@ for (( iteration=1; iteration<=MAX_ITERATIONS; iteration++ )); do
 
     if [[ "$FAILED" -gt 0 ]]; then
       REASON=$(echo "$STATUS" | jq -r '[.status.conditions[]? | select(.type=="Failed" and .status=="True") | .message] | first // "see the logs screen for details"')
+      JOB_REASON=$(echo "$STATUS" | jq -r '[.status.conditions[]? | select(.type=="Failed" and .status=="True") | .reason // empty] | first // empty')
+      # The Job condition only says it gave up (BackoffLimitExceeded); the
+      # container's own termination says why (OOMKilled, Error + exit code).
+      POD_FAILURE=$(kubectl get pods -n "$K8S_NAMESPACE" -l "job-name=$JOB" -o json 2>/dev/null | jq -r '
+        [.items[].status.containerStatuses[]?
+          | (.state.terminated // .lastState.terminated // empty) as $t
+          | select($t.reason != "Completed")
+          | "\($t.reason)\t\(.name)\t\($t.exitCode // "")"]
+        | last // empty' 2>/dev/null || echo "")
+      IFS=$'\t' read -r FAILURE_REASON FAILURE_CONTAINER FAILURE_EXIT_CODE <<< "$POD_FAILURE" || true
+      FAILURE_REASON="${FAILURE_REASON:-$JOB_REASON}"
+      if command -v np_scope_failure >/dev/null 2>&1; then
+        np_scope_failure "$FAILURE_REASON" "${FAILURE_CONTAINER:-}" "${FAILURE_EXIT_CODE:-}"
+      fi
       log error "❌ Job $JOB failed: $REASON"
+      if [[ -n "${FAILURE_CONTAINER:-}" ]]; then
+        log error "📋 Detected: $FAILURE_REASON on container $FAILURE_CONTAINER${FAILURE_EXIT_CODE:+ (exit $FAILURE_EXIT_CODE)}"
+      fi
+      if [[ "$FAILURE_REASON" == "OOMKilled" ]]; then
+        log error "💡 The task exceeded its memory limit — raise the scope's memory"
+      fi
       log error ""
       log error "🔧 How to fix:"
       log error "   • Inspect the failed run from the logs screen"
@@ -57,6 +80,9 @@ for (( iteration=1; iteration<=MAX_ITERATIONS; iteration++ )); do
   sleep "$INTERVAL"
 done
 
+if command -v np_scope_failure >/dev/null 2>&1; then
+  np_scope_failure "WaitTimeout"
+fi
 log error "❌ Timeout waiting for job $JOB to complete after ${TIMEOUT}s"
 log error ""
 log error "💡 Possible causes:"
