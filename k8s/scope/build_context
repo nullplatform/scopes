@@ -261,8 +261,12 @@ if [[ "$K8S_MODIFIERS" == *'${np.'* ]]; then
     fi
     K8S_MODIFIERS="$MODIFIERS_EXPANDED"
   else
-    log warn "⚠️  Could not evaluate placeholders in object_modifiers; ignoring object_modifiers for this action"
-    K8S_MODIFIERS="{}"
+    # Keep the entries without placeholders: routing objects re-applied here would otherwise lose every annotation.
+    log warn "⚠️  Could not evaluate placeholders in object_modifiers; dropping every entry that holds one for this action"
+    if ! K8S_MODIFIERS=$(drop_placeholder_entries "$K8S_MODIFIERS"); then
+      log warn "⚠️  Could not drop the object_modifiers entries holding placeholders; ignoring object_modifiers for this action"
+      K8S_MODIFIERS="{}"
+    fi
   fi
 fi
 
@@ -274,6 +278,16 @@ SERVICE_ACCOUNT_ENABLED=$(get_config_value \
 SERVICE_ACCOUNT_ENABLED_RAW="$SERVICE_ACCOUNT_ENABLED"
 SERVICE_ACCOUNT_ENABLED=$(echo "$SERVICE_ACCOUNT_ENABLED" | tr '[:upper:]' '[:lower:]')
 if [ "$SERVICE_ACCOUNT_ENABLED" != "true" ] && [ "$SERVICE_ACCOUNT_ENABLED" != "false" ]; then
+  if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+    log error "   ❌ Invalid security.service_account_enabled value '$SERVICE_ACCOUNT_ENABLED_RAW' (expected true or false)"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   A typo in the scope-configurations provider or the SERVICE_ACCOUNT_ENABLED env var"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set security.service_account_enabled to true or false"
+    exit 1
+  fi
   log warn "⚠️  Invalid security.service_account_enabled value '$SERVICE_ACCOUNT_ENABLED_RAW' (expected true or false); treating it as false"
   SERVICE_ACCOUNT_ENABLED="false"
 fi

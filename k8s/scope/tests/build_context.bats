@@ -648,6 +648,16 @@ set_scope_config() {
   assert_equal "$SERVICE_ACCOUNT_ENABLED" "true"
 }
 
+@test "build_context: an invalid service_account_enabled fails in strict mode" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "ture"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "❌ Invalid security.service_account_enabled value 'ture' (expected true or false)"
+}
+
 @test "build_context: an invalid service_account_enabled warns and is treated as false" {
   set_scope_config '{"security": {"service_account_enabled": "yes"}}'
 
@@ -738,6 +748,9 @@ set_scope_config() {
 # Placeholder helper failures follow the strict / tolerant mode explicitly
 # =============================================================================
 failing_helpers() {
+  source "$PROJECT_ROOT/k8s/utils/expand_placeholders"
+  export _NP_PLACEHOLDER_JQ_DEFS
+  export -f _np_placeholder_jq drop_placeholder_entries
   expand_placeholders() { log error "   ❌ helper failed"; return 1; }
   unresolved_placeholders() { log error "   ❌ helper failed"; return 1; }
   expand_resolvable_placeholders() { log error "   ❌ helper failed"; return 1; }
@@ -757,15 +770,28 @@ failing_helpers() {
   assert_contains "$output" "helper failed"
 }
 
-@test "build_context: a placeholder helper failure warns and drops the modifiers in tolerant mode" {
+@test "build_context: a placeholder helper failure drops only the entries holding placeholders in tolerant mode" {
   failing_helpers
-  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.application_slug}"}}}, "security": {"service_account_enabled": "true"}}'
+  set_scope_config '{"object_modifiers": {"ingress": {"annotations": {"x": "${np.application_slug}", "keep": "v"}}}, "security": {"service_account_enabled": "true"}}'
 
   run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers) SA=$(echo "$CONTEXT" | jq -c .service_account)"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "⚠️  Could not evaluate placeholders in object_modifiers; ignoring object_modifiers for this action"
-  assert_contains "$output" 'MODS={} SA={"enabled":false,"name":""}'
+  assert_contains "$output" "⚠️  Could not evaluate placeholders in object_modifiers; dropping every entry that holds one for this action"
+  assert_contains "$output" 'MODS={"ingress":{"annotations":{"keep":"v"}}} SA={"enabled":false,"name":""}'
+}
+
+@test "build_context: modifiers are ignored in tolerant mode when not even the fallback can read them" {
+  failing_helpers
+  drop_placeholder_entries() { log error "   ❌ helper failed"; return 1; }
+  export -f drop_placeholder_entries
+  set_scope_config '{"object_modifiers": {"ingress": {"annotations": {"x": "${np.application_slug}"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Could not drop the object_modifiers entries holding placeholders; ignoring object_modifiers for this action"
+  assert_contains "$output" 'MODS={}'
 }
 
 @test "build_context: modifiers without placeholders never call the placeholder helpers" {

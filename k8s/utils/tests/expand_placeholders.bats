@@ -164,10 +164,17 @@ setup() {
   [[ "$output" != *'${np.'* ]] || false
 }
 
-@test "expand_resolvable_placeholders drops unresolved list items" {
-  run expand_resolvable_placeholders '{"l":["a","${np.nope}","${np.scope_slug}"]}' "$CTX"
+@test "expand_resolvable_placeholders drops the whole list when one of its items is unresolved" {
+  run expand_resolvable_placeholders '{"l":["a","${np.nope}","${np.scope_slug}"],"k":"${np.scope_slug}"}' "$CTX"
   [ "$status" -eq 0 ] || false
-  [ "$(echo "$output" | jq -c .)" = '{"l":["a","development"]}' ] || false
+  [ "$(echo "$output" | jq -c .)" = '{"k":"development"}' ] || false
+}
+
+@test "expand_resolvable_placeholders never keeps a list element without its unresolved field" {
+  in='{"deployment":{"tolerations":[{"key":"${np.dimension.region}","operator":"Exists","effect":"NoSchedule"},{"key":"pool","operator":"Equal","value":"a"}],"annotations":{"a":"b"}}}'
+  run expand_resolvable_placeholders "$in" "$CTX"
+  [ "$status" -eq 0 ] || false
+  [ "$(echo "$output" | jq -cS .)" = '{"deployment":{"annotations":{"a":"b"}}}' ] || false
 }
 
 @test "expand_resolvable_placeholders drops malformed tokens" {
@@ -187,7 +194,13 @@ setup() {
   in='{"deployment":{"annotations":{"vault.hashicorp.com/agent-inject-secret-x":"${np.nope}","ok":"${np.scope_slug}"}},"l":["${np.}"]}'
   run unresolved_placeholder_paths "$in" "$CTX"
   [ "$status" -eq 0 ] || false
-  [ "$output" = 'deployment.annotations."vault.hashicorp.com/agent-inject-secret-x", l[0]' ] || false
+  [ "$output" = 'deployment.annotations."vault.hashicorp.com/agent-inject-secret-x", l' ] || false
+}
+
+@test "unresolved_placeholder_paths names a list once however many items are unresolved" {
+  run unresolved_placeholder_paths '{"l":[{"a":"${np.x}"},"${np.y}"]}' "$CTX"
+  [ "$status" -eq 0 ] || false
+  [ "$output" = 'l' ] || false
 }
 
 # =============================================================================
@@ -207,6 +220,30 @@ setup() {
     [ "$status" -ne 0 ] || false
     [[ "$output" == *"❌ Could not scan placeholders: the document is not valid JSON"* ]] || false
   done
+}
+
+@test "a jq failure on a valid document reports jq's error instead of invalid JSON" {
+  jq() { if [[ "$*" == *'--argjson v'* ]]; then echo "jq: error: boom" >&2; return 5; fi; command jq "$@"; }
+  run expand_resolvable_placeholders '{"x":"${np.application_slug}"}' "$CTX"
+  [ "$status" -ne 0 ] || false
+  [[ "$output" == *"❌ Could not scan placeholders: jq: error: boom"* ]] || false
+  [[ "$output" != *"not valid JSON"* ]] || false
+}
+
+# =============================================================================
+# drop_placeholder_entries: context-free fallback
+# =============================================================================
+@test "drop_placeholder_entries drops every entry holding \${np. and keeps the rest" {
+  in='{"ingress":{"annotations":{"a":"${np.application_slug}","alb":"internal"}},"deployment":{"tolerations":[{"key":"${np.x}"}],"labels":{"t":"{{ .x }}"}}}'
+  run drop_placeholder_entries "$in"
+  [ "$status" -eq 0 ] || false
+  [ "$(echo "$output" | jq -cS .)" = '{"deployment":{"labels":{"t":"{{ .x }}"}},"ingress":{"annotations":{"alb":"internal"}}}' ] || false
+}
+
+@test "drop_placeholder_entries fails on a malformed document" {
+  run drop_placeholder_entries '{"x":'
+  [ "$status" -ne 0 ] || false
+  [[ "$output" == *"❌ Could not scan placeholders: the document is not valid JSON"* ]] || false
 }
 
 @test "the unknown-placeholder hint lists the supported keys from the values map" {
