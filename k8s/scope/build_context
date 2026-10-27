@@ -212,7 +212,13 @@ K8S_MODIFIERS=$(get_config_value \
   --provider '.providers["scope-configurations"].object_modifiers' \
   --default "{}"
 )
-K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq .)
+# The API stores a dotted key ("vault.hashicorp.com/role") plus a nested copy split on the dots; K8s rejects
+# non-string values in these maps, so keep only the string entries.
+K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq 'walk(
+  if type == "object" then
+    with_entries(if (.key == "annotations" or .key == "labels" or .key == "nodeselector") and (.value | type) == "object"
+      then .value |= with_entries(select(.value | type == "string")) else . end)
+  else . end)')
 
 OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
 if [ -n "${NP_OUTPUT_DIR:-}" ]; then

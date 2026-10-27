@@ -464,6 +464,30 @@ set_scope_config() {
   assert_equal "$(echo "$CONTEXT" | jq -cS .k8s_modifiers)" '{"deployment":{"annotations":{"c":"d"},"labels":{"a":"b"}}}'
 }
 
+@test "build_context: drops the nested copy the API adds for dotted keys in string maps" {
+  set_scope_config '{"object_modifiers": {"deployment": {
+    "annotations": {"vault.hashicorp.com/role": "apps", "vault": {"hashicorp": {"com/role": "apps"}}},
+    "labels": {"app.kubernetes.io/name": "x", "app": {"kubernetes": {"io/name": "x"}}},
+    "nodeselector": {"kubernetes.io/os": "linux", "kubernetes": {"io/os": "linux"}},
+    "tolerations": [{"key": "dedicated", "operator": "Exists"}]}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -cS .k8s_modifiers.deployment)" \
+    '{"annotations":{"vault.hashicorp.com/role":"apps"},"labels":{"app.kubernetes.io/name":"x"},"nodeselector":{"kubernetes.io/os":"linux"},"tolerations":[{"key":"dedicated","operator":"Exists"}]}'
+}
+
+@test "build_context: drops nested dotted-key copies before expanding placeholders" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {
+    "vault.hashicorp.com/agent-inject-secret-s": "secret/data/${np.application_slug}",
+    "vault": {"hashicorp": {"com/agent-inject-secret-s": "secret/data/${np.application_slug}"}}}}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .k8s_modifiers.deployment.annotations)" \
+    '{"vault.hashicorp.com/agent-inject-secret-s":"secret/data/test-app"}'
+}
+
 @test "build_context: service_account is disabled by default" {
   source "$SCRIPT"
 
