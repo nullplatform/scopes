@@ -20,12 +20,13 @@ setup() {
   export TIMEOUT=30
   export NP_API_KEY="test-api-key"
   export SKIP_DEPLOYMENT_STATUS_CHECK="false"
+  export DEPLOYMENT_STATUS_READ_RETRY_SECONDS=0
 
   # Mock np CLI - running by default
   np() {
     case "$1" in
       deployment)
-        echo "running"
+        echo '{"status":"running"}'
         ;;
     esac
   }
@@ -82,7 +83,7 @@ teardown() {
 
 @test "wait_deployment_active: accepts waiting_for_instances status" {
   np() {
-    echo "waiting_for_instances"
+    echo '{"status":"waiting_for_instances"}'
   }
   export -f np
 
@@ -96,7 +97,7 @@ teardown() {
   export SKIP_DEPLOYMENT_STATUS_CHECK="true"
 
   np() {
-    echo "failed"  # Would fail if checked
+    echo '{"status":"failed"}'
   }
   export -f np
 
@@ -183,7 +184,7 @@ teardown() {
 
 @test "wait_deployment_active: fails when deployment status is null" {
   np() {
-    echo "null"
+    echo '{"status":null}'
   }
   export -f np
 
@@ -197,7 +198,7 @@ teardown() {
   export SKIP_DEPLOYMENT_STATUS_CHECK="false"
 
   np() {
-    echo "failed"
+    echo '{"status":"failed"}'
   }
   export -f np
 
@@ -207,6 +208,23 @@ teardown() {
   assert_contains "$output" "❌ Deployment is no longer running (status: failed)"
   # Non-running status path must also source print_failed_deployment_hints
   assert_contains "$output" "⚠️  Application Startup Issue Detected"
+}
+
+@test "wait_deployment_active: a status read that fails once is retried" {
+  np() {
+    if [ ! -f "$BATS_TEST_TMPDIR/np-failed" ]; then
+      touch "$BATS_TEST_TMPDIR/np-failed"
+      echo "Error connecting to API" >&2
+      return 1
+    fi
+    echo '{"status":"running"}'
+  }
+  export -f np
+
+  run bash "$BATS_TEST_DIRNAME/../wait_deployment_active"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Failed to read deployment status"* ]]
 }
 
 # =============================================================================
@@ -303,7 +321,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -341,7 +359,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -466,7 +484,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -501,7 +519,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -559,7 +577,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -611,7 +629,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -670,7 +688,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -715,7 +733,7 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -768,13 +786,15 @@ teardown() {
     }
     export -f kubectl
 
-    np() { echo 'running'; }
+    np() { echo '{\"status\":\"running\"}'; }
     export -f np
 
     np_scope_explain() { echo \"EXPLAIN \$*\"; }
     np_scope_error() { echo \"ERROR \$*\"; }
     np_scope_step_timeout() { echo \"TIMEOUT \$*\"; }
-    export -f np_scope_explain np_scope_error np_scope_step_timeout
+    np_scope_failure() { echo \"FAILURE \$*\"; }
+    np_scope_labels() { echo \"LABELS \$*\"; }
+    export -f np_scope_explain np_scope_error np_scope_step_timeout np_scope_failure np_scope_labels
 
     export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"health_check\":{\"path\":\"/health-bad\"}}}}'
     export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
@@ -788,6 +808,52 @@ teardown() {
   assert_contains "$output" "Detected: Startup probe"
   assert_contains "$output" "HTTP 404"
   assert_contains "$output" "--next"
+  assert_contains "$output" "FAILURE Unhealthy"
+  assert_contains "$output" "LABELS failure.probe=startup failure.probe_mode=http-404"
+}
+
+@test "wait_deployment_active: a timeout traces the pods' own cause as the error code and failure labels" {
+  run bash -c "
+    sleep() { :; }
+    export -f sleep
+
+    kubectl() {
+      case \"\$*\" in
+        \"get deployment -n test-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}\")
+          echo 'd-scope-123-deploy-456'
+          ;;
+        \"get deployment\"*\"-o json\"*)
+          echo '{\"spec\":{\"replicas\":1},\"status\":{\"availableReplicas\":0,\"updatedReplicas\":1,\"readyReplicas\":0}}'
+          ;;
+        \"get pods -n test-namespace -l deployment_id=deploy-456 -o json\")
+          echo '{\"items\":[{\"metadata\":{\"name\":\"d-scope-123-deploy-456-abc\"},\"status\":{\"containerStatuses\":[{\"name\":\"application\",\"restartCount\":3,\"state\":{\"waiting\":{\"reason\":\"CrashLoopBackOff\"}},\"lastState\":{\"terminated\":{\"reason\":\"OOMKilled\",\"exitCode\":137}}}]}}]}'
+          ;;
+        \"get pods\"*) echo 'd-scope-123-deploy-456-abc' ;;
+        \"get events\"*) echo '{\"items\":[]}' ;;
+      esac
+    }
+    export -f kubectl
+
+    np() { echo '{\"status\":\"running\"}'; }
+    export -f np
+
+    np_scope_explain() { :; }
+    np_scope_error() { echo \"ERROR \$*\"; }
+    np_scope_failure() { echo \"FAILURE \$*\"; }
+    np_scope_step_timeout() { :; }
+    export -f np_scope_explain np_scope_error np_scope_failure np_scope_step_timeout
+
+    export CONTEXT='{\"scope\":{\"name\":\"Stage\",\"capabilities\":{\"ram_memory\":256}}}'
+    export SERVICE_PATH='$SERVICE_PATH' K8S_NAMESPACE='$K8S_NAMESPACE'
+    export SCOPE_ID='$SCOPE_ID' DEPLOYMENT_ID='$DEPLOYMENT_ID'
+    export TIMEOUT=10 NP_API_KEY='$NP_API_KEY' SKIP_DEPLOYMENT_STATUS_CHECK='false'
+    bash '$BATS_TEST_DIRNAME/../wait_deployment_active'
+  "
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE OOMKilled application 137"
+  assert_contains "$output" "ERROR "
+  [[ "$(echo "$output" | grep '^ERROR ')" == *" OOMKilled" ]]
 }
 
 # =============================================================================
@@ -879,7 +945,7 @@ teardown() {
         echo "$*" >> "$PATCH_LOG"
         ;;
       *)
-        echo "running"
+        echo '{"status":"running"}'
         ;;
     esac
   }
@@ -936,7 +1002,7 @@ teardown() {
           echo \"\$*\" >> \"\$PATCH_LOG\"
           ;;
         *)
-          echo 'running'
+          echo '{\"status\":\"running\"}'
           ;;
       esac
     }
@@ -988,7 +1054,7 @@ teardown() {
         return 1
         ;;
       *)
-        echo "running"
+        echo '{"status":"running"}'
         ;;
     esac
   }

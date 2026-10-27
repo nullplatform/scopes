@@ -328,9 +328,44 @@ secret/sec-1 created"
 	[ "$(echo "$output" | grep 'apply-manifests@0.0"' | grep -c 'tracing.error')" -eq 1 ]
 }
 
+@test "np_scope_error carries the machine cause as the error code" {
+	run_logged 'np_scope_error "gave up" "" OOMKilled'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep 'tracing.error' | grep -q '"code":"OOMKilled"'
+}
+
+@test "np_scope_failure labels the step with the cause, and the run with the reason" {
+	run_logged 'np_scope_failure OOMKilled app 137'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep 'apply-manifests@0.0"' | grep -q '"failure.reason":"OOMKilled"'
+	echo "$output" | grep 'apply-manifests@0.0"' | grep -q '"failure.container":"app"'
+	echo "$output" | grep 'apply-manifests@0.0"' | grep -q '"failure.exit_code":"137"'
+	echo "$output" | grep '"run_id":"scope-provision-42"' | grep -q '"failure.reason":"OOMKilled"'
+}
+
+@test "np_scope_failure drops what it does not know and ignores an empty reason" {
+	run_logged '
+		np_scope_failure CrashLoopBackOff
+		np_scope_failure ""
+	'
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"failure.reason":"CrashLoopBackOff"'
+	! echo "$output" | grep -q '"failure.container"'
+	! echo "$output" | grep -q '"failure.reason":""'
+}
+
+@test "np_scope_failure on a run-level NP_TRACE labels the run once" {
+	run_logged '
+		export NP_TRACE="1|trace-9|scope-provision-42"
+		np_scope_failure OOMKilled
+	'
+	[ "$status" -eq 0 ]
+	[ "$(echo "$output" | grep -c '"failure.reason":"OOMKilled"')" -eq 1 ]
+}
+
 @test "narrative helpers are defined no-ops when untraced" {
 	unset NP_TRACE
-	run "$BASH" -c "source '$LOGGING'; np_scope_output x '{}'; np_scope_input x '{}'; np_scope_explain --title t; np_scope_error m; np_scope_labels a=b; echo rc=\$?"
+	run "$BASH" -c "source '$LOGGING'; np_scope_output x '{}'; np_scope_input x '{}'; np_scope_explain --title t; np_scope_error m; np_scope_labels a=b; np_scope_failure OOMKilled app 137; echo rc=\$?"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=0"* ]]
 }

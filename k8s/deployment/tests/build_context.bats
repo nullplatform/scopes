@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE 2>/dev/null || true
 }
 
 # =============================================================================
@@ -1455,4 +1455,54 @@ EOF
 
   assert_equal "$(echo "$CONTEXT" | jq -c '.blue_additional_port_services')" '{"grpc-9014":false}'
   assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" ""
+}
+
+# =============================================================================
+# prestop_sleep_mode resolution
+# =============================================================================
+
+@test "prestop_sleep_mode: defaults to exec so existing scopes keep /bin/sleep" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
+}
+
+@test "prestop_sleep_mode: native from scope-configurations" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "native"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
+}
+
+@test "prestop_sleep_mode: PRESTOP_SLEEP_MODE env var honoured" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=native
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
+}
+
+@test "prestop_sleep_mode: scope-configurations wins over the env var" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=native
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "exec"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
+}
+
+@test "prestop_sleep_mode: rejects unknown values" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=auto
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ PRESTOP_SLEEP_MODE must be native or exec, got: 'auto'"
 }

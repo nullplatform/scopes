@@ -41,7 +41,7 @@ func TestProcessLinesFromChannelAppliesEndTime(t *testing.T) {
 
 	entries := NewProcessor().ProcessLinesFromChannel(
 		linesChannel(lines...), "", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z",
-	)
+	).Entries
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry within the window, got %d", len(entries))
@@ -59,7 +59,7 @@ func TestProcessLinesFromChannelStopsReadingPastEndTime(t *testing.T) {
 	ch <- "2026-08-18T10:00:00.000000000Z should never be read"
 	close(ch)
 
-	entries := NewProcessor().ProcessLinesFromChannel(ch, "", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z")
+	entries := NewProcessor().ProcessLinesFromChannel(ch, "", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z").Entries
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry within the window, got %d", len(entries))
@@ -77,7 +77,7 @@ func TestProcessLinesFromChannelKeepsReadingThroughFilteredLines(t *testing.T) {
 	ch <- "2026-08-17T12:00:00.000000000Z keep me too"
 	close(ch)
 
-	entries := NewProcessor().ProcessLinesFromChannel(ch, "keep", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z")
+	entries := NewProcessor().ProcessLinesFromChannel(ch, "keep", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z").Entries
 
 	if len(entries) != 2 {
 		t.Fatalf("expected both matching entries, got %d", len(entries))
@@ -92,9 +92,42 @@ func TestProcessLinesFromChannelWithoutEndTimeKeepsEverything(t *testing.T) {
 
 	entries := NewProcessor().ProcessLinesFromChannel(
 		linesChannel(lines...), "", "pod-a", "uid-a", "", "",
-	)
+	).Entries
 
 	if len(entries) != 2 {
 		t.Fatalf("expected both entries when no upper bound is set, got %d", len(entries))
+	}
+}
+
+// The cursor has to move through lines the filter drops, or a read with no match ends the
+// search where it stands.
+func TestProcessLinesFromChannelScansPastFilteredLines(t *testing.T) {
+	scan := NewProcessor().ProcessLinesFromChannel(linesChannel(
+		"2026-08-17T10:00:00.000000000Z no match",
+		"2026-08-17T10:00:01.000000000Z no match either",
+	), "needle", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z")
+
+	if len(scan.Entries) != 0 {
+		t.Fatalf("expected no entries, got %d", len(scan.Entries))
+	}
+	if scan.ScannedUpTo != "2026-08-17T10:00:01.000000000Z" {
+		t.Errorf("expected the scan to reach the last line read, got %q", scan.ScannedUpTo)
+	}
+	if scan.Done {
+		t.Error("a read that ran out of lines is not done: only the fetcher knows if the log ended")
+	}
+}
+
+func TestProcessLinesFromChannelIsDoneAtEndTime(t *testing.T) {
+	scan := NewProcessor().ProcessLinesFromChannel(linesChannel(
+		"2026-08-17T10:00:00.000000000Z inside",
+		"2026-08-18T09:00:00.000000000Z past the window",
+	), "", "pod-a", "uid-a", "", "2026-08-17T23:59:59Z")
+
+	if !scan.Done {
+		t.Error("expected the scan to be done once a line passed end_time")
+	}
+	if scan.ScannedUpTo != "2026-08-17T10:00:00.000000000Z" {
+		t.Errorf("the line past end_time must not move the cursor, got %q", scan.ScannedUpTo)
 	}
 }
