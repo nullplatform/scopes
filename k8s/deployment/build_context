@@ -372,35 +372,23 @@ fi
 
 log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
 
-# How the application container waits in preStop. "exec" runs /bin/sleep inside the
-# image, which fails on images without a shell (distroless, scratch): the hook errors,
-# the container gets SIGTERM at once and the balancer keeps sending it requests.
-# "native" uses the kubelet sleep action (Kubernetes >= 1.30), independent of the image.
-# "auto" picks native when the API server supports it and falls back to exec otherwise.
+# preStop wait of the application container. "exec" runs /bin/sleep in the image and fails
+# on images without a shell (distroless, scratch), so the container is killed before the
+# balancer stops routing to it. "native" is the kubelet sleep action: opt-in because every
+# node's kubelet must be >= 1.30, which the API server version does not guarantee.
 PRESTOP_SLEEP_MODE=$(get_config_value \
   --env PRESTOP_SLEEP_MODE \
   --provider '.providers["scope-configurations"].deployment.prestop_sleep_mode' \
-  --default "auto"
+  --default "exec"
 )
 
 case "$PRESTOP_SLEEP_MODE" in
   native|exec) ;;
-  auto)
-    K8S_SERVER_MINOR=$(kubectl version -o json 2>/dev/null \
-      | jq -r '.serverVersion | select(.major == "1") | .minor' 2>/dev/null \
-      | tr -cd '0-9' || true)
-    if [[ -n "$K8S_SERVER_MINOR" ]] && (( K8S_SERVER_MINOR >= 30 )); then
-      PRESTOP_SLEEP_MODE="native"
-    else
-      PRESTOP_SLEEP_MODE="exec"
-      log debug "🔍 Kubernetes server version unknown or older than 1.30, preStop falls back to /bin/sleep"
-    fi
-    ;;
   *)
-    log error "❌ PRESTOP_SLEEP_MODE must be one of auto, native or exec, got: '$PRESTOP_SLEEP_MODE'"
+    log error "❌ PRESTOP_SLEEP_MODE must be native or exec, got: '$PRESTOP_SLEEP_MODE'"
     log error ""
     log error "🔧 How to fix:"
-    log error "   • Set auto (default), native (Kubernetes >= 1.30) or exec in values.yaml or the scope-configurations provider"
+    log error "   • Set exec (default) or native (every node on Kubernetes >= 1.30) in values.yaml or the scope-configurations provider"
     log error ""
     exit 1
     ;;

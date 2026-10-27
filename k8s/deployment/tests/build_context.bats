@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE MOCK_SERVER_MINOR 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE 2>/dev/null || true
 }
 
 # =============================================================================
@@ -1459,66 +1459,23 @@ EOF
 
 # =============================================================================
 # prestop_sleep_mode resolution
-# "auto" picks the kubelet sleep action on Kubernetes >= 1.30 and falls back to
-# /bin/sleep when the server version is older or cannot be read.
 # =============================================================================
 
-# Overrides the kubectl mock so `kubectl version` reports the given server minor.
-mock_server_minor() {
-  export MOCK_SERVER_MINOR="$1"
-  kubectl() {
-    case "$1 $2" in
-      "get service") return 1 ;;
-      "version -o")  echo "{\"serverVersion\":{\"major\":\"1\",\"minor\":\"$MOCK_SERVER_MINOR\"}}" ;;
-      *)             return 0 ;;
-    esac
-  }
-  export -f kubectl
+@test "prestop_sleep_mode: defaults to exec so existing scopes keep /bin/sleep" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
 }
 
-@test "prestop_sleep_mode: auto resolves to native on Kubernetes 1.30" {
+@test "prestop_sleep_mode: native from scope-configurations" {
   setup_full_build_context
-  mock_server_minor "30"
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "native"')
 
   source "$SCRIPT"
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
-}
-
-@test "prestop_sleep_mode: auto handles EKS-style minor versions like 35+" {
-  setup_full_build_context
-  mock_server_minor "35+"
-
-  source "$SCRIPT"
-
-  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
-}
-
-@test "prestop_sleep_mode: auto falls back to exec on Kubernetes 1.29" {
-  setup_full_build_context
-  mock_server_minor "29"
-
-  source "$SCRIPT"
-
-  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
-}
-
-@test "prestop_sleep_mode: auto falls back to exec when the server version cannot be read" {
-  setup_full_build_context
-
-  source "$SCRIPT"
-
-  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
-}
-
-@test "prestop_sleep_mode: explicit exec from scope-configurations skips detection" {
-  setup_full_build_context
-  mock_server_minor "35"
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "exec"')
-
-  source "$SCRIPT"
-
-  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
 }
 
 @test "prestop_sleep_mode: PRESTOP_SLEEP_MODE env var honoured" {
@@ -1530,12 +1487,22 @@ mock_server_minor() {
   assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
 }
 
+@test "prestop_sleep_mode: scope-configurations wins over the env var" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=native
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "exec"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
+}
+
 @test "prestop_sleep_mode: rejects unknown values" {
   setup_full_build_context
-  export PRESTOP_SLEEP_MODE=sometimes
+  export PRESTOP_SLEEP_MODE=auto
 
   run source "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  assert_contains "$output" "❌ PRESTOP_SLEEP_MODE must be one of auto, native or exec, got: 'sometimes'"
+  assert_contains "$output" "❌ PRESTOP_SLEEP_MODE must be native or exec, got: 'auto'"
 }

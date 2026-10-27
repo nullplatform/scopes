@@ -151,7 +151,7 @@ _render_with_prestop_mode() {
   assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop | has("exec")')" "false"
 }
 
-@test "preStop: exec mode keeps /bin/sleep for clusters older than 1.30" {
+@test "preStop: exec mode renders /bin/sleep and no sleep action" {
   rendered=$(_render_with_prestop_mode exec)
 
   assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop.exec.command | join(" ")')" \

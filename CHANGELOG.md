@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- Fix: k8s scopes on Kubernetes 1.30+ now wait in preStop with the kubelet sleep action instead of `/bin/sleep`, so images without a shell (distroless, scratch) no longer stop at once and return 502s while the balancer drains them. `PRESTOP_SLEEP_MODE` (`auto`, `native`, `exec`) overrides the detection
+- k8s scopes can wait in preStop with the kubelet sleep action instead of `/bin/sleep` (`PRESTOP_SLEEP_MODE=native` or `deployment.prestop_sleep_mode` in scope-configurations, Kubernetes 1.30+ on every node), so images without a shell (distroless, scratch) no longer stop at once and return 502s during pod replacements. The default stays `exec`
 - Fix: searching the logs of a k8s scope over a wide time range now finds matches past the first read of each pod, instead of returning "No logs" with an empty token that ended pagination
 - k8s deployment actions on the same scope now run one at a time: an action launched while another is running waits for it instead of overlapping
 - Fix: a k8s deployment action that arrives again after its deployment already moved past it (e.g. a late finalize) now ends successfully instead of failing
