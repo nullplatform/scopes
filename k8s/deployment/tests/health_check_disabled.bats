@@ -138,6 +138,15 @@ _assert_probes_on_every_container() {
     "/bin/sleep 16"
 }
 
+@test "TCP health check: the exec probe dials loopback by address, never localhost" {
+  rendered=$(_render "$(_health_check true TCP)")
+
+  # musl (Alpine) resolves localhost to ::1 first and nginx listens on IPv4 only.
+  command=$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "http") | .readinessProbe.exec.command[2]')
+  assert_equal "$command" \
+    "(nc -z 127.0.0.1 8080 || nc -z ::1 8080) && (nc -z 127.0.0.1 80 || nc -z ::1 80)"
+}
+
 _render_with_prestop_mode() {
   local ctx="$BATS_TEST_TMPDIR/ctx.json"
   _context "$(_health_check true HTTP)" | jq --arg m "$1" '. + {prestop_sleep_mode: $m}' > "$ctx"
