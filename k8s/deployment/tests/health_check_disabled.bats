@@ -137,3 +137,33 @@ _assert_probes_on_every_container() {
   assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop.exec.command | join(" ")')" \
     "/bin/sleep 16"
 }
+
+@test "TCP health check: the exec probe dials loopback by address, never localhost" {
+  rendered=$(_render "$(_health_check true TCP)")
+
+  # musl (Alpine) resolves localhost to ::1 first and nginx listens on IPv4 only.
+  command=$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "http") | .readinessProbe.exec.command[2]')
+  assert_equal "$command" \
+    "(nc -z 127.0.0.1 8080 || nc -z ::1 8080) && (nc -z 127.0.0.1 80 || nc -z ::1 80)"
+}
+
+_render_with_prestop_mode() {
+  local ctx="$BATS_TEST_TMPDIR/ctx.json"
+  _context "$(_health_check true HTTP)" | jq --arg m "$1" '. + {prestop_sleep_mode: $m}' > "$ctx"
+  gomplate -c .="$ctx" -f "$DEPLOYMENT"
+}
+
+@test "preStop: native mode uses the kubelet sleep action instead of /bin/sleep" {
+  rendered=$(_render_with_prestop_mode native)
+
+  assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop.sleep.seconds')" "16"
+  assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop | has("exec")')" "false"
+}
+
+@test "preStop: exec mode renders /bin/sleep and no sleep action" {
+  rendered=$(_render_with_prestop_mode exec)
+
+  assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop.exec.command | join(" ")')" \
+    "/bin/sleep 16"
+  assert_equal "$(echo "$rendered" | yq -N '.spec.template.spec.containers[] | select(.name == "application") | .lifecycle.preStop | has("sleep")')" "false"
+}

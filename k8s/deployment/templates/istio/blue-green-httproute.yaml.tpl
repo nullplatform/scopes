@@ -49,10 +49,16 @@ spec:
     - {{ .name }}
 {{- end }}
   parentRefs:
+{{- $gateways := coll.Slice (coll.Dict "name" .gateway_name "namespace" "gateways") }}
+{{- if has . "gateways" }}
+  {{- $gateways = .gateways }}
+{{- end }}
+{{- range $gateways }}
     - group: gateway.networking.k8s.io
       kind: Gateway
-      name: {{ .gateway_name }}
-      namespace: gateways
+      name: {{ .name }}
+      namespace: {{ .namespace }}
+{{- end }}
   rules:
     - backendRefs:
         # Blue deployment (old version)

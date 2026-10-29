@@ -1,0 +1,137 @@
+#!/bin/bash
+# Dedicated workflow step: pick the Azure managed identity the rest of the
+# workflow authenticates as (AKS workload identity). The Azure counterpart of
+# utils/assume_role_step.
+#
+# Runs right after `assume role` in each workflow. The workflow YAML must
+# declare AZURE_CLIENT_ID and AZURE_CLIENT_SECRET as output:environment so the
+# engine propagates them.
+#
+# The Azure identity provider (category "identity-access-control", type
+# azure-identity-configuration) is read from CONTEXT.providers[...], where the
+# platform has ALREADY resolved it for the scope's dimensions. Requires
+# "identity-access-control" to be listed in values.yaml provider_categories.
+#
+# Resolution precedence (see resolve_azure_client_id in azure_identity_lib):
+#   $CONTAINERS_AZURE_CLIENT_ID -> provider by selector
+#     -> $CONTAINERS_AZURE_CLIENT_ID_DEFAULT -> agent credentials
+#
+# With a client ID resolved it exports AZURE_CLIENT_ID and clears
+# AZURE_CLIENT_SECRET, after one token exchange that proves the federation.
+#
+# Requires: curl, jq. Expects: CONTEXT (engine-injected), K8S_FLAVOR, and on
+# AKS the webhook-injected AZURE_FEDERATED_TOKEN_FILE and AZURE_TENANT_ID.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/azure_identity_lib"
+
+if [ "${K8S_FLAVOR:-}" != "aks" ]; then
+  log debug "   ✅ azure_identity=skipped (K8S_FLAVOR=${K8S_FLAVOR:-unset})"
+  return 0
+fi
+
+AZURE_IDENTITY_SELECTOR="${CONTAINERS_AZURE_IDENTITY_SELECTOR:-containers}"
+
+# Azure identity provider as resolved for the scope's dimensions by the platform.
+AZURE_IDENTITY_PROVIDER=$(echo "${CONTEXT:-}" | jq -c '.providers["identity-access-control"] // {}' 2>/dev/null)
+
+AZURE_RESOLVED_CLIENT_ID=$(resolve_azure_client_id "$AZURE_IDENTITY_PROVIDER" "$AZURE_IDENTITY_SELECTOR")
+
+if [ -z "$AZURE_RESOLVED_CLIENT_ID" ]; then
+  log debug "   ✅ azure_identity=skipped (using agent credentials)"
+  return 0
+fi
+
+# Record where the resolved client ID came from, for the info line and the
+# AADSTS700016 hint (same precedence as resolve_azure_client_id). The fix line
+# spells the provider case out in full; everywhere else the two read the same.
+if [ -n "${CONTAINERS_AZURE_CLIENT_ID:-}" ]; then
+  AZURE_CLIENT_ID_SOURCE="env CONTAINERS_AZURE_CLIENT_ID"
+  AZURE_CLIENT_ID_SOURCE_FIX="$AZURE_CLIENT_ID_SOURCE"
+elif [ -n "$(client_id_for_selector "$AZURE_IDENTITY_PROVIDER" "$AZURE_IDENTITY_SELECTOR")" ]; then
+  AZURE_CLIENT_ID_SOURCE="provider selector '$AZURE_IDENTITY_SELECTOR'"
+  AZURE_CLIENT_ID_SOURCE_FIX="the Azure Identity & Access provider (Platform Settings), selector '$AZURE_IDENTITY_SELECTOR'"
+else
+  AZURE_CLIENT_ID_SOURCE="env CONTAINERS_AZURE_CLIENT_ID_DEFAULT"
+  AZURE_CLIENT_ID_SOURCE_FIX="$AZURE_CLIENT_ID_SOURCE"
+fi
+
+if [ -z "${AZURE_FEDERATED_TOKEN_FILE:-}" ] || [ ! -r "$AZURE_FEDERATED_TOKEN_FILE" ]; then
+  log error "   ❌ azure_identity step failed: no workload identity token to authenticate as $AZURE_RESOLVED_CLIENT_ID"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • The pod is missing the azure.workload.identity/use=\"true\" label"
+  log error "   • Workload identity is not enabled on the AKS cluster"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set azure_workload_identity = true on the nullplatform agent module and re-apply it"
+  log error "   • Check the cluster: az aks show -n <cluster> -g <resource-group> --query securityProfile.workloadIdentity"
+  log error ""
+  exit 1
+fi
+
+log info "   🔑 Using Azure managed identity: $AZURE_RESOLVED_CLIENT_ID (from $AZURE_CLIENT_ID_SOURCE)"
+
+export AZURE_CLIENT_ID="$AZURE_RESOLVED_CLIENT_ID"
+# The Azure SDKs prefer a client secret over the projected token when both are
+# set, which would silently keep the legacy Service Principal identity.
+export AZURE_CLIENT_SECRET=""
+
+# Exchange the projected token once, so a broken federation fails here instead
+# of halfway through a step that already changed Azure resources.
+azure_grant_args
+if ! AZURE_PROBE_RESPONSE=$(curl --http1.1 -s -w "\n__HTTP_CODE__:%{http_code}" -X POST \
+  "https://login.microsoftonline.com/${AZURE_TENANT_ID:-}/oauth2/v2.0/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=${AZURE_CLIENT_ID}" \
+  "${AZURE_GRANT_ARGS[@]}" \
+  -d "scope=https://management.azure.com/.default" \
+  -d "grant_type=client_credentials" \
+  --connect-timeout 10 --max-time 30 2>&1); then
+  log error "   ❌ azure_identity step failed: could not reach the Azure token endpoint"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   • Network egress to login.microsoftonline.com is blocked"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Allow HTTPS egress from the agent namespace to login.microsoftonline.com"
+  log error ""
+  exit 1
+fi
+
+AZURE_PROBE_CODE=$(echo "$AZURE_PROBE_RESPONSE" | grep -o "__HTTP_CODE__:[0-9]*" | cut -d: -f2 || true)
+
+if [ "${AZURE_PROBE_CODE:-0}" != "200" ]; then
+  AZURE_PROBE_DESCRIPTION=$(echo "$AZURE_PROBE_RESPONSE" | sed 's/__HTTP_CODE__:[0-9]*//' \
+    | jq -r '.error_description // empty' 2>/dev/null | head -1 || true)
+
+  log error "   ❌ azure_identity step failed: token exchange for $AZURE_CLIENT_ID returned HTTP ${AZURE_PROBE_CODE:-unknown}"
+  log error ""
+  log error "💡 Possible causes:"
+  case "$AZURE_PROBE_RESPONSE" in
+    *AADSTS70021*)
+      log error "   • The managed identity has no federated credential matching this pod's ServiceAccount token (AADSTS70021x)"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Add a federated credential to identity $AZURE_CLIENT_ID with issuer $(azure_token_claim "$AZURE_FEDERATED_TOKEN_FILE" iss), subject $(azure_token_claim "$AZURE_FEDERATED_TOKEN_FILE" sub) and audience api://AzureADTokenExchange"
+      ;;
+    *AADSTS700016*)
+      log error "   • No managed identity with client ID $AZURE_CLIENT_ID exists in tenant ${AZURE_TENANT_ID:-unknown} (AADSTS700016)"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Check the client ID set in $AZURE_CLIENT_ID_SOURCE_FIX"
+      ;;
+    *)
+      log error "   • Azure AD rejected the token request: ${AZURE_PROBE_DESCRIPTION:-no error description}"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Review the error above and the federated credentials of identity $AZURE_CLIENT_ID"
+      ;;
+  esac
+  log error ""
+  exit 1
+fi
+
+unset AZURE_PROBE_RESPONSE AZURE_PROBE_DESCRIPTION AZURE_PROBE_CODE AZURE_GRANT_ARGS
+
+log info "   ✅ Managed identity token exchange succeeded"

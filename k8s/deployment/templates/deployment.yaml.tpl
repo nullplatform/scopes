@@ -9,7 +9,7 @@
               command:
                 - /bin/sh
                 - '-c'
-                - nc -z localhost {{ .app_port }} && nc -z localhost {{ .traffic_port }}
+                - (nc -z 127.0.0.1 {{ .app_port }} || nc -z ::1 {{ .app_port }}) && (nc -z 127.0.0.1 {{ .traffic_port }} || nc -z ::1 {{ .traffic_port }})
 {{- end }}
 {{- define "probe.app_tcp" }}
             tcpSocket:
@@ -358,10 +358,15 @@ spec:
           {{- end }}
           lifecycle:
             preStop:
+              {{- if and (has . "prestop_sleep_mode") (eq .prestop_sleep_mode "native") }}
+              sleep:
+                seconds: 16
+              {{- else }}
               exec:
                 command:
                   - /bin/sleep
                   - '16'
+              {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent

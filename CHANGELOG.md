@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-10-29
+- k8s scopes can wait in preStop with the kubelet sleep action instead of `/bin/sleep` (`PRESTOP_SLEEP_MODE=native` or `deployment.prestop_sleep_mode` in scope-configurations, Kubernetes 1.30+ on every node), so images without a shell (distroless, scratch) no longer stop at once and return 502s during pod replacements. The default stays `exec`
+- Fix: searching the logs of a k8s scope over a wide time range now finds matches past the first read of each pod, instead of returning "No logs" with an empty token that ended pagination
+- k8s deployment actions on the same scope now run one at a time: an action launched while another is running waits for it instead of overlapping
+- Fix: a k8s deployment action that arrives again after its deployment already moved past it (e.g. a late finalize) now ends successfully instead of failing
+- k8s scopes on Istio can publish their route on additional gateways with `additional_public_gateways` / `additional_private_gateways`
+- k8s scopes on Istio honor the gateway namespace set in `gateway_namespace` or in the container-orchestration provider, instead of always using `gateways`
+- Fix: a k8s deployment on Istio now fails when a configured gateway does not exist or rejects the route, instead of reporting success
+- The trace of initial, blue/green and traffic-switch k8s deployments shows a "Configure ingress" step; on Istio it shows each gateway the route is published on, with its validation and reconciliation status
+- Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
+- Fix: a k8s scope's Pod Disruption Budget lets pods that are not ready be evicted, so a scope stuck in a crash loop never blocks a node drain
+- k8s scopes on AKS can make their Azure DNS calls as a managed identity chosen per dimension (AKS Workload Identity), configured through the Identity & Access provider or the `CONTAINERS_AZURE_CLIENT_ID` / `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` env vars, instead of the agent's Service Principal client secret
+- Fix: the assume role step now runs only on EKS; on AKS/ARO it no longer tries `sts:AssumeRole` (which failed every workflow when the account also had an AWS IAM provider)
+- Fix: deleting a k8s scope on Azure DNS now fails with a hint when the DNS record cannot be deleted, instead of reporting success
+- Fix: deleting a k8s deployment now also removes the finalizers from the ingresses of its additional HTTP and GRPC ports
+- Fix: a `kubectl delete` in a k8s workflow now gives up after `KUBECTL_DELETE_TIMEOUT_SECONDS` (default 300) instead of waiting forever on a stuck finalizer
+- Fix: a k8s scope with a TCP health check now becomes ready on Alpine-based traffic manager images (1.8.1, v1.9.0). The sidecar probe checked `localhost`, which resolves to IPv6 there while nginx listens only on IPv4, so the pod never became ready and the deployment failed after 10 minutes
+- The trace of a failed k8s or scheduled task run labels its failure cause (`failure.reason`, plus the probe and its mode for health checks), so runs can be queried by cause, and a failed scheduled task Job reports how its container ended (e.g. OOMKilled, exit 137) instead of only `BackoffLimitExceeded`
+
 ## [1.18.0] - 2026-09-29
 - Fix: the Instances tab of a k8s scope now reports the application container's CPU, memory and architecture, instead of the traffic sidecar's
 - Fix: diagnose on a k8s scope now attaches the application's logs to a pod stuck in not-ready, instead of the traffic sidecar's

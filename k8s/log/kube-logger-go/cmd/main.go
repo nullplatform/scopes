@@ -66,9 +66,9 @@ func main() {
 
 	// Get logs concurrently from all pods
 	fetcher := logs.NewFetcher(clientset)
-	allLogs := fetcher.FetchConcurrently(pods, cfg)
+	scans := fetcher.FetchConcurrently(pods, cfg)
 
-	allLogs, token := pagination.Page(allLogs, cfg.Limit, pagination.DecodeToken(cfg.NextPageToken))
+	allLogs, token := pagination.Page(scans, cfg.Limit, pagination.DecodeToken(cfg.NextPageToken))
 
 	response := types.Response{
 		Results:       allLogs,

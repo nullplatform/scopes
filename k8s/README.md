@@ -75,12 +75,19 @@ Gateway configuration for ingress traffic routing.
 |----------|-------------|------------------------------|
 | **PUBLIC_GATEWAY_NAME** | Public gateway name for ingress | `networking.gateway_public_name` |
 | **PRIVATE_GATEWAY_NAME** | Private/internal gateway name for ingress | `networking.gateway_private_name` |
+| **GATEWAY_NAMESPACE** | Namespace of the public and private gateways (default `gateways`). Also read from `gateway.namespace` in the container-orchestration provider | `networking.gateway_namespace` |
+| _additional public gateways_ | Extra gateways the HTTPRoute of public scopes is attached to, as a list of `{"name", "namespace"}` (namespace defaults to the gateway namespace). Also read from `gateway.additional_public_gateways` in the container-orchestration provider | `networking.additional_public_gateways` |
+| _additional private gateways_ | Same as above, for private scopes | `networking.additional_private_gateways` |
 | **GATEWAY_EXTERNAL_IP** | Address published in DNS instead of the one detected from the cluster. Set it when a NAT/VIP device fronts the gateway, so records carry the externally reachable address rather than the internal one. An IPv4 value yields an A record, a hostname a CNAME. | _environment variable_ |
 
 **Note:** `GATEWAY_EXTERNAL_IP` is read straight from the agent's environment, not from the
 `scope-configurations` provider, and only applies to the `external_dns` DNS type. Left unset,
 the address is auto-detected from the Gateway or its Service, which is correct whenever no
 address translation sits in front of the cluster.
+
+Every gateway the HTTPRoute references must exist before it is applied, and the deployment
+waits until each of them reports `Accepted` and `ResolvedRefs`. DNS records keep pointing at
+the main gateway only. The agent needs `get` on `gateways` in every namespace configured.
 
 ### Deployment
 
@@ -90,6 +97,8 @@ address translation sits in front of the cluster.
 |----------|-------------|------------------------------|
 | **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `deployment.deployment_strategy` |
 | **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Maximum wait time for deployments (seconds) | `deployment.deployment_max_wait_seconds` |
+| **PRESTOP_SLEEP_MODE** | preStop wait before SIGTERM: `exec` (default, `/bin/sleep` in the image) or `native` (kubelet sleep action, works on images without `/bin/sleep`; every node must run Kubernetes >= 1.30) | `deployment.prestop_sleep_mode` |
+| **KUBECTL_DELETE_TIMEOUT_SECONDS** | Maximum time a `kubectl delete` waits for the objects to be gone, finalizers included (seconds, default `300`). When it runs out, the deletion is logged as failed instead of hanging the workflow | - |
 
 #### Traffic Manager
 
@@ -177,6 +186,57 @@ using the same matching the rest of the platform uses.
 
 The target role's trust policy must allow the agent's role to call
 `sts:AssumeRole`.
+
+This step runs only on EKS (`K8S_FLAVOR` = `eks` or unset); on other flavors
+(AKS, ARO) it is skipped and `CONTAINERS_ASSUME_ROLE_ARN` is ignored.
+
+#### Using an Azure managed identity for Azure operations (AKS)
+
+On AKS (`K8S_FLAVOR=aks`), the scope's Azure calls (Azure DNS records) use the
+agent's Service Principal credentials by default. To run them as a dedicated
+managed identity per dimension instead, with no client secret, configure the
+nullplatform **Azure identity provider** (`azure-identity-configuration`) with a
+`managed_identities.identities` entry whose `selector` is `containers`:
+
+```hcl
+attributes = {
+  managed_identities = {
+    identities = [
+      { selector = "containers", client_id = "<managed identity client id>" }
+    ]
+  }
+}
+```
+
+Resolution precedence (first non-empty wins):
+
+1. `CONTAINERS_AZURE_CLIENT_ID` environment variable (explicit override).
+2. Azure identity provider entry matching the selector (`CONTAINERS_AZURE_IDENTITY_SELECTOR`, default `containers`).
+3. `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` environment variable.
+4. None configured → the agent's credentials are used.
+
+Until the `azure-identity-configuration` provider type is available in Platform
+Settings, the environment variables (`CONTAINERS_AZURE_CLIENT_ID`,
+`CONTAINERS_AZURE_CLIENT_ID_DEFAULT`) are the way to configure this.
+
+> **Warning:** once the Service Principal client secret is removed from the
+> agent, every dimension needs a resolved identity (a provider entry or
+> `CONTAINERS_AZURE_CLIENT_ID_DEFAULT`) — otherwise Azure DNS calls for that
+> dimension have no credentials to use.
+
+The provider is resolved for the scope's dimensions exactly like the AWS IAM
+provider above. When an identity is resolved, the `azure identity` workflow step
+exports `AZURE_CLIENT_ID`, clears `AZURE_CLIENT_SECRET` and performs one token
+exchange to verify the setup before any Azure resource is touched.
+
+Requirements:
+
+- The agent and its worker pods carry the label `azure.workload.identity/use: "true"`
+  (`azure_workload_identity = true` on the `nullplatform/agent` tofu module).
+- The managed identity has a federated identity credential trusting the cluster's
+  OIDC issuer and the subject `system:serviceaccount:<agent namespace>:<agent service account>`.
+- The managed identity holds the roles the scope needs (e.g. `DNS Zone Contributor`
+  on the DNS zone).
 
 #### Vault
 

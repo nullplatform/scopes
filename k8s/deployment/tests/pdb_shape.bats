@@ -64,3 +64,17 @@ write_context() {
 	label="$(yq -N '.metadata.labels.deployment_id' "$out")"
 	assert_equal "$label" "$deployment_id_to_delete"
 }
+
+@test "pdb: lets unhealthy pods be evicted so a broken scope never blocks a node drain" {
+	local ctx="$BATS_TEST_TMPDIR/context.json"
+	write_context "789012" "$ctx"
+
+	local out="$BATS_TEST_TMPDIR/pdb.yaml"
+	render_pdb "$ctx" "$out"
+
+	# With the default IfHealthyBudget, pods that never become ready count
+	# against the budget and evictions stay blocked until they recover.
+	local policy
+	policy="$(yq -N '.spec.unhealthyPodEvictionPolicy' "$out")"
+	assert_equal "$policy" "AlwaysAllow"
+}
