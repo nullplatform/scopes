@@ -243,3 +243,54 @@ teardown() {
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ KUBECTL_DELETE_TIMEOUT_SECONDS must be a positive integer, got: ''"
 }
+
+# =============================================================================
+# Order: what a manifest depends on is applied before it, and deleted after it
+# =============================================================================
+# Production, 2026-10-29: the scope's ingress was applied two seconds before the
+# service it points at existed; the AWS Load Balancer Controller then failed the
+# model of the whole ingress group (every scope on that ALB) until the service
+# appeared. `find` lists the rendered files in no useful order.
+@test "apply_templates: applies secrets, then the service, the deployment, its scaling and PDB, and the ingress last" {
+  for name in ingress-1-2 pdb-1-2 scaling-1-2 deployment-1-2 service-1-2 secret-files-1-2 secret-1-2 dns-endpoint-1-2; do
+    echo "apiVersion: v1" > "$OUTPUT_DIR/$name.yaml"
+  done
+  kubectl() { basename "$3" >> "$OUTPUT_DIR/kubectl.log"; return 0; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  local applied
+  applied="$(tr '\n' ' ' < "$OUTPUT_DIR/kubectl.log")"
+  [ "$applied" = "secret-1-2.yaml secret-files-1-2.yaml service-1-2.yaml deployment-1-2.yaml scaling-1-2.yaml pdb-1-2.yaml dns-endpoint-1-2.yaml ingress-1-2.yaml " ]
+}
+
+@test "apply_templates: deletes in the reverse order, the ingress first and the secrets last" {
+  export ACTION="delete"
+  for name in secret-1-2 service-1-2 deployment-1-2 ingress-1-2 scaling-1-2; do
+    echo "apiVersion: v1" > "$OUTPUT_DIR/$name.yaml"
+  done
+  kubectl() { basename "$3" >> "$OUTPUT_DIR/kubectl.log"; return 0; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  local deleted
+  deleted="$(tr '\n' ' ' < "$OUTPUT_DIR/kubectl.log")"
+  [ "$deleted" = "ingress-1-2.yaml scaling-1-2.yaml deployment-1-2.yaml service-1-2.yaml secret-1-2.yaml " ]
+}
+
+@test "apply_templates: a manifest of an unknown kind is applied after the known ones, before the ingress" {
+  for name in ingress-1-2 custom-thing service-1-2; do
+    echo "apiVersion: v1" > "$OUTPUT_DIR/$name.yaml"
+  done
+  kubectl() { basename "$3" >> "$OUTPUT_DIR/kubectl.log"; return 0; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [ "$(tr '\n' ' ' < "$OUTPUT_DIR/kubectl.log")" = "service-1-2.yaml custom-thing.yaml ingress-1-2.yaml " ]
+}
