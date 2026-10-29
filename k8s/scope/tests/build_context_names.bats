@@ -6,6 +6,7 @@ setup() {
 	log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
 	export -f log
 	source "$PROJECT_ROOT/k8s/utils/get_config_value"
+	export NAMING_STRATEGY="ids"
 
 	export SCRIPT="$PROJECT_ROOT/k8s/scope/build_context"
 

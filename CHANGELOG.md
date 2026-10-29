@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Fix: a k8s deployment now applies its manifests in dependency order (secrets, service, deployment, scaling, PDB, ingress last) and deletes them in reverse. The ingress was applied before the service it routes to existed, and the AWS Load Balancer Controller then failed the model of the whole ingress group (every scope on that ALB) for about a minute on every deploy
+- k8s scopes name their Kubernetes objects with the `qualified` strategy (application and scope slugs) when no naming strategy is configured
 
 ## [1.19.0] - 2026-10-29
 - k8s scopes can wait in preStop with the kubelet sleep action instead of `/bin/sleep` (`PRESTOP_SLEEP_MODE=native` or `deployment.prestop_sleep_mode` in scope-configurations, Kubernetes 1.30+ on every node), so images without a shell (distroless, scratch) no longer stop at once and return 502s during pod replacements. The default stays `exec`
