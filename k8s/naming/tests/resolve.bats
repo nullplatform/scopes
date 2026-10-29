@@ -9,7 +9,7 @@ setup() {
 	source "$PROJECT_ROOT/k8s/naming/resolve_names"
 
 	export CONTEXT="$(cat "$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal.json")"
-	unset NAMING_STRATEGY
+	export NAMING_STRATEGY="ids"
 
 	kubectl() { echo ""; }
 }
@@ -64,11 +64,11 @@ setup() {
 	assert_equal "$output" "k-8-s-production-123456-internet-facing"
 }
 
-@test "np_naming_resolve: unset strategy defaults to ids" {
+@test "np_naming_resolve: unset strategy defaults to qualified" {
 	unset NAMING_STRATEGY
 	names="$(np_naming_resolve)"
 	run jq -r '.deployment' <<< "$names"
-	assert_equal "$output" "d-123456-789012"
+	assert_equal "$output" "checkout-api-production-789012"
 }
 
 @test "np_naming_resolve: empty strategy aborts" {
@@ -76,7 +76,7 @@ setup() {
 	run np_naming_resolve
 	[ "$status" -ne 0 ]
 	assert_contains "$output" "❌ NAMING_STRATEGY is set but empty"
-	assert_contains "$output" "   • Remove it to use the default 'ids', or set one of: ids, qualified, custom"
+	assert_contains "$output" "   • Remove it to use the default 'qualified', or set one of: ids, qualified, custom"
 }
 
 @test "np_naming_resolve: unrecognised strategy aborts" {

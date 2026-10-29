@@ -8,9 +8,9 @@ Operational scripts that need to find an *already-running* object (an HPA, a Dep
 
 Set the strategy via the `container-orchestration` or `scope-configurations` provider's `naming.strategy`, or the `NAMING_STRATEGY` env var. Provider values win over the env var; both win over the default.
 
-### `ids` (default)
+### `ids`
 
-Names objects from raw scope and deployment ids, exactly as the scope has always done. No behavior changes for existing scopes.
+Names objects from raw scope and deployment ids, as the scope did before `qualified` became the default.
 
 ```
 deployment:     d-123456-789012
@@ -18,7 +18,7 @@ hpa:            hpa-d-123456-789012
 scope_ingress:  k-8-s-production-123456-internet-facing
 ```
 
-### `qualified`
+### `qualified` (default)
 
 Names objects from the application and scope slugs plus the numeric id, so an object's name says what it is instead of just carrying an opaque id.
 
@@ -99,7 +99,7 @@ Resolving a scope's existing object name lists both `ingress` and `httproute` in
 
 ## Tests
 
-- `k8s/naming/tests/golden.bats` renders all fifteen templates under the default `ids` strategy and diffs them byte-for-byte against a captured baseline, so a naming change can never silently alter today's names.
+- `k8s/naming/tests/golden.bats` renders all fifteen templates under the `ids` strategy and diffs them byte-for-byte against a captured baseline, so a naming change can never silently alter today's names.
 - `k8s/naming/tests/resolve.bats` and `k8s/naming/tests/trim.bats` cover the `ids` strategy and the slug-trimming engine.
 - `k8s/naming/tests/qualified.bats` covers the `qualified` strategy, including the naming-budget precedence chain and the pod/CronJob length ceilings.
 - `k8s/naming/tests/pattern.bats` covers pattern validation (discriminant, unsafe paths, separator, literal budget) and the `custom` strategy.

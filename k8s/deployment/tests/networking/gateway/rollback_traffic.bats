@@ -13,7 +13,7 @@ setup() {
   source "$PROJECT_ROOT/k8s/naming/resolve_names"
   export -f get_config_value
   export -f $(declare -F | awk '{print $3}' | grep '^np_')
-  unset NAMING_STRATEGY
+  export NAMING_STRATEGY="ids"
 
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export DEPLOYMENT_ID="deploy-new-123"
