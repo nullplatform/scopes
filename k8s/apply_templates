@@ -17,7 +17,39 @@ fi
 
 APPLIED_FILES=()
 
-# Find all .yaml files that were not yet applied / deleted
+# The rank a manifest is applied at: what one depends on comes first (the secrets
+# a deployment mounts, the service an ingress routes to, the deployment its
+# scaling and PDB target), the ingress last, so the load balancer controller
+# never sees an ingress whose service does not exist yet (that fails the model
+# of its whole ingress group, every scope on that ALB, until the service
+# appears). A delete goes in the reverse order. Unknown kinds go between.
+rank_of() {
+  case "$(basename "$1")" in
+    secret-files-*) echo 1 ;;
+    secret-*)       echo 0 ;;
+    service-*)      echo 2 ;;
+    deployment-*)   echo 3 ;;
+    scaling-*)      echo 4 ;;
+    pdb-*)          echo 5 ;;
+    ingress-*)      echo 9 ;;
+    *)              echo 7 ;;
+  esac
+}
+
+# The .yaml files not yet applied / deleted, in that order (reversed for a delete).
+ordered_templates() {
+  # A key with its own ordering (n) ignores a global -r: the reverse goes on each key.
+  local reverse=""
+  if [[ "$ACTION" == "delete" ]]; then
+    reverse="r"
+  fi
+  while IFS= read -r TEMPLATE_FILE; do
+    printf '%s\t%s\n' "$(rank_of "$TEMPLATE_FILE")" "$TEMPLATE_FILE"
+  done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print) \
+    | sort -t $'\t' -k1,1n$reverse -k2,2$reverse | cut -f2-
+}
+
+# Every .yaml file that was not yet applied / deleted, in dependency order
 while IFS= read -r TEMPLATE_FILE; do
    FILENAME="$(basename "$TEMPLATE_FILE")"
    BASE_DIR="$(dirname "$TEMPLATE_FILE")"
@@ -90,7 +122,7 @@ while IFS= read -r TEMPLATE_FILE; do
 
    # Add the moved file path to our array
    APPLIED_FILES+=("$DEST_DIR/$FILENAME")
-done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print)
+done < <(ordered_templates)
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log debug ""

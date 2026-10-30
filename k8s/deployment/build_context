@@ -392,6 +392,30 @@ fi
 
 log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
 
+# preStop wait of the application container. "exec" runs /bin/sleep in the image and fails
+# on images without a shell (distroless, scratch), so the container is killed before the
+# balancer stops routing to it. "native" is the kubelet sleep action: opt-in because every
+# node's kubelet must be >= 1.30, which the API server version does not guarantee.
+PRESTOP_SLEEP_MODE=$(get_config_value \
+  --env PRESTOP_SLEEP_MODE \
+  --provider '.providers["scope-configurations"].deployment.prestop_sleep_mode' \
+  --default "exec"
+)
+
+case "$PRESTOP_SLEEP_MODE" in
+  native|exec) ;;
+  *)
+    log error "❌ PRESTOP_SLEEP_MODE must be native or exec, got: '$PRESTOP_SLEEP_MODE'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set exec (default) or native (every node on Kubernetes >= 1.30) in values.yaml or the scope-configurations provider"
+    log error ""
+    exit 1
+    ;;
+esac
+
+log debug "🔍 prestop_sleep_mode resolved to ${PRESTOP_SLEEP_MODE}"
+
 BLUE_NAME_FALLBACK=""
 if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
   BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
@@ -456,6 +480,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           --arg main_http_port "$MAIN_HTTP_PORT" \
           --arg main_traffic_manager_port "$MAIN_TRAFFIC_MANAGER_PORT" \
+          --arg prestop_sleep_mode "$PRESTOP_SLEEP_MODE" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -470,7 +495,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 container_cpu_in_millicores: $container_cpu_in_millicores,
                 blue_additional_port_services: $blue_additional_port_services,
                 main_http_port: ($main_http_port | tonumber),
-                main_traffic_manager_port: ($main_traffic_manager_port | tonumber)
+                main_traffic_manager_port: ($main_traffic_manager_port | tonumber),
+                prestop_sleep_mode: $prestop_sleep_mode
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")

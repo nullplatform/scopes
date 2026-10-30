@@ -197,6 +197,11 @@ if [ "$SCOPE_VISIBILITY" = "public" ]; then
       --provider '.providers["container-orchestration"].gateway.public_name' \
       --default "$GATEWAY_DEFAULT"
     )
+    ADDITIONAL_GATEWAYS=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.additional_public_gateways' \
+      --provider '.providers["container-orchestration"].gateway.additional_public_gateways' \
+      --default "[]"
+    )
 else
     export INGRESS_VISIBILITY="internal"
     GATEWAY_DEFAULT="${PRIVATE_GATEWAY_NAME:-gateway-internal}"
@@ -205,7 +210,39 @@ else
       --provider '.providers["container-orchestration"].gateway.private_name' \
       --default "$GATEWAY_DEFAULT"
     )
+    ADDITIONAL_GATEWAYS=$(get_config_value \
+      --provider '.providers["scope-configurations"].networking.additional_private_gateways' \
+      --provider '.providers["container-orchestration"].gateway.additional_private_gateways' \
+      --default "[]"
+    )
 fi
+
+GATEWAY_NAMESPACE=$(get_config_value \
+  --provider '.providers["scope-configurations"].networking.gateway_namespace' \
+  --provider '.providers["container-orchestration"].gateway.namespace' \
+  --env GATEWAY_NAMESPACE \
+  --default "gateways"
+)
+export GATEWAY_NAMESPACE
+
+INVALID_ADDITIONAL_GATEWAYS=""
+if ! GATEWAYS=$(echo "$ADDITIONAL_GATEWAYS" | jq -c \
+  --arg name "$GATEWAY_NAME" \
+  --arg namespace "$GATEWAY_NAMESPACE" '
+  def dns_name: type == "string" and test("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$");
+  def dns_label: type == "string" and test("^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$");
+  if type == "array" and all(.[]; type == "object" and (.name | dns_name) and ((.namespace // "") == "" or (.namespace | dns_label)))
+  then
+    reduce ([{name: $name, namespace: $namespace}]
+      + map({name, namespace: (if (.namespace // "") == "" then $namespace else .namespace end)}))[] as $gateway
+      ([]; if any(.[]; . == $gateway) then . else . + [$gateway] end)
+  else error("invalid additional gateways")
+  end' 2>/dev/null); then
+    log warn "⚠️  Ignoring invalid additional_${SCOPE_VISIBILITY}_gateways: $ADDITIONAL_GATEWAYS"
+    INVALID_ADDITIONAL_GATEWAYS="$ADDITIONAL_GATEWAYS"
+    GATEWAYS=$(jq -nc --arg name "$GATEWAY_NAME" --arg namespace "$GATEWAY_NAMESPACE" '[{name: $name, namespace: $namespace}]')
+fi
+export INVALID_ADDITIONAL_GATEWAYS
 
 K8S_MODIFIERS=$(get_config_value \
   --env K8S_MODIFIERS \
@@ -228,6 +265,7 @@ COMPONENT=$(echo "$NAMESPACE_SLUG-$APPLICATION_SLUG" | sed -E 's/^(.{0,62}[a-zA-
 
 log debug "📋 Scope: $SCOPE_ID | Visibility: $SCOPE_VISIBILITY | Domain: $SCOPE_DOMAIN"
 log debug "📋 Namespace: $K8S_NAMESPACE | Region: $REGION | Gateway: $GATEWAY_NAME | ALB: $ALB_NAME"
+log debug "📋 Gateways: $(echo "$GATEWAYS" | jq -r 'map("\(.namespace)/\(.name)") | join(", ")')"
 
 if ! type -t expand_resolvable_placeholders >/dev/null 2>&1; then source "$SCRIPT_DIR/../utils/expand_placeholders"; fi
 
@@ -390,13 +428,15 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg k8s_namespace "$K8S_NAMESPACE" \
           --arg region "$REGION" \
           --arg gateway_name "$GATEWAY_NAME" \
+          --arg gateway_namespace "$GATEWAY_NAMESPACE" \
+          --argjson gateways "$GATEWAYS" \
           --arg alb_name "$ALB_NAME" \
           --arg component "$COMPONENT" \
           --arg base_domain "$DOMAIN" \
           --argjson modifiers "$K8S_MODIFIERS" \
           --argjson sa_enabled "$SERVICE_ACCOUNT_ENABLED" \
           --arg sa_name "$SERVICE_ACCOUNT_NAME_RESOLVED" \
-          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain, service_account: {enabled: $sa_enabled, name: $sa_name}}')
+          '. + {ingress_visibility: $ingress_visibility, k8s_namespace: $k8s_namespace, gateway_name: $gateway_name, gateway_namespace: $gateway_namespace, gateways: $gateways, region: $region, k8s_modifiers: $modifiers, alb_name: $alb_name, component: $component, base_domain: $base_domain, service_account: {enabled: $sa_enabled, name: $sa_name}}')
 
 source "$SCRIPT_DIR/../naming/resolve_names"
 if ! type -t require_resource >/dev/null 2>&1; then source "$SCRIPT_DIR/require_resource"; fi

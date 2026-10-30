@@ -9,17 +9,53 @@ elapsed=0
 log debug "🔍 Verifying HTTPRoute reconciliation..."
 log debug "📋 HTTPRoute: $HTTPROUTE_NAME | Namespace: $K8S_NAMESPACE | Timeout: ${MAX_WAIT_SECONDS}s"
 
-if command -v np_scope_step_begin >/dev/null 2>&1; then
-    np_scope_step_begin verify-httproute --title "Verify HTTPRoute reconciliation ($HTTPROUTE_NAME)"
-    np_scope_wait_heartbeat "httproute-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
-fi
+np_scope_step_begin verify-httproute --title "Verify HTTPRoute reconciliation ($HTTPROUTE_NAME)"
+np_scope_wait_heartbeat "httproute-reconciliation" 0 "$MAX_WAIT_SECONDS" "pending"
+
+parents_status_of() {
+    echo "$1" | jq -c --arg route_namespace "$K8S_NAMESPACE" '
+      (.status.parents // []) as $statuses
+      | ((.spec.parentRefs // []) | if length > 0 then . else [$statuses[].parentRef] end)
+      | map(
+          (.namespace // $route_namespace) as $namespace
+          | .name as $name
+          | [$statuses[]
+              | select(.parentRef.name == $name and (.parentRef.namespace // $route_namespace) == $namespace)
+              | .conditions[]?] as $conditions
+          | {
+              gateway: "\($namespace)/\($name)",
+              conditions: $conditions,
+              accepted: ([$conditions[] | select(.type == "Accepted")][0] // {}),
+              resolved: ([$conditions[] | select(.type == "ResolvedRefs")][0] // {})
+            })'
+}
+
+print_parents_conditions() {
+    echo "$1" | jq -r '.[] | "   - Gateway \(.gateway):", (if (.conditions | length) == 0 then "     - no status reported" else (.conditions[] | "     - \(.type): \(.status) (\(.reason)) - \(.message)") end)' >&2
+}
+
+trace_parents_status() {
+    np_scope_output gateways "$(echo "$1" | jq -c 'map({gateway, accepted: (.accepted.status // "Unknown"), resolved_refs: (.resolved.status // "Unknown")})')"
+}
+
+fail_reconciliation() {
+    trace_parents_status "$parents_status"
+    if [ "$accepted_status" == "False" ]; then
+        np_scope_failure "$accepted_reason"
+    else
+        np_scope_failure "$resolved_reason"
+    fi
+    np_scope_step_end 1 "HTTPRoute $HTTPROUTE_NAME failed to reconcile on gateway $1"
+    exit 1
+}
 
 while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
     sleep $CHECK_INTERVAL
 
     httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
 
-    parents_count=$(echo "$httproute_json" | jq '.status.parents | length // 0')
+    parents_status=$(parents_status_of "$httproute_json")
+    parents_count=$(echo "$parents_status" | jq 'length')
 
     if [ "$parents_count" -eq 0 ]; then
         log debug "📝 HTTPRoute pending sync (no parent status yet)... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
@@ -27,78 +63,68 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         continue
     fi
 
-    conditions=$(echo "$httproute_json" | jq -r '.status.parents[0].conditions // []')
-    conditions_count=$(echo "$conditions" | jq 'length')
+    failed_parent=$(echo "$parents_status" | jq -c '[.[] | select(.accepted.status == "False" or .resolved.status == "False")][0] // empty')
 
-    if [ "$conditions_count" -eq 0 ]; then
-        log debug "📝 HTTPRoute pending sync (no conditions yet)... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
-        elapsed=$((elapsed + CHECK_INTERVAL))
-        continue
-    fi
+    if [ -n "$failed_parent" ]; then
+        gateway=$(echo "$failed_parent" | jq -r '.gateway')
+        conditions=$(echo "$failed_parent" | jq -c '.conditions')
 
-    accepted_status=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .status')
-    accepted_reason=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .reason')
-    accepted_message=$(echo "$conditions" | jq -r '.[] | select(.type=="Accepted") | .message')
+        accepted_status=$(echo "$failed_parent" | jq -r '.accepted.status // ""')
+        accepted_reason=$(echo "$failed_parent" | jq -r '.accepted.reason // ""')
+        accepted_message=$(echo "$failed_parent" | jq -r '.accepted.message // ""')
 
-    resolved_status=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .status')
-    resolved_reason=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .reason')
-    resolved_message=$(echo "$conditions" | jq -r '.[] | select(.type=="ResolvedRefs") | .message')
+        resolved_status=$(echo "$failed_parent" | jq -r '.resolved.status // ""')
+        resolved_reason=$(echo "$failed_parent" | jq -r '.resolved.reason // ""')
+        resolved_message=$(echo "$failed_parent" | jq -r '.resolved.message // ""')
 
-    if [ "$accepted_status" == "True" ] && [ "$resolved_status" == "True" ]; then
-        log info "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
-        if command -v np_scope_step_end >/dev/null 2>&1; then
-            np_scope_step_end 0
-            np_scope_explain --title "Verify networking"                 --what "HTTPRoute $HTTPROUTE_NAME reconciled — DNS routing verified"
+        log error "❌ HTTPRoute failed to reconcile on gateway $gateway"
+
+        # Check for certificate/TLS errors
+        if echo "$accepted_message $resolved_message" | grep -qi "certificate\|tls\|secret.*not found"; then
+            log error "❌ Certificate/TLS error detected"
+            log error "💡 Possible causes:"
+            log error "   - TLS secret does not exist in namespace $K8S_NAMESPACE"
+            log error "   - Certificate is invalid or expired"
+            log error "   - Gateway references incorrect certificate secret"
+            [ "$accepted_status" == "False" ] && log error "   - Accepted: $accepted_reason - $accepted_message"
+            [ "$resolved_status" == "False" ] && log error "   - ResolvedRefs: $resolved_reason - $resolved_message"
+            log error "🔧 How to fix:"
+            log error "   - Verify TLS secret: kubectl get secret -n $K8S_NAMESPACE | grep tls"
+            log error "   - Check certificate validity"
+            log error "   - Ensure Gateway references the correct secret"
+            fail_reconciliation "$gateway"
         fi
-        return 0
-    fi
 
-    # Check for certificate/TLS errors
-    if echo "$accepted_message $resolved_message" | grep -qi "certificate\|tls\|secret.*not found"; then
-        log error "❌ Certificate/TLS error detected"
-        log error "💡 Possible causes:"
-        log error "   - TLS secret does not exist in namespace $K8S_NAMESPACE"
-        log error "   - Certificate is invalid or expired"
-        log error "   - Gateway references incorrect certificate secret"
-        [ "$accepted_status" == "False" ] && log error "   - Accepted: $accepted_reason - $accepted_message"
-        [ "$resolved_status" == "False" ] && log error "   - ResolvedRefs: $resolved_reason - $resolved_message"
-        log error "🔧 How to fix:"
-        log error "   - Verify TLS secret: kubectl get secret -n $K8S_NAMESPACE | grep tls"
-        log error "   - Check certificate validity"
-        log error "   - Ensure Gateway references the correct secret"
-        exit 1
-    fi
+        # Check for backend service errors
+        if echo "$resolved_message" | grep -qi "service.*not found\|backend.*not found"; then
+            log error "❌ Backend service error detected"
+            log error "💡 Possible causes:"
+            log error "   - Referenced service does not exist"
+            log error "   - Service name is misspelled in HTTPRoute"
+            log error "   - Message: $resolved_message"
+            log error "🔧 How to fix:"
+            log error "   - List services: kubectl get svc -n $K8S_NAMESPACE"
+            log error "   - Verify backend service name in HTTPRoute"
+            log error "   - Ensure service has ready endpoints"
+            fail_reconciliation "$gateway"
+        fi
 
-    # Check for backend service errors
-    if echo "$resolved_message" | grep -qi "service.*not found\|backend.*not found"; then
-        log error "❌ Backend service error detected"
-        log error "💡 Possible causes:"
-        log error "   - Referenced service does not exist"
-        log error "   - Service name is misspelled in HTTPRoute"
-        log error "   - Message: $resolved_message"
-        log error "🔧 How to fix:"
-        log error "   - List services: kubectl get svc -n $K8S_NAMESPACE"
-        log error "   - Verify backend service name in HTTPRoute"
-        log error "   - Ensure service has ready endpoints"
-        exit 1
-    fi
+        # Accepted=False is an error
+        if [ "$accepted_status" == "False" ]; then
+            log error "❌ HTTPRoute not accepted by Gateway"
+            log error "💡 Possible causes:"
+            log error "   - Reason: $accepted_reason"
+            log error "   - Message: $accepted_message"
+            log error "📋 All conditions:"
+            echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason)) - \(.message)"' >&2
+            log error "🔧 How to fix:"
+            log error "   - Check Gateway configuration"
+            log error "   - Verify the gateway $gateway exists and allows routes from namespace $K8S_NAMESPACE"
+            log error "   - Verify HTTPRoute spec matches Gateway requirements"
+            fail_reconciliation "$gateway"
+        fi
 
-    # Accepted=False is an error
-    if [ "$accepted_status" == "False" ]; then
-        log error "❌ HTTPRoute not accepted by Gateway"
-        log error "💡 Possible causes:"
-        log error "   - Reason: $accepted_reason"
-        log error "   - Message: $accepted_message"
-        log error "📋 All conditions:"
-        echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason)) - \(.message)"' >&2
-        log error "🔧 How to fix:"
-        log error "   - Check Gateway configuration"
-        log error "   - Verify HTTPRoute spec matches Gateway requirements"
-        exit 1
-    fi
-
-    # ResolvedRefs=False is an error
-    if [ "$resolved_status" == "False" ]; then
+        # ResolvedRefs=False is an error
         log error "❌ HTTPRoute references could not be resolved"
         log error "💡 Possible causes:"
         log error "   - Reason: $resolved_reason"
@@ -108,12 +134,27 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
         log error "🔧 How to fix:"
         log error "   - Verify all referenced services exist"
         log error "   - Check backend service ports match"
-        exit 1
+        fail_reconciliation "$gateway"
     fi
 
-    log debug "📝 HTTPRoute reconciling... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
-    echo "$conditions" | jq -r '.[] | "   - \(.type): \(.status) (\(.reason))"'
-    if [ $((elapsed % 30)) -eq 0 ] && command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+    pending_gateways=$(echo "$parents_status" | jq -r '[.[] | select(.accepted.status != "True" or .resolved.status != "True") | .gateway] | join(", ")')
+
+    if [ -z "$pending_gateways" ]; then
+        log info "✅ HTTPRoute successfully reconciled (Accepted: True, ResolvedRefs: True)"
+        log info "✅ Gateways: $(echo "$parents_status" | jq -r 'map(.gateway) | join(", ")')"
+        trace_parents_status "$parents_status"
+        for reconciled_gateway in $(echo "$parents_status" | jq -r '.[].gateway'); do
+            np_scope_consumes "k8s-gateway:$reconciled_gateway"
+        done
+        np_scope_step_end 0
+        np_scope_explain --title "Verify networking" --what "HTTPRoute $HTTPROUTE_NAME reconciled — DNS routing verified"
+        return 0
+    fi
+
+    log debug "📝 HTTPRoute reconciling, waiting for gateways: $pending_gateways (${elapsed}s/${MAX_WAIT_SECONDS}s)"
+    echo "$parents_status" | jq -r '.[] | "   - \(.gateway): " + ([.conditions[] | "\(.type)=\(.status)"] | join(", "))'
+    np_scope_progress "$(echo "$parents_status" | jq '[.[] | select(.accepted.status == "True" and .resolved.status == "True")] | length')" "$parents_count" gateways
+    if [ $((elapsed % 30)) -eq 0 ]; then
         np_scope_wait_heartbeat "httproute-reconciliation" "$elapsed" "$MAX_WAIT_SECONDS" "reconciling"
     fi
     elapsed=$((elapsed + CHECK_INTERVAL))
@@ -122,15 +163,17 @@ done
 log error "❌ Timeout waiting for HTTPRoute reconciliation after ${MAX_WAIT_SECONDS}s"
 log error "💡 Possible causes:"
 log error "   - Gateway controller is not running"
+log error "   - A referenced gateway does not exist or is not managed by the controller"
 log error "   - Network policies blocking reconciliation"
 log error "   - Resource constraints on controller"
 log error "📋 Current conditions:"
 httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
-echo "$httproute_json" | jq -r '.status.parents[0].conditions[] | "   - \(.type): \(.status) (\(.reason)) - \(.message)"' >&2
+parents_status=$(parents_status_of "$httproute_json")
+print_parents_conditions "$parents_status"
+trace_parents_status "$parents_status"
+np_scope_failure ReconcileTimeout
 log error "🔧 How to fix:"
 log error "   - Check Gateway controller logs"
 log error "   - Verify Gateway and Istio configuration"
-if command -v np_scope_step_timeout >/dev/null 2>&1; then
-    np_scope_step_timeout "HTTPRoute $HTTPROUTE_NAME not reconciled after ${MAX_WAIT_SECONDS}s"
-fi
+np_scope_step_timeout "HTTPRoute $HTTPROUTE_NAME not reconciled after ${MAX_WAIT_SECONDS}s"
 exit 1
