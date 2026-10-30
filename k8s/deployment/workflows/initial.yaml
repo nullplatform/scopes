@@ -52,6 +52,9 @@ steps:
     type: script
     file: "$SERVICE_PATH/deployment/build_context"
     trace: false
+    configuration:
+      # Strict: an unresolved ${np.*} placeholder or invalid object_modifiers / ServiceAccount config fails here.
+      STRICT_PLACEHOLDERS: true
     output:
       - name: CONTEXT
         type: environment
@@ -72,6 +75,32 @@ steps:
       title: Validate load balancer capacity
       group: setting-up
       flavors: [route53]
+  # Before route traffic: apply_templates applies every manifest left in OUTPUT_DIR.
+  - name: ensure service account
+    type: workflow
+    steps:
+      - name: build service account
+        type: script
+        file: "$SERVICE_PATH/scope/iam/build_service_account"
+        trace: false
+        configuration:
+          ACTION: create
+          SERVICE_ACCOUNT_MODE: per-scope-only
+        output:
+          - name: SERVICE_ACCOUNT_TEMPLATE_PATH
+            type: file
+            file: "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+      - name: apply service account
+        type: script
+        file: "$SERVICE_PATH/apply_templates"
+        trace:
+          key: apply-service-account
+          title: Apply service account
+          group: setting-up
+        configuration:
+          ACTION: apply
+          DRY_RUN: false
+          SKIP_WHEN_EMPTY: true
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/deployment/networking/gateway/route_traffic"

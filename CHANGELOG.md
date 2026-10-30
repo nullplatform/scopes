@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Add a per-scope Kubernetes ServiceAccount without IAM: `security.service_account_enabled` / `security.service_account_name` run the pods with a dedicated ServiceAccount created and owned by the scope (an existing unlabeled one is used as-is; one owned by another scope fails the workflow). It is mutually exclusive with IAM (the `IAM` env var or `security.iam_enabled`): enabling both fails scope create/update and deployments, while other actions warn and keep the IAM ServiceAccount
+- Add `${np.*}` placeholders such as `${np.application_slug}` or `${np.dimension.environment}` in `object_modifiers` and the ServiceAccount name. An unresolved placeholder fails only scope create/update and deployment initial/blue-green; other actions drop the affected entries with a warning. Non-string values under `annotations`, `labels` and `nodeselector` follow the same rule, and the nested copy the API stores for dotted keys is dropped
 - Fix: a k8s deployment now applies its manifests in dependency order (secrets, service, deployment, scaling, PDB, ingress last) and deletes them in reverse. The ingress was applied before the service it routes to existed, and the AWS Load Balancer Controller then failed the model of the whole ingress group (every scope on that ALB) for about a minute on every deploy
 
 ## [1.19.0] - 2026-10-29

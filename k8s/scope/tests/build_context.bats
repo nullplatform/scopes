@@ -161,6 +161,7 @@ teardown() {
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
     "k8s_modifiers": {},
+    "service_account": {"enabled": false, "name": ""},
     "names": {
       "deployment": "",
       "service": "",
@@ -238,6 +239,7 @@ teardown() {
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
     "k8s_modifiers": {},
+    "service_account": {"enabled": false, "name": ""},
     "names": {
       "deployment": "",
       "service": "",
@@ -422,6 +424,476 @@ teardown() {
   assert_equal "$(echo "$CONTEXT" | jq -r .gateway_name)" "scope-gw-public"
   assert_equal "$(echo "$CONTEXT" | jq -r .alb_name)" "scope-alb-public"
   assert_equal "$GATEWAY_NAME" "scope-gw-public"
+}
+
+# =============================================================================
+# Placeholder expansion and service account resolution
+# =============================================================================
+set_scope_config() {
+  export CONTEXT=$(echo "$CONTEXT" | jq --argjson cfg "$1" '
+    .scope.dimensions = {"environment": "development"} |
+    .providers["scope-configurations"] = $cfg')
+}
+
+@test "build_context: expands \${np.*} placeholders in k8s_modifiers" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.application_slug}"}}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.x)" "test-app"
+}
+
+@test "build_context: leaves Go template syntax in k8s_modifiers untouched" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"vault": "{{ with secret \"kv/app\" }}{{ .Data.x }}{{ end }}"}}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.vault)" '{{ with secret "kv/app" }}{{ .Data.x }}{{ end }}'
+}
+
+@test "build_context: fails on unknown placeholder in k8s_modifiers when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.nope}"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "np.nope"
+}
+
+@test "build_context: k8s_modifiers without placeholders are unchanged" {
+  export K8S_MODIFIERS='{"deployment":{"labels":{"a":"b"},"annotations":{"c":"d"}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -cS .k8s_modifiers)" '{"deployment":{"annotations":{"c":"d"},"labels":{"a":"b"}}}'
+}
+
+@test "build_context: drops the nested copy the API adds for dotted keys in string maps" {
+  set_scope_config '{"object_modifiers": {"deployment": {
+    "annotations": {"vault.hashicorp.com/role": "apps", "vault": {"hashicorp": {"com/role": "apps"}}},
+    "labels": {"app.kubernetes.io/name": "x", "app": {"kubernetes": {"io/name": "x"}}},
+    "nodeselector": {"kubernetes.io/os": "linux", "kubernetes": {"io/os": "linux"}},
+    "tolerations": [{"key": "dedicated", "operator": "Exists"}]}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -cS .k8s_modifiers.deployment)" \
+    '{"annotations":{"vault.hashicorp.com/role":"apps"},"labels":{"app.kubernetes.io/name":"x"},"nodeselector":{"kubernetes.io/os":"linux"},"tolerations":[{"key":"dedicated","operator":"Exists"}]}'
+}
+
+@test "build_context: drops nested dotted-key copies before expanding placeholders" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {
+    "vault.hashicorp.com/agent-inject-secret-s": "secret/data/${np.application_slug}",
+    "vault": {"hashicorp": {"com/agent-inject-secret-s": "secret/data/${np.application_slug}"}}}}}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .k8s_modifiers.deployment.annotations)" \
+    '{"vault.hashicorp.com/agent-inject-secret-s":"secret/data/test-app"}'
+}
+
+@test "build_context: drops the nested dotted-key copy without a warning" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {
+    "vault.hashicorp.com/role": "apps", "vault": {"hashicorp": {"com/role": "apps"}}}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"non-string"* ]] || false
+}
+
+@test "build_context: a non-string value in a string map fails in strict mode" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"prometheus.io/scrape": true, "a": "b"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" '❌ object_modifiers values must be strings: deployment.annotations."prometheus.io/scrape"'
+  assert_contains "$output" "🔧 How to fix:"
+}
+
+@test "build_context: a non-string value in a string map is dropped with a warning outside strict mode" {
+  set_scope_config '{"object_modifiers": {"ingress": {"labels": {"tier": 1, "a": "b"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Dropped non-string object_modifiers values: ingress.labels.tier"
+  assert_contains "$output" 'MODS={"ingress":{"labels":{"a":"b"}}}'
+}
+
+@test "build_context: service_account is disabled by default" {
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":false,"name":""}'
+  assert_equal "$SERVICE_ACCOUNT_ENABLED" "false"
+  assert_equal "$SERVICE_ACCOUNT_NAME_RESOLVED" ""
+}
+
+@test "build_context: disabled service account never evaluates the name template" {
+  set_scope_config '{"security": {"service_account_name": "${np.nope}"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":false,"name":""}'
+}
+
+@test "build_context: enabled service account defaults to <app_slug>-<scope_id>" {
+  set_scope_config '{"security": {"service_account_enabled": "true"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":true,"name":"test-app-test-scope-123"}'
+  assert_equal "$SERVICE_ACCOUNT_NAME_RESOLVED" "test-app-test-scope-123"
+}
+
+@test "build_context: service account name template resolves placeholders" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.application_slug}-${np.dimension.environment}"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account.name)" "test-app-development"
+}
+
+@test "build_context: service account name ending in a dash fails with DNS-1123 message when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.application_slug}-"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "DNS-1123"
+}
+
+@test "build_context: service account name with uppercase fails with DNS-1123 message when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "My-SA"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "DNS-1123"
+}
+
+@test "build_context: fails on an unresolved service account placeholder when STRICT_PLACEHOLDERS=true" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.dimension.region}-sa"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "np.dimension.region"
+}
+
+# Tolerant mode (default): actions that do not render pod specs never block on a placeholder.
+@test "build_context: tolerant mode expands resolvable placeholders and drops unresolved entries" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"vault.hashicorp.com/agent-inject-secret-x": "kv/${np.nope}", "y": "${np.application_slug}"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" '⚠️  Dropped object_modifiers entries with unresolved placeholder(s) (np.nope): deployment.annotations."vault.hashicorp.com/agent-inject-secret-x"'
+  assert_contains "$output" 'MODS={"deployment":{"annotations":{"y":"test-app"}}}'
+  [[ "$output" != *'MODS='*'${np.'* ]] || false
+  [[ "$output" != *"❌"* ]] || false
+}
+
+@test "build_context: tolerant mode logs a single warning for several dropped entries" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"a": "${np.nope}", "b": "${np.}"}}, "ingress": {"labels": {"c": "${np.dimension.region}"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_equal "$(grep -c "Dropped object_modifiers entries" <<<"$output")" "1"
+  assert_contains "$output" '(${np.}, np.dimension.region, np.nope): deployment.annotations.a, deployment.annotations.b, ingress.labels.c'
+  assert_contains "$output" 'MODS={"deployment":{"annotations":{}},"ingress":{"labels":{}}}'
+}
+
+@test "build_context: strict mode fails on a malformed placeholder in k8s_modifiers" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.unclosed"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" '${np.unclosed'
+}
+
+@test "build_context: tolerant mode disables an unresolvable service account with a warning" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "${np.dimension.region}-sa"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account) ENABLED=$SERVICE_ACCOUNT_ENABLED"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Could not resolve the service account name from '\${np.dimension.region}-sa' (unresolved placeholder(s): np.dimension.region); continuing without the per-scope service account for this action (a scope delete leaves it in place)"
+  assert_contains "$output" 'SA={"enabled":false,"name":""} ENABLED=false'
+  [[ "$output" != *"❌"* ]] || false
+}
+
+@test "build_context: tolerant mode disables a service account with an invalid name with a warning" {
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "My-SA"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "(invalid DNS-1123 name 'My-SA')"
+  assert_contains "$output" 'SA={"enabled":false,"name":""}'
+}
+
+@test "build_context: tolerant mode still resolves a valid service account and modifiers" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.application_slug}"}}}, "security": {"service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account) X=$(echo "$CONTEXT" | jq -r .k8s_modifiers.deployment.annotations.x)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" 'SA={"enabled":true,"name":"test-app-test-scope-123"} X=test-app'
+  [[ "$output" != *"Unresolved placeholder"* ]] || false
+  [[ "$output" != *"Could not resolve the service account"* ]] || false
+}
+
+# =============================================================================
+# DNS-1123 subdomain validation of the resolved service account name
+# =============================================================================
+@test "build_context: service account names with an empty or dash-edged label are rejected" {
+  export STRICT_PLACEHOLDERS=true
+  for name in "a..b" "a.-b" "a-.b"; do
+    set_scope_config "{\"security\": {\"service_account_enabled\": \"true\", \"service_account_name\": \"$name\"}}"
+    run bash -c 'source "$SCRIPT"'
+    [ "$status" -ne 0 ] || false
+    assert_contains "$output" "DNS-1123"
+  done
+}
+
+@test "build_context: a dotted service account name is accepted" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "true", "service_account_name": "a.b"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$SERVICE_ACCOUNT_NAME_RESOLVED" "a.b"
+}
+
+@test "build_context: a 253-character service account name is accepted and 254 rejected" {
+  export STRICT_PLACEHOLDERS=true
+  name253="$(printf 'a%.0s' $(seq 1 253))"
+  set_scope_config "{\"security\": {\"service_account_enabled\": \"true\", \"service_account_name\": \"$name253\"}}"
+  run bash -c 'source "$SCRIPT" && echo "LEN=${#SERVICE_ACCOUNT_NAME_RESOLVED}"'
+  assert_equal "$status" "0"
+  assert_contains "$output" "LEN=253"
+
+  set_scope_config "{\"security\": {\"service_account_enabled\": \"true\", \"service_account_name\": \"${name253}b\"}}"
+  run bash -c 'source "$SCRIPT"'
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "DNS-1123"
+}
+
+# =============================================================================
+# service_account_enabled / STRICT_PLACEHOLDERS parsing and env fallback
+# =============================================================================
+@test "build_context: service_account_enabled accepts a JSON boolean true" {
+  set_scope_config '{"security": {"service_account_enabled": true}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":true,"name":"test-app-test-scope-123"}'
+}
+
+@test "build_context: service_account_enabled is case-insensitive" {
+  set_scope_config '{"security": {"service_account_enabled": "TRUE"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$SERVICE_ACCOUNT_ENABLED" "true"
+}
+
+@test "build_context: an invalid service_account_enabled fails in strict mode" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"security": {"service_account_enabled": "ture"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "❌ Invalid security.service_account_enabled value 'ture' (expected true or false)"
+}
+
+@test "build_context: an invalid service_account_enabled warns and is treated as false" {
+  set_scope_config '{"security": {"service_account_enabled": "yes"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Invalid security.service_account_enabled value 'yes' (expected true or false); treating it as false"
+  assert_contains "$output" 'SA={"enabled":false,"name":""}'
+}
+
+@test "build_context: SERVICE_ACCOUNT_ENABLED and SERVICE_ACCOUNT_NAME_TEMPLATE env vars are the fallback" {
+  export SERVICE_ACCOUNT_ENABLED=true SERVICE_ACCOUNT_NAME_TEMPLATE='env-${np.scope_slug}'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":true,"name":"env-test-scope"}'
+}
+
+@test "build_context: the provider wins over the SERVICE_ACCOUNT_* env vars" {
+  export SERVICE_ACCOUNT_ENABLED=true SERVICE_ACCOUNT_NAME_TEMPLATE='env-${np.scope_slug}'
+  set_scope_config '{"security": {"service_account_name": "provider-${np.scope_slug}"}}'
+  source "$SCRIPT"
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_account.name)" "provider-test-scope"
+
+  export SERVICE_ACCOUNT_ENABLED=true
+  set_scope_config '{"security": {"service_account_enabled": false}}'
+  source "$SCRIPT"
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_account)" '{"enabled":false,"name":""}'
+}
+
+@test "build_context: STRICT_PLACEHOLDERS is case-insensitive" {
+  export STRICT_PLACEHOLDERS=TRUE
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.nope}"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "np.nope"
+}
+
+@test "build_context: an invalid STRICT_PLACEHOLDERS fails" {
+  export STRICT_PLACEHOLDERS=yes
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "❌ Invalid STRICT_PLACEHOLDERS value 'yes' (expected true or false)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
+}
+
+# =============================================================================
+# IAM and the per-scope service account are mutually exclusive
+# =============================================================================
+@test "build_context: IAM and service_account_enabled together fail before any step in strict mode" {
+  export STRICT_PLACEHOLDERS=true IAM='{"ENABLED":true,"PREFIX":"np-role"}'
+  set_scope_config '{"security": {"service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "❌ IAM and service_account_enabled are both enabled for this scope"
+  assert_contains "$output" "• Disable security.iam_enabled or security.service_account_enabled in scope-configurations"
+  [[ "$output" != *"Scope context built successfully"* ]] || false
+}
+
+@test "build_context: IAM and service_account_enabled together warn and ignore the per-scope SA outside strict mode" {
+  export IAM='{"ENABLED":"true","PREFIX":"np-role"}'
+  set_scope_config '{"security": {"service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "SA=$(echo "$CONTEXT" | jq -c .service_account) ENABLED=$SERVICE_ACCOUNT_ENABLED"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  IAM and service_account_enabled are both enabled; the per-scope service account is ignored because IAM owns the pod service account"
+  assert_contains "$output" 'SA={"enabled":false,"name":""} ENABLED=false'
+}
+
+@test "build_context: security.iam_enabled and service_account_enabled together fail in strict mode" {
+  export STRICT_PLACEHOLDERS=true
+  unset IAM
+  set_scope_config '{"security": {"iam_enabled": true, "service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "❌ IAM and service_account_enabled are both enabled for this scope"
+}
+
+@test "build_context: security.iam_enabled and service_account_enabled together warn outside strict mode" {
+  unset IAM
+  set_scope_config '{"security": {"iam_enabled": "true", "service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "ENABLED=$SERVICE_ACCOUNT_ENABLED"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  IAM and service_account_enabled are both enabled"
+  assert_contains "$output" "ENABLED=false"
+}
+
+@test "build_context: the IAM env var wins over security.iam_enabled" {
+  export STRICT_PLACEHOLDERS=true IAM='{"ENABLED":false}'
+  set_scope_config '{"security": {"iam_enabled": true, "service_account_enabled": "true"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$SERVICE_ACCOUNT_ENABLED" "true"
+}
+
+@test "build_context: IAM disabled keeps the per-scope service account in strict mode" {
+  export STRICT_PLACEHOLDERS=true IAM='{"ENABLED":false}'
+  set_scope_config '{"security": {"service_account_enabled": "true"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$SERVICE_ACCOUNT_ENABLED" "true"
+}
+
+# =============================================================================
+# Placeholder helper failures follow the strict / tolerant mode explicitly
+# =============================================================================
+failing_helpers() {
+  source "$PROJECT_ROOT/k8s/utils/expand_placeholders"
+  export _NP_PLACEHOLDER_JQ_DEFS
+  export -f _np_placeholder_jq drop_placeholder_entries
+  expand_placeholders() { log error "   ❌ helper failed"; return 1; }
+  unresolved_placeholders() { log error "   ❌ helper failed"; return 1; }
+  expand_resolvable_placeholders() { log error "   ❌ helper failed"; return 1; }
+  unresolved_placeholder_paths() { log error "   ❌ helper failed"; return 1; }
+  expand_placeholder_string() { log error "   ❌ helper failed"; return 1; }
+  export -f expand_placeholders unresolved_placeholders expand_resolvable_placeholders unresolved_placeholder_paths expand_placeholder_string
+}
+
+@test "build_context: a placeholder helper failure exits in strict mode" {
+  failing_helpers
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"x": "${np.application_slug}"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "helper failed"
+}
+
+@test "build_context: a placeholder helper failure drops only the entries holding placeholders in tolerant mode" {
+  failing_helpers
+  set_scope_config '{"object_modifiers": {"ingress": {"annotations": {"x": "${np.application_slug}", "keep": "v"}}}, "security": {"service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers) SA=$(echo "$CONTEXT" | jq -c .service_account)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Could not evaluate placeholders in object_modifiers; dropping every entry that holds one for this action"
+  assert_contains "$output" 'MODS={"ingress":{"annotations":{"keep":"v"}}} SA={"enabled":false,"name":""}'
+}
+
+@test "build_context: modifiers are ignored in tolerant mode when not even the fallback can read them" {
+  failing_helpers
+  drop_placeholder_entries() { log error "   ❌ helper failed"; return 1; }
+  export -f drop_placeholder_entries
+  set_scope_config '{"object_modifiers": {"ingress": {"annotations": {"x": "${np.application_slug}"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Could not drop the object_modifiers entries holding placeholders; ignoring object_modifiers for this action"
+  assert_contains "$output" 'MODS={}'
+}
+
+@test "build_context: modifiers without placeholders never call the placeholder helpers" {
+  failing_helpers
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"object_modifiers": {"deployment": {"labels": {"a": "b"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" 'MODS={"deployment":{"labels":{"a":"b"}}}'
 }
 
 # =============================================================================

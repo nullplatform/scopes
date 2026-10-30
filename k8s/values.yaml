@@ -86,6 +86,9 @@ configuration:
 #              ]
 #            }
 #      BOUNDARY_ARN: arn:aws:iam::aws:policy/AmazonS3FullAccess
+# Per-scope ServiceAccount without IAM (mutually exclusive with IAM.ENABLED); see the README Service Account section.
+#  SERVICE_ACCOUNT_ENABLED: false
+#  SERVICE_ACCOUNT_NAME_TEMPLATE: "${np.application_slug}-${np.scope_id}"
   MANIFEST_BACKUP:
     ENABLED: false
 #    TYPE: s3
