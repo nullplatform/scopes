@@ -49,7 +49,7 @@ steps:
       title: Create namespace
       optional: true
     configuration:
-      # Renders pod specs: an unresolved ${np.*} placeholder fails here.
+      # Strict: an unresolved ${np.*} placeholder or invalid object_modifiers / ServiceAccount config fails here.
       STRICT_PLACEHOLDERS: true
     output:
       - name: CONTEXT

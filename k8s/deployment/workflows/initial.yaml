@@ -53,7 +53,7 @@ steps:
     file: "$SERVICE_PATH/deployment/build_context"
     trace: false
     configuration:
-      # Renders pod specs: an unresolved ${np.*} placeholder fails here.
+      # Strict: an unresolved ${np.*} placeholder or invalid object_modifiers / ServiceAccount config fails here.
       STRICT_PLACEHOLDERS: true
     output:
       - name: CONTEXT

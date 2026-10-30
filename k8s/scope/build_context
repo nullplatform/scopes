@@ -212,13 +212,6 @@ K8S_MODIFIERS=$(get_config_value \
   --provider '.providers["scope-configurations"].object_modifiers' \
   --default "{}"
 )
-# The API stores a dotted key ("vault.hashicorp.com/role") plus a nested copy split on the dots; K8s rejects
-# non-string values in these maps, so keep only the string entries.
-K8S_MODIFIERS=$(echo "$K8S_MODIFIERS" | jq 'walk(
-  if type == "object" then
-    with_entries(if (.key == "annotations" or .key == "labels" or .key == "nodeselector") and (.value | type) == "object"
-      then .value |= with_entries(select(.value | type == "string")) else . end)
-  else . end)')
 
 OUTPUT_DIR="$SERVICE_PATH/output/$SCOPE_ID"
 if [ -n "${NP_OUTPUT_DIR:-}" ]; then
@@ -238,7 +231,7 @@ log debug "📋 Namespace: $K8S_NAMESPACE | Region: $REGION | Gateway: $GATEWAY_
 
 if ! type -t expand_resolvable_placeholders >/dev/null 2>&1; then source "$SCRIPT_DIR/../utils/expand_placeholders"; fi
 
-# Only workflows that render pod specs (scope create/update, deployment initial/blue-green) set
+# Only workflows that first validate and apply the config (scope create/update, deployment initial/blue-green) set
 # STRICT_PLACEHOLDERS=true; elsewhere (delete, rollback, ...) a bad placeholder warns so teardown never blocks.
 STRICT_PLACEHOLDERS=$(echo "${STRICT_PLACEHOLDERS:-false}" | tr '[:upper:]' '[:lower:]')
 if [ "$STRICT_PLACEHOLDERS" != "true" ] && [ "$STRICT_PLACEHOLDERS" != "false" ]; then
@@ -248,8 +241,36 @@ if [ "$STRICT_PLACEHOLDERS" != "true" ] && [ "$STRICT_PLACEHOLDERS" != "false" ]
   log error "   A workflow or override sets STRICT_PLACEHOLDERS to an unsupported value"
   log error ""
   log error "🔧 How to fix:"
-  log error "   • Set STRICT_PLACEHOLDERS: true on the build context step of workflows that render pod specs, or leave it unset"
+  log error "   • Set STRICT_PLACEHOLDERS: true on the build context step of scope create or deployment initial, or leave it unset"
   exit 1
+fi
+
+# The API stores a dotted key ("vault.hashicorp.com/role") plus a nested copy split on the dots: drop the copy.
+# Any other non-string value in annotations/labels/nodeselector (at any depth) is rejected by K8s.
+STRING_MAPS=$(echo "$K8S_MODIFIERS" | jq -c '
+  def fmt: map(if type == "number" then "[\(.)]" elif test("\\A[A-Za-z_][A-Za-z0-9_]*\\z") then ".\(.)"
+               else ".\(tojson)" end) | join("") | ltrimstr(".");
+  def is_copy($m; $k): type == "object" and
+    ([paths(scalars) as $p | [$k] + $p | map(tostring) | join(".")] as $f
+     | ($f | length) > 0 and all($f[]; . as $d | $m[$d] | type == "string"));
+  [paths(objects) as $p | select($p[-1] | IN("annotations", "labels", "nodeselector")) | getpath($p) as $m
+   | $m | to_entries[] | select(.value | type != "string") as $kv
+   | {path: ($p + [$kv.key]), copy: ($kv.value | is_copy($m; $kv.key))}] as $e
+  | {modifiers: delpaths([$e[].path]), invalid: ([$e[] | select(.copy | not) | .path | fmt] | join(", "))}')
+K8S_MODIFIERS=$(echo "$STRING_MAPS" | jq -c .modifiers)
+INVALID_MODIFIERS=$(echo "$STRING_MAPS" | jq -r .invalid)
+if [ -n "$INVALID_MODIFIERS" ]; then
+  if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
+    log error "   ❌ object_modifiers values must be strings: $INVALID_MODIFIERS"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   A number, boolean or null under annotations, labels or nodeselector"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Quote the value in scope-configurations, e.g. \"true\" instead of true"
+    exit 1
+  fi
+  log warn "⚠️  Dropped non-string object_modifiers values: $INVALID_MODIFIERS"
 fi
 
 # Context used to resolve ${np.*}: the scope context plus the resolved k8s namespace.
@@ -298,9 +319,16 @@ if [ "$SERVICE_ACCOUNT_ENABLED" != "true" ] && [ "$SERVICE_ACCOUNT_ENABLED" != "
   SERVICE_ACCOUNT_ENABLED="false"
 fi
 
-# IAM owns the pod service account when enabled; same source and truthiness as scope/iam/create_role.
+# IAM owns the pod service account when enabled: the IAM env (as scope/iam/create_role reads it) or, when
+# unset, security.iam_enabled (as deployment/build_context reads it).
 if [ "$SERVICE_ACCOUNT_ENABLED" = "true" ]; then
-  SCOPE_IAM_ENABLED=$(echo "${IAM-"{}"}" | jq -r .ENABLED 2>/dev/null) || SCOPE_IAM_ENABLED="false"
+  if [ -n "${IAM:-}" ]; then
+    SCOPE_IAM_ENABLED=$(echo "$IAM" | jq -r .ENABLED 2>/dev/null) || SCOPE_IAM_ENABLED="false"
+  else
+    SCOPE_IAM_ENABLED=$(get_config_value \
+      --provider '.providers["scope-configurations"].security.iam_enabled' \
+      --default "false" | tr '[:upper:]' '[:lower:]')
+  fi
   if [ -n "$SCOPE_IAM_ENABLED" ] && [ "$SCOPE_IAM_ENABLED" != "false" ] && [ "$SCOPE_IAM_ENABLED" != "null" ]; then
     if [ "$STRICT_PLACEHOLDERS" = "true" ]; then
       log error "   ❌ IAM and service_account_enabled are both enabled for this scope"

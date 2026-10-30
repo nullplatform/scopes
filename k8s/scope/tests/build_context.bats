@@ -488,6 +488,37 @@ set_scope_config() {
     '{"vault.hashicorp.com/agent-inject-secret-s":"secret/data/test-app"}'
 }
 
+@test "build_context: drops the nested dotted-key copy without a warning" {
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {
+    "vault.hashicorp.com/role": "apps", "vault": {"hashicorp": {"com/role": "apps"}}}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  [[ "$output" != *"non-string"* ]] || false
+}
+
+@test "build_context: a non-string value in a string map fails in strict mode" {
+  export STRICT_PLACEHOLDERS=true
+  set_scope_config '{"object_modifiers": {"deployment": {"annotations": {"prometheus.io/scrape": true, "a": "b"}}}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" '❌ object_modifiers values must be strings: deployment.annotations."prometheus.io/scrape"'
+  assert_contains "$output" "🔧 How to fix:"
+}
+
+@test "build_context: a non-string value in a string map is dropped with a warning outside strict mode" {
+  set_scope_config '{"object_modifiers": {"ingress": {"labels": {"tier": 1, "a": "b"}}}}'
+
+  run bash -c 'source "$SCRIPT" && echo "MODS=$(echo "$CONTEXT" | jq -c .k8s_modifiers)"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Dropped non-string object_modifiers values: ingress.labels.tier"
+  assert_contains "$output" 'MODS={"ingress":{"labels":{"a":"b"}}}'
+}
+
 @test "build_context: service_account is disabled by default" {
   source "$SCRIPT"
 
@@ -757,6 +788,37 @@ set_scope_config() {
   assert_equal "$status" "0"
   assert_contains "$output" "⚠️  IAM and service_account_enabled are both enabled; the per-scope service account is ignored because IAM owns the pod service account"
   assert_contains "$output" 'SA={"enabled":false,"name":""} ENABLED=false'
+}
+
+@test "build_context: security.iam_enabled and service_account_enabled together fail in strict mode" {
+  export STRICT_PLACEHOLDERS=true
+  unset IAM
+  set_scope_config '{"security": {"iam_enabled": true, "service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -ne 0 ] || false
+  assert_contains "$output" "❌ IAM and service_account_enabled are both enabled for this scope"
+}
+
+@test "build_context: security.iam_enabled and service_account_enabled together warn outside strict mode" {
+  unset IAM
+  set_scope_config '{"security": {"iam_enabled": "true", "service_account_enabled": "true"}}'
+
+  run bash -c 'source "$SCRIPT" && echo "ENABLED=$SERVICE_ACCOUNT_ENABLED"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  IAM and service_account_enabled are both enabled"
+  assert_contains "$output" "ENABLED=false"
+}
+
+@test "build_context: the IAM env var wins over security.iam_enabled" {
+  export STRICT_PLACEHOLDERS=true IAM='{"ENABLED":false}'
+  set_scope_config '{"security": {"iam_enabled": true, "service_account_enabled": "true"}}'
+
+  source "$SCRIPT"
+
+  assert_equal "$SERVICE_ACCOUNT_ENABLED" "true"
 }
 
 @test "build_context: IAM disabled keeps the per-scope service account in strict mode" {

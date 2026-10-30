@@ -237,11 +237,11 @@ authenticate to the cluster identity (e.g. Vault Kubernetes auth) and each appli
 
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
-| **SERVICE_ACCOUNT_ENABLED** | Whether the scope runs with its own ServiceAccount: `true` or `false`, case-insensitive (default `false`; any other value logs a warning and counts as `false`) | `security.service_account_enabled` |
+| **SERVICE_ACCOUNT_ENABLED** | Whether the scope runs with its own ServiceAccount: `true` or `false`, case-insensitive (default `false`; any other value fails scope create/update and deployments, and other actions warn and treat it as `false`) | `security.service_account_enabled` |
 | **SERVICE_ACCOUNT_NAME_TEMPLATE** | Name of the ServiceAccount, accepts [placeholders](#placeholders) (default `${np.application_slug}-${np.scope_id}`) | `security.service_account_name` |
 
 - The resolved name must be a valid DNS-1123 subdomain (dot-separated labels of lowercase alphanumerics or `-`, each starting and ending alphanumeric, at most 253 characters); otherwise scope create/update and deployments fail (see [placeholders](#placeholders) for other actions).
-- It is mutually exclusive with IAM (`IAM.ENABLED` / `security.iam_enabled`): enabling both fails scope create/update when the scope context is built, before any step runs (so no IAM role is created), and fails deployments. Rollback, switch traffic, finalize and deletes only warn and keep the IAM service account, so enabling both never blocks them.
+- It is mutually exclusive with IAM (the `IAM` env var or, when it is unset, `security.iam_enabled`): enabling both fails scope create/update when the scope context is built, before any step runs (so no IAM role is created), and fails deployments. Rollback, switch traffic, finalize and deletes only warn and keep the IAM service account, so enabling both never blocks them.
 - **Ownership.** The scope manages a ServiceAccount only if it carries the label `scope_id` equal to the scope's id.
   - Labeled with another scope's id: scope create/update and deployments fail, naming the owning scope.
   - Without the `scope_id` label: it is used as-is, with a warning, and is never modified or deleted. This lets you bring your own ServiceAccount by pre-creating it.
@@ -270,15 +270,15 @@ Advanced configuration options.
 #### Placeholders
 
 Every string value in `object_modifiers` (and the ServiceAccount name template) can reference scope data with `${np.<key>}`.
-Only values are expanded, never object keys. `<key>` is one of the names below, made of letters, digits, `_`, `.` and `-`.
+Only values are expanded, never object keys. The API also stores each dotted key (`vault.hashicorp.com/role`) as a nested copy split on the dots; that copy is dropped from `annotations`, `labels` and `nodeselector` before expansion. `<key>` is one of the names below, made of letters, digits, `_`, `.` and `-`.
 Placeholders in `object_modifiers` are resolved when the scope context is built; the ServiceAccount name template is only evaluated when `service_account_enabled` is `true`.
 
 A placeholder is unresolved when its key is unknown, its value is null or empty (e.g. a dimension the scope does not have), or it is malformed (`${np.}`, `${np.bad key}`, a missing `}`).
 
-- **Strict** (scope create/update, deployment initial and blue-green): an unresolved placeholder, an invalid ServiceAccount name or an invalid `service_account_enabled` value fails the workflow instead of rendering an empty or literal value.
-- **Tolerant** (every other action: scope delete, deployment delete, rollback, switch traffic, finalize, ...): resolvable placeholders are expanded and every `object_modifiers` entry whose value still holds an unresolved placeholder is dropped, with one warning naming the dropped paths. A map entry drops its key; anything inside a list drops the whole list (e.g. all of `tolerations`), since a list element missing a field can match more than intended. If the placeholders cannot be evaluated at all, every entry holding `${np.` is dropped and the rest is kept. A literal `${np.` never reaches a live object. These actions only apply routing objects (labels and annotations); the pod specs they render are only deleted. An unresolvable ServiceAccount name disables the per-scope ServiceAccount for that action, so a scope delete leaves it in place.
+- **Strict** (scope create/update, deployment initial and blue-green): an unresolved placeholder, an invalid ServiceAccount name, an invalid `service_account_enabled` value or a non-string value under `annotations`, `labels` or `nodeselector` fails the workflow instead of rendering an empty or literal value.
+- **Tolerant** (every other action: scope delete, deployment delete, rollback, switch traffic, finalize, ...): resolvable placeholders are expanded and every `object_modifiers` entry whose value still holds an unresolved placeholder is dropped, with one warning naming the dropped paths. A map entry drops its key; anything inside a list drops the whole list (e.g. all of `tolerations`), since a list element missing a field can match more than intended. Non-string values under `annotations`, `labels` or `nodeselector` are dropped with a warning. If the placeholders cannot be evaluated at all, every entry holding `${np.` is dropped and the rest is kept (and if even that fails, `object_modifiers` is ignored for the action). A literal `${np.` never reaches a live object. These actions only apply routing objects (labels and annotations); the pod specs they render are only deleted. An unresolvable ServiceAccount name disables the per-scope ServiceAccount for that action, so a scope delete leaves it in place.
 
-The mode is chosen by `STRICT_PLACEHOLDERS` (`true` or `false`, case-insensitive; any other value fails the step), which the built-in workflows set to `true` on the build context step of scope create and deployment initial. A custom workflow or override that replaces that step must set it too to keep failing fast; without it the step is tolerant.
+The mode is chosen by `STRICT_PLACEHOLDERS` (`true` or `false`, case-insensitive; any other value fails the step), which the built-in workflows set to `true` on the build context step of scope create and deployment initial (scope update and blue-green inherit it by including those workflows). A custom workflow or override that replaces that step must set it too to keep failing fast; without it the step is tolerant.
 
 | Placeholder | Value |
 |-------------|-------|
