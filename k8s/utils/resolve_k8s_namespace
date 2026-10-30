@@ -6,15 +6,25 @@
 # (cluster.namespace / NAMESPACE_OVERRIDE / K8S_NAMESPACE / "nullplatform"),
 # exactly as before.
 #
-# With parity on (cluster.use_nullplatform_namespace = true), every
-# nullplatform namespace gets its own Kubernetes namespace. Resolution order:
-#   1. sticky  - the namespace where the scope's objects already live, so
-#                scopes created before parity was enabled never move
-#   2. pinned  - the Kubernetes namespace labeled with this nullplatform
-#                namespace id, so renaming the nullplatform namespace keeps
-#                its scopes together
-#   3. computed - built from the nullplatform namespace slug
-#                (namespace_strategy: np_namespace | np_account_namespace)
+# Parity is on when a namespace pattern is configured: naming.namespace_pattern
+# in the container-orchestration or scope-configurations provider, or the
+# NAMESPACE_PATTERN env var. cluster.use_nullplatform_namespace = true (or
+# USE_NULLPLATFORM_NAMESPACE) is the shorthand for the pattern
+# "{.namespace.slug}". The pattern is rendered by the same engine as resource
+# names (k8s/naming/resolve_names), so it accepts any context path, e.g.
+# "{.account.slug}-{.namespace.slug}" or
+# "{.namespace.slug}-{.scope.dimensions.environment}".
+#
+# Resolution order with parity on:
+#   1. sticky   - the namespace where the scope's objects already live, so
+#                 scopes created before parity was enabled never move
+#   2. pinned   - the Kubernetes namespace labeled with this nullplatform
+#                 namespace id, so renaming the nullplatform namespace keeps
+#                 its scopes together. Only when the pattern depends on the
+#                 organization, account and namespace alone: a pattern with
+#                 other fields (e.g. dimensions) maps one nullplatform
+#                 namespace to several Kubernetes namespaces
+#   3. computed - the rendered pattern
 #
 # Usage (source this file, do not run it in a subshell):
 #   resolve_k8s_namespace <static_namespace> [<scope_id>]
@@ -26,31 +36,56 @@ _RESOLVE_K8S_NAMESPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 if [[ "$(type -t get_config_value 2>/dev/null)" != "function" ]]; then
   source "$_RESOLVE_K8S_NAMESPACE_DIR/get_config_value"
 fi
+if [[ "$(type -t np_name_render 2>/dev/null)" != "function" ]]; then
+  source "$_RESOLVE_K8S_NAMESPACE_DIR/../naming/resolve_names"
+fi
 
 K8S_NAMESPACE_RESERVED_DEFAULT="default kube-system kube-public kube-node-lease istio-system gateways cert-manager external-dns"
+K8S_NAMESPACE_PATTERN_DEFAULT="{.namespace.slug}"
+K8S_NAMESPACE_NAME_BUDGET=63
 
-k8s_namespace_parity_enabled() {
-  local enabled
+# Prints the configured namespace pattern; empty means parity is off.
+k8s_namespace_pattern() {
+  local pattern enabled
+  pattern=$(get_config_value \
+    --env NAMESPACE_PATTERN \
+    --provider '.providers["scope-configurations"].naming.namespace_pattern' \
+    --provider '.providers["container-orchestration"].naming.namespace_pattern' \
+    --default ""
+  )
+  if [ -n "$pattern" ]; then
+    echo "$pattern"
+    return 0
+  fi
+
   enabled=$(get_config_value \
     --env USE_NULLPLATFORM_NAMESPACE \
     --provider '.providers["scope-configurations"].cluster.use_nullplatform_namespace' \
     --provider '.providers["container-orchestration"].cluster.use_nullplatform_namespace' \
     --default "false"
   )
-  [ "$enabled" = "true" ]
+  if [ "$enabled" = "true" ]; then
+    echo "$K8S_NAMESPACE_PATTERN_DEFAULT"
+  fi
 }
 
-# Lowercases, keeps DNS-1123 characters and caps the name at 63 characters,
-# replacing the tail with a short hash when it is longer.
-sanitize_k8s_namespace_name() {
-  local raw="$1" name hash
-  name=$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
-  if [ "${#name}" -gt 63 ]; then
-    hash=$(printf '%s' "$raw" | { sha1sum 2>/dev/null || shasum; } | cut -c1-6)
-    name="${name:0:56}"
-    name="${name%-}-$hash"
-  fi
-  echo "$name"
+k8s_namespace_parity_enabled() {
+  [ -n "$(k8s_namespace_pattern)" ]
+}
+
+# True when every placeholder of the pattern is a field of the organization,
+# account or namespace, so one nullplatform namespace maps to one Kubernetes
+# namespace and pinning by namespace id is safe.
+_k8s_namespace_pattern_is_per_namespace() {
+  local placeholder
+  while read -r placeholder; do
+    [ -n "$placeholder" ] || continue
+    case "$placeholder" in
+      "{.organization."*|"{.account."*|"{.namespace."*) ;;
+      *) return 1 ;;
+    esac
+  done < <(grep -oE '\{[^}]*\}' <<< "$1")
+  return 0
 }
 
 _k8s_namespace_of_scope() {
@@ -76,7 +111,7 @@ k8s_namespace_of_pods() {
 
 resolve_k8s_namespace() {
   local static_namespace="$1" scope_id="${2:-}"
-  local np_namespace_slug account_slug strategy name reserved owner managed
+  local pattern name reserved owner managed
 
   K8S_NAMESPACE="$static_namespace"
   K8S_NAMESPACE_PARITY="false"
@@ -92,7 +127,8 @@ resolve_k8s_namespace() {
     // empty' 2>/dev/null || true)
   export K8S_NAMESPACE K8S_NAMESPACE_PARITY K8S_NAMESPACE_SOURCE NP_NAMESPACE_ID NP_ACCOUNT_ID
 
-  k8s_namespace_parity_enabled || return 0
+  pattern=$(k8s_namespace_pattern)
+  [ -n "$pattern" ] || return 0
   K8S_NAMESPACE_PARITY="true"
 
   if [ -z "$scope_id" ]; then
@@ -105,56 +141,36 @@ resolve_k8s_namespace() {
     return 0
   fi
 
-  name=$(_k8s_namespace_pinned_to "$NP_NAMESPACE_ID")
-  if [ -n "$name" ]; then
-    K8S_NAMESPACE="$name"
-    K8S_NAMESPACE_SOURCE="pinned"
-    return 0
-  fi
-
-  np_namespace_slug=$(echo "$CONTEXT" | jq -r '.namespace.slug // .tags.namespace // empty' 2>/dev/null || true)
-  account_slug=$(echo "$CONTEXT" | jq -r '.account.slug // .tags.account // empty' 2>/dev/null || true)
-
-  if [ -z "$np_namespace_slug" ] || [ -z "$NP_NAMESPACE_ID" ]; then
-    log error "❌ Namespace parity is enabled but the context has no nullplatform namespace slug or id"
+  if [ -z "$NP_NAMESPACE_ID" ]; then
+    log error "❌ Namespace parity is enabled but the context has no nullplatform namespace id"
     log error "💡 Possible causes:"
-    log error "   The action context does not carry .namespace / .tags.namespace"
+    log error "   The action context does not carry .namespace or the scope NRN"
     log error "🔧 How to fix:"
     log error "   • Run the action from a scope or deployment of a nullplatform namespace"
-    log error "   • Or disable cluster.use_nullplatform_namespace in the container-orchestration provider"
     return 1
   fi
 
-  strategy=$(get_config_value \
-    --env K8S_NAMESPACE_STRATEGY \
-    --provider '.providers["scope-configurations"].cluster.namespace_strategy' \
-    --provider '.providers["container-orchestration"].cluster.namespace_strategy' \
-    --default "np_namespace"
-  )
+  if _k8s_namespace_pattern_is_per_namespace "$pattern"; then
+    name=$(_k8s_namespace_pinned_to "$NP_NAMESPACE_ID")
+    if [ -n "$name" ]; then
+      K8S_NAMESPACE="$name"
+      K8S_NAMESPACE_SOURCE="pinned"
+      return 0
+    fi
+  fi
 
-  case "$strategy" in
-    np_namespace)
-      name=$(sanitize_k8s_namespace_name "$np_namespace_slug") ;;
-    np_account_namespace)
-      if [ -z "$account_slug" ]; then
-        log error "❌ namespace_strategy 'np_account_namespace' needs the account slug, and the context has none"
-        log error "🔧 How to fix:"
-        log error "   • Use namespace_strategy 'np_namespace' or run the action with a full scope context"
-        return 1
-      fi
-      name=$(sanitize_k8s_namespace_name "$account_slug-$np_namespace_slug") ;;
-    *)
-      log error "❌ Unknown namespace_strategy '$strategy'"
-      log error "🔧 How to fix:"
-      log error "   • Set cluster.namespace_strategy to 'np_namespace' or 'np_account_namespace'"
-      return 1 ;;
-  esac
+  if ! name=$(np_name_render "$K8S_NAMESPACE_NAME_BUDGET" "$pattern"); then
+    log error "❌ Could not render the Kubernetes namespace from pattern '$pattern'"
+    log error "🔧 How to fix:"
+    log error "   • Fix naming.namespace_pattern (or NAMESPACE_PATTERN); see k8s/docs/resource-naming.md"
+    return 1
+  fi
 
   for reserved in ${K8S_RESERVED_NAMESPACES:-$K8S_NAMESPACE_RESERVED_DEFAULT} "$static_namespace"; do
     if [ "$name" = "$reserved" ] || [[ "$name" == kube-* ]]; then
-      log error "❌ Kubernetes namespace '$name' (from nullplatform namespace '$np_namespace_slug') is reserved"
+      log error "❌ Kubernetes namespace '$name' (pattern '$pattern') is reserved"
       log error "🔧 How to fix:"
-      log error "   • Rename the nullplatform namespace, or use namespace_strategy 'np_account_namespace'"
+      log error "   • Rename the nullplatform namespace, or add a prefix to naming.namespace_pattern, e.g. {.account.slug}-{.namespace.slug}"
       return 1
     fi
   done
@@ -173,7 +189,7 @@ resolve_k8s_namespace() {
       log error "   • Two accounts sharing this cluster have a nullplatform namespace with the same slug"
       log error "   • The namespace was created outside nullplatform"
       log error "🔧 How to fix:"
-      log error "   • Use namespace_strategy 'np_account_namespace' to prefix the account slug"
+      log error "   • Prefix the account slug: naming.namespace_pattern = {.account.slug}-{.namespace.slug}"
       log error "   • Or label the namespace if it is meant for this one: kubectl label namespace $name nullplatform=true namespace_id=$NP_NAMESPACE_ID"
       return 1
     fi
@@ -194,7 +210,7 @@ claim_k8s_namespace() {
   if [ -n "$owner" ] && [ "$owner" != "$NP_NAMESPACE_ID" ]; then
     log error "❌ Kubernetes namespace '$namespace' was claimed by nullplatform namespace id $owner"
     log error "🔧 How to fix:"
-    log error "   • Use namespace_strategy 'np_account_namespace' to avoid name collisions"
+    log error "   • Prefix the account slug: naming.namespace_pattern = {.account.slug}-{.namespace.slug}"
     return 1
   fi
 

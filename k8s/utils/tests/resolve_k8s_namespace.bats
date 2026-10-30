@@ -75,7 +75,7 @@ setup() {
 teardown() {
   rm -f "$KUBECTL_LOG" "$CREATED_FILE"
   unset -f kubectl log
-  unset MOCK_SECRET_TYPE USE_NULLPLATFORM_NAMESPACE K8S_NAMESPACE_STRATEGY K8S_RESERVED_NAMESPACES \
+  unset MOCK_SECRET_TYPE USE_NULLPLATFORM_NAMESPACE NAMESPACE_PATTERN K8S_RESERVED_NAMESPACES \
     PULL_SECRETS IMAGE_PULL_SECRETS TRAFFIC_MANAGER_CONFIG_MAP NAMESPACE_BOOTSTRAP_RESOURCES
 }
 
@@ -136,8 +136,29 @@ parity_off() {
   assert_equal "$K8S_NAMESPACE" "payments"
 }
 
-@test "resolve_k8s_namespace: falls back to context tags when .namespace is missing" {
+@test "resolve_k8s_namespace: naming.namespace_pattern enables parity on its own" {
+  parity_off
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].naming.namespace_pattern = "{.account.slug}-{.namespace.slug}"')
+
+  resolve_k8s_namespace "nullplatform"
+
+  assert_equal "$K8S_NAMESPACE" "acme-payments"
+  assert_equal "$K8S_NAMESPACE_PARITY" "true"
+}
+
+@test "resolve_k8s_namespace: NAMESPACE_PATTERN env renders with scope dimensions" {
+  parity_off
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {environment: "production"}')
+  export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions.environment}"
+
+  resolve_k8s_namespace "nullplatform"
+
+  assert_equal "$K8S_NAMESPACE" "payments-production"
+}
+
+@test "resolve_k8s_namespace: the pattern can read context tags" {
   CONTEXT=$(echo "$CONTEXT" | jq 'del(.namespace) | .tags = {namespace: "billing", namespace_id: "301"}')
+  export NAMESPACE_PATTERN="{.tags.namespace}"
 
   resolve_k8s_namespace "nullplatform"
 
@@ -145,21 +166,39 @@ parity_off() {
   assert_equal "$NP_NAMESPACE_ID" "301"
 }
 
-@test "resolve_k8s_namespace: np_account_namespace prefixes the account slug" {
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace_strategy = "np_account_namespace"')
+@test "resolve_k8s_namespace: the provider pattern wins over the env pattern" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].naming.namespace_pattern = "{.account.slug}-{.namespace.slug}"')
+  export NAMESPACE_PATTERN="{.namespace.slug}"
 
   resolve_k8s_namespace "nullplatform"
 
   assert_equal "$K8S_NAMESPACE" "acme-payments"
 }
 
-@test "resolve_k8s_namespace: rejects an unknown strategy" {
-  export K8S_NAMESPACE_STRATEGY="by_team"
+@test "resolve_k8s_namespace: the pattern wins over the use_nullplatform_namespace shorthand" {
+  export NAMESPACE_PATTERN="np-{.namespace.slug}"
+
+  resolve_k8s_namespace "nullplatform"
+
+  assert_equal "$K8S_NAMESPACE" "np-payments"
+}
+
+@test "resolve_k8s_namespace: rejects a pattern the naming engine rejects" {
+  export NAMESPACE_PATTERN="{.namespace.slug}_{.account.slug}"
 
   run resolve_k8s_namespace "nullplatform"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Unknown namespace_strategy 'by_team'"
+  assert_contains "$output" "Could not render the Kubernetes namespace from pattern"
+}
+
+@test "resolve_k8s_namespace: fails when the pattern reads a field the context lacks" {
+  export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions.region}"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "resolves to an empty value"
 }
 
 @test "resolve_k8s_namespace: an existing scope stays where its objects are" {
@@ -178,6 +217,17 @@ parity_off() {
 
   assert_equal "$K8S_NAMESPACE" "payments-old"
   assert_equal "$K8S_NAMESPACE_SOURCE" "pinned"
+}
+
+@test "resolve_k8s_namespace: does not pin when the pattern depends on more than the namespace" {
+  export MOCK_PINNED_NS="payments-development"
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {environment: "production"}')
+  export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions.environment}"
+
+  resolve_k8s_namespace "nullplatform"
+
+  assert_equal "$K8S_NAMESPACE" "payments-production"
+  assert_equal "$K8S_NAMESPACE_SOURCE" "computed"
 }
 
 @test "resolve_k8s_namespace: reuses a namespace this nullplatform namespace already owns" {
@@ -204,7 +254,7 @@ parity_off() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "belongs to another owner (namespace_id='999')"
-  assert_contains "$output" "np_account_namespace"
+  assert_contains "$output" "{.account.slug}-{.namespace.slug}"
 }
 
 @test "resolve_k8s_namespace: never takes a namespace created outside nullplatform" {
@@ -241,7 +291,7 @@ parity_off() {
   run resolve_k8s_namespace "nullplatform"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "no nullplatform namespace slug or id"
+  assert_contains "$output" "has no nullplatform namespace id"
 }
 
 @test "resolve_k8s_namespace: an explicit scope id wins over the context" {
@@ -250,27 +300,6 @@ parity_off() {
   resolve_k8s_namespace "nullplatform" "scope-from-tags"
 
   assert_contains "$(cat "$KUBECTL_LOG")" "scope_id=scope-from-tags"
-}
-
-# =============================================================================
-# Naming
-# =============================================================================
-@test "sanitize_k8s_namespace_name: keeps valid names" {
-  assert_equal "$(sanitize_k8s_namespace_name "payments-api")" "payments-api"
-}
-
-@test "sanitize_k8s_namespace_name: lowercases and replaces invalid characters" {
-  assert_equal "$(sanitize_k8s_namespace_name "Payments_API.v2")" "payments-api-v2"
-}
-
-@test "sanitize_k8s_namespace_name: caps long names at 63 characters with a hash" {
-  local long name
-  long=$(printf 'a%.0s' $(seq 1 80))
-
-  name=$(sanitize_k8s_namespace_name "$long")
-
-  [ "${#name}" -le 63 ]
-  [[ "$name" =~ ^a+-[0-9a-f]{6}$ ]]
 }
 
 # =============================================================================

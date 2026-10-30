@@ -6,10 +6,11 @@ provider_categories:
 configuration:
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
-# Namespace parity: one Kubernetes namespace per nullplatform namespace.
-# Usually set from the container-orchestration provider (cluster.use_nullplatform_namespace).
-#  USE_NULLPLATFORM_NAMESPACE: false
-#  K8S_NAMESPACE_STRATEGY: np_namespace # np_namespace | np_account_namespace
+# Namespace parity: one Kubernetes namespace per nullplatform namespace, named
+# by a pattern rendered like the resource naming patterns (docs/resource-naming.md).
+# Usually set from the container-orchestration provider (naming.namespace_pattern).
+#  NAMESPACE_PATTERN: "{.namespace.slug}" # or "{.account.slug}-{.namespace.slug}", "{.namespace.slug}-{.scope.dimensions.environment}"
+#  USE_NULLPLATFORM_NAMESPACE: false # shorthand for NAMESPACE_PATTERN="{.namespace.slug}"
 #  NAMESPACE_BOOTSTRAP_RESOURCES: "networkpolicy/default-deny,limitrange/defaults"
   DOMAIN: nullapps.io
 #  PRIVATE_DOMAIN: nullapps.io
