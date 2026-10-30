@@ -2,14 +2,21 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
+source "$SCRIPT_DIR/../utils/resolve_k8s_namespace"
 
-K8S_NAMESPACE=$(get_config_value \
+# Static namespace: where every scope runs without namespace parity, and where
+# shared objects (pull secrets, traffic manager ConfigMap, dummy ingress) live.
+K8S_STATIC_NAMESPACE=$(get_config_value \
   --env NAMESPACE_OVERRIDE \
   --env K8S_NAMESPACE \
   --provider '.providers["scope-configurations"].cluster.namespace' \
   --provider '.providers["container-orchestration"].cluster.namespace' \
   --default "nullplatform"
 )
+export K8S_STATIC_NAMESPACE
+
+# With cluster.use_nullplatform_namespace, one namespace per nullplatform namespace
+resolve_k8s_namespace "$K8S_STATIC_NAMESPACE" || exit 1
 
 # General configuration
 DNS_TYPE=$(get_config_value \
@@ -145,6 +152,14 @@ else
   if command -v np_step_skip >/dev/null 2>&1; then
     np_step_skip "namespace '$K8S_NAMESPACE' already exists"
   fi
+fi
+
+if [ "$K8S_NAMESPACE_PARITY" = "true" ]; then
+  log debug "📋 Namespace parity: '$K8S_NAMESPACE' ($K8S_NAMESPACE_SOURCE)"
+  if [ "$K8S_NAMESPACE_SOURCE" = "computed" ] || [ "$K8S_NAMESPACE_SOURCE" = "pinned" ]; then
+    claim_k8s_namespace "$K8S_NAMESPACE" || exit 1
+  fi
+  copy_k8s_namespace_resources "$K8S_STATIC_NAMESPACE" "$K8S_NAMESPACE" || exit 1
 fi
 
 USE_ACCOUNT_SLUG=$(get_config_value \

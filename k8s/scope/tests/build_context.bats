@@ -385,6 +385,72 @@ teardown() {
 }
 
 # =============================================================================
+# Namespace parity (cluster.use_nullplatform_namespace)
+# =============================================================================
+enable_namespace_parity() {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.use_nullplatform_namespace = true')
+
+  # Empty cluster: no scope objects, no pinned namespace, no namespaces yet
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")
+        [ "$#" -gt 3 ] && return 0
+        return 1 ;;
+      get*)
+        return 0 ;;
+      *)
+        echo "kubectl $*" >> "$NP_OUTPUT_DIR/kubectl.log"
+        return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+@test "build_context: namespace parity creates the namespace of the nullplatform namespace" {
+  enable_namespace_parity
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Creating namespace 'test-namespace'..."
+  assert_contains "$output" "k8s_namespace=test-namespace"
+  assert_contains "$(cat "$NP_OUTPUT_DIR/kubectl.log")" "kubectl label namespace test-namespace --overwrite nullplatform=true namespace_id=300 account_id=200"
+}
+
+@test "build_context: namespace parity keeps an existing scope in its namespace" {
+  enable_namespace_parity
+  kubectl() {
+    case "$1 $2" in
+      "get deployments,services") printf 'default-namespace' ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=default-namespace"
+  [[ "$output" != *"kubectl label namespace"* ]]
+}
+
+@test "build_context: namespace parity fails on a namespace owned by someone else" {
+  enable_namespace_parity
+  kubectl() {
+    case "$*" in
+      "get namespace test-namespace -o jsonpath={.metadata.labels.namespace_id}") printf '999' ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "already exists and belongs to another owner (namespace_id='999')"
+}
+
+# =============================================================================
 # COMPONENT truncation
 # =============================================================================
 @test "build_context: COMPONENT truncates to 63 chars ending with alphanumeric" {

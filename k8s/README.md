@@ -32,6 +32,25 @@ Configuration for Kubernetes cluster settings.
 |----------|-------------|------------------------------|
 | **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `cluster.namespace` |
 | **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `cluster.create_namespace_if_not_exist` |
+| **USE_NULLPLATFORM_NAMESPACE** | Namespace parity: each nullplatform namespace gets its own Kubernetes namespace (default `false`). Also read from `cluster.use_nullplatform_namespace` in the container-orchestration provider | `cluster.use_nullplatform_namespace` |
+| **K8S_NAMESPACE_STRATEGY** | Name of the parity namespace: `np_namespace` (default, the nullplatform namespace slug) or `np_account_namespace` (`<account slug>-<namespace slug>`, for clusters shared by several accounts). Also read from the container-orchestration provider | `cluster.namespace_strategy` |
+| **NAMESPACE_BOOTSTRAP_RESOURCES** | Extra objects copied from `K8S_NAMESPACE` into each parity namespace, as `kind/name` (comma-separated env, list in providers). Only `networkpolicy`, `limitrange`, `resourcequota` and `configmap`. Image pull secrets (type `kubernetes.io/dockerconfigjson`) and the traffic manager ConfigMap are always copied; no other secret is | `cluster.namespace_bootstrap_resources` |
+
+#### Namespace parity
+
+With `cluster.use_nullplatform_namespace`, `K8S_NAMESPACE` stops being the namespace of every scope and becomes the
+*static* namespace, where shared objects live. Each scope runs in the namespace of its nullplatform namespace,
+resolved by `utils/resolve_k8s_namespace` in this order:
+
+1. **Sticky**: where the scope's objects already are. Scopes created before parity was enabled never move.
+2. **Pinned**: the namespace labeled `namespace_id=<id>`. Renaming the nullplatform namespace keeps its scopes together.
+3. **Computed**: from `cluster.namespace_strategy`. A namespace that already exists is used only when it carries this
+   `namespace_id`, or `nullplatform=true` without an owner (it is adopted); anything else fails with a collision error.
+
+New parity namespaces get the labels `nullplatform=true`, `namespace_id` and `account_id`, and the annotation
+`nullplatform.com/namespace-name`. Reserved names (`default`, `kube-*`, the static namespace, gateway and add-on
+namespaces; override with `K8S_RESERVED_NAMESPACES`) are rejected. The agent needs cluster-wide permissions to create
+namespaces and to list pods, deployments and services in every namespace. Kubernetes namespaces are never deleted.
 
 ### Networking
 
