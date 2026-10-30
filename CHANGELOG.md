@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- k8s scopes can run each nullplatform namespace in its own Kubernetes namespace (`cluster.use_nullplatform_namespace` in the container-orchestration provider or `USE_NULLPLATFORM_NAMESPACE`). The namespace is created on first use, named after the nullplatform namespace slug (`namespace_strategy: np_account_namespace` prefixes the account slug), pinned to the namespace id so renames keep scopes together, and seeded with the image pull secrets, the traffic manager ConfigMap and the objects in `namespace_bootstrap_resources`. Existing scopes stay where they are. It reads the setting from the provider, so it works with orchestrated workers, where `NAMESPACE_OVERRIDE` from the channel does not arrive
+- Fix: logs, instances, restart, pause/resume autoscaling, set instances, kill instance and diagnose of a k8s scope now find its pods when the namespace comes from a provider, instead of always looking in `nullplatform`
 - Fix: a k8s deployment now applies its manifests in dependency order (secrets, service, deployment, scaling, PDB, ingress last) and deletes them in reverse. The ingress was applied before the service it routes to existed, and the AWS Load Balancer Controller then failed the model of the whole ingress group (every scope on that ALB) for about a minute on every deploy
 
 ## [1.19.0] - 2026-10-29

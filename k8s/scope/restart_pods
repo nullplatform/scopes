@@ -10,6 +10,10 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
+# With namespace parity on, find the namespace the scope actually runs in
+source "${SERVICE_PATH:-$(dirname "$0")/..}/utils/resolve_k8s_namespace"
+resolve_k8s_namespace "$K8S_NAMESPACE" || exit 1
+
 find_deployment_by_label "$SCOPE_ID" "$DEPLOYMENT_ID" "$K8S_NAMESPACE"
 
 log debug "📝 Restarting deployment: $DEPLOYMENT"

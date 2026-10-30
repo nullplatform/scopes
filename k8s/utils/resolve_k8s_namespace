@@ -1,0 +1,310 @@
+#!/bin/bash
+
+# Resolves the Kubernetes namespace a scope runs in.
+#
+# Namespace parity is off by default: the namespace is the static one
+# (cluster.namespace / NAMESPACE_OVERRIDE / K8S_NAMESPACE / "nullplatform"),
+# exactly as before.
+#
+# With parity on (cluster.use_nullplatform_namespace = true), every
+# nullplatform namespace gets its own Kubernetes namespace. Resolution order:
+#   1. sticky  - the namespace where the scope's objects already live, so
+#                scopes created before parity was enabled never move
+#   2. pinned  - the Kubernetes namespace labeled with this nullplatform
+#                namespace id, so renaming the nullplatform namespace keeps
+#                its scopes together
+#   3. computed - built from the nullplatform namespace slug
+#                (namespace_strategy: np_namespace | np_account_namespace)
+#
+# Usage (source this file, do not run it in a subshell):
+#   resolve_k8s_namespace <static_namespace> [<scope_id>]
+# Sets K8S_NAMESPACE, K8S_NAMESPACE_PARITY (true|false),
+# K8S_NAMESPACE_SOURCE (static|sticky|pinned|computed), NP_NAMESPACE_ID and
+# NP_ACCOUNT_ID. Returns 1 when the namespace cannot be used.
+
+_RESOLVE_K8S_NAMESPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+if [[ "$(type -t get_config_value 2>/dev/null)" != "function" ]]; then
+  source "$_RESOLVE_K8S_NAMESPACE_DIR/get_config_value"
+fi
+
+K8S_NAMESPACE_RESERVED_DEFAULT="default kube-system kube-public kube-node-lease istio-system gateways cert-manager external-dns"
+
+k8s_namespace_parity_enabled() {
+  local enabled
+  enabled=$(get_config_value \
+    --env USE_NULLPLATFORM_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.use_nullplatform_namespace' \
+    --provider '.providers["container-orchestration"].cluster.use_nullplatform_namespace' \
+    --default "false"
+  )
+  [ "$enabled" = "true" ]
+}
+
+# Lowercases, keeps DNS-1123 characters and caps the name at 63 characters,
+# replacing the tail with a short hash when it is longer.
+sanitize_k8s_namespace_name() {
+  local raw="$1" name hash
+  name=$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
+  if [ "${#name}" -gt 63 ]; then
+    hash=$(printf '%s' "$raw" | { sha1sum 2>/dev/null || shasum; } | cut -c1-6)
+    name="${name:0:56}"
+    name="${name%-}-$hash"
+  fi
+  echo "$name"
+}
+
+_k8s_namespace_of_scope() {
+  local scope_id="$1"
+  [ -n "$scope_id" ] || return 0
+  kubectl get deployments,services -A -l "scope_id=$scope_id" \
+    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true
+}
+
+_k8s_namespace_pinned_to() {
+  local np_namespace_id="$1"
+  [ -n "$np_namespace_id" ] || return 0
+  kubectl get namespaces -l "nullplatform=true,namespace_id=$np_namespace_id" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+}
+
+# Namespace of the first pod matching a label selector, across namespaces.
+# Read actions (logs, instances) only receive ids, not providers, so they look
+# the pods up instead of resolving the namespace.
+k8s_namespace_of_pods() {
+  kubectl get pods -A -l "$1" -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true
+}
+
+resolve_k8s_namespace() {
+  local static_namespace="$1" scope_id="${2:-}"
+  local np_namespace_slug account_slug strategy name reserved owner managed
+
+  K8S_NAMESPACE="$static_namespace"
+  K8S_NAMESPACE_PARITY="false"
+  K8S_NAMESPACE_SOURCE="static"
+
+  NP_NAMESPACE_ID=$(echo "$CONTEXT" | jq -r '
+    .namespace.id // .tags.namespace_id
+    // ((.scope.nrn // "") | capture("namespace=(?<id>[0-9]+)").id)
+    // empty' 2>/dev/null || true)
+  NP_ACCOUNT_ID=$(echo "$CONTEXT" | jq -r '
+    .account.id // .tags.account_id
+    // ((.scope.nrn // "") | capture("account=(?<id>[0-9]+)").id)
+    // empty' 2>/dev/null || true)
+  export K8S_NAMESPACE K8S_NAMESPACE_PARITY K8S_NAMESPACE_SOURCE NP_NAMESPACE_ID NP_ACCOUNT_ID
+
+  k8s_namespace_parity_enabled || return 0
+  K8S_NAMESPACE_PARITY="true"
+
+  if [ -z "$scope_id" ]; then
+    scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // .tags.scope_id // empty' 2>/dev/null || true)
+  fi
+  name=$(_k8s_namespace_of_scope "$scope_id")
+  if [ -n "$name" ]; then
+    K8S_NAMESPACE="$name"
+    K8S_NAMESPACE_SOURCE="sticky"
+    return 0
+  fi
+
+  name=$(_k8s_namespace_pinned_to "$NP_NAMESPACE_ID")
+  if [ -n "$name" ]; then
+    K8S_NAMESPACE="$name"
+    K8S_NAMESPACE_SOURCE="pinned"
+    return 0
+  fi
+
+  np_namespace_slug=$(echo "$CONTEXT" | jq -r '.namespace.slug // .tags.namespace // empty' 2>/dev/null || true)
+  account_slug=$(echo "$CONTEXT" | jq -r '.account.slug // .tags.account // empty' 2>/dev/null || true)
+
+  if [ -z "$np_namespace_slug" ] || [ -z "$NP_NAMESPACE_ID" ]; then
+    log error "❌ Namespace parity is enabled but the context has no nullplatform namespace slug or id"
+    log error "💡 Possible causes:"
+    log error "   The action context does not carry .namespace / .tags.namespace"
+    log error "🔧 How to fix:"
+    log error "   • Run the action from a scope or deployment of a nullplatform namespace"
+    log error "   • Or disable cluster.use_nullplatform_namespace in the container-orchestration provider"
+    return 1
+  fi
+
+  strategy=$(get_config_value \
+    --env K8S_NAMESPACE_STRATEGY \
+    --provider '.providers["scope-configurations"].cluster.namespace_strategy' \
+    --provider '.providers["container-orchestration"].cluster.namespace_strategy' \
+    --default "np_namespace"
+  )
+
+  case "$strategy" in
+    np_namespace)
+      name=$(sanitize_k8s_namespace_name "$np_namespace_slug") ;;
+    np_account_namespace)
+      if [ -z "$account_slug" ]; then
+        log error "❌ namespace_strategy 'np_account_namespace' needs the account slug, and the context has none"
+        log error "🔧 How to fix:"
+        log error "   • Use namespace_strategy 'np_namespace' or run the action with a full scope context"
+        return 1
+      fi
+      name=$(sanitize_k8s_namespace_name "$account_slug-$np_namespace_slug") ;;
+    *)
+      log error "❌ Unknown namespace_strategy '$strategy'"
+      log error "🔧 How to fix:"
+      log error "   • Set cluster.namespace_strategy to 'np_namespace' or 'np_account_namespace'"
+      return 1 ;;
+  esac
+
+  for reserved in ${K8S_RESERVED_NAMESPACES:-$K8S_NAMESPACE_RESERVED_DEFAULT} "$static_namespace"; do
+    if [ "$name" = "$reserved" ] || [[ "$name" == kube-* ]]; then
+      log error "❌ Kubernetes namespace '$name' (from nullplatform namespace '$np_namespace_slug') is reserved"
+      log error "🔧 How to fix:"
+      log error "   • Rename the nullplatform namespace, or use namespace_strategy 'np_account_namespace'"
+      return 1
+    fi
+  done
+
+  if kubectl get namespace "$name" >/dev/null 2>&1; then
+    owner=$(kubectl get namespace "$name" -o jsonpath='{.metadata.labels.namespace_id}' 2>/dev/null || true)
+    managed=$(kubectl get namespace "$name" -o jsonpath='{.metadata.labels.nullplatform}' 2>/dev/null || true)
+    # Namespaces created by nullplatform before parity (for example with
+    # NAMESPACE_OVERRIDE={$context.tags.namespace}) carry nullplatform=true
+    # but no owner yet: adopt them; claim_k8s_namespace labels them.
+    if [ -z "$owner" ] && [ "$managed" = "true" ]; then
+      log info "   ✅ Adopting existing nullplatform namespace '$name'"
+    elif [ "$owner" != "$NP_NAMESPACE_ID" ]; then
+      log error "❌ Kubernetes namespace '$name' already exists and belongs to another owner (namespace_id='${owner:-none}')"
+      log error "💡 Possible causes:"
+      log error "   • Two accounts sharing this cluster have a nullplatform namespace with the same slug"
+      log error "   • The namespace was created outside nullplatform"
+      log error "🔧 How to fix:"
+      log error "   • Use namespace_strategy 'np_account_namespace' to prefix the account slug"
+      log error "   • Or label the namespace if it is meant for this one: kubectl label namespace $name nullplatform=true namespace_id=$NP_NAMESPACE_ID"
+      return 1
+    fi
+  fi
+
+  K8S_NAMESPACE="$name"
+  K8S_NAMESPACE_SOURCE="computed"
+  return 0
+}
+
+# Labels a namespace created for parity with its nullplatform owner and checks
+# nobody else claimed it in the meantime.
+claim_k8s_namespace() {
+  local namespace="$1" owner np_namespace_slug
+  np_namespace_slug=$(echo "$CONTEXT" | jq -r '.namespace.slug // .tags.namespace // empty' 2>/dev/null || true)
+
+  owner=$(kubectl get namespace "$namespace" -o jsonpath='{.metadata.labels.namespace_id}' 2>/dev/null || true)
+  if [ -n "$owner" ] && [ "$owner" != "$NP_NAMESPACE_ID" ]; then
+    log error "❌ Kubernetes namespace '$namespace' was claimed by nullplatform namespace id $owner"
+    log error "🔧 How to fix:"
+    log error "   • Use namespace_strategy 'np_account_namespace' to avoid name collisions"
+    return 1
+  fi
+
+  kubectl label namespace "$namespace" --overwrite \
+    nullplatform=true "namespace_id=$NP_NAMESPACE_ID" "account_id=$NP_ACCOUNT_ID" >/dev/null
+  if [ -n "$np_namespace_slug" ]; then
+    kubectl annotate namespace "$namespace" --overwrite \
+      "nullplatform.com/namespace-name=$np_namespace_slug" >/dev/null
+  fi
+}
+
+# Names of the image pull secrets the scope may use, from every source the
+# deployment reads them from.
+_k8s_pull_secret_names() {
+  local raw
+  for raw in "${PULL_SECRETS:-}" "${IMAGE_PULL_SECRETS:-}" \
+    "$(echo "$CONTEXT" | jq -c '.providers["scope-configurations"].security.image_pull_secrets // empty' 2>/dev/null)" \
+    "$(echo "$CONTEXT" | jq -c '.providers["container-orchestration"].security.image_pull_secrets // empty' 2>/dev/null)"; do
+    [ -n "$raw" ] || continue
+    echo "$raw" | jq -r '
+      if type == "array" then .[]
+      elif type == "object" then (.SECRETS // [])[]
+      else empty end
+      | if type == "object" then (.name // empty) else . end
+      | select(type == "string" and . != "")' 2>/dev/null
+  done | sort -u
+}
+
+# Copies into a parity namespace what scopes need from the static namespace:
+# image pull secrets, the traffic manager ConfigMap and any extra
+# "kind/name" listed in cluster.namespace_bootstrap_resources or
+# NAMESPACE_BOOTSTRAP_RESOURCES (networkpolicy, limitrange, resourcequota or
+# configmap only). Secrets are copied only when they are image pull secrets.
+# Objects already in the target are left alone.
+copy_k8s_namespace_resources() {
+  local source_namespace="$1" target_namespace="$2"
+  local -a refs=()
+  local ref secret configmap extra_resources object
+
+  [ "$source_namespace" != "$target_namespace" ] || return 0
+
+  while read -r secret; do
+    [ -n "$secret" ] && refs+=("secret/$secret")
+  done < <(_k8s_pull_secret_names)
+
+  configmap=$(get_config_value \
+    --env TRAFFIC_MANAGER_CONFIG_MAP \
+    --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
+    --default ""
+  )
+  [ -n "$configmap" ] && refs+=("configmap/$configmap")
+
+  extra_resources=$(get_config_value \
+    --env NAMESPACE_BOOTSTRAP_RESOURCES \
+    --provider '(.providers["scope-configurations"].cluster.namespace_bootstrap_resources // []) | join(",")' \
+    --provider '(.providers["container-orchestration"].cluster.namespace_bootstrap_resources // []) | join(",")' \
+    --default ""
+  )
+  # Extra resources are limited to kinds that carry no credentials, so a
+  # provider cannot make the agent copy arbitrary secrets into a tenant namespace
+  for ref in ${extra_resources//,/ }; do
+    case "$(echo "${ref%%/*}" | tr '[:upper:]' '[:lower:]')" in
+      networkpolicy|networkpolicies|limitrange|limitranges|resourcequota|resourcequotas|configmap|configmaps)
+        refs+=("$ref") ;;
+      *)
+        log warn "   ⚠️  $ref is not a kind namespace_bootstrap_resources can copy (networkpolicy, limitrange, resourcequota, configmap), skipping" ;;
+    esac
+  done
+
+  [ "${#refs[@]}" -gt 0 ] || return 0
+
+  log debug "📝 Copying base resources from '$source_namespace' to '$target_namespace'..."
+
+  for ref in $(printf '%s\n' "${refs[@]}" | sort -u); do
+    if kubectl get "$ref" -n "$target_namespace" >/dev/null 2>&1; then
+      log debug "   ✅ $ref already exists in '$target_namespace'"
+      continue
+    fi
+
+    if ! kubectl get "$ref" -n "$source_namespace" >/dev/null 2>&1; then
+      log warn "   ⚠️  $ref not found in '$source_namespace', skipping"
+      continue
+    fi
+
+    object=$(kubectl get "$ref" -n "$source_namespace" -o json)
+
+    # Only image pull secrets are copied, whatever name the configuration gives
+    if [ "$(echo "$object" | jq -r '.kind')" = "Secret" ]; then
+      case "$(echo "$object" | jq -r '.type // ""')" in
+        kubernetes.io/dockerconfigjson|kubernetes.io/dockercfg) ;;
+        *)
+          log warn "   ⚠️  $ref is not an image pull secret, skipping"
+          continue ;;
+      esac
+    fi
+
+    if ! echo "$object" | \
+      jq --arg ns "$target_namespace" --arg src "$source_namespace" '
+        del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp,
+            .metadata.managedFields, .metadata.ownerReferences, .metadata.selfLink,
+            .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"], .status)
+        | .metadata.namespace = $ns
+        | .metadata.labels = ((.metadata.labels // {}) + {"nullplatform.com/copied-from": $src})' | \
+      kubectl create -f - >/dev/null; then
+      log error "   ❌ Failed to copy $ref from '$source_namespace' to '$target_namespace'"
+      log error "🔧 How to fix:"
+      log error "   • Check the agent can read $ref in '$source_namespace' and create it in '$target_namespace'"
+      return 1
+    fi
+
+    log info "   ✅ Copied $ref to '$target_namespace'"
+  done
+}
