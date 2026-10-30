@@ -60,7 +60,7 @@ jobs:
     needs: containers
     runs-on: ubuntu-24.04
     env:
-      NULLPLATFORM_API_KEY: ${{ secrets.NP_API_KEY }}
+      NULLPLATFORM_API_KEY: ${{ secrets.ARTIFACT_NP_API_KEY }}
       NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
     steps:
       - name: Install np CLI (2.10.0)
