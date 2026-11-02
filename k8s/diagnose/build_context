@@ -1,8 +1,19 @@
 #!/bin/bash
 
-NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
-  .providers["container-orchestration"].cluster.namespace // $default
-')
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value" || {
+  echo "Error: could not load $SCRIPT_DIR/../utils/get_config_value" >&2
+  exit 1
+}
+
+# Same chain as scope/build_context, so the action finds the objects the deployment wrote.
+NAMESPACE=$(get_config_value \
+  --env NAMESPACE_OVERRIDE \
+  --env K8S_NAMESPACE \
+  --provider '.providers["scope-configurations"].cluster.namespace' \
+  --provider '.providers["container-orchestration"].cluster.namespace' \
+  --default "nullplatform"
+)
 
 SCOPE_LABEL_SELECTOR="scope_id=$SCOPE_ID"
 LABEL_SELECTOR="$SCOPE_LABEL_SELECTOR"

@@ -1,6 +1,20 @@
 #!/bin/bash
 
-K8S_NAMESPACE="${NAMESPACE_OVERRIDE:-nullplatform}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/get_config_value" || {
+    echo "Error: could not load $SCRIPT_DIR/../utils/get_config_value" >&2
+    exit 1
+}
+
+# Same chain as scope/build_context: listing a namespace the deployment never
+# wrote to returns an empty list, not an error.
+K8S_NAMESPACE=$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+)
 LABEL_SELECTOR="nullplatform=true"
 if [[ -n "$APPLICATION_ID" && "$APPLICATION_ID" != "null" ]]; then
  LABEL_SELECTOR="$LABEL_SELECTOR,application_id=$APPLICATION_ID"

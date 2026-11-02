@@ -19,6 +19,8 @@ setup() {
   printf '#!/usr/bin/env bash\necho "$@"\n' > "$STUB_ROOT/log/kube-logger-go/bin/$platform/exec-$arch"
   chmod +x "$STUB_ROOT/log/kube-logger-go/bin/$platform/exec-$arch"
 
+  unset CONTEXT NAMESPACE_OVERRIDE K8S_NAMESPACE FILTER_PATTERN
+
   export SERVICE_PATH="$STUB_ROOT"
   export APPLICATION_ID="26611171"
   export SCOPE_ID="2075362883"
@@ -30,6 +32,7 @@ setup() {
 teardown() {
   unset -f epoch_ms_to_iso 2>/dev/null || true
   unset SERVICE_PATH APPLICATION_ID SCOPE_ID START_TIME END_TIME 2>/dev/null || true
+  unset CONTEXT NAMESPACE_OVERRIDE K8S_NAMESPACE FILTER_PATTERN 2>/dev/null || true
   [ -n "$STUB_ROOT" ] && rm -rf "$STUB_ROOT"
 }
 
@@ -85,4 +88,93 @@ teardown() {
   run bash "$LOG_SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" != *"--start-time"* ]]
+}
+
+# =============================================================================
+# Namespace resolution - must match scope/build_context, or the reader looks in
+# a namespace the deployment never wrote to and the UI shows no logs
+# =============================================================================
+@test "log: falls back to the nullplatform namespace" {
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace nullplatform"
+}
+
+@test "log: honors the K8S_NAMESPACE env var" {
+  export K8S_NAMESPACE="apps"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace apps"
+}
+
+@test "log: NAMESPACE_OVERRIDE wins over K8S_NAMESPACE" {
+  export K8S_NAMESPACE="apps"
+  export NAMESPACE_OVERRIDE="override"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace override"
+}
+
+@test "log: the container-orchestration provider wins over the environment" {
+  export NAMESPACE_OVERRIDE="override"
+  export CONTEXT='{"providers":{"container-orchestration":{"cluster":{"namespace":"from-provider"}}}}'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace from-provider"
+}
+
+@test "log: the scope-configurations provider wins over the environment" {
+  export NAMESPACE_OVERRIDE="override"
+  export CONTEXT='{"providers":{"scope-configurations":{"cluster":{"namespace":"from-scope-config"}}}}'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace from-scope-config"
+}
+
+@test "log: scope-configurations wins over container-orchestration" {
+  export CONTEXT='{"providers":{"scope-configurations":{"cluster":{"namespace":"from-scope-config"}},"container-orchestration":{"cluster":{"namespace":"from-provider"}}}}'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "--namespace from-scope-config"
+}
+
+# NAMESPACE_OVERRIDE is the channel that pins the array conversion: it is the
+# only namespace source the string-plus-eval version fed back to the shell.
+@test "log: a NAMESPACE_OVERRIDE with shell metacharacters is passed inert, not executed" {
+  local marker="$STUB_ROOT/injected"
+  export NAMESPACE_OVERRIDE="ns1; touch $marker"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  assert_contains "$output" "--namespace ns1; touch $marker"
+}
+
+# Resolution through a provider is new here, so this channel was never
+# exploitable. Pinned so it stays that way.
+@test "log: a provider namespace with shell metacharacters is passed inert, not executed" {
+  local marker="$STUB_ROOT/injected"
+  export CONTEXT="{\"providers\":{\"container-orchestration\":{\"cluster\":{\"namespace\":\"ns1; touch $marker\"}}}}"
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  assert_contains "$output" "--namespace ns1; touch $marker"
+}
+
+# =============================================================================
+# Filter pattern - the shell used to expand it before kube-logger saw it, so a
+# "$" or a quote arrived altered
+# =============================================================================
+@test "log: a filter pattern with shell syntax reaches kube-logger verbatim" {
+  export FILTER_PATTERN='cost is $HOME and "quoted"'
+
+  run bash "$LOG_SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" '--filter cost is $HOME and "quoted"'
 }

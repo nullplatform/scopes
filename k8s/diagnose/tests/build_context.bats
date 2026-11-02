@@ -453,3 +453,17 @@ run_build_context() {
 
   unset POD_LOG_TAIL_LINES
 }
+
+@test "build_context: the scope-configurations namespace wins over container-orchestration" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {cluster: {namespace: "from-scope-config"}}')
+  run_build_context
+  assert_equal "$NAMESPACE" "from-scope-config"
+}
+
+@test "build_context: honors NAMESPACE_OVERRIDE when no provider sets a namespace" {
+  export CONTEXT='{"providers": {}}'
+  export NAMESPACE_OVERRIDE="from-channel"
+  run_build_context
+  assert_equal "$NAMESPACE" "from-channel"
+  unset NAMESPACE_OVERRIDE
+}
