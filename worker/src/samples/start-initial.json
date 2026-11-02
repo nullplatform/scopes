@@ -1,0 +1,59 @@
+{
+  "notification": {
+    "action": "service:action:create",
+    "id": "act-2",
+    "slug": "start-initial",
+    "name": "start-initial",
+    "type": "custom",
+    "status": "pending",
+    "parameters": {
+      "scope_id": "77",
+      "deployment_id": "d-9"
+    },
+    "specification": {
+      "id": "spec-2",
+      "slug": "start-initial"
+    },
+    "service": {
+      "id": "svc-77",
+      "slug": "orders-prod",
+      "attributes": {
+        "replicas": 2,
+        "asset_url": "registry.example.com/orders:1.4.0"
+      },
+      "type": "scope",
+      "specification": {
+        "id": "scope-spec-1",
+        "slug": "kubernetes"
+      },
+      "dimensions": {
+        "environment": "prod"
+      }
+    },
+    "tags": {
+      "scope_id": "77",
+      "scope": "orders-prod",
+      "application_id": "4",
+      "application": "orders",
+      "namespace_id": "3",
+      "namespace": "shop"
+    },
+    "entity_nrn": "organization=1:account=2:namespace=3:application=4:scope=77",
+    "results": {},
+    "link": null,
+    "package": {
+      "id": "pkg-1",
+      "slug": "kubernetes",
+      "name": "kubernetes",
+      "revision": {
+        "id": "rev-1",
+        "version": "0.1.0",
+        "artifacts": []
+      }
+    },
+    "user": {
+      "id": "1",
+      "email": "dev@example.com"
+    }
+  }
+}
