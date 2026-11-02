@@ -91,7 +91,7 @@ naming.namespace_pattern: "{.account.slug}-{.namespace.slug}"                  #
 naming.namespace_pattern: "{.namespace.slug}-{.scope.dimensions.environment}"  # payments-production
 ```
 
-It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. Resolution (scopes that already exist keep their namespace, a renamed nullplatform namespace keeps its Kubernetes one) is in `k8s/utils/resolve_k8s_namespace`; see the namespace parity section of `k8s/README.md`.
+It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. On top of them, every placeholder must resolve to a single value (`{.scope.dimensions}` is an object and is rejected) and the rendered name must be a valid Kubernetes namespace name. Resolution (scopes that already exist keep their namespace) is in `k8s/utils/resolve_k8s_namespace`; see the namespace parity section of `k8s/README.md`.
 
 ## Known limitations
 

@@ -47,14 +47,17 @@ so it can read any context field:
 | `{.namespace.slug}` | `payments` |
 | `{.account.slug}-{.namespace.slug}` | `acme-payments`, for clusters shared by several accounts |
 | `{.namespace.slug}-{.scope.dimensions.environment}` | `payments-production`, one per environment |
+| `apps-{.namespace.slug}-{.scope.dimensions.environment}-team` | `apps-payments-production-team`, with fixed text |
+
+Placeholders must point at a single value: `{.scope.dimensions}` is an object and is rejected, use one key such as
+`{.scope.dimensions.environment}`. Fixed text goes before the first placeholder or after the last one, in lowercase;
+placeholders are separated by a single hyphen. The rendered name must be a valid Kubernetes namespace name.
 
 Each scope runs in the namespace resolved by `utils/resolve_k8s_namespace`, in this order:
 
-1. **Sticky**: where the scope's objects already are. Scopes created before parity was enabled never move.
-2. **Pinned**: the namespace labeled `namespace_id=<id>`, so renaming the nullplatform namespace keeps its scopes
-   together. Only when the pattern reads organization, account and namespace fields alone; a pattern with other fields
-   (such as dimensions) maps one nullplatform namespace to several Kubernetes namespaces and is not pinned.
-3. **Computed**: the rendered pattern. A namespace that already exists is used only when it carries this
+1. **Sticky**: where the scope's objects already are. Scopes never move: not when parity is enabled, not when the
+   pattern changes, not when the nullplatform namespace is renamed (new scopes then get the new name).
+2. **Computed**: the rendered pattern. A namespace that already exists is used only when it carries this
    `namespace_id`, or `nullplatform=true` without an owner (it is adopted); anything else fails with a collision error.
 
 New parity namespaces get the labels `nullplatform=true`, `namespace_id` and `account_id`, and the annotation

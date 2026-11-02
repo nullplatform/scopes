@@ -18,7 +18,6 @@ setup() {
 
   # Cluster state the kubectl mock answers from
   export MOCK_SCOPE_NS=""      # namespace where the scope already has objects
-  export MOCK_PINNED_NS=""     # namespace labeled with the nullplatform namespace id
   export MOCK_EXISTING_NS=""   # namespace that already exists, by name
   export MOCK_OWNER=""         # namespace_id label of MOCK_EXISTING_NS
   export MOCK_MANAGED=""       # nullplatform label of MOCK_EXISTING_NS
@@ -30,8 +29,6 @@ setup() {
     case "$*" in
       "get deployments,services -A -l scope_id="*)
         printf '%s' "$MOCK_SCOPE_NS" ;;
-      "get namespaces -l "*)
-        printf '%s' "$MOCK_PINNED_NS" ;;
       "get namespace "*" -o jsonpath={.metadata.labels.namespace_id}")
         printf '%s' "$MOCK_OWNER" ;;
       "get namespace "*" -o jsonpath={.metadata.labels.nullplatform}")
@@ -156,6 +153,15 @@ parity_off() {
   assert_equal "$K8S_NAMESPACE" "payments-production"
 }
 
+@test "resolve_k8s_namespace: the pattern can carry fixed text" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {environment: "production"}')
+  export NAMESPACE_PATTERN="apps-{.namespace.slug}-{.scope.dimensions.environment}-team"
+
+  resolve_k8s_namespace "nullplatform"
+
+  assert_equal "$K8S_NAMESPACE" "apps-payments-production-team"
+}
+
 @test "resolve_k8s_namespace: the pattern can read context tags" {
   CONTEXT=$(echo "$CONTEXT" | jq 'del(.namespace) | .tags = {namespace: "billing", namespace_id: "301"}')
   export NAMESPACE_PATTERN="{.tags.namespace}"
@@ -192,6 +198,36 @@ parity_off() {
   assert_contains "$output" "Could not render the Kubernetes namespace from pattern"
 }
 
+@test "resolve_k8s_namespace: rejects a placeholder that is an object, not a single value" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {environment: "production"}')
+  export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions}"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "uses {.scope.dimensions}, which is an object or a list"
+  assert_contains "$output" "{.scope.dimensions.environment}"
+}
+
+@test "resolve_k8s_namespace: rejects a placeholder that is a list" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.domains = ["a.example.com"]')
+  export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.domains}"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "uses {.scope.domains}, which is an object or a list"
+}
+
+@test "resolve_k8s_namespace: rejects a rendered name that is not a valid namespace name" {
+  export NAMESPACE_PATTERN="{.namespace.slug}-"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "renders 'payments-', which is not a valid Kubernetes namespace name"
+}
+
 @test "resolve_k8s_namespace: fails when the pattern reads a field the context lacks" {
   export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions.region}"
 
@@ -210,24 +246,14 @@ parity_off() {
   assert_equal "$K8S_NAMESPACE_SOURCE" "sticky"
 }
 
-@test "resolve_k8s_namespace: a renamed nullplatform namespace keeps its pinned namespace" {
-  export MOCK_PINNED_NS="payments-old"
+@test "resolve_k8s_namespace: a new scope follows the rendered name, not other namespaces of its owner" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "payments-renamed"')
 
   resolve_k8s_namespace "nullplatform"
 
-  assert_equal "$K8S_NAMESPACE" "payments-old"
-  assert_equal "$K8S_NAMESPACE_SOURCE" "pinned"
-}
-
-@test "resolve_k8s_namespace: does not pin when the pattern depends on more than the namespace" {
-  export MOCK_PINNED_NS="payments-development"
-  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {environment: "production"}')
-  export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions.environment}"
-
-  resolve_k8s_namespace "nullplatform"
-
-  assert_equal "$K8S_NAMESPACE" "payments-production"
+  assert_equal "$K8S_NAMESPACE" "payments-renamed"
   assert_equal "$K8S_NAMESPACE_SOURCE" "computed"
+  [[ "$(cat "$KUBECTL_LOG")" != *"get namespaces -l"* ]]
 }
 
 @test "resolve_k8s_namespace: reuses a namespace this nullplatform namespace already owns" {

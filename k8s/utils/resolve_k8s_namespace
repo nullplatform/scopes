@@ -17,19 +17,16 @@
 #
 # Resolution order with parity on:
 #   1. sticky   - the namespace where the scope's objects already live, so
-#                 scopes created before parity was enabled never move
-#   2. pinned   - the Kubernetes namespace labeled with this nullplatform
-#                 namespace id, so renaming the nullplatform namespace keeps
-#                 its scopes together. Only when the pattern depends on the
-#                 organization, account and namespace alone: a pattern with
-#                 other fields (e.g. dimensions) maps one nullplatform
-#                 namespace to several Kubernetes namespaces
-#   3. computed - the rendered pattern
+#                 scopes never move: not when parity is enabled, not when the
+#                 pattern changes, not when the nullplatform namespace is
+#                 renamed
+#   2. computed - the rendered pattern, which must be a valid Kubernetes
+#                 namespace name
 #
 # Usage (source this file, do not run it in a subshell):
 #   resolve_k8s_namespace <static_namespace> [<scope_id>]
 # Sets K8S_NAMESPACE, K8S_NAMESPACE_PARITY (true|false),
-# K8S_NAMESPACE_SOURCE (static|sticky|pinned|computed), NP_NAMESPACE_ID and
+# K8S_NAMESPACE_SOURCE (static|sticky|computed), NP_NAMESPACE_ID and
 # NP_ACCOUNT_ID. Returns 1 when the namespace cannot be used.
 
 _RESOLVE_K8S_NAMESPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -43,6 +40,7 @@ fi
 K8S_NAMESPACE_RESERVED_DEFAULT="default kube-system kube-public kube-node-lease istio-system gateways cert-manager external-dns"
 K8S_NAMESPACE_PATTERN_DEFAULT="{.namespace.slug}"
 K8S_NAMESPACE_NAME_BUDGET=63
+K8S_NAMESPACE_NAME_PATTERN='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
 
 # Prints the configured namespace pattern; empty means parity is off.
 k8s_namespace_pattern() {
@@ -73,19 +71,24 @@ k8s_namespace_parity_enabled() {
   [ -n "$(k8s_namespace_pattern)" ]
 }
 
-# True when every placeholder of the pattern is a field of the organization,
-# account or namespace, so one nullplatform namespace maps to one Kubernetes
-# namespace and pinning by namespace id is safe.
-_k8s_namespace_pattern_is_per_namespace() {
-  local placeholder
+# Prints the first placeholder of the pattern that resolves to an object or a
+# list, such as {.scope.dimensions}: the naming engine would render it as an
+# empty or mangled segment. Paths the engine rejects are left to it.
+_k8s_namespace_pattern_non_scalar() {
+  local placeholder path type
   while read -r placeholder; do
     [ -n "$placeholder" ] || continue
-    case "$placeholder" in
-      "{.organization."*|"{.account."*|"{.namespace."*) ;;
-      *) return 1 ;;
+    path="${placeholder#\{}"
+    path="${path%\}}"
+    [[ "$path" =~ $NP_NAMING_PATH_PATTERN ]] || continue
+    type=$(echo "$CONTEXT" | jq -r "$path | type" 2>/dev/null || true)
+    case "$type" in
+      object|array)
+        echo "$placeholder"
+        return 0
+        ;;
     esac
   done < <(grep -oE '\{[^}]*\}' <<< "$1")
-  return 0
 }
 
 _k8s_namespace_of_scope() {
@@ -93,13 +96,6 @@ _k8s_namespace_of_scope() {
   [ -n "$scope_id" ] || return 0
   kubectl get deployments,services -A -l "scope_id=$scope_id" \
     -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true
-}
-
-_k8s_namespace_pinned_to() {
-  local np_namespace_id="$1"
-  [ -n "$np_namespace_id" ] || return 0
-  kubectl get namespaces -l "nullplatform=true,namespace_id=$np_namespace_id" \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
 }
 
 # Namespace of the first pod matching a label selector, across namespaces.
@@ -111,7 +107,7 @@ k8s_namespace_of_pods() {
 
 resolve_k8s_namespace() {
   local static_namespace="$1" scope_id="${2:-}"
-  local pattern name reserved owner managed
+  local pattern placeholder name reserved owner managed
 
   K8S_NAMESPACE="$static_namespace"
   K8S_NAMESPACE_PARITY="false"
@@ -150,19 +146,26 @@ resolve_k8s_namespace() {
     return 1
   fi
 
-  if _k8s_namespace_pattern_is_per_namespace "$pattern"; then
-    name=$(_k8s_namespace_pinned_to "$NP_NAMESPACE_ID")
-    if [ -n "$name" ]; then
-      K8S_NAMESPACE="$name"
-      K8S_NAMESPACE_SOURCE="pinned"
-      return 0
-    fi
+  placeholder=$(_k8s_namespace_pattern_non_scalar "$pattern")
+  if [ -n "$placeholder" ]; then
+    log error "❌ Namespace pattern '$pattern' uses $placeholder, which is an object or a list, not a single value"
+    log error "🔧 How to fix:"
+    log error "   • Point the placeholder at one field, e.g. {.scope.dimensions.environment}"
+    return 1
   fi
 
   if ! name=$(np_name_render "$K8S_NAMESPACE_NAME_BUDGET" "$pattern"); then
     log error "❌ Could not render the Kubernetes namespace from pattern '$pattern'"
     log error "🔧 How to fix:"
     log error "   • Fix naming.namespace_pattern (or NAMESPACE_PATTERN); see k8s/docs/resource-naming.md"
+    return 1
+  fi
+
+  if [ "${#name}" -gt "$K8S_NAMESPACE_NAME_BUDGET" ] || ! [[ "$name" =~ $K8S_NAMESPACE_NAME_PATTERN ]]; then
+    log error "❌ Namespace pattern '$pattern' renders '$name', which is not a valid Kubernetes namespace name"
+    log error "🔧 How to fix:"
+    log error "   • Use lowercase letters, digits and hyphens, starting and ending with a letter or digit"
+    log error "   • Do not end the pattern with a hyphen"
     return 1
   fi
 
