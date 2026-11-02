@@ -1,8 +1,8 @@
 /**
  * The worker of a scope image: what the agent dials. It answers the telemetry
- * actions on the cluster itself (telemetry.ts) and runs the repo's bash
- * entrypoint for everything else (bash.ts), the scope actions, the parameters
- * and whatever an overlay took over, so an image built on this needs no
+ * actions on the cluster and the metrics backend itself (telemetry.ts) and
+ * runs the repo's bash entrypoint for everything else (bash.ts), the scope
+ * actions and the parameters, so an image built on this needs no
  * worker-bridge. Nothing runs on import: src/index.ts runs it with the real
  * ports, the tests with in-memory ones.
  */
@@ -12,7 +12,7 @@ import { failureOf, runEntrypoint, type Entrypoint } from "./bash";
 import startInitialSample from "./samples/start-initial.json" with { type: "json" };
 import { telemetryRoutes, type TelemetryConfig, type TelemetryPorts } from "./telemetry";
 
-export interface WorkerConfig extends Omit<TelemetryConfig, "overridesPaths"> {
+export interface WorkerConfig extends TelemetryConfig {
   /** What the image is to the agent: the package the pin names, and its version. */
   package: { name: string; version: string };
   /** The notification sources the agent routes to this worker. */
@@ -44,6 +44,6 @@ export function scopeWorker(config: WorkerConfig, ports: TelemetryPorts) {
   return definePlugin({
     package: { name: config.package.name, version: config.package.version, description: "The scope's worker: telemetry from the cluster, every other action by the bash entrypoint" },
     agent: { sources: config.sources },
-    routes: [...telemetryRoutes({ ...config, overridesPaths: config.entrypoint.overridesPaths }, ports), bashRoute(config.entrypoint)],
+    routes: [...telemetryRoutes(config, ports), bashRoute(config.entrypoint)],
   });
 }

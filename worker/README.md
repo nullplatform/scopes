@@ -7,8 +7,9 @@ It does two things:
   are answered here, from the Kubernetes API and Prometheus, with no bash, no `kubectl` and no
   `np` in the path: the k8s-telemetry worker's code (`src/kube`, `src/logs`, `src/metrics`,
   `src/instances`), which read a page of logs in milliseconds where the scripts took tens of
-  them. An overlay that provides a workflow for one of these actions (the datadog folder's
-  `metric/workflows`) keeps it: that action goes to the bash like any other (`src/overlay.ts`).
+  them. Metrics come from Prometheus, or from Datadog on the containers-datadog image
+  (`METRICS_BACKEND=datadog`, `src/metrics/datadog.ts`: the overlay's queries over the
+  `nullplatform.scope.*` series, the keys from the environment or the metrics provider).
 - **Everything else by the bash entrypoint.** Scope actions, deployments, parameters and the
   overlays' actions run `entrypoint --service-path=<scope> [--overrides-path=<overlay>]…` with
   `NP_ACTION_CONTEXT`, exactly as the worker-bridge ran it (`src/bash.ts`). What the entrypoint
@@ -29,7 +30,9 @@ Read once, in `src/index.ts`, from the image's environment (the agent's worker p
 | `NP_AGENT_SOURCES` | The notification sources routed here (`service,telemetry`). |
 | `K8S_SCOPE_PROVIDER` | The id(s) of the Kubernetes scope's specification, for the channel the manifest describes. |
 | `NAMESPACE_OVERRIDE`, `K8S_NAMESPACE` | The namespace the scope's pods live in; unset reads every namespace by label. |
+| `METRICS_BACKEND` | Where metrics come from: `prometheus` (default) or `datadog`. |
 | `PROMETHEUS_URL` | A fixed Prometheus; unset asks the organization's metrics provider. |
+| `DATADOG_API_KEY`, `DATADOG_APP_KEY`, `DATADOG_SITE` | Datadog's keys and site; unset, the metrics provider's `credentials` and `settings.site`. |
 | `KUBECONFIG`, `KUBE_CONTEXT` | How the cluster is reached; unset, the in-cluster service account. |
 
 ## Develop
@@ -37,7 +40,7 @@ Read once, in `src/index.ts`, from the image's environment (the agent's worker p
 ```bash
 cd worker
 bun install
-bun test                 # the telemetry suites, the bash runner, the overlay rule, the routing
+bun test                 # the telemetry suites, both metrics backends, the bash runner, the routing
 bunx tsc --noEmit -p .
 bun run describe         # the manifest
 docker build -f ../docker/containers.Dockerfile ..   # the image, from the repository root

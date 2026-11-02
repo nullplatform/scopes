@@ -1,5 +1,7 @@
 import { main } from "@nullplatform/plugin";
 import { kubeClient } from "./kube/client";
+import { datadogBackend, prometheusBackend } from "./metrics/backend";
+import { datadogKeysOf } from "./metrics/datadog";
 import { prometheusClient } from "./metrics/prometheus";
 import { scopeWorker } from "./worker";
 
@@ -10,7 +12,9 @@ import { scopeWorker } from "./worker";
 //   NP_AGENT_SOURCES                      the notification sources routed here
 //   K8S_SCOPE_PROVIDER                    the id(s) of the Kubernetes scope's specification, comma-separated, for the channel
 //   NAMESPACE_OVERRIDE (or K8S_NAMESPACE) the namespace the scope's pods live in; unset reads every namespace by label
+//   METRICS_BACKEND                       where metrics come from: prometheus (default) or datadog
 //   PROMETHEUS_URL                        a fixed Prometheus; unset asks the organization's metrics provider
+//   DATADOG_API_KEY, DATADOG_APP_KEY, DATADOG_SITE   Datadog's keys and site; unset, the metrics provider's
 //   KUBECONFIG, KUBE_CONTEXT              read by @kubernetes/client-node; unset, the in-cluster service account
 const env = process.env;
 const list = (value: string | undefined): string[] => (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
@@ -23,7 +27,7 @@ const plugin = scopeWorker(
     scopeProviders: list(env.K8S_SCOPE_PROVIDER),
     namespace: env.NAMESPACE_OVERRIDE || env.K8S_NAMESPACE || undefined,
   },
-  { kube: kubeClient({ context: env.KUBE_CONTEXT || undefined }), prometheus: prometheusClient(), prometheusUrl: env.PROMETHEUS_URL || undefined },
+  { kube: kubeClient({ context: env.KUBE_CONTEXT || undefined }), metrics: env.METRICS_BACKEND === "datadog" ? datadogBackend({ fetch, keys: datadogKeysOf(env) }) : prometheusBackend(prometheusClient(), env.PROMETHEUS_URL || undefined) },
 );
 
 await main(plugin);
