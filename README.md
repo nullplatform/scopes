@@ -81,6 +81,7 @@ The script will:
 
 -   **`configure`**: The setup script that registers the provider with nullplatform.
 -   **`entrypoint`**: The main script executed by the agent. It routes events to the appropriate scope implementation.
+-   **`worker/`**: The worker the agent dials (TypeScript on bun). It answers the telemetry actions (`log:read`, `metric:*`, `instance:data`) on the cluster itself and runs `entrypoint` for every other action; `docker/containers.Dockerfile` compiles it into the scope image. See `worker/README.md`.
 -   **`k8s/`**: Kubernetes scope implementation.
     -   `specs/`: JSON schemas and templates.
     -   `scope/`: Lifecycle workflows (create, update, delete).

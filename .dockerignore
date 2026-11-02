@@ -1,0 +1,5 @@
+# What no image needs of the checkout: dependency trees and builds of the worker, the git history.
+.git
+worker/node_modules
+worker/dist
+**/node_modules

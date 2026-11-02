@@ -1,0 +1,109 @@
+{
+  "notification": {
+    "action": "metric:data",
+    "entity_nrn": "organization=1:account=2:namespace=3:application=4:scope=5",
+    "arguments": {
+      "metric": "http.response_time",
+      "start_time": "2026-10-20T12:00:00.000Z",
+      "end_time": "2026-10-20T13:00:00.000Z",
+      "filters": {
+        "scope": "checkout-dev"
+      },
+      "period": 60,
+      "group_by": [],
+      "application_id": 4,
+      "scope_id": "5",
+      "options": {},
+      "service": null,
+      "service_specification": null,
+      "scope_type": "custom",
+      "scope_provider": "34ef2d7d-bde1-453c-a7c8-4e33f7b2f6d3"
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "results"
+      ],
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "period_in_seconds": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "selector",
+              "data"
+            ],
+            "properties": {
+              "selector": {
+                "type": "object"
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "scope": {
+      "id": 5,
+      "slug": "checkout-dev",
+      "name": "checkout-dev",
+      "type": "custom",
+      "nrn": "organization=1:account=2:namespace=3:application=4:scope=5",
+      "provider": "34ef2d7d-bde1-453c-a7c8-4e33f7b2f6d3",
+      "profiles": [
+        "environment_example",
+        "country_example",
+        "site_example"
+      ]
+    },
+    "service": {
+      "id": "923d0a0d-47b9-4551-ac72-5ac305ff5a75",
+      "dimensions": {
+        "environment": "example-environment",
+        "country": "example-country",
+        "site": "example-site"
+      }
+    },
+    "parameters": {
+      "scope_id": 5
+    },
+    "tags": {
+      "organization": "acme-corp",
+      "organization_id": 1,
+      "organization_name": "Acme Corp",
+      "account": "acme-main",
+      "account_id": 2,
+      "account_name": "Acme Main",
+      "namespace": "payments",
+      "namespace_id": 3,
+      "namespace_name": "Payments",
+      "application": "checkout",
+      "application_id": 4,
+      "application_name": "Checkout",
+      "repository_url": "https://github.com/acme-corp/checkout",
+      "scope": "checkout-dev",
+      "scope_id": 5,
+      "scope_name": "checkout-dev",
+      "scope_type": "custom"
+    }
+  }
+}
