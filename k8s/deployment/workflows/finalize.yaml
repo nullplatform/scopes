@@ -53,6 +53,8 @@ steps:
     output:
       - name: CONTEXT
         type: environment
+      - name: K8S_NAMESPACE
+        type: environment
       - name: SCOPE_VISIBILITY
         type: environment
       - name: SCOPE_DOMAIN

@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# Resolves the Kubernetes namespace a scope runs in:
+#   1. sticky     - the namespace where the scope's objects already live, so a
+#                   scope never moves when the configured namespace changes
+#   2. configured - the usual setting (NAMESPACE_OVERRIDE, K8S_NAMESPACE,
+#                   cluster.namespace)
+#
+# The configured value may be a pattern, rendered by the same engine as
+# resource names (k8s/naming/resolve_names), e.g. "{.namespace.slug}" for one
+# Kubernetes namespace per nullplatform namespace,
+# "{.account.slug}-{.namespace.slug}" or
+# "{.namespace.slug}-{.scope.dimensions.environment}". A Kubernetes namespace
+# name cannot contain "{", so a value without one is used as is.
+#
+# Usage (source this file, do not run it in a subshell):
+#   resolve_k8s_namespace <configured_namespace> [<scope_id>]
+# Sets K8S_NAMESPACE. Returns 1 when the pattern does not render a valid
+# Kubernetes namespace name.
+
+_RESOLVE_K8S_NAMESPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+if [[ "$(type -t np_name_render 2>/dev/null)" != "function" ]]; then
+  source "$_RESOLVE_K8S_NAMESPACE_DIR/../naming/resolve_names"
+fi
+
+K8S_NAMESPACE_NAME_BUDGET=63
+K8S_NAMESPACE_NAME_PATTERN='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+
+# Namespace where the scope already has objects: deployments and services, or
+# the cronjobs and jobs of a scheduled_task scope.
+_k8s_namespace_of_scope() {
+  local scope_id="$1"
+  [ -n "$scope_id" ] || return 0
+  kubectl get deployments,services,cronjobs,jobs -A -l "scope_id=$scope_id" \
+    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true
+}
+
+# Namespace of the first pod matching a label selector, across namespaces.
+# Read actions (logs, instances) only receive ids, not providers, so they look
+# the pods up instead of resolving the namespace.
+k8s_namespace_of_pods() {
+  kubectl get pods -A -l "$1" -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true
+}
+
+resolve_k8s_namespace() {
+  local configured="$1" scope_id="${2:-}" name
+
+  if [ -z "$scope_id" ]; then
+    scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // .tags.scope_id // empty' 2>/dev/null || true)
+  fi
+  name=$(_k8s_namespace_of_scope "$scope_id")
+  if [ -n "$name" ]; then
+    export K8S_NAMESPACE="$name"
+    return 0
+  fi
+
+  export K8S_NAMESPACE="$configured"
+  [[ "$configured" == *"{"* ]] || return 0
+
+  if ! name=$(np_name_render "$K8S_NAMESPACE_NAME_BUDGET" "$configured"); then
+    log error "❌ Could not render the Kubernetes namespace from pattern '$configured'"
+    log error "🔧 How to fix:"
+    log error "   • Fix cluster.namespace (or K8S_NAMESPACE); see k8s/docs/resource-naming.md"
+    return 1
+  fi
+
+  if [ "${#name}" -gt "$K8S_NAMESPACE_NAME_BUDGET" ] || ! [[ "$name" =~ $K8S_NAMESPACE_NAME_PATTERN ]]; then
+    log error "❌ Namespace pattern '$configured' renders '$name', which is not a valid Kubernetes namespace name"
+    log error "🔧 How to fix:"
+    log error "   • Point each placeholder at a single value, e.g. {.scope.dimensions.environment}, not {.scope.dimensions}"
+    log error "   • Use lowercase letters, digits and hyphens, and do not end the pattern with a hyphen"
+    return 1
+  fi
+
+  export K8S_NAMESPACE="$name"
+}
