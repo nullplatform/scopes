@@ -75,6 +75,44 @@ teardown() {
 }
 
 # =============================================================================
+# Namespace: existing scopes stay where they run, the configured value may be a
+# pattern
+# =============================================================================
+@test "trigger: renders a namespace pattern in cluster.namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "payments" | .providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
+  kubectl() {
+    case "$*" in
+      "get cronjob -n payments -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}") echo "my-cronjob" ;;
+      "create job --from=cronjob/my-cronjob"*) echo "kubectl $*" ;;
+    esac
+    return 0
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "kubectl create job --from=cronjob/my-cronjob my-cronjob-1700000000 -n payments"
+}
+
+@test "trigger: finds the CronJob where the scope runs, not in the configured namespace" {
+  kubectl() {
+    case "$*" in
+      "get deployments,services,cronjobs,jobs -A -l scope_id=scope-123"*) printf 'old-namespace' ;;
+      "get cronjob -n old-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}") echo "my-cronjob" ;;
+      "create job --from=cronjob/my-cronjob"*) echo "kubectl $*" ;;
+    esac
+    return 0
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../trigger"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "kubectl create job --from=cronjob/my-cronjob my-cronjob-1700000000 -n old-namespace"
+}
+
+# =============================================================================
 # Error: scope not deployed (no active deployment)
 # =============================================================================
 @test "trigger: fails with a clear message when the scope has no active deployment" {

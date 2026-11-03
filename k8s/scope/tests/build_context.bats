@@ -385,10 +385,11 @@ teardown() {
 }
 
 # =============================================================================
-# Namespace parity (naming.namespace_pattern = {.namespace.slug})
+# Namespace resolution: existing scopes stay, the configured value may be a
+# pattern (cluster.namespace = {.namespace.slug})
 # =============================================================================
-enable_namespace_parity() {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].naming.namespace_pattern = "{.namespace.slug}"')
+set_configured_namespace() {
+  export CONTEXT=$(echo "$CONTEXT" | jq --arg ns "$1" '.providers["container-orchestration"].cluster.namespace = $ns')
 
   # Empty cluster: no scope objects, no namespaces yet
   kubectl() {
@@ -406,48 +407,46 @@ enable_namespace_parity() {
   export -f kubectl
 }
 
-@test "build_context: namespace parity creates the namespace of the nullplatform namespace" {
-  enable_namespace_parity
+# Cluster where the scope already has objects in the given namespace
+scope_runs_in() {
+  export SCOPE_NAMESPACE="$1"
+  kubectl() {
+    case "$1 $2" in
+      "get deployments,services,cronjobs,jobs") printf '%s' "$SCOPE_NAMESPACE" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+@test "build_context: a namespace pattern creates the namespace of the nullplatform namespace" {
+  set_configured_namespace "{.namespace.slug}"
 
   run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "📝 Creating namespace 'test-namespace'..."
   assert_contains "$output" "k8s_namespace=test-namespace"
-  assert_contains "$(cat "$NP_OUTPUT_DIR/kubectl.log")" "kubectl label namespace test-namespace --overwrite nullplatform=true namespace_id=300 account_id=200"
 }
 
-@test "build_context: namespace parity keeps an existing scope in its namespace" {
-  enable_namespace_parity
-  kubectl() {
-    case "$1 $2" in
-      "get deployments,services") printf 'default-namespace' ;;
-      *) return 0 ;;
-    esac
-  }
-  export -f kubectl
+@test "build_context: a namespace pattern keeps an existing scope in its namespace" {
+  set_configured_namespace "{.namespace.slug}"
+  scope_runs_in "default-namespace"
 
   run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
 
   [ "$status" -eq 0 ]
   assert_contains "$output" "k8s_namespace=default-namespace"
-  [[ "$output" != *"kubectl label namespace"* ]]
 }
 
-@test "build_context: namespace parity fails on a namespace owned by someone else" {
-  enable_namespace_parity
-  kubectl() {
-    case "$*" in
-      "get namespace test-namespace -o jsonpath={.metadata.labels.namespace_id}") printf '999' ;;
-      *) return 0 ;;
-    esac
-  }
-  export -f kubectl
+@test "build_context: an existing scope stays in its namespace when the configured namespace changes" {
+  set_configured_namespace "new-namespace"
+  scope_runs_in "old-namespace"
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "already exists and belongs to another owner (namespace_id='999')"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=old-namespace"
 }
 
 # =============================================================================

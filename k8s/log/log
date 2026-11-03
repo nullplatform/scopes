@@ -14,7 +14,7 @@ fi
 
 source "${SERVICE_PATH:-$(dirname "$0")/..}/utils/resolve_k8s_namespace"
 
-# Pods may run in a namespace per nullplatform namespace: look them up first
+# Pods may run outside the configured namespace: look them up first
 LOG_SELECTOR="nullplatform=true,application_id=$APPLICATION_ID"
 [ -n "$SCOPE_ID" ] && LOG_SELECTOR="$LOG_SELECTOR,scope_id=$SCOPE_ID"
 K8S_NAMESPACE=$(k8s_namespace_of_pods "$LOG_SELECTOR")

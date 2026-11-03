@@ -29,7 +29,7 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "$K8S_NAMESPACE" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
 
-# With namespace parity on, find the namespace the scope actually runs in
+# Find the namespace the scope actually runs in, which may differ from the configured one
 source "${SERVICE_PATH:-$(dirname "$0")/..}/utils/resolve_k8s_namespace"
 resolve_k8s_namespace "$K8S_NAMESPACE" || exit 1
 

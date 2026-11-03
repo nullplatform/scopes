@@ -32,38 +32,28 @@ Configuration for Kubernetes cluster settings.
 |----------|-------------|------------------------------|
 | **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `cluster.namespace` |
 | **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `cluster.create_namespace_if_not_exist` |
-| **NAMESPACE_PATTERN** | Namespace parity: each nullplatform namespace gets its own Kubernetes namespace, named by this pattern (rendered like the resource naming patterns, see `docs/resource-naming.md`). Empty (default) keeps every scope in `K8S_NAMESPACE`. Also read from `naming.namespace_pattern` in the container-orchestration provider | `naming.namespace_pattern` |
-| **NAMESPACE_BOOTSTRAP_RESOURCES** | Extra objects copied from `K8S_NAMESPACE` into each parity namespace, as `kind/name` (comma-separated env, list in providers). Only `networkpolicy`, `limitrange`, `resourcequota` and `configmap`. Image pull secrets (type `kubernetes.io/dockerconfigjson`) and the traffic manager ConfigMap are always copied; no other secret is | `cluster.namespace_bootstrap_resources` |
 
-#### Namespace parity
+#### Namespace per nullplatform namespace
 
-With a namespace pattern, `K8S_NAMESPACE` stops being the namespace of every scope and becomes the *static* namespace,
-where shared objects live. The pattern uses the same `{.path}` placeholders and engine as the resource naming patterns,
-so it can read any context field:
+`K8S_NAMESPACE` (or `cluster.namespace`) may be a pattern instead of a fixed name. It uses the same `{.path}`
+placeholders and engine as the resource naming patterns (`docs/resource-naming.md`), so it can read any context field:
 
-| Pattern | Kubernetes namespace |
+| `K8S_NAMESPACE` / `cluster.namespace` | Kubernetes namespace |
 |---|---|
-| `{.namespace.slug}` | `payments` |
-| `{.account.slug}-{.namespace.slug}` | `acme-payments`, for clusters shared by several accounts |
-| `{.namespace.slug}-{.scope.dimensions.environment}` | `payments-production`, one per environment |
-| `apps-{.namespace.slug}-{.scope.dimensions.environment}-team` | `apps-payments-production-team`, with fixed text |
+| `nullplatform` | `nullplatform`: every scope in one namespace (default) |
+| `{.namespace.slug}` | `payments`: one per nullplatform namespace |
+| `{.account.slug}-{.namespace.slug}` | `acme-payments`: for clusters shared by several accounts |
+| `{.namespace.slug}-{.scope.dimensions.environment}` | `payments-production`: one per environment |
 
-Placeholders must point at a single value: `{.scope.dimensions}` is an object and is rejected, use one key such as
-`{.scope.dimensions.environment}`. Fixed text goes before the first placeholder or after the last one, in lowercase;
-placeholders are separated by a single hyphen. The rendered name must be a valid Kubernetes namespace name.
+Each placeholder must point at a single value (`{.scope.dimensions.environment}`, not `{.scope.dimensions}`), fixed
+text goes before the first placeholder or after the last one, and the rendered name must be a valid Kubernetes
+namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE_IF_NOT_EXIST` is true. Nothing is
+copied into it: image pull secrets, the traffic manager ConfigMap or any other object the scopes need there come from a
+workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
 
-Each scope runs in the namespace resolved by `utils/resolve_k8s_namespace`, in this order:
-
-1. **Sticky**: where the scope's objects already are. Scopes never move: not when parity is enabled, not when the
-   pattern changes, not when the nullplatform namespace is renamed (new scopes then get the new name).
-2. **Computed**: the rendered pattern. A namespace that already exists is used only when it carries this
-   `namespace_id`, or `nullplatform=true` without an owner (it is adopted); anything else fails with a collision error.
-
-New parity namespaces get the labels `nullplatform=true`, `namespace_id` and `account_id`, and the annotation
-`nullplatform.com/namespace-name`. Reserved names (`default`, `kube-*`, the static namespace, gateway and add-on
-namespaces; override with `K8S_RESERVED_NAMESPACES`) are rejected. The agent needs cluster-wide permissions to create
-namespaces and to list pods, deployments and services in every namespace. Kubernetes namespaces are never deleted.
-Once scopes run in parity namespaces, do not turn parity off: their next deployment would go back to `K8S_NAMESPACE`.
+A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`), so changing
+the namespace or its pattern only affects new scopes. Finding them lists deployments, services, cronjobs and jobs in
+every namespace; an agent without that permission falls back to the configured namespace. Kubernetes namespaces are never deleted.
 
 ### Networking
 

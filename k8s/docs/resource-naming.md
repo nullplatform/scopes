@@ -83,15 +83,15 @@ The blue deployment during a rollback or during finalize's cleanup is the one ex
 
 ## Namespace pattern
 
-The same engine names the Kubernetes namespace a scope runs in when namespace parity is on: `naming.namespace_pattern` on the `container-orchestration` or `scope-configurations` provider, or the `NAMESPACE_PATTERN` env var. Empty (the default) keeps every scope in `K8S_NAMESPACE`.
+The same engine names the Kubernetes namespace a scope runs in when the configured namespace (`cluster.namespace` on the `container-orchestration` or `scope-configurations` provider, or `K8S_NAMESPACE`) is a pattern instead of a fixed name. A Kubernetes namespace name cannot contain `{`, so a value without one is used as is.
 
 ```
-naming.namespace_pattern: "{.namespace.slug}"                                  # payments
-naming.namespace_pattern: "{.account.slug}-{.namespace.slug}"                  # acme-payments
-naming.namespace_pattern: "{.namespace.slug}-{.scope.dimensions.environment}"  # payments-production
+cluster.namespace: "{.namespace.slug}"                                  # payments
+cluster.namespace: "{.account.slug}-{.namespace.slug}"                  # acme-payments
+cluster.namespace: "{.namespace.slug}-{.scope.dimensions.environment}"  # payments-production
 ```
 
-It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. On top of them, every placeholder must resolve to a single value (`{.scope.dimensions}` is an object and is rejected) and the rendered name must be a valid Kubernetes namespace name. Resolution (scopes that already exist keep their namespace) is in `k8s/utils/resolve_k8s_namespace`; see the namespace parity section of `k8s/README.md`.
+It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. Every placeholder must resolve to a single value (`{.scope.dimensions}` is an object) and the rendered name must be a valid Kubernetes namespace name. A scope that already has objects in the cluster keeps their namespace, whatever the configured value says now (`k8s/utils/resolve_k8s_namespace`); see the namespace section of `k8s/README.md`.
 
 ## Known limitations
 
@@ -107,8 +107,8 @@ Resolving a scope's existing object name lists both `ingress` and `httproute` in
 - Wired into scope context: `k8s/scope/build_context` (look for `np_naming_resolve`)
 - Wired into deployment context (blue discovery): `k8s/deployment/build_context` (look for `np_naming_discover_blue`)
 - Label-based lookups used by operational scripts: `k8s/scope/pause_autoscaling`, `k8s/scope/resume_autoscaling`, `k8s/scope/set_desired_instance_count`, `k8s/deployment/scale_deployments`, `k8s/deployment/kill_instance`, `k8s/deployment/wait_deployment_active`
-- Example `NAMING_STRATEGY` and `NAMESPACE_PATTERN` configuration: `k8s/values.yaml`
-- Namespace pattern resolution: `k8s/utils/resolve_k8s_namespace`
+- Example `NAMING_STRATEGY` and `K8S_NAMESPACE` configuration: `k8s/values.yaml`
+- Namespace resolution: `k8s/utils/resolve_k8s_namespace`
 
 ## Tests
 

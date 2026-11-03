@@ -4,13 +4,10 @@ provider_categories:
   - scope-configurations
   - identity-access-control
 configuration:
+# May be a pattern, e.g. "{.namespace.slug}" for one Kubernetes namespace per
+# nullplatform namespace (docs/resource-naming.md)
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
-# Namespace parity: one Kubernetes namespace per nullplatform namespace, named
-# by a pattern rendered like the resource naming patterns (docs/resource-naming.md).
-# Usually set from the container-orchestration provider (naming.namespace_pattern).
-#  NAMESPACE_PATTERN: "{.namespace.slug}" # or "{.account.slug}-{.namespace.slug}", "{.namespace.slug}-{.scope.dimensions.environment}"
-#  NAMESPACE_BOOTSTRAP_RESOURCES: "networkpolicy/default-deny,limitrange/defaults"
   DOMAIN: nullapps.io
 #  PRIVATE_DOMAIN: nullapps.io
   USE_ACCOUNT_SLUG: false

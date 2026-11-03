@@ -61,7 +61,7 @@ fi
 
 log debug "📋 Scope ID: $SCOPE_ID"
 
-# With namespace parity on, find the namespace the scope actually runs in
+# Find the namespace the scope actually runs in, which may differ from the configured one
 source "${SERVICE_PATH:-$(dirname "$0")/..}/utils/resolve_k8s_namespace"
 resolve_k8s_namespace "$K8S_NAMESPACE" "$SCOPE_ID" || exit 1
 
