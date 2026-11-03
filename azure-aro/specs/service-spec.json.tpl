@@ -380,7 +380,7 @@
                }
             ],
             "title":"Visibility",
-            "default":"public",
+            "default":"{{ env.Getenv "DEFAULT_VISIBILITY" "public" }}",
             "editableOn": [
                 "create"
             ],
