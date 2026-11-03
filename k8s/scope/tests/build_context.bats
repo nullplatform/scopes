@@ -385,10 +385,10 @@ teardown() {
 }
 
 # =============================================================================
-# Namespace parity (use_nullplatform_namespace, the {.namespace.slug} shorthand)
+# Namespace parity (naming.namespace_pattern = {.namespace.slug})
 # =============================================================================
 enable_namespace_parity() {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.use_nullplatform_namespace = true')
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].naming.namespace_pattern = "{.namespace.slug}"')
 
   # Empty cluster: no scope objects, no namespaces yet
   kubectl() {

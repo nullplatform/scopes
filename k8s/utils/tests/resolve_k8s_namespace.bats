@@ -63,22 +63,24 @@ setup() {
     "account": {"id": 20, "slug": "acme"},
     "providers": {
       "container-orchestration": {
-        "cluster": {"namespace": "nullplatform", "use_nullplatform_namespace": true}
+        "cluster": {"namespace": "nullplatform"}
       }
     }
   }'
+
+  # Parity on, full parity: the Kubernetes namespace is the nullplatform slug
+  export NAMESPACE_PATTERN="{.namespace.slug}"
 }
 
 teardown() {
   rm -f "$KUBECTL_LOG" "$CREATED_FILE"
   unset -f kubectl log
-  unset MOCK_SECRET_TYPE USE_NULLPLATFORM_NAMESPACE NAMESPACE_PATTERN K8S_RESERVED_NAMESPACES \
+  unset MOCK_SECRET_TYPE NAMESPACE_PATTERN K8S_RESERVED_NAMESPACES \
     PULL_SECRETS IMAGE_PULL_SECRETS TRAFFIC_MANAGER_CONFIG_MAP NAMESPACE_BOOTSTRAP_RESOURCES
 }
 
 parity_off() {
-  CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers["container-orchestration"].cluster.use_nullplatform_namespace)')
-  export CONTEXT
+  unset NAMESPACE_PATTERN
 }
 
 # =============================================================================
@@ -93,15 +95,6 @@ parity_off() {
   assert_equal "$K8S_NAMESPACE_PARITY" "false"
   assert_equal "$K8S_NAMESPACE_SOURCE" "static"
   assert_equal "$(cat "$KUBECTL_LOG")" ""
-}
-
-@test "resolve_k8s_namespace: use_nullplatform_namespace false keeps the static namespace" {
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.use_nullplatform_namespace = false')
-
-  resolve_k8s_namespace "nullplatform"
-
-  assert_equal "$K8S_NAMESPACE" "nullplatform"
-  assert_equal "$K8S_NAMESPACE_PARITY" "false"
 }
 
 @test "resolve_k8s_namespace: exposes the nullplatform namespace and account ids" {
@@ -124,16 +117,7 @@ parity_off() {
   assert_equal "$K8S_NAMESPACE_SOURCE" "computed"
 }
 
-@test "resolve_k8s_namespace: USE_NULLPLATFORM_NAMESPACE env enables parity without the provider flag" {
-  parity_off
-  export USE_NULLPLATFORM_NAMESPACE=true
-
-  resolve_k8s_namespace "nullplatform"
-
-  assert_equal "$K8S_NAMESPACE" "payments"
-}
-
-@test "resolve_k8s_namespace: naming.namespace_pattern enables parity on its own" {
+@test "resolve_k8s_namespace: naming.namespace_pattern in the provider enables parity" {
   parity_off
   CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].naming.namespace_pattern = "{.account.slug}-{.namespace.slug}"')
 
@@ -144,7 +128,6 @@ parity_off() {
 }
 
 @test "resolve_k8s_namespace: NAMESPACE_PATTERN env renders with scope dimensions" {
-  parity_off
   CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {environment: "production"}')
   export NAMESPACE_PATTERN="{.namespace.slug}-{.scope.dimensions.environment}"
 
@@ -179,14 +162,6 @@ parity_off() {
   resolve_k8s_namespace "nullplatform"
 
   assert_equal "$K8S_NAMESPACE" "acme-payments"
-}
-
-@test "resolve_k8s_namespace: the pattern wins over the use_nullplatform_namespace shorthand" {
-  export NAMESPACE_PATTERN="np-{.namespace.slug}"
-
-  resolve_k8s_namespace "nullplatform"
-
-  assert_equal "$K8S_NAMESPACE" "np-payments"
 }
 
 @test "resolve_k8s_namespace: rejects a pattern the naming engine rejects" {

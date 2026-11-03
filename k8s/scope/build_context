@@ -15,8 +15,8 @@ K8S_STATIC_NAMESPACE=$(get_config_value \
 )
 export K8S_STATIC_NAMESPACE
 
-# With a namespace pattern (naming.namespace_pattern, NAMESPACE_PATTERN or the
-# use_nullplatform_namespace shorthand), the scope gets its own namespace
+# With a namespace pattern (naming.namespace_pattern or NAMESPACE_PATTERN), the
+# scope gets its own namespace
 resolve_k8s_namespace "$K8S_STATIC_NAMESPACE" || exit 1
 
 # General configuration

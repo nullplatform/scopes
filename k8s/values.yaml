@@ -10,7 +10,6 @@ configuration:
 # by a pattern rendered like the resource naming patterns (docs/resource-naming.md).
 # Usually set from the container-orchestration provider (naming.namespace_pattern).
 #  NAMESPACE_PATTERN: "{.namespace.slug}" # or "{.account.slug}-{.namespace.slug}", "{.namespace.slug}-{.scope.dimensions.environment}"
-#  USE_NULLPLATFORM_NAMESPACE: false # shorthand for NAMESPACE_PATTERN="{.namespace.slug}"
 #  NAMESPACE_BOOTSTRAP_RESOURCES: "networkpolicy/default-deny,limitrange/defaults"
   DOMAIN: nullapps.io
 #  PRIVATE_DOMAIN: nullapps.io

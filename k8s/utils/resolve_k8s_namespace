@@ -8,12 +8,10 @@
 #
 # Parity is on when a namespace pattern is configured: naming.namespace_pattern
 # in the container-orchestration or scope-configurations provider, or the
-# NAMESPACE_PATTERN env var. cluster.use_nullplatform_namespace = true (or
-# USE_NULLPLATFORM_NAMESPACE) is the shorthand for the pattern
-# "{.namespace.slug}". The pattern is rendered by the same engine as resource
-# names (k8s/naming/resolve_names), so it accepts any context path, e.g.
-# "{.account.slug}-{.namespace.slug}" or
-# "{.namespace.slug}-{.scope.dimensions.environment}".
+# NAMESPACE_PATTERN env var. The pattern is rendered by the same engine as
+# resource names (k8s/naming/resolve_names), so it accepts any context path,
+# e.g. "{.namespace.slug}" for full parity, "{.account.slug}-{.namespace.slug}"
+# or "{.namespace.slug}-{.scope.dimensions.environment}".
 #
 # Resolution order with parity on:
 #   1. sticky   - the namespace where the scope's objects already live, so
@@ -38,33 +36,16 @@ if [[ "$(type -t np_name_render 2>/dev/null)" != "function" ]]; then
 fi
 
 K8S_NAMESPACE_RESERVED_DEFAULT="default kube-system kube-public kube-node-lease istio-system gateways cert-manager external-dns"
-K8S_NAMESPACE_PATTERN_DEFAULT="{.namespace.slug}"
 K8S_NAMESPACE_NAME_BUDGET=63
 K8S_NAMESPACE_NAME_PATTERN='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
 
 # Prints the configured namespace pattern; empty means parity is off.
 k8s_namespace_pattern() {
-  local pattern enabled
-  pattern=$(get_config_value \
+  get_config_value \
     --env NAMESPACE_PATTERN \
     --provider '.providers["scope-configurations"].naming.namespace_pattern' \
     --provider '.providers["container-orchestration"].naming.namespace_pattern' \
     --default ""
-  )
-  if [ -n "$pattern" ]; then
-    echo "$pattern"
-    return 0
-  fi
-
-  enabled=$(get_config_value \
-    --env USE_NULLPLATFORM_NAMESPACE \
-    --provider '.providers["scope-configurations"].cluster.use_nullplatform_namespace' \
-    --provider '.providers["container-orchestration"].cluster.use_nullplatform_namespace' \
-    --default "false"
-  )
-  if [ "$enabled" = "true" ]; then
-    echo "$K8S_NAMESPACE_PATTERN_DEFAULT"
-  fi
 }
 
 k8s_namespace_parity_enabled() {

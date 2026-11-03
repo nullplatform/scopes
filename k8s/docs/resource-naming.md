@@ -83,7 +83,7 @@ The blue deployment during a rollback or during finalize's cleanup is the one ex
 
 ## Namespace pattern
 
-The same engine names the Kubernetes namespace a scope runs in when namespace parity is on: `naming.namespace_pattern` on the `container-orchestration` or `scope-configurations` provider, or the `NAMESPACE_PATTERN` env var. Empty (the default) keeps every scope in `K8S_NAMESPACE`; `cluster.use_nullplatform_namespace` is the shorthand for `{.namespace.slug}`.
+The same engine names the Kubernetes namespace a scope runs in when namespace parity is on: `naming.namespace_pattern` on the `container-orchestration` or `scope-configurations` provider, or the `NAMESPACE_PATTERN` env var. Empty (the default) keeps every scope in `K8S_NAMESPACE`.
 
 ```
 naming.namespace_pattern: "{.namespace.slug}"                                  # payments

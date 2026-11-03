@@ -33,7 +33,6 @@ Configuration for Kubernetes cluster settings.
 | **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `cluster.namespace` |
 | **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `cluster.create_namespace_if_not_exist` |
 | **NAMESPACE_PATTERN** | Namespace parity: each nullplatform namespace gets its own Kubernetes namespace, named by this pattern (rendered like the resource naming patterns, see `docs/resource-naming.md`). Empty (default) keeps every scope in `K8S_NAMESPACE`. Also read from `naming.namespace_pattern` in the container-orchestration provider | `naming.namespace_pattern` |
-| **USE_NULLPLATFORM_NAMESPACE** | Shorthand for `NAMESPACE_PATTERN="{.namespace.slug}"` (default `false`); a configured pattern wins. Also read from `cluster.use_nullplatform_namespace` in the container-orchestration provider | `cluster.use_nullplatform_namespace` |
 | **NAMESPACE_BOOTSTRAP_RESOURCES** | Extra objects copied from `K8S_NAMESPACE` into each parity namespace, as `kind/name` (comma-separated env, list in providers). Only `networkpolicy`, `limitrange`, `resourcequota` and `configmap`. Image pull secrets (type `kubernetes.io/dockerconfigjson`) and the traffic manager ConfigMap are always copied; no other secret is | `cluster.namespace_bootstrap_resources` |
 
 #### Namespace parity
