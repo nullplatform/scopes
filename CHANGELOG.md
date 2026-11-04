@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- k8s, azure, azure-aro and onprem scopes are created with `internal` visibility by default (was `public`); existing scopes keep theirs. The default is read from `DEFAULT_VISIBILITY` when the spec is rendered: set `template_env_vars = { DEFAULT_VISIBILITY = "public" }` in the `scope_definition` module (tofu-modules v9.3.0+) to keep `public`. The value ignores case and surrounding spaces, `private` is an alias of `internal`, and any other value fails the render
+- k8s, azure, azure-aro and onprem scopes default to `internal` visibility (was `public`); set `template_env_vars = { DEFAULT_VISIBILITY = "public" }` in `scope_definition` to keep `public`
 - k8s, azure, azure-aro and onprem scopes label the `internal` visibility option "Private" instead of "Main Account". The stored value is still `internal`
 
 ## [1.20.0] - 2026-11-04
