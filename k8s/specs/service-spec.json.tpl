@@ -1,6 +1,6 @@
-{{- /* DEFAULT_VISIBILITY: visibility preselected for new scopes, public or internal (the default).
-       Case and surrounding spaces are ignored and private is an alias of internal (the UI label).
-       Any other value fails the render instead of guessing. The schema always accepts both values. */ -}}
+{{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal (default internal).
+       Trimmed and case-insensitive; empty means internal and private aliases internal (the UI label).
+       Anything else fails the render so a typo never silently becomes public. The oneOf keeps both values. */ -}}
 {{- $visibility := env.Getenv "DEFAULT_VISIBILITY" "internal" | strings.TrimSpace | strings.ToLower -}}
 {{- if eq $visibility "" "private" }}{{ $visibility = "internal" }}{{ end -}}
 {{- if not (coll.Has (coll.Slice "public" "internal") $visibility) -}}
