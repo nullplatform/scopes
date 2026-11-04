@@ -416,7 +416,7 @@
                },
                {
                   "const":"internal",
-                  "title":"Main Account",
+                  "title":"Private",
                   "description":"Only visible inside your organization"
                }
             ],
