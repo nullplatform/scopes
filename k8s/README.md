@@ -33,6 +33,28 @@ Configuration for Kubernetes cluster settings.
 | **K8S_NAMESPACE** | Kubernetes namespace where resources are deployed | `cluster.namespace` |
 | **CREATE_K8S_NAMESPACE_IF_NOT_EXIST** | Whether to create the namespace if it doesn't exist | `cluster.create_namespace_if_not_exist` |
 
+#### Namespace per nullplatform namespace
+
+`K8S_NAMESPACE` (or `cluster.namespace`) may be a pattern instead of a fixed name. It uses the same `{.path}`
+placeholders and engine as the resource naming patterns (`docs/resource-naming.md`), so it can read any context field:
+
+| `K8S_NAMESPACE` / `cluster.namespace` | Kubernetes namespace |
+|---|---|
+| `nullplatform` | `nullplatform`: every scope in one namespace (default) |
+| `{.namespace.slug}` | `payments`: one per nullplatform namespace |
+| `{.account.slug}-{.namespace.slug}` | `acme-payments`: for clusters shared by several accounts |
+| `{.namespace.slug}-{.scope.dimensions.environment}` | `payments-production`: one per environment |
+
+Each placeholder must point at a single value (`{.scope.dimensions.environment}`, not `{.scope.dimensions}`), fixed
+text goes before the first placeholder or after the last one, and the rendered name must be a valid Kubernetes
+namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE_IF_NOT_EXIST` is true. Nothing is
+copied into it: image pull secrets, the traffic manager ConfigMap or any other object the scopes need there come from a
+workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
+
+A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`), so changing
+the namespace or its pattern only affects new scopes. Finding them lists deployments, services, cronjobs and jobs in
+every namespace; an agent without that permission falls back to the configured namespace. Kubernetes namespaces are never deleted.
+
 ### Networking
 
 #### General

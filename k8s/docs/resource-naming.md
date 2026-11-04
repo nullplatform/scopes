@@ -81,6 +81,18 @@ This asymmetry is deliberate and only applies to scope-scoped names. Deployment-
 
 The blue deployment during a rollback or during finalize's cleanup is the one exception: `np_naming_apply_to_context` (used by `build_blue_deployment` and `rollback_traffic`) discovers the blue's live object names by `deployment_id` label instead of recomputing them from whatever strategy is active now, falling back to the `ids` formula only when discovery finds nothing. Without this, a blue created under one strategy and rolled back to after a strategy change would route traffic to, or try to delete, an object that was never created.
 
+## Namespace pattern
+
+The same engine names the Kubernetes namespace a scope runs in when the configured namespace (`cluster.namespace` on the `container-orchestration` or `scope-configurations` provider, or `K8S_NAMESPACE`) is a pattern instead of a fixed name. A Kubernetes namespace name cannot contain `{`, so a value without one is used as is.
+
+```
+cluster.namespace: "{.namespace.slug}"                                  # payments
+cluster.namespace: "{.account.slug}-{.namespace.slug}"                  # acme-payments
+cluster.namespace: "{.namespace.slug}-{.scope.dimensions.environment}"  # payments-production
+```
+
+It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. Every placeholder must resolve to a single value (`{.scope.dimensions}` is an object) and the rendered name must be a valid Kubernetes namespace name. A scope that already has objects in the cluster keeps their namespace, whatever the configured value says now (`k8s/utils/resolve_k8s_namespace`); see the namespace section of `k8s/README.md`.
+
 ## Known limitations
 
 scheduled_task's `cronjob.*` metrics (`execution_count`, `success_count`, `failure_count`, `cpu_usage`, `memory_usage`) match Prometheus series by parsing the scope id back out of the job/pod name with a `job-${SCOPE_ID}-.*` regex. Under `qualified` or `custom`, job and pod names carry the application and scope slugs instead of that fixed shape, so the regex stops matching and these metrics return no data.
@@ -95,7 +107,8 @@ Resolving a scope's existing object name lists both `ingress` and `httproute` in
 - Wired into scope context: `k8s/scope/build_context` (look for `np_naming_resolve`)
 - Wired into deployment context (blue discovery): `k8s/deployment/build_context` (look for `np_naming_discover_blue`)
 - Label-based lookups used by operational scripts: `k8s/scope/pause_autoscaling`, `k8s/scope/resume_autoscaling`, `k8s/scope/set_desired_instance_count`, `k8s/deployment/scale_deployments`, `k8s/deployment/kill_instance`, `k8s/deployment/wait_deployment_active`
-- Example `NAMING_STRATEGY` configuration: `k8s/values.yaml`
+- Example `NAMING_STRATEGY` and `K8S_NAMESPACE` configuration: `k8s/values.yaml`
+- Namespace resolution: `k8s/utils/resolve_k8s_namespace`
 
 ## Tests
 

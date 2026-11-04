@@ -4,6 +4,8 @@ provider_categories:
   - scope-configurations
   - identity-access-control
 configuration:
+# May be a pattern, e.g. "{.namespace.slug}" for one Kubernetes namespace per
+# nullplatform namespace (docs/resource-naming.md)
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
   DOMAIN: nullapps.io
