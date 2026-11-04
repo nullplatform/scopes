@@ -1,3 +1,11 @@
+{{- /* DEFAULT_VISIBILITY: visibility preselected for new scopes, public or internal (the default).
+       Case and surrounding spaces are ignored and private is an alias of internal (the UI label).
+       Any other value fails the render instead of guessing. The schema always accepts both values. */ -}}
+{{- $visibility := env.Getenv "DEFAULT_VISIBILITY" "internal" | strings.TrimSpace | strings.ToLower -}}
+{{- if eq $visibility "" "private" }}{{ $visibility = "internal" }}{{ end -}}
+{{- if not (coll.Has (coll.Slice "public" "internal") $visibility) -}}
+{{- test.Fail (printf "DEFAULT_VISIBILITY: unknown visibility %q (allowed: public, internal, private)" (env.Getenv "DEFAULT_VISIBILITY")) -}}
+{{- end -}}
 {
   "available_actions": [
     "create-scope",
@@ -380,7 +388,7 @@
                }
             ],
             "title":"Visibility",
-            "default":"{{ env.Getenv "DEFAULT_VISIBILITY" "internal" }}",
+            "default":"{{ $visibility }}",
             "editableOn": [
                 "create"
             ],
