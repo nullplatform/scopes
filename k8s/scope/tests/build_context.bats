@@ -33,7 +33,6 @@ setup() {
 
   # Default values from values.yaml
   export K8S_NAMESPACE="nullplatform"
-  export DOMAIN="nullapps.io"
   export USE_ACCOUNT_SLUG="false"
   export PUBLIC_GATEWAY_NAME="gateway-public"
   export PRIVATE_GATEWAY_NAME="gateway-internal"
@@ -639,4 +638,26 @@ scope_runs_in() {
 
   assert_equal "$INVALID_ADDITIONAL_GATEWAYS" ""
   assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
+}
+
+@test "build_context: public scope without domain_name fails instead of defaulting to nullapps.io" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "public"')
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "No domain configured for scope (visibility: public)"
+  assert_contains "$output" "Set networking.domain_name in scope-configurations or cloud-providers"
+  [[ "$output" != *"nullapps.io"* ]]
+}
+
+@test "build_context: private scope without domain fails instead of defaulting to nullapps.io" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "private"')
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "No domain configured for scope (visibility: private)"
+  assert_contains "$output" "networking.private_domain_name (or networking.domain_name)"
+  [[ "$output" != *"nullapps.io"* ]]
 }

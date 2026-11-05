@@ -24,7 +24,6 @@ setup() {
 	export SERVICE_PATH="$PROJECT_ROOT/k8s"
 
 	export K8S_NAMESPACE="nullplatform"
-	export DOMAIN="nullapps.io"
 	export K8S_MODIFIERS="{}"
 
 	export CONTEXT='{
