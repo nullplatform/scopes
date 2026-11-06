@@ -61,6 +61,9 @@ spec:
         scope: "{{ .scope.slug }}"
         scope_id: "{{ .scope.id }}"
         deployment_id: "{{ .deployment.id }}"
+        {{- if $istio }}
+        traffic_proxy: "istio"
+        {{- end }}
     {{- $global := index .k8s_modifiers "global" }}
     {{- if $global }}
       {{- $labels := index $global "labels" }}

@@ -267,3 +267,10 @@ _grace_seconds() {
     [ $((grace - sleep_seconds)) -ge 10 ] || false
   done
 }
+
+@test "render istio: el pod lleva el label traffic_proxy para que el logs-controller lo reconozca" {
+  run _render istio
+  [ "$status" -eq 0 ]
+  pod_labels=$(echo "$output" | awk '/^  template:/,/^    spec:/')
+  assert_contains "$pod_labels" 'traffic_proxy: "istio"'
+}
