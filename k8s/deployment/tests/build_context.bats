@@ -1275,9 +1275,6 @@ EOF
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
 }
 
-# =============================================================================
-# TRAFFIC_PROXY Tests
-# =============================================================================
 @test "traffic_proxy: default es nginx cuando no está configurado" {
   eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
   unset TRAFFIC_PROXY
@@ -1299,8 +1296,6 @@ EOF
 }
 
 @test "traffic_proxy: rechaza un valor desconocido" {
-  # Un typo como 'envoy' o 'Istio' dejaría el sidecar puesto sin avisar, y el
-  # scope quedaría sin métricas por el camino nuevo y con nginx sin usar.
   eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
   export TRAFFIC_PROXY=envoy
   export CONTEXT='{}'
@@ -1311,10 +1306,6 @@ EOF
 }
 
 @test "traffic_proxy: an invalid value aborts the full build_context, not just the isolated function" {
-  # Guards the wiring, not just resolve_traffic_proxy in isolation: if a future
-  # edit re-introduces `local` on `TRAFFIC_PROXY=$(resolve_traffic_proxy) || exit 1`,
-  # `local`'s own exit status would mask the failure and the script would carry
-  # on with an empty TRAFFIC_PROXY instead of aborting.
   setup_full_build_context
   export TRAFFIC_PROXY=envoy
 

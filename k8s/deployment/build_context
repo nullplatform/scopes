@@ -202,10 +202,6 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
-# nginx: el sidecar traffic-manager maneja el tráfico y sus access logs son la
-# fuente de las métricas HTTP.
-# istio: no hay sidecar; el gateway rutea directo al puerto de la aplicación y
-# las métricas salen de su access log.
 resolve_traffic_proxy() {
   local value
   value=$(get_config_value \
