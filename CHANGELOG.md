@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway.
+- k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).
 - Healthcheck metrics of k8s scopes with `traffic_proxy: istio` show pod readiness instead of the probe request count.
 
 ## [1.15.1] - 2026-08-12

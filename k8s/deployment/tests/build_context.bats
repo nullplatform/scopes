@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT TRAFFIC_PROXY 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT TRAFFIC_PROXY GATEWAY_TYPE 2>/dev/null || true
 }
 
 # =============================================================================
@@ -1303,6 +1303,28 @@ EOF
   run resolve_traffic_proxy
   [ "$status" -ne 0 ]
   assert_contains "$output" "TRAFFIC_PROXY"
+}
+
+@test "traffic_proxy: rechaza istio en clusters ARO, que no pasan por el gateway de Istio" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export GATEWAY_TYPE=aro_cluster
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "aro_cluster"
+}
+
+@test "traffic_proxy: nginx sigue permitido en clusters ARO" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  unset TRAFFIC_PROXY
+  export GATEWAY_TYPE=aro_cluster
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "nginx" ]
 }
 
 @test "traffic_proxy: an invalid value aborts the full build_context, not just the isolated function" {

@@ -221,6 +221,17 @@ resolve_traffic_proxy() {
     return 1
   fi
 
+  if [[ "$value" == "istio" && "${GATEWAY_TYPE:-istio}" == "aro_cluster" ]]; then
+    log error "❌ TRAFFIC_PROXY 'istio' is not supported with GATEWAY_TYPE 'aro_cluster'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - ARO scopes receive traffic through OpenShift Routes, not the Istio gateway, so there are no gateway access logs to build HTTP metrics from"
+    log error "🔧 How to fix:"
+    log error "   • Set TRAFFIC_PROXY to nginx for this scope"
+    log error ""
+    return 1
+  fi
+
   echo "$value"
 }
 
