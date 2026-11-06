@@ -98,3 +98,19 @@ _resolved_traffic_proxy() {
   run grep -c 'scope-configurations' "$NP_LOG"
   [ "$output" = "0" ]
 }
+
+@test "healthcheck sin PROMETHEUS_URL: lee el scope una sola vez" {
+  unset PROMETHEUS_URL
+  np() {
+    echo "$*" >> "$NP_LOG"
+    if [ "$1" = "scope" ]; then echo '{"nrn":"n"}'; return 0; fi
+    if [ "$4" = "metrics" ]; then echo '{"results":[{"attributes":{"server":{"url":"http://p"}}}]}'; return 0; fi
+    if [ "$4" = "scope-configurations" ]; then echo '{"results":[{"attributes":{}}]}'; return 0; fi
+    return 1
+  }
+  export -f np
+  run _resolved_traffic_proxy http.healthcheck_count
+  [ "$status" -eq 0 ]
+  run grep -c '^scope read' "$NP_LOG"
+  [ "$output" = "1" ]
+}

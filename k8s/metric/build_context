@@ -12,8 +12,10 @@ read_scope_nrn() {
 }
 
 resolve_traffic_proxy() {
-  local nrn
-  nrn=$(read_scope_nrn) || return 1
+  local nrn="${NRN-}"
+  if [[ -z "$nrn" ]]; then
+    nrn=$(read_scope_nrn) || return 1
+  fi
   local providers
   providers=$(np provider list --categories scope-configurations --nrn "$nrn" --format json) || {
     echo "Could not read the scope-configurations provider to resolve TRAFFIC_PROXY." >&2

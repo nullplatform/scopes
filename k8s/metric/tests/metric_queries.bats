@@ -3,7 +3,7 @@
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
-  eval "$(sed -n '/^build_query()/,/^}/p' "$PROJECT_ROOT/k8s/metric/metric")"
+  eval "$(sed -n '/^build_istio_healthcheck_query()/,/^}/p;/^build_query()/,/^}/p' "$PROJECT_ROOT/k8s/metric/metric")"
   export GROUP_BY=""
 }
 

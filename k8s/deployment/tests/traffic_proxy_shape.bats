@@ -49,7 +49,7 @@ value_between() {
 }
 
 @test "el contenedor http está condicionado al flag" {
-  guard_line=$(grep -n 'ne .traffic_proxy "istio"' "$DEPLOYMENT" | head -1 | cut -d: -f1)
+  guard_line=$(grep -nF 'if not $istio' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   [ -n "$guard_line" ]
   guard_end=$(find_guard_end "$guard_line")
   [ -n "$guard_end" ]
@@ -60,7 +60,7 @@ value_between() {
 }
 
 @test "los contenedores grpc también están condicionados" {
-  guard_line=$(grep -n 'ne .traffic_proxy "istio"' "$DEPLOYMENT" | head -1 | cut -d: -f1)
+  guard_line=$(grep -nF 'if not $istio' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   guard_end=$(find_guard_end "$guard_line")
   grpc_line=$(grep -n 'name: grpc-{{ .port }}' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   [ -n "$grpc_line" ]
@@ -69,7 +69,7 @@ value_between() {
 }
 
 @test "el contenedor de la aplicación no está condicionado al flag" {
-  guard_line=$(grep -n 'ne .traffic_proxy "istio"' "$DEPLOYMENT" | head -1 | cut -d: -f1)
+  guard_line=$(grep -nF 'if not $istio' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   guard_end=$(find_guard_end "$guard_line")
   [ -n "$guard_end" ]
   app_line=$(grep -n 'name: application' "$DEPLOYMENT" | head -1 | cut -d: -f1)

@@ -1,3 +1,4 @@
+{{- $istio := and (has . "traffic_proxy") (eq .traffic_proxy "istio") -}}
 {{- define "probe.http" }}
             httpGet:
               path: {{ .healthCheck.path }}
@@ -118,7 +119,7 @@ spec:
       {{- end }}
       {{- end }}
       containers:
-        {{- if or (not (has . "traffic_proxy")) (ne .traffic_proxy "istio") }}
+        {{- if not $istio }}
         - name: http
           securityContext:
             runAsUser: 0
@@ -359,7 +360,7 @@ spec:
             preStop:
               exec:
                 command:
-                {{- if and (has . "traffic_proxy") (eq .traffic_proxy "istio") }}
+                {{- if $istio }}
                   - /bin/sleep
                   - '15'
                 {{- else }}
@@ -405,7 +406,7 @@ spec:
   {{- end }}
 {{- end }}
       restartPolicy: Always
-      {{- if and (has . "traffic_proxy") (eq .traffic_proxy "istio") }}
+      {{- if $istio }}
       terminationGracePeriodSeconds: 45
       {{- else }}
       terminationGracePeriodSeconds: 30
