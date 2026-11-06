@@ -3,41 +3,7 @@
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
 
-source "$SERVICE_PATH/utils/get_config_value"
-
-read_scope_nrn() {
-  local scope
-  scope=$(np scope read --id "$SCOPE_ID" --format json) || return 1
-  echo "$scope" | jq -r .nrn
-}
-
-resolve_traffic_proxy() {
-  local nrn="${NRN-}"
-  if [[ -z "$nrn" ]]; then
-    nrn=$(read_scope_nrn) || return 1
-  fi
-  local providers
-  providers=$(np provider list --categories scope-configurations --nrn "$nrn" --format json) || {
-    echo "Could not read the scope-configurations provider to resolve TRAFFIC_PROXY." >&2
-    return 1
-  }
-  local provider_context
-  provider_context=$(echo "$providers" | jq -c '{providers: {"scope-configurations": (.results[0].attributes // {})}}') || return 1
-
-  local value
-  value=$(CONTEXT="$provider_context" get_config_value \
-    --env TRAFFIC_PROXY \
-    --provider '.providers["scope-configurations"].deployment.traffic_proxy' \
-    --default "nginx"
-  )
-
-  if [[ "$value" != "nginx" && "$value" != "istio" ]]; then
-    echo "TRAFFIC_PROXY must be 'nginx' or 'istio', got: '$value'" >&2
-    return 1
-  fi
-
-  echo "$value"
-}
+source "$SERVICE_PATH/utils/resolve_metric_traffic_proxy"
 
 if [[ -z "$PROMETHEUS_URL" ]]; then
   NRN=$(read_scope_nrn)
