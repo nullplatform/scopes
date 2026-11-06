@@ -10,6 +10,7 @@ setup() {
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
   source "$PROJECT_ROOT/k8s/utils/get_config_value"
+  export NAMING_STRATEGY="ids"
 
   # Base CONTEXT for tests
   export CONTEXT='{
@@ -23,7 +24,7 @@ setup() {
 
 teardown() {
   unset -f validate_status 2>/dev/null || true
-  unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
+  unset CONTEXT NAMING_STRATEGY DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
   unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE 2>/dev/null || true
 }
 
