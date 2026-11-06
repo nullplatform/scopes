@@ -3,10 +3,8 @@
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
 
-source "$SERVICE_PATH/utils/resolve_metric_traffic_proxy"
-
 if [[ -z "$PROMETHEUS_URL" ]]; then
-  NRN=$(read_scope_nrn)
+  NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
 
   PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
 
@@ -30,11 +28,6 @@ done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
   end')
 if [[ -n "$METRIC" ]]; then
   export METRIC_NAME="$METRIC"
-fi
-
-if [[ "$METRIC_NAME" == "http.healthcheck_count" || "$METRIC_NAME" == "http.healthcheck_fail" ]]; then
-  TRAFFIC_PROXY=$(resolve_traffic_proxy) || exit 1
-  export TRAFFIC_PROXY
 fi
 
 export PROM_URL

@@ -97,15 +97,6 @@ build_filters() {
   echo "$filters"
 }
 
-build_istio_healthcheck_query() {
-  local metric_name="$1" filters="$2" groupBy="$3"
-  if [[ -n "$groupBy" ]]; then
-    echo "sum(${metric_name}{$filters}) by ($groupBy)"
-  else
-    echo "sum(${metric_name}{$filters})"
-  fi
-}
-
 # Build Prometheus query based on metric type
 build_query() {
   local metric="$1"
@@ -119,10 +110,6 @@ build_query() {
 
   case "$metric" in
     "http.healthcheck_count")
-      if [[ "${TRAFFIC_PROXY-}" == "istio" ]]; then
-        build_istio_healthcheck_query nullplatform_healthcheck_status "$filters" "$groupBy"
-        return
-      fi
       local healthcheck_filters="${filters},is_healthcheck=\"yes\""
       if [[ -n "$groupBy" ]]; then
         echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
@@ -131,10 +118,6 @@ build_query() {
       fi
       ;;
     "http.healthcheck_fail")
-      if [[ "${TRAFFIC_PROXY-}" == "istio" ]]; then
-        build_istio_healthcheck_query nullplatform_healthcheck_fail "$filters" "$groupBy"
-        return
-      fi
       local healthcheck_filters="${filters},is_healthcheck=\"yes\""
       local ok_filters="${filters},is_healthcheck=\"yes\",quality=\"OK (2XX, 3XX)\""
       if [[ -n "$groupBy" ]]; then
