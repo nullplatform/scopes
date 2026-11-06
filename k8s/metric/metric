@@ -110,6 +110,14 @@ build_query() {
 
   case "$metric" in
     "http.healthcheck_count")
+      if [[ "${TRAFFIC_PROXY-}" == "istio" ]]; then
+        if [[ -n "$groupBy" ]]; then
+          echo "sum(nullplatform_healthcheck_status{$filters}) by ($groupBy)"
+        else
+          echo "sum(nullplatform_healthcheck_status{$filters})"
+        fi
+        return
+      fi
       local healthcheck_filters="${filters},is_healthcheck=\"yes\""
       if [[ -n "$groupBy" ]]; then
         echo "sum(rate(nullplatform_http_response_time_count{$healthcheck_filters}[$interval])) by ($groupBy)"
@@ -118,6 +126,14 @@ build_query() {
       fi
       ;;
     "http.healthcheck_fail")
+      if [[ "${TRAFFIC_PROXY-}" == "istio" ]]; then
+        if [[ -n "$groupBy" ]]; then
+          echo "sum(nullplatform_healthcheck_fail{$filters}) by ($groupBy)"
+        else
+          echo "sum(nullplatform_healthcheck_fail{$filters})"
+        fi
+        return
+      fi
       local healthcheck_filters="${filters},is_healthcheck=\"yes\""
       local ok_filters="${filters},is_healthcheck=\"yes\",quality=\"OK (2XX, 3XX)\""
       if [[ -n "$groupBy" ]]; then
