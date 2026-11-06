@@ -26,6 +26,7 @@
   "release": {"semver": "1.0.0"},
   "dns_zone_type": "public", "record_type": "A", "gateway_ip": "10.0.0.5",
   "providers": {
+    "cloud-providers": {"networking": {"domain_name": "nullapps.io"}},
     "container-orchestration": {
       "balancer": {"public_name": "alb-public", "private_name": "alb-private"}
     }
