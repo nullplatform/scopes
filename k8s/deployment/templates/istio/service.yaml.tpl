@@ -1,3 +1,4 @@
+{{- $istio := and (has . "traffic_proxy") (eq .traffic_proxy "istio") -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -51,7 +52,11 @@ spec:
   ports:
     - protocol: TCP
       port: {{ .main_http_port }}
+      {{- if $istio }}
+      targetPort: {{ .main_http_port }}
+      {{- else }}
       targetPort: {{ .main_traffic_manager_port }}
+      {{- end }}
   selector:
     nullplatform: "true"
     account: {{ .account.slug }}

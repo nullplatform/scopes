@@ -1,3 +1,4 @@
+{{- $istio := and (has . "traffic_proxy") (eq .traffic_proxy "istio") -}}
 {{- define "probe.http" }}
             httpGet:
               path: {{ .healthCheck.path }}
@@ -60,6 +61,9 @@ spec:
         scope: "{{ .scope.slug }}"
         scope_id: "{{ .scope.id }}"
         deployment_id: "{{ .deployment.id }}"
+        {{- if $istio }}
+        traffic_proxy: "istio"
+        {{- end }}
     {{- $global := index .k8s_modifiers "global" }}
     {{- if $global }}
       {{- $labels := index $global "labels" }}
@@ -113,6 +117,7 @@ spec:
       {{- end }}
       {{- end }}
       containers:
+        {{- if not $istio }}
         - name: http
           securityContext:
             runAsUser: 0
@@ -296,6 +301,7 @@ spec:
         {{ end }}
         {{ end }}
         {{ end }}
+        {{- end }}
         - name: application
           envFrom:
             - secretRef:
@@ -360,12 +366,21 @@ spec:
             preStop:
               {{- if and (has . "prestop_sleep_mode") (eq .prestop_sleep_mode "native") }}
               sleep:
+                {{- if $istio }}
+                seconds: 15
+                {{- else }}
                 seconds: 16
+                {{- end }}
               {{- else }}
               exec:
                 command:
+                {{- if $istio }}
+                  - /bin/sleep
+                  - '15'
+                {{- else }}
                   - /bin/sleep
                   - '16'
+                {{- end }}
               {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
@@ -406,7 +421,11 @@ spec:
   {{- end }}
 {{- end }}
       restartPolicy: Always
+      {{- if $istio }}
+      terminationGracePeriodSeconds: 45
+      {{- else }}
       terminationGracePeriodSeconds: 30
+      {{- end }}
       dnsPolicy: ClusterFirst
       schedulerName: default-scheduler
       topologySpreadConstraints:
