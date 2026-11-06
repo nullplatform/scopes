@@ -27,4 +27,10 @@ steps:
       DRY_RUN: false
     post:
       name: wait deployment active
-      action: skip
+      action: replace
+      type: script
+      file: "$OVERRIDES_PATH/deployment/wait_job"
+      trace:
+        key: wait-for-job
+        title: Run the task
+        group: waiting-instances

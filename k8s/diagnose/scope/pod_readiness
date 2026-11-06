@@ -4,6 +4,8 @@
 
 require_pods || return 0
 
+APPLICATION_CONTAINER_NAME="application"
+
 PODS=$(jq -r '.items[].metadata.name' "$PODS_FILE" 2>/dev/null | tr '\n' ' ')
 
 # Counters for summary
@@ -145,16 +147,19 @@ for POD_NAME in $PODS; do
           fi
 
           # For pods stuck in "not_ready" (not just starting), embed current
-          # logs of the first container so the AI can correlate readiness
+          # logs of the application container so the AI can correlate readiness
           # failure with what the app printed. We skip starting pods because
           # their logs are still in flight and not informative yet.
           POD_LOGS_PER_CONTAINER="[]"
           if [[ "$POD_STATE" == "not_ready" ]]; then
-              # Iterate first regular container only — keep payload bounded
-              FIRST_CONTAINER=$(echo "$POD_INFO" | jq -r '.spec.containers[0].name // empty')
-              if [[ -n "$FIRST_CONTAINER" ]]; then
-                  CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$FIRST_CONTAINER" "current")
-                  POD_LOGS_PER_CONTAINER=$(jq -nc --arg c "$FIRST_CONTAINER" --argjson logs "$CURRENT_LOGS" \
+              # One container only — keep payload bounded
+              LOG_CONTAINER=$(echo "$POD_INFO" | jq -r --arg cn "$APPLICATION_CONTAINER_NAME" '
+                  (.spec.containers // []) as $all
+                  | (first($all[] | select(.name == $cn)) // $all[0] // {})
+                  | .name // empty')
+              if [[ -n "$LOG_CONTAINER" ]]; then
+                  CURRENT_LOGS=$(read_log_tail "$POD_NAME" "$LOG_CONTAINER" "current")
+                  POD_LOGS_PER_CONTAINER=$(jq -nc --arg c "$LOG_CONTAINER" --argjson logs "$CURRENT_LOGS" \
                       '[{container: $c, current_logs: $logs}]')
               fi
           fi

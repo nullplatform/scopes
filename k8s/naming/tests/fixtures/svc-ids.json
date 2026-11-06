@@ -1,0 +1,30 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "d-123456-789011",
+        "namespace": "nullplatform",
+        "labels": {"deployment_id": "789011"}
+      },
+      "spec": {
+        "ports": [{"protocol": "TCP", "port": 8080, "targetPort": 80}]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "d-123456-789011-grpc-9090",
+        "namespace": "nullplatform",
+        "labels": {"deployment_id": "789011"}
+      },
+      "spec": {
+        "ports": [{"protocol": "TCP", "port": 9090, "targetPort": 19090}]
+      }
+    }
+  ]
+}

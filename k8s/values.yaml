@@ -4,12 +4,15 @@ provider_categories:
   - scope-configurations
   - identity-access-control
 configuration:
+# May be a pattern, e.g. "{.namespace.slug}" for one Kubernetes namespace per
+# nullplatform namespace (docs/resource-naming.md)
   K8S_NAMESPACE: nullplatform
   CREATE_K8S_NAMESPACE_IF_NOT_EXIST: true
   DOMAIN: nullapps.io
 #  PRIVATE_DOMAIN: nullapps.io
   USE_ACCOUNT_SLUG: false
   DNS_TYPE: route53 # Available values route53 | azure | external_dns
+  K8S_FLAVOR: eks # The cluster variant (eks | aks | aro | gke) — independent of DNS_TYPE
   ALB_RECONCILIATION_ENABLED: false
   ALB_MAX_CAPACITY: 75
   # 100 is the max target groups for ALB. Keeps 2 free for emergencies
@@ -28,6 +31,8 @@ configuration:
   ALB_AUTOCREATE_NAME_PREFIX: nullplatform-auto-
   ALB_AUTOCREATE_TIMEOUT_SECONDS: 300
   DEPLOYMENT_MAX_WAIT_IN_SECONDS: 600
+  KUBECTL_DELETE_TIMEOUT_SECONDS: 300
+  NAMING_MAX_LENGTH: 46
   DEPLOYMENT_TEMPLATE: "$SERVICE_PATH/deployment/templates/deployment.yaml.tpl"
   SECRET_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret.yaml.tpl"
   SECRET_FILES_TEMPLATE: "$SERVICE_PATH/deployment/templates/secret-files.yaml.tpl"
@@ -48,6 +53,9 @@ configuration:
 # port for pod-to-pod traffic BEFORE setting this — with VPC CNI custom
 # networking that is the security group in the ENIConfig CRD, not the node's.
 #  MAIN_TRAFFIC_MANAGER_PORT: 10080
+# preStop wait of the application container: exec (default) or native.
+# exec needs /bin/sleep in the application image; native needs every node on Kubernetes >= 1.30.
+#  PRESTOP_SLEEP_MODE: exec
   IMAGE_PULL_SECRETS:
     ENABLED: true
     SECRETS:

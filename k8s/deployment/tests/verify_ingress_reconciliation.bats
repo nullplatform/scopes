@@ -26,6 +26,9 @@ setup() {
     "alb_name": "k8s-test-alb",
     "deployment": {
       "strategy": "rolling"
+    },
+    "names": {
+      "scope_ingress": "k-8-s-my-app-scope-123-internet-facing"
     }
   }'
 }
@@ -64,6 +67,44 @@ teardown() {
   assert_contains "$output" "🔍 Verifying ingress reconciliation..."
   assert_contains "$output" "📋 Ingress: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s"
   assert_contains "$output" "📋 ALB reconciliation disabled, checking cluster events only"
+  assert_contains "$output" "✅ Ingress successfully reconciled"
+}
+
+@test "verify_ingress_reconciliation: targets the resolved ingress name from context, not a constructed one" {
+  local qualified_context='{
+    "scope": {"slug": "my-app", "domain": "app.example.com", "domains": []},
+    "alb_name": "k8s-test-alb",
+    "deployment": {"strategy": "rolling"},
+    "names": {"scope_ingress": "checkout-api-production-123456"}
+  }'
+
+  run bash -c "
+    kubectl() {
+      case \"\$1\" in
+        get)
+          if [[ \"\$2\" == \"ingress\" ]]; then
+            if [[ \"\$3\" != \"checkout-api-production-123456\" ]]; then
+              return 1
+            fi
+            echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}'
+            return 0
+          elif [[ \"\$2\" == \"events\" ]]; then
+            echo '{\"items\": [{\"type\": \"Normal\", \"reason\": \"SuccessfullyReconciled\", \"message\": \"Ingress reconciled\", \"involvedObject\": {\"resourceVersion\": \"12345\"}, \"lastTimestamp\": \"2024-01-01T00:00:00Z\"}]}'
+            return 0
+          fi
+          ;;
+      esac
+      return 0
+    }
+    export -f kubectl
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='$MAX_WAIT_SECONDS' CHECK_INTERVAL='$CHECK_INTERVAL' CONTEXT='$qualified_context'
+    export ALB_RECONCILIATION_ENABLED='$ALB_RECONCILIATION_ENABLED' REGION='$REGION'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Ingress: checkout-api-production-123456 | Namespace: test-namespace | Timeout: 1s"
   assert_contains "$output" "✅ Ingress successfully reconciled"
 }
 

@@ -25,29 +25,6 @@ find_guard_end() {
   ' "$DEPLOYMENT"
 }
 
-block_after() {
-  local anchor="$1"
-  local anchor_line if_line else_line end_line rel
-  anchor_line=$(grep -n -- "$anchor" "$DEPLOYMENT" | head -1 | cut -d: -f1)
-  [ -n "$anchor_line" ] || return 1
-
-  rel=$(tail -n "+$anchor_line" "$DEPLOYMENT" | grep -nE '\{\{-? *if ' | head -1 | cut -d: -f1)
-  if_line=$((anchor_line + rel - 1))
-
-  rel=$(tail -n "+$((if_line + 1))" "$DEPLOYMENT" | grep -nE '\{\{-? *else *\}\}' | head -1 | cut -d: -f1)
-  else_line=$((if_line + rel))
-
-  rel=$(tail -n "+$((else_line + 1))" "$DEPLOYMENT" | grep -nE '\{\{-? *end *\}\}' | head -1 | cut -d: -f1)
-  end_line=$((else_line + rel))
-
-  echo "$if_line $else_line $end_line"
-}
-
-value_between() {
-  local from="$1" to="$2" pattern="$3"
-  sed -n "${from},${to}p" "$DEPLOYMENT" | grep -oE "$pattern" | head -1 | grep -oE '[0-9]+'
-}
-
 @test "el contenedor http está condicionado al flag" {
   guard_line=$(grep -nF 'if not $istio' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   [ -n "$guard_line" ]
@@ -82,42 +59,27 @@ value_between() {
   [ "$count" -eq 3 ]
 }
 
-@test "drenaje istio: preStop 15s y terminationGracePeriodSeconds 45s, con margen" {
-  read -r if_l else_l end_l <<< "$(block_after 'preStop:')"
-  [ -n "$end_l" ]
-  istio_sleep=$(value_between "$if_l" "$else_l" "'[0-9]+'")
-
-  read -r gif_l gelse_l gend_l <<< "$(block_after 'restartPolicy: Always')"
-  [ -n "$gend_l" ]
-  istio_grace=$(value_between "$gif_l" "$gelse_l" 'terminationGracePeriodSeconds: [0-9]+')
-
-  [ "$istio_sleep" -eq 15 ]
-  [ "$istio_grace" -eq 45 ]
-  margin=$((istio_grace - istio_sleep))
-  [ "$margin" -ge 10 ]
-}
-
-@test "drenaje nginx: preStop 16s y terminationGracePeriodSeconds 30s no cambiaron, con margen" {
-  read -r if_l else_l end_l <<< "$(block_after 'preStop:')"
-  nginx_sleep=$(value_between "$else_l" "$end_l" "'[0-9]+'")
-
-  read -r gif_l gelse_l gend_l <<< "$(block_after 'restartPolicy: Always')"
-  nginx_grace=$(value_between "$gelse_l" "$gend_l" 'terminationGracePeriodSeconds: [0-9]+')
-
-  [ "$nginx_sleep" -eq 16 ]
-  [ "$nginx_grace" -eq 30 ]
-  margin=$((nginx_grace - nginx_sleep))
-  [ "$margin" -ge 10 ]
-}
-
 _context() {
-  local traffic_proxy_field=""
+  local traffic_proxy_field="" prestop_field=""
   if [ -n "${1:-}" ]; then
     traffic_proxy_field="  \"traffic_proxy\": \"$1\","
+  fi
+  if [ -n "${2:-}" ]; then
+    prestop_field="  \"prestop_sleep_mode\": \"$2\","
   fi
   cat <<CTXEOF
 {
 $traffic_proxy_field
+$prestop_field
+  "names": {
+    "deployment": "d-scope-123-deploy-456",
+    "service": "d-scope-123-deploy-456",
+    "hpa": "hpa-d-scope-123-deploy-456",
+    "pdb": "pdb-d-scope-123-deploy-456",
+    "secret": "s-scope-123-d-deploy-456",
+    "secret_files": "s-scope-123-d-deploy-456-files",
+    "serving_cert": "d-scope-123"
+  },
   "account": {"id": "acc1", "slug": "acct"},
   "namespace": {"id": "ns1", "slug": "nsps"},
   "application": {"id": "app1", "slug": "appslug"},
@@ -166,9 +128,9 @@ CTXEOF
 }
 
 _render() {
-  local traffic_proxy="$1"
+  local traffic_proxy="$1" prestop_sleep_mode="${2:-}"
   local ctx="$BATS_TEST_TMPDIR/ctx.json"
-  _context "$traffic_proxy" > "$ctx"
+  _context "$traffic_proxy" "$prestop_sleep_mode" > "$ctx"
   gomplate -c .="$ctx" -f "$DEPLOYMENT"
 }
 
@@ -194,56 +156,7 @@ _render() {
 }
 
 @test "render nginx: el golden fixture no cambió" {
-  local ctx="$BATS_TEST_TMPDIR/golden-ctx.json"
-  cat > "$ctx" <<'CTXEOF'
-{
-  "traffic_proxy": "nginx",
-  "account": {"id": "acc1", "slug": "acct"},
-  "namespace": {"id": "ns1", "slug": "nsps"},
-  "application": {"id": "app1", "slug": "appslug"},
-  "release": {"semver": "1.0.0"},
-  "scope": {
-    "id": "scope-123",
-    "slug": "scopeslug",
-    "domain": "x.example.com",
-    "domains": [],
-    "dimensions": {"env": "dev"},
-    "capabilities": {
-      "cpu_millicores": 100,
-      "ram_memory": 128,
-      "cpu_millicores_limit": 200,
-      "ram_memory_limit": 256,
-      "additional_ports": [{"port": 9090, "type": "GRPC", "traffic_manager_port": 19090}],
-      "scaling_type": "fixed",
-      "autoscaling": {
-        "min_replicas": 1,
-        "max_replicas": 3,
-        "target_cpu_utilization": 80,
-        "target_memory_enabled": false,
-        "target_memory_utilization": 80
-      },
-      "health_check": {"path": "/health", "timeout_seconds": 1, "period_seconds": 5, "initial_delay_seconds": 5}
-    }
-  },
-  "deployment": {"id": "deploy-456"},
-  "k8s_namespace": "ns-test",
-  "k8s_modifiers": {},
-  "asset": {"url": "example.com/app:latest"},
-  "main_http_port": 8080,
-  "main_traffic_manager_port": 80,
-  "traffic_image": "example.com/traffic:latest",
-  "container_cpu_in_millicores": 50,
-  "container_memory_in_memory": 64,
-  "pull_secrets": {"ENABLED": false, "SECRETS": []},
-  "region": "us-east-1",
-  "component": "app",
-  "service_account_name": "",
-  "traffic_manager_config_map": "cm-scope-123",
-  "replicas": 1,
-  "parameters": {"results": []}
-}
-CTXEOF
-  run gomplate -c .="$ctx" -f "$DEPLOYMENT"
+  run _render nginx
   [ "$status" -eq 0 ]
   diff <(echo "$output") "$GOLDEN_NGINX"
 }
@@ -256,6 +169,15 @@ _service_context() {
   cat <<CTXEOF
 {
 $traffic_proxy_field
+  "names": {
+    "deployment": "d-scope-123-deploy-456",
+    "service": "d-scope-123-deploy-456",
+    "hpa": "hpa-d-scope-123-deploy-456",
+    "pdb": "pdb-d-scope-123-deploy-456",
+    "secret": "s-scope-123-d-deploy-456",
+    "secret_files": "s-scope-123-d-deploy-456-files",
+    "serving_cert": "d-scope-123"
+  },
   "account": {"id": "acc1", "slug": "acct"},
   "namespace": {"id": "ns1", "slug": "nsps"},
   "application": {"id": "app1", "slug": "appslug"},
@@ -264,8 +186,8 @@ $traffic_proxy_field
     "slug": "scopeslug",
     "capabilities": {
       "additional_ports": [
-        {"port": 9090, "type": "GRPC", "traffic_manager_port": 19090},
-        {"port": 9091, "type": "HTTP", "traffic_manager_port": 19091}
+        {"port": 9090, "type": "GRPC", "traffic_manager_port": 19090, "service_name": "d-scope-123-deploy-456-grpc-9090"},
+        {"port": 9091, "type": "HTTP", "traffic_manager_port": 19091, "service_name": "d-scope-123-deploy-456-http-9091"}
       ],
       "health_check": {"path": "/health", "timeout_seconds": 1, "period_seconds": 5}
     }
@@ -323,4 +245,25 @@ _render_service() {
   [ "$status" -eq 0 ]
   target_ports=$(echo "$output" | grep -oE 'targetPort: [0-9]+' | cut -d' ' -f2 | tr '\n' ' ')
   [ "$target_ports" = "8080 " ]
+}
+
+_application_prestop_seconds() {
+  echo "$1" | awk '/- name: application/,0' | grep -A1 -E '^ *(- /bin/sleep|sleep:)$' | grep -oE "[0-9]+" | head -1
+}
+
+_grace_seconds() {
+  echo "$1" | grep -oE 'terminationGracePeriodSeconds: [0-9]+' | grep -oE '[0-9]+'
+}
+
+@test "drenaje: preStop y terminationGracePeriodSeconds por flag y modo de sleep, con margen" {
+  for case in "istio exec 15 45" "istio native 15 45" "nginx exec 16 30" "nginx native 16 30"; do
+    read -r proxy mode expected_sleep expected_grace <<< "$case"
+    run _render "$proxy" "$mode"
+    [ "$status" -eq 0 ] || false
+    sleep_seconds=$(_application_prestop_seconds "$output")
+    grace=$(_grace_seconds "$output")
+    [ "$sleep_seconds" = "$expected_sleep" ] || false
+    [ "$grace" = "$expected_grace" ] || false
+    [ $((grace - sleep_seconds)) -ge 10 ] || false
+  done
 }

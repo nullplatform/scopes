@@ -1,5 +1,6 @@
 configuration:
   DNS_TYPE: azure
+  K8S_FLAVOR: aks
   USE_ACCOUNT_SLUG: false
   IMAGE_PULL_SECRETS:
     ENABLED: false

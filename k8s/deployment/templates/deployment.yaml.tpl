@@ -10,7 +10,7 @@
               command:
                 - /bin/sh
                 - '-c'
-                - nc -z localhost {{ .app_port }} && nc -z localhost {{ .traffic_port }}
+                - (nc -z 127.0.0.1 {{ .app_port }} || nc -z ::1 {{ .app_port }}) && (nc -z 127.0.0.1 {{ .traffic_port }} || nc -z ::1 {{ .traffic_port }})
 {{- end }}
 {{- define "probe.app_tcp" }}
             tcpSocket:
@@ -22,14 +22,15 @@
             initialDelaySeconds: {{ .healthCheck.initial_delay_seconds }}
             successThreshold: 1
 {{- end }}
+{{- $healthCheckEnabled := or (not (has .scope.capabilities.health_check "enabled")) .scope.capabilities.health_check.enabled }}
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.deployment }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
     account: {{ .account.slug }}
     account_id: "{{ .account.id }}"
@@ -44,11 +45,11 @@ spec:
   replicas: {{ .replicas }}
   selector:
     matchLabels:
-      name: d-{{ .scope.id }}-{{ .deployment.id }}
+      name: {{ .names.deployment }}
   template:
     metadata:
       labels:
-        name: d-{{ .scope.id }}-{{ .deployment.id }}
+        name: {{ .names.deployment }}
         app.kubernetes.io/part-of: {{ .component }}
         nullplatform: "true"
         account: "{{ .account.slug }}"
@@ -75,12 +76,6 @@ spec:
       {{- end }}
     {{- end }}
       annotations:
-        nullplatform.logs.cloudwatch: 'true'
-        nullplatform.logs.cloudwatch.log_group_name: {{ .namespace.slug }}.{{ .application.slug }}
-        nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
-        nullplatform.logs.cloudwatch.log_stream_name_pattern: >-
-          type=${type};application={{ .application.id }};scope={{ .scope.id }};deploy={{ .deployment.id }};instance=${instance};container=${container}
-        nullplatform.logs.cloudwatch.region: {{ .region }}
     {{- $global := index .k8s_modifiers "global" }}
     {{- if $global }}
       {{- $annotations := index $global "annotations" }}
@@ -155,6 +150,7 @@ spec:
               memory: {{ .container_memory_in_memory }}Mi
             requests:
               cpu: 31m
+          {{- if $healthCheckEnabled }}
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
             {{- template "probe.tcp" dict "healthCheck" .scope.capabilities.health_check "traffic_port" .main_traffic_manager_port "app_port" .main_http_port }}
@@ -179,6 +175,7 @@ spec:
             {{- end }}
             {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
+          {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
@@ -210,6 +207,7 @@ spec:
               memory: {{ $.container_memory_in_memory }}Mi
             requests:
               cpu: 31m
+          {{- if $healthCheckEnabled }}
           livenessProbe:
             grpc:
               port: {{ .traffic_manager_port }}
@@ -234,6 +232,7 @@ spec:
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
             successThreshold: 1
             failureThreshold: 90
+          {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
@@ -264,6 +263,7 @@ spec:
               memory: {{ $.container_memory_in_memory }}Mi
             requests:
               cpu: 31m
+          {{- if $healthCheckEnabled }}
           livenessProbe:
             httpGet:
               path: {{ $.scope.capabilities.health_check.path }}
@@ -291,6 +291,7 @@ spec:
             initialDelaySeconds: {{ $.scope.capabilities.health_check.initial_delay_seconds }}
             successThreshold: 1
             failureThreshold: 90
+          {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
@@ -301,7 +302,7 @@ spec:
         - name: application
           envFrom:
             - secretRef:
-                name: s-{{ .scope.id }}-d-{{ .deployment.id }}
+                name: {{ .names.secret }}
     {{- if .parameters.results }}
           env:
       {{- range .parameters.results }}
@@ -332,6 +333,7 @@ spec:
             requests:
               cpu: {{ .scope.capabilities.cpu_millicores }}m
               memory: {{ .scope.capabilities.ram_memory }}Mi
+          {{- if $healthCheckEnabled }}
           livenessProbe:
             {{- if and (has .scope.capabilities.health_check "type") (eq .scope.capabilities.health_check.type "TCP") }}
             {{- template "probe.app_tcp" dict "port" .main_http_port }}
@@ -356,8 +358,17 @@ spec:
            {{- end }}
            {{- template "probe.base" dict "healthCheck" .scope.capabilities.health_check }}
             failureThreshold: 90
+          {{- end }}
           lifecycle:
             preStop:
+              {{- if and (has . "prestop_sleep_mode") (eq .prestop_sleep_mode "native") }}
+              sleep:
+                {{- if $istio }}
+                seconds: 15
+                {{- else }}
+                seconds: 16
+                {{- end }}
+              {{- else }}
               exec:
                 command:
                 {{- if $istio }}
@@ -367,6 +378,7 @@ spec:
                   - /bin/sleep
                   - '16'
                 {{- end }}
+              {{- end }}
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
@@ -397,7 +409,7 @@ spec:
         {{- $key := .name | strings.ToLower | regexp.Replace "[^a-z0-9]+" "-" | strings.Trim "-" }}
       - name: {{ printf "file-%s" $key }}
         secret:
-          secretName: s-{{ $.scope.id }}-d-{{ $.deployment.id }}-files
+          secretName: {{ $.names.secret_files }}
           items:
           - key: {{ printf "app-file-%s" $key }}
             path: {{ filepath.Base .destination_path | quote }}
@@ -419,7 +431,7 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              name: d-{{ .scope.id }}-{{ .deployment.id }}
+              name: {{ .names.deployment }}
   strategy:
     type: RollingUpdate
     rollingUpdate:

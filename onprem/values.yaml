@@ -1,0 +1,29 @@
+# The categories this flavor actually uses. A cluster with no cloud behind it has
+# no cloud identity to assume and no cloud provider to read, yet the assume-role
+# step resolves whatever identity provider the account happens to hold and tries
+# to assume a role that belongs to another cluster, with a cloud CLI the agent
+# image does not carry.
+#
+# Declaring them here does not remove the inherited ones yet: the CLI concatenates
+# an override's provider_categories onto the base list rather than replacing it,
+# so cloud-providers and identity-access-control survive the merge. This states
+# what the flavor needs; it takes effect once an override can subtract.
+provider_categories:
+  - container-orchestration
+  - scope-configurations
+
+configuration:
+  DNS_TYPE: external_dns
+  K8S_FLAVOR: onprem
+  USE_ACCOUNT_SLUG: false
+  IMAGE_PULL_SECRETS:
+    ENABLED: true
+    SECRETS:
+      - image-pull-secret-nullplatform
+  DOMAIN: $OVERRIDE_DOMAIN
+  # Set GATEWAY_EXTERNAL_IP in the agent's environment when a NAT/VIP device fronts
+  # the gateway: DNS then publishes that address instead of the cluster-internal one
+  # the Gateway reports. Unset, the address is auto-detected. See k8s/README.md.
+  SERVICE_TEMPLATE: "$SERVICE_PATH/deployment/templates/istio/service.yaml.tpl"
+  INITIAL_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl"
+  BLUE_GREEN_INGRESS_PATH: "$SERVICE_PATH/deployment/templates/istio/blue-green-httproute.yaml.tpl"

@@ -2,14 +2,15 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: pdb-d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.pdb }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: pdb-d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.pdb }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}-{{ .application.slug }}
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: {{ .scope.slug }}
     app.kubernetes.io/name: {{ .scope.slug }}
+    deployment_id: "{{ .deployment.id }}"
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}
@@ -47,7 +48,8 @@ metadata:
 {{- end }}
 spec:
   maxUnavailable: {{ .pdb_max_unavailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
-      app: d-{{ .scope.id }}-{{ .deployment.id }}
+      name: {{ .names.deployment }}
 {{- end }}

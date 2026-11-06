@@ -1,0 +1,94 @@
+#!/bin/bash
+# Sourceable library of helpers for Azure managed identity resolution
+# (AKS workload identity), the Azure counterpart of assume_role_lib.
+#
+# Input is the Azure identity provider exactly as it appears in
+# CONTEXT.providers["identity-access-control"] — the platform already resolved
+# it for the scope's dimensions (most-specific config whose dimensions are a
+# subset of the scope's wins). These helpers make NO np/az/network calls; the
+# only I/O is reading the projected ServiceAccount token file, so they are
+# fully unit-testable.
+#
+# Requires (at call time): jq, base64.
+
+# client_id_for_selector <identity_provider_attributes_json> <selector>
+# Echoes the client_id whose entry in .managed_identities.identities[] matches
+# <selector>, or "" if none. First match wins.
+# Returns "" on empty/malformed input (never crashes).
+client_id_for_selector() {
+  local json="$1" selector="$2"
+  [ -n "$json" ] || return 0
+  [ -n "$selector" ] || return 0
+  # jq exits non-zero on malformed JSON; swallow it so the helper honors its
+  # "never crashes, returns empty" contract.
+  printf '%s' "$json" | jq -r --arg sel "$selector" '
+    [ .managed_identities.identities[]?
+      | select(.selector == $sel)
+      | .client_id ]
+    | first // ""' 2>/dev/null || true
+}
+
+# resolve_azure_client_id <identity_provider_json> <selector>
+# Echoes the managed identity client ID to use ("" = keep agent credentials):
+#   1. $CONTAINERS_AZURE_CLIENT_ID env var (explicit override)
+#   2. Azure identity provider entry matching <selector> (already
+#      dimension-resolved by the platform)
+#   3. $CONTAINERS_AZURE_CLIENT_ID_DEFAULT env var (per-agent default)
+# Note: an explicitly empty variable is treated the same as unset — the chain
+# continues to the next source.
+resolve_azure_client_id() {
+  local identity_json="$1" selector="$2" client_id=""
+
+  client_id="${CONTAINERS_AZURE_CLIENT_ID:-}"
+
+  if [ -z "$client_id" ] && [ -n "$identity_json" ] && [ -n "$selector" ]; then
+    client_id=$(client_id_for_selector "$identity_json" "$selector")
+  fi
+
+  client_id="${client_id:-${CONTAINERS_AZURE_CLIENT_ID_DEFAULT:-}}"
+  printf '%s' "$client_id"
+}
+
+# azure_uses_federated_token
+# Succeeds when the environment is set up for workload identity: a readable
+# projected token, a client ID, and no client secret competing with it.
+azure_uses_federated_token() {
+  [ -n "${AZURE_FEDERATED_TOKEN_FILE:-}" ] \
+    && [ -r "$AZURE_FEDERATED_TOKEN_FILE" ] \
+    && [ -n "${AZURE_CLIENT_ID:-}" ] \
+    && [ -z "${AZURE_CLIENT_SECRET:-}" ]
+}
+
+# azure_grant_args
+# Sets the global array AZURE_GRANT_ARGS to the curl arguments carrying the
+# client credential of a client_credentials token request: the projected token
+# as a client assertion under workload identity, the client secret otherwise.
+# The client assertion is passed as @<file> so curl reads and url-encodes the
+# token itself, keeping the live token value off this process's argv.
+# Callers add client_id, scope and grant_type themselves.
+azure_grant_args() {
+  if azure_uses_federated_token; then
+    AZURE_GRANT_ARGS=(
+      -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+      --data-urlencode "client_assertion@$AZURE_FEDERATED_TOKEN_FILE"
+    )
+  else
+    AZURE_GRANT_ARGS=(-d "client_secret=${AZURE_CLIENT_SECRET:-}")
+  fi
+}
+
+# azure_token_claim <token_file> <claim>
+# Echoes a claim from the JWT payload in <token_file> (e.g. iss, sub of the
+# projected ServiceAccount token), or "" when the file or claim is missing.
+# Used to print the exact issuer/subject a federated credential must trust.
+azure_token_claim() {
+  local file="$1" claim="$2" payload
+  [ -r "$file" ] || return 0
+  payload=$(cut -d. -f2 < "$file" | tr '_-' '/+')
+  case $(( ${#payload} % 4 )) in
+    2) payload="${payload}==" ;;
+    3) payload="${payload}=" ;;
+  esac
+  printf '%s' "$payload" | base64 -d 2>/dev/null \
+    | jq -r --arg c "$claim" '.[$c] // ""' 2>/dev/null || true
+}

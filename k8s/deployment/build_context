@@ -139,10 +139,13 @@ fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
 
-TRAFFIC_CONTAINER_VERSION="latest"
-
 if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
   TRAFFIC_CONTAINER_VERSION="websocket2"
+else
+  TRAFFIC_CONTAINER_VERSION=$(get_config_value \
+    --provider '.providers["container-orchestration"].traffic_manager.version' \
+    --default "latest"
+  )
 fi
 
 TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
@@ -406,26 +409,77 @@ fi
 
 log debug "🔍 main_traffic_manager_port resolved to ${MAIN_TRAFFIC_MANAGER_PORT}"
 
-# Check if blue deployment has K8s services for additional ports
-BLUE_ADDITIONAL_PORT_SERVICES="{}"
-if [ -n "$BLUE_DEPLOYMENT_ID" ] && [ "$BLUE_DEPLOYMENT_ID" != "null" ]; then
-    ADDITIONAL_PORTS=$(echo "$CONTEXT" | jq -c '.scope.capabilities.additional_ports // []')
-    if [ "$ADDITIONAL_PORTS" != "[]" ] && [ "$ADDITIONAL_PORTS" != "null" ]; then
-        while IFS= read -r port_config; do
-            port=$(echo "$port_config" | jq -r '.port')
-            type_raw=$(echo "$port_config" | jq -r '.type')
-            type_lower=$(echo "$type_raw" | tr '[:upper:]' '[:lower:]')
-            service_name="d-${SCOPE_ID}-${BLUE_DEPLOYMENT_ID}-${type_lower}-${port}"
-            key="${type_lower}-${port}"
-            if kubectl get service "$service_name" -n "$K8S_NAMESPACE" &>/dev/null; then
-                BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): true}')
-            else
-                BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq --arg key "$key" '. + {($key): false}')
-                log info "Blue deployment service '$service_name' not found - additional port traffic will route to new deployment only"
-            fi
-        done < <(echo "$ADDITIONAL_PORTS" | jq -c '.[]')
-    fi
+# preStop wait of the application container. "exec" runs /bin/sleep in the image and fails
+# on images without a shell (distroless, scratch), so the container is killed before the
+# balancer stops routing to it. "native" is the kubelet sleep action: opt-in because every
+# node's kubelet must be >= 1.30, which the API server version does not guarantee.
+PRESTOP_SLEEP_MODE=$(get_config_value \
+  --env PRESTOP_SLEEP_MODE \
+  --provider '.providers["scope-configurations"].deployment.prestop_sleep_mode' \
+  --default "exec"
+)
+
+case "$PRESTOP_SLEEP_MODE" in
+  native|exec) ;;
+  *)
+    log error "❌ PRESTOP_SLEEP_MODE must be native or exec, got: '$PRESTOP_SLEEP_MODE'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set exec (default) or native (every node on Kubernetes >= 1.30) in values.yaml or the scope-configurations provider"
+    log error ""
+    exit 1
+    ;;
+esac
+
+log debug "🔍 prestop_sleep_mode resolved to ${PRESTOP_SLEEP_MODE}"
+
+BLUE_NAME_FALLBACK=""
+if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
+  BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
 fi
+
+if DISCOVERED_BLUE=$(np_naming_discover_blue "$K8S_NAMESPACE" "$BLUE_DEPLOYMENT_ID" "$MAIN_HTTP_PORT"); then
+    DISCOVER_BLUE_STATUS=0
+else
+    DISCOVER_BLUE_STATUS=$?
+fi
+
+if [ "$DISCOVER_BLUE_STATUS" -eq 1 ]; then
+    log error "❌ Could not check the cluster for the existing blue deployment and service names"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading service/deployment in namespace '$K8S_NAMESPACE'"
+    log error "🔧 How to fix:"
+    log error "   • Verify cluster connectivity and RBAC: kubectl get deployment -n $K8S_NAMESPACE -l deployment_id=$BLUE_DEPLOYMENT_ID"
+    log error "   • Verify cluster connectivity and RBAC: kubectl get service -n $K8S_NAMESPACE -l deployment_id=$BLUE_DEPLOYMENT_ID"
+    log error ""
+    exit 1
+fi
+
+CONTEXT=$(echo "$CONTEXT" | jq --argjson blue "$DISCOVERED_BLUE" --arg fallback "$BLUE_NAME_FALLBACK" '
+  .names.blue_deployment = (if $blue.deployment != "" then $blue.deployment else $fallback end)
+  | .names.blue_service = (if $blue.service != "" then $blue.service else $fallback end)
+  | if (.scope.capabilities.additional_ports | type) == "array" then
+      .scope.capabilities.additional_ports |= map(
+        (.port|tostring) as $port_key
+        | if ($blue.ports[$port_key] // "") != "" then . + {blue_service_name: $blue.ports[$port_key]} else . end
+      )
+    else . end
+')
+
+BLUE_ADDITIONAL_PORT_SERVICES=$(echo "$CONTEXT" | jq -c --argjson blue "$DISCOVERED_BLUE" '
+  [ (.scope.capabilities.additional_ports // [])[]
+    | ((.type | ascii_downcase) + "-" + (.port|tostring)) as $key
+    | (.port|tostring) as $port_key
+    | {key: $key, value: (($blue.ports[$port_key] // "") != "")}
+  ] | from_entries
+')
+
+while IFS= read -r missing_port_key; do
+  [ -z "$missing_port_key" ] && continue
+  log debug "🔍 No blue deployment service for additional port $missing_port_key — its traffic will route entirely to the green deployment"
+done < <(echo "$BLUE_ADDITIONAL_PORT_SERVICES" | jq -r 'to_entries[] | select(.value == false) | .key')
 
 CONTEXT=$(echo "$CONTEXT" | jq \
           --arg blue_deployment_id "$BLUE_DEPLOYMENT_ID" \
@@ -444,6 +498,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --argjson blue_additional_port_services "$BLUE_ADDITIONAL_PORT_SERVICES" \
           --arg main_http_port "$MAIN_HTTP_PORT" \
           --arg main_traffic_manager_port "$MAIN_TRAFFIC_MANAGER_PORT" \
+          --arg prestop_sleep_mode "$PRESTOP_SLEEP_MODE" \
           '. + {blue_deployment_id: $blue_deployment_id,
                 blue_replicas: $blue_replicas,
                 green_replicas: $green_replicas,
@@ -459,7 +514,8 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 container_cpu_in_millicores: $container_cpu_in_millicores,
                 blue_additional_port_services: $blue_additional_port_services,
                 main_http_port: ($main_http_port | tonumber),
-                main_traffic_manager_port: ($main_traffic_manager_port | tonumber)
+                main_traffic_manager_port: ($main_traffic_manager_port | tonumber),
+                prestop_sleep_mode: $prestop_sleep_mode
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")

@@ -11,7 +11,7 @@ apiVersion: v1
 kind: Secret
 immutable: true
 metadata:
-  name: s-{{ .scope.id }}-d-{{ .deployment.id }}-files
+  name: {{ .names.secret_files }}
   namespace: {{ .k8s_namespace }}
   labels:
     nullplatform: "true"

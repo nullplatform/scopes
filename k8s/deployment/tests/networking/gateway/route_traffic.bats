@@ -14,6 +14,7 @@ setup() {
   export DEPLOYMENT_ID="deploy-456"
   export INGRESS_VISIBILITY="internet-facing"
   export TEMPLATE="$BATS_TEST_TMPDIR/template.yaml"
+  export SERVICE_PATH="$PROJECT_ROOT/k8s"
 
   export CONTEXT='{
     "scope": {
@@ -49,6 +50,11 @@ metadata:
     return 0
   }
   export -f gomplate
+
+  for helper in np_scope_step_begin np_scope_step_end np_scope_explain np_scope_input np_scope_output np_scope_consumes np_scope_failure; do
+    eval "$helper() { :; }"
+    export -f "$helper"
+  done
 }
 
 teardown() {
@@ -145,4 +151,59 @@ teardown() {
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
 
   [ "$status" -eq 0 ]
+}
+
+@test "route_traffic: validates the gateways when the manifest is an HTTPRoute" {
+  gomplate() {
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --out) printf 'apiVersion: gateway.networking.k8s.io/v1\nkind: HTTPRoute\n' > "$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+  }
+  kubectl() { echo "$*" >> "$BATS_TEST_TMPDIR/kubectl.log"; }
+  export -f gomplate kubectl
+  export CONTEXT='{"gateways": [{"name": "gateway-public", "namespace": "gateways"}, {"name": "partners", "namespace": "edge"}]}'
+
+  run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ All gateways exist: gateways/gateway-public, edge/partners"
+  assert_equal "$(cat "$BATS_TEST_TMPDIR/kubectl.log")" "get gateway gateway-public -n gateways -o name
+get gateway partners -n edge -o name"
+}
+
+@test "route_traffic: fails when a gateway of the HTTPRoute does not exist" {
+  gomplate() {
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --out) printf 'apiVersion: gateway.networking.k8s.io/v1\nkind: HTTPRoute\n' > "$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+  }
+  kubectl() {
+    [ "$3" = "partners" ] || return 0
+    echo 'Error from server (NotFound): gateways.gateway.networking.k8s.io "partners" not found' >&2
+    return 1
+  }
+  export -f gomplate kubectl
+  export CONTEXT='{"gateways": [{"name": "gateway-public", "namespace": "gateways"}, {"name": "partners", "namespace": "edge"}]}'
+
+  run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Gateways not found: edge/partners"
+}
+
+@test "route_traffic: does not look up gateways for an Ingress manifest" {
+  kubectl() { echo "$*" >> "$BATS_TEST_TMPDIR/kubectl.log"; }
+  export -f kubectl
+
+  run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$BATS_TEST_TMPDIR/kubectl.log" ]
+  [[ "$output" != *"Validating gateways referenced by the HTTPRoute"* ]] || false
 }

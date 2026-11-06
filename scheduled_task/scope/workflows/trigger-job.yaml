@@ -3,16 +3,30 @@ include:
 provider_categories:
   - container-orchestration
   - cloud-providers
+trace:
+  title: Run scheduled task
+  job: scheduled-task-trigger
 steps:
   - name: load logging
     type: script
     file: "$OVERRIDES_PATH/logging"
+    trace: false
     output:
       - name: log
         type: function
         parameters:
           level: string
           message: string
+  - name: load naming
+    type: script
+    file: "$SERVICE_PATH/naming/resolve_names"
+    output:
+      - name: np_naming_list_by_label
+        type: function
+        parameters:
+          kind: string
+          namespace: string
+          label: string
   - name: trigger
     type: script
     file: "$OVERRIDES_PATH/scope/trigger"

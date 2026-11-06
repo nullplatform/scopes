@@ -1,0 +1,46 @@
+#!/bin/bash
+
+source "$SERVICE_PATH/deployment/deployment_lock"
+
+WAIT_TIMEOUT="${NP_DEPLOY_LOCK_WAIT_TIMEOUT:-900}"
+POLL_SECONDS="${NP_DEPLOY_LOCK_POLL_SECONDS:-5}"
+WAIT_TITLE="Wait for the running action"
+
+holder=$(deployment_lock_holder_summary)
+log info "⏳ Another action is running on scope $SCOPE_ID (${holder:-unknown}): waiting for it to finish"
+if command -v np_scope_explain >/dev/null 2>&1; then
+    np_scope_explain --title "$WAIT_TITLE" --what "Waiting for ${holder:-another action} to finish on this scope"
+fi
+if command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+    np_scope_wait_heartbeat "deployment-lock" 0 "$WAIT_TIMEOUT" "waiting"
+fi
+
+start=$(date -u +%s)
+while true; do
+    deployment_lock_try_acquire
+    case $? in
+        0)
+            log info "✅ Lock acquired after $(( $(date -u +%s) - start ))s"
+            exit 0
+            ;;
+        2)
+            log warn "⚠️  The deployment lock cannot be used here; continuing without it"
+            exit 0
+            ;;
+    esac
+
+    elapsed=$(( $(date -u +%s) - start ))
+    if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+        message="Gave up after ${WAIT_TIMEOUT}s waiting for ${holder:-another action} to finish on scope $SCOPE_ID"
+        log error "❌ $message"
+        log error "💡 Check the action still running on this scope; once it ends, retry this one"
+        if command -v np_scope_error >/dev/null 2>&1; then
+            np_scope_error "$message"
+        fi
+        exit 1
+    fi
+    if [ $(( elapsed % 30 )) -lt "$POLL_SECONDS" ] && command -v np_scope_wait_heartbeat >/dev/null 2>&1; then
+        np_scope_wait_heartbeat "deployment-lock" "$elapsed" "$WAIT_TIMEOUT" "waiting"
+    fi
+    sleep "$POLL_SECONDS"
+done

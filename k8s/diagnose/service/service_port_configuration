@@ -113,7 +113,7 @@ for SERVICE_NAME in $SERVICES; do
 
         # Active connectivity check
         print_info "    Testing connectivity to port $ACTUAL_TARGET_PORT in container '$CONTAINER_NAME'..."
-        kubectl exec "$FIRST_POD" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && nc -z localhost $ACTUAL_TARGET_PORT || (command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1 >/dev/null
+        kubectl exec "$FIRST_POD" -n "$NAMESPACE" -c "$CONTAINER_NAME" -- timeout 2 sh -c "command -v nc >/dev/null 2>&1 && (nc -z 127.0.0.1 $ACTUAL_TARGET_PORT || nc -z ::1 $ACTUAL_TARGET_PORT) ||(command -v curl >/dev/null 2>&1 && curl -s --max-time 1 localhost:$ACTUAL_TARGET_PORT >/dev/null)" 2>&1 >/dev/null
         CONNECTIVITY_EXIT_CODE=$?
 
         if [[ $CONNECTIVITY_EXIT_CODE -eq 0 ]]; then

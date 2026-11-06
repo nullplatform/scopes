@@ -2,10 +2,10 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: hpa-d-{{ .scope.id }}-{{ .deployment.id }}
+  name: {{ .names.hpa }}
   namespace: {{ .k8s_namespace }}
   labels:
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
     app.kubernetes.io/part-of: {{ .namespace.slug }}
     account: {{ .account.slug }}
     account_id: "{{ .account.id }}"
@@ -20,7 +20,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: d-{{ .scope.id }}-{{ .deployment.id }}
+    name: {{ .names.deployment }}
   minReplicas: {{ .scope.capabilities.autoscaling.min_replicas }}
   maxReplicas: {{ .scope.capabilities.autoscaling.max_replicas }}
   metrics:

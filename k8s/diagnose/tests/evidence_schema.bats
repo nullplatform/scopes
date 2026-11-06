@@ -433,6 +433,47 @@ EOF
   [[ "$starting_logs" == "[]" ]] || { echo "expected empty container_logs for starting pod, got $starting_logs"; return 1; }
 }
 
+@test "logs: pod_readiness embeds the application container logs, not the sidecar's" {
+  reset_output
+  setup_pod_logs "stuck-pod" "http" "127.0.0.1 - - GET /healthz 502" ""
+  setup_pod_logs "stuck-pod" "application" "ERROR: cannot reach the database" ""
+  cat > "$PODS_FILE" << 'EOF'
+{
+  "items":[{
+    "metadata":{"name":"stuck-pod"},
+    "spec":{"containers":[{"name":"http"},{"name":"application"}]},
+    "status":{"phase":"Running","conditions":[{"type":"Ready","status":"False","reason":"ContainersNotReady"}],"containerStatuses":[{"name":"http","ready":true,"state":{"running":{}},"restartCount":0},{"name":"application","ready":false,"state":{"running":{}},"restartCount":0}]}
+  }]
+}
+EOF
+  source "$BATS_TEST_DIRNAME/../scope/pod_readiness" || true
+
+  logged_container=$(jq -r '.evidence.details.pods[0].container_logs[0].container' "$SCRIPT_OUTPUT_FILE")
+  [[ "$logged_container" == "application" ]] || { echo "expected the application container, got $logged_container"; return 1; }
+
+  pod_logs=$(jq -c '.evidence.details.pods[0].container_logs' "$SCRIPT_OUTPUT_FILE")
+  contains=$(echo "$pod_logs" | jq -r '.[].current_logs[] | select(test("cannot reach the database"))' | head -1)
+  [[ -n "$contains" ]] || { echo "expected the application log line, got $pod_logs"; return 1; }
+}
+
+@test "logs: pod_readiness falls back to the only container when there is no application container" {
+  reset_output
+  setup_pod_logs "stuck-pod" "worker" "INFO: queue is empty" ""
+  cat > "$PODS_FILE" << 'EOF'
+{
+  "items":[{
+    "metadata":{"name":"stuck-pod"},
+    "spec":{"containers":[{"name":"worker"}]},
+    "status":{"phase":"Running","conditions":[{"type":"Ready","status":"False","reason":"ContainersNotReady"}],"containerStatuses":[{"name":"worker","ready":false,"state":{"running":{}},"restartCount":0}]}
+  }]
+}
+EOF
+  source "$BATS_TEST_DIRNAME/../scope/pod_readiness" || true
+
+  logged_container=$(jq -r '.evidence.details.pods[0].container_logs[0].container' "$SCRIPT_OUTPUT_FILE")
+  [[ "$logged_container" == "worker" ]] || { echo "expected the worker container, got $logged_container"; return 1; }
+}
+
 @test "logs: success path does not embed logs (keeps payload light)" {
   reset_output
   cat > "$PODS_FILE" << 'EOF'

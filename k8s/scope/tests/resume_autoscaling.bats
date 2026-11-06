@@ -11,8 +11,10 @@ setup() {
   source "$PROJECT_ROOT/testing/assertions.sh"
   log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
   export -f log
+  source "$PROJECT_ROOT/k8s/naming/resolve_names"
+  export -f np_naming_lookup np_naming_list_by_label
   source "$PROJECT_ROOT/k8s/scope/require_resource"
-  export -f require_hpa require_deployment find_deployment_by_label
+  export -f require_resource
 
   # Default environment
   export K8S_NAMESPACE="default-namespace"
@@ -43,7 +45,28 @@ teardown() {
 @test "resume_autoscaling: fails when HPA does not exist" {
   kubectl() {
     case "$*" in
-      "get hpa"*)
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo ""
+        ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash "$BATS_TEST_DIRNAME/../resume_autoscaling"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ No HPA found for deployment deploy-456 in namespace 'provider-namespace'"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "   - Autoscaling is not configured for this deployment"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   • Verify the HPA exists: kubectl get hpa -n provider-namespace -l deployment_id=deploy-456"
+}
+
+@test "resume_autoscaling: fails distinctly when the HPA lookup itself fails" {
+  kubectl() {
+    case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "Error from server (Forbidden): hpas.autoscaling is forbidden"
         return 1
         ;;
     esac
@@ -53,13 +76,12 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../resume_autoscaling"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'provider-namespace'..."
-  assert_contains "$output" "❌ HPA 'hpa-d-scope-123-deploy-456' not found in namespace 'provider-namespace'"
+  assert_contains "$output" "❌ Could not check the cluster for the HPA of deployment deploy-456"
   assert_contains "$output" "💡 Possible causes:"
-  assert_contains "$output" "The HPA may not exist or autoscaling is not configured for this deployment"
+  assert_contains "$output" "   - The cluster API server is unreachable"
+  assert_contains "$output" "   - RBAC denies reading hpa in namespace 'provider-namespace'"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• Verify the HPA exists: kubectl get hpa -n provider-namespace"
-  assert_contains "$output" "• Check that autoscaling is configured for scope scope-123"
+  assert_contains "$output" "   • Verify cluster connectivity and RBAC: kubectl auth can-i get hpa -n provider-namespace"
 }
 
 # =============================================================================
@@ -68,12 +90,11 @@ teardown() {
 @test "resume_autoscaling: succeeds when HPA is already active (empty annotation)" {
   kubectl() {
     case "$*" in
-      "get hpa"*"-n provider-namespace"*)
-        if [[ "$*" == *"-o jsonpath"* ]]; then
-          echo ""
-        else
-          return 0
-        fi
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
+        echo ""
         ;;
     esac
   }
@@ -88,12 +109,11 @@ teardown() {
 @test "resume_autoscaling: succeeds when hpa is not paused" {
   kubectl() {
     case "$*" in
-      "get hpa"*"-n provider-namespace"*)
-        if [[ "$*" == *"-o jsonpath"* ]]; then
-          echo "null"
-        else
-          return 0
-        fi
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
+        echo "null"
         ;;
     esac
   }
@@ -111,12 +131,11 @@ teardown() {
 @test "resume_autoscaling: complete successful resume flow" {
   kubectl() {
     case "$*" in
-      "get hpa"*"-n provider-namespace"*)
-        if [[ "$*" == *"-o jsonpath"* ]]; then
-          echo '{"originalMinReplicas":3,"originalMaxReplicas":15,"pausedAt":"2024-06-15T10:30:00Z"}'
-        else
-          return 0
-        fi
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
+        echo '{"originalMinReplicas":3,"originalMaxReplicas":15,"pausedAt":"2024-06-15T10:30:00Z"}'
         ;;
       "patch hpa"*)
         return 0
@@ -128,7 +147,6 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../resume_autoscaling"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'provider-namespace'..."
   assert_contains "$output" "📋 Found paused HPA configuration:"
   assert_contains "$output" "   Original min replicas: 3"
   assert_contains "$output" "   Original max replicas: 15"
@@ -144,12 +162,11 @@ teardown() {
 @test "resume_autoscaling: removes paused annotation" {
   kubectl() {
     case "$*" in
-      "get hpa"*"-n provider-namespace"*)
-        if [[ "$*" == *"-o jsonpath"* ]]; then
-          echo '{"originalMinReplicas":2,"originalMaxReplicas":10,"pausedAt":"2024-01-01T00:00:00Z"}'
-        else
-          return 0
-        fi
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
+      "get hpa hpa-d-scope-123-deploy-456 -n provider-namespace -o jsonpath"*)
+        echo '{"originalMinReplicas":2,"originalMaxReplicas":10,"pausedAt":"2024-01-01T00:00:00Z"}'
         ;;
       "patch hpa"*)
         if [[ "$*" == *"null"* ]]; then
@@ -172,6 +189,9 @@ teardown() {
 @test "resume_autoscaling: uses namespace from provider" {
   kubectl() {
     case "$*" in
+      "get hpa -n provider-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
       *"-n provider-namespace"*)
         if [[ "$*" == *"-o jsonpath"* ]]; then
           echo '{"originalMinReplicas":2,"originalMaxReplicas":10,"pausedAt":"2024-01-01T00:00:00Z"}'
@@ -189,7 +209,6 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../resume_autoscaling"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'provider-namespace'..."
   assert_contains "$output" "   Namespace: provider-namespace"
 }
 
@@ -198,6 +217,9 @@ teardown() {
 
   kubectl() {
     case "$*" in
+      "get hpa -n default-namespace -l deployment_id=deploy-456 -o jsonpath={.items[*].metadata.name}")
+        echo "hpa-d-scope-123-deploy-456"
+        ;;
       *"-n default-namespace"*)
         if [[ "$*" == *"-o jsonpath"* ]]; then
           echo '{"originalMinReplicas":2,"originalMaxReplicas":10,"pausedAt":"2024-01-01T00:00:00Z"}'
@@ -215,6 +237,5 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../resume_autoscaling"
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "🔍 Looking for HPA 'hpa-d-scope-123-deploy-456' in namespace 'default-namespace'..."
   assert_contains "$output" "   Namespace: default-namespace"
 }

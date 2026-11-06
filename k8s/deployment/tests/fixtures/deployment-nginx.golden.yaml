@@ -38,25 +38,12 @@ spec:
         scope_id: "scope-123"
         deployment_id: "deploy-456"
       annotations:
-        nullplatform.logs.cloudwatch: 'true'
-        nullplatform.logs.cloudwatch.log_group_name: nsps.appslug
-        nullplatform.logs.cloudwatch.log_stream_log_retention_days: '7'
-        nullplatform.logs.cloudwatch.log_stream_name_pattern: >-
-          type=${type};application=app1;scope=scope-123;deploy=deploy-456;instance=${instance};container=${container}
-        nullplatform.logs.cloudwatch.region: us-east-1
     spec:
       containers:
         - name: http
           securityContext:
             runAsUser: 0
           image: example.com/traffic:latest
-          volumeMounts:
-              - name: nginx-config
-                mountPath: /etc/nginx/nginx.conf
-                subPath: nginx.conf
-              - name: nginx-config
-                mountPath: /etc/nginx/conf.d/default.conf
-                subPath: default.conf
           ports:
             - containerPort: 80
               protocol: TCP
@@ -235,9 +222,6 @@ spec:
           imagePullPolicy: IfNotPresent
           volumeMounts:
       volumes:
-      - name: nginx-config
-        configMap:
-          name: cm-scope-123
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst

@@ -1,0 +1,56 @@
+#!/usr/bin/env bats
+
+setup() {
+	export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+	source "$PROJECT_ROOT/testing/assertions.sh"
+	RENDER_DIR="$(mktemp -d)"
+}
+
+teardown() {
+	if [ -n "${RENDER_DIR:-}" ]; then rm -r "$RENDER_DIR"; fi
+}
+
+@test "golden: normal context renders byte-identically" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
+	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/normal" "$RENDER_DIR"
+	[ "$status" -eq 0 ]
+}
+
+@test "golden: long context renders byte-identically" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-long-raw.json" "$RENDER_DIR"
+	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/long" "$RENDER_DIR"
+	[ "$status" -eq 0 ]
+}
+
+@test "golden: full context renders byte-identically" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full-raw.json" "$RENDER_DIR"
+	run diff -r "$PROJECT_ROOT/k8s/naming/tests/goldens/full" "$RENDER_DIR"
+	[ "$status" -eq 0 ]
+}
+
+@test "golden: pdb selector matches the deployment's pod labels" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-full-raw.json" "$RENDER_DIR"
+	# An unrendered PDB or an empty selector would pass the check below vacuously.
+	run yq -e '.spec.selector.matchLabels | length > 0' "$RENDER_DIR/k8s-pdb.yaml"
+	[ "$status" -eq 0 ]
+	# A selector that matches no pods is valid to the API server, so the PDB
+	# would silently protect nothing.
+	local unmatched
+	unmatched="$(yq ea -N '
+		select(fi == 0).spec.template.metadata.labels as $pod
+		| select(fi == 1).spec.selector.matchLabels
+		| to_entries | .[] | select($pod[.key] != .value) | .key
+	' "$RENDER_DIR/k8s-deployment.yaml" "$RENDER_DIR/k8s-pdb.yaml")"
+	assert_equal "$unmatched" ""
+}
+
+@test "golden: renders all fifteen templates" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
+	run bash -c "ls '$RENDER_DIR' | wc -l | tr -d ' '"
+	assert_equal "$output" "15"
+}

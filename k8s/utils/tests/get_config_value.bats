@@ -308,3 +308,61 @@ teardown() {
 
   assert_equal "$result" "container-orch-namespace"
 }
+
+# =============================================================================
+# Test: Boolean false is a value, not an absence
+# =============================================================================
+@test "get_config_value: provider false wins over a later provider true" {
+  export CONTEXT='{"providers":{"scope-configurations":{"flag":false},"cloud-providers":{"flag":true}}}'
+
+  result=$(get_config_value \
+    --provider '.providers["scope-configurations"].flag' \
+    --provider '.providers["cloud-providers"].flag' \
+    --default "true")
+
+  assert_equal "$result" "false"
+}
+
+@test "get_config_value: provider false wins over env var and default" {
+  export CONTEXT='{"providers":{"scope-configurations":{"flag":false}}}'
+  export TEST_ENV_VAR="true"
+
+  result=$(get_config_value \
+    --env TEST_ENV_VAR \
+    --provider '.providers["scope-configurations"].flag' \
+    --default "true")
+
+  assert_equal "$result" "false"
+}
+
+@test "get_config_value: provider null still falls through" {
+  export CONTEXT='{"providers":{"scope-configurations":{"flag":null},"cloud-providers":{"flag":true}}}'
+
+  result=$(get_config_value \
+    --provider '.providers["scope-configurations"].flag' \
+    --provider '.providers["cloud-providers"].flag' \
+    --default "false")
+
+  assert_equal "$result" "true"
+}
+
+@test "get_config_value: provider paths ending in a filter keep working" {
+  export CONTEXT='{"providers":{"scope-configurations":{"list":["a","b"]}}}'
+
+  result=$(get_config_value \
+    --provider '.providers["scope-configurations"].list | @json' \
+    --provider '.providers["scope-configurations"].missing | @json' \
+    --default "[]")
+
+  assert_equal "$result" '["a","b"]'
+}
+
+@test "get_config_value: provider path piped to @json on a missing key falls through" {
+  export CONTEXT='{"providers":{}}'
+
+  result=$(get_config_value \
+    --provider '.providers["scope-configurations"].missing | @json' \
+    --default "[]")
+
+  assert_equal "$result" "[]"
+}

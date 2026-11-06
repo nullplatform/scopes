@@ -1,0 +1,4 @@
+[submodule "vendor/catalog-tracing-sh"]
+	path = vendor/catalog-tracing-sh
+	url = https://github.com/nullplatform/catalog-tracing-sh.git
+	branch = main

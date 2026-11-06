@@ -1,0 +1,117 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k-8-s-production-123456-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+  annotations:
+    alb.ingress.kubernetes.io/actions.bg-deployment: >-
+      {"type":"forward","forwardConfig":{"targetGroups":[
+        {"serviceName":"d-123456-789011","servicePort":8080,"weight":0},
+        {"serviceName":"d-123456-789012","servicePort":8080,"weight":100}
+      ]}}
+    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
+    alb.ingress.kubernetes.io/group.name: alb-public
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/load-balancer-name: alb-public
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/target-node-labels: account=acme,namespace=payments,application=checkout-api,account_id=1,namespace_id=11,application_id=111,scope=production,scope_id=123456,nullplatform=true
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: alb
+  rules:
+    - host: checkout.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment
+                port:
+                  name: use-annotation
+    - host: www.checkout.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment
+                port:
+                  name: use-annotation
+
+
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k-8-s-production-123456-grpc-9090-internet-facing
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+  annotations:
+    alb.ingress.kubernetes.io/actions.bg-deployment-grpc-9090: >-
+      {"type":"forward","forwardConfig":{"targetGroups":[
+        {"serviceName":"d-123456-789011-grpc-9090","servicePort":9090,"weight":0},
+        {"serviceName":"d-123456-789012-grpc-9090","servicePort":9090,"weight":100}
+      ]}}
+    alb.ingress.kubernetes.io/actions.response-404: '{"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"404 scope not found or has not been deployed yet"}}'
+    alb.ingress.kubernetes.io/group.name: alb-public
+    alb.ingress.kubernetes.io/load-balancer-name: alb-public
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-node-labels: account=acme,namespace=payments,application=checkout-api,account_id=1,namespace_id=11,application_id=111,scope=production,scope_id=123456,nullplatform=true
+    alb.ingress.kubernetes.io/target-type: ip
+    
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":9090}]'
+    alb.ingress.kubernetes.io/backend-protocol-version: GRPC
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true
+    
+spec:
+  ingressClassName: alb
+  rules:
+    - host: checkout.example.com
+      http:
+        paths:
+          
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment-grpc-9090
+                port:
+                  name: use-annotation
+          
+    - host: www.checkout.example.com
+      http:
+        paths:
+          
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bg-deployment-grpc-9090
+                port:
+                  name: use-annotation
+          
+
+

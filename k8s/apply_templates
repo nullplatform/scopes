@@ -9,9 +9,47 @@ log debug "📋 Action: $ACTION"
 log debug "📋 Dry run: $DRY_RUN"
 log debug ""
 
+DELETE_TIMEOUT_SECONDS="${KUBECTL_DELETE_TIMEOUT_SECONDS-300}"
+if [[ "$ACTION" == "delete" ]] && ! [[ "$DELETE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  log error "❌ KUBECTL_DELETE_TIMEOUT_SECONDS must be a positive integer, got: '$DELETE_TIMEOUT_SECONDS'"
+  exit 1
+fi
+
 APPLIED_FILES=()
 
-# Find all .yaml files that were not yet applied / deleted
+# The rank a manifest is applied at: what one depends on comes first (the secrets
+# a deployment mounts, the service an ingress routes to, the deployment its
+# scaling and PDB target), the ingress last, so the load balancer controller
+# never sees an ingress whose service does not exist yet (that fails the model
+# of its whole ingress group, every scope on that ALB, until the service
+# appears). A delete goes in the reverse order. Unknown kinds go between.
+rank_of() {
+  case "$(basename "$1")" in
+    secret-files-*) echo 1 ;;
+    secret-*)       echo 0 ;;
+    service-*)      echo 2 ;;
+    deployment-*)   echo 3 ;;
+    scaling-*)      echo 4 ;;
+    pdb-*)          echo 5 ;;
+    ingress-*)      echo 9 ;;
+    *)              echo 7 ;;
+  esac
+}
+
+# The .yaml files not yet applied / deleted, in that order (reversed for a delete).
+ordered_templates() {
+  # A key with its own ordering (n) ignores a global -r: the reverse goes on each key.
+  local reverse=""
+  if [[ "$ACTION" == "delete" ]]; then
+    reverse="r"
+  fi
+  while IFS= read -r TEMPLATE_FILE; do
+    printf '%s\t%s\n' "$(rank_of "$TEMPLATE_FILE")" "$TEMPLATE_FILE"
+  done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print) \
+    | sort -t $'\t' -k1,1n$reverse -k2,2$reverse | cut -f2-
+}
+
+# Every .yaml file that was not yet applied / deleted, in dependency order
 while IFS= read -r TEMPLATE_FILE; do
    FILENAME="$(basename "$TEMPLATE_FILE")"
    BASE_DIR="$(dirname "$TEMPLATE_FILE")"
@@ -25,15 +63,55 @@ while IFS= read -r TEMPLATE_FILE; do
    log debug "📝 kubectl $ACTION $FILENAME"
 
    if [[ "$DRY_RUN" == "false" ]]; then
-     IGNORE_NOT_FOUND=""
+     DELETE_FLAGS=""
 
      if [[ "$ACTION" == "delete" ]]; then
-       IGNORE_NOT_FOUND="--ignore-not-found=true"
+       DELETE_FLAGS="--ignore-not-found=true --timeout=${DELETE_TIMEOUT_SECONDS}s"
      fi
 
-     if ! kubectl "$ACTION" -f "$TEMPLATE_FILE" $IGNORE_NOT_FOUND; then
-       log error "   ❌ Failed to apply"
+     TRACE_STEP_KEY=""
+     if [[ "$ACTION" == "apply" ]] && command -v np_scope_step_begin >/dev/null 2>&1; then
+       case "$FILENAME" in
+         deployment-*) TRACE_STEP_KEY="create-deployment" ;;
+         secret-*)     TRACE_STEP_KEY="create-secret" ;;
+         scaling-*)    TRACE_STEP_KEY="create-hpa" ;;
+         service-*)    TRACE_STEP_KEY="create-service" ;;
+         pdb-*)        TRACE_STEP_KEY="create-pod-disruption-budget" ;;
+         ingress-*)
+           if [[ -n "${DEPLOYMENT_ID:-}" ]]; then
+             TRACE_STEP_KEY="configure-ingress"
+           else
+             TRACE_STEP_KEY="create-ingress"
+           fi ;;
+       esac
+       [[ -n "$TRACE_STEP_KEY" ]] && np_scope_step_begin "$TRACE_STEP_KEY"
      fi
+
+     if KUBECTL_OUT=$(kubectl "$ACTION" -f "$TEMPLATE_FILE" $DELETE_FLAGS 2>&1); then
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT"
+       [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 0
+       if [[ "$ACTION" == "apply" ]] && command -v np_scope_k8s_applied >/dev/null 2>&1; then
+         np_scope_k8s_applied "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
+       fi
+       if [[ "$ACTION" == "delete" ]] && command -v np_scope_k8s_deleted >/dev/null 2>&1; then
+         np_scope_k8s_deleted "${K8S_NAMESPACE:-}" "$KUBECTL_OUT"
+       fi
+     else
+       [[ -n "$KUBECTL_OUT" ]] && echo "$KUBECTL_OUT" >&2
+       log error "   ❌ Failed to apply $FILENAME${KUBECTL_OUT:+: $KUBECTL_OUT}"
+       if [[ "$ACTION" == "delete" ]] && [[ "$KUBECTL_OUT" == *"timed out waiting"* ]]; then
+         log error "   ⚠️  $FILENAME was not deleted within ${DELETE_TIMEOUT_SECONDS}s"
+         log error "   💡 Possible causes:"
+         log error "      - A finalizer is blocking the deletion and the controller that owns it is not removing it"
+         log error "        (for an ingress, the AWS Load Balancer Controller failing to reconcile its ALB)"
+         log error "   🔧 How to fix:"
+         log error "      - Find the objects stuck in deletion (they have a deletionTimestamp) and their finalizers in namespace ${K8S_NAMESPACE:-<namespace>}"
+         log error "      - Check the logs of the controller that owns the finalizer"
+         log error "      - Raise KUBECTL_DELETE_TIMEOUT_SECONDS if the controller only needs more time"
+       fi
+       [[ -n "$TRACE_STEP_KEY" ]] && command -v np_scope_step_end >/dev/null 2>&1 && np_scope_step_end 1
+     fi
+     TRACE_STEP_KEY=""
    fi
 
    DEST_DIR="${BASE_DIR}/$ACTION"
@@ -44,12 +122,31 @@ while IFS= read -r TEMPLATE_FILE; do
 
    # Add the moved file path to our array
    APPLIED_FILES+=("$DEST_DIR/$FILENAME")
-done < <(find "$OUTPUT_DIR" \( -path "*/apply" -o -path "*/delete" \) -prune -o -type f -name "*.yaml" -print)
+done < <(ordered_templates)
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log debug ""
   log debug "📋 Dry run mode - no changes were made"
   exit 1
+fi
+
+if [[ "${TRACE_TRAFFIC_SWITCH:-false}" == "true" ]] && [[ -n "${CONTEXT:-}" ]] \
+  && command -v np_scope_explain >/dev/null 2>&1; then
+  TRAFFIC_TO=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.desired_switched_traffic // 100')
+  TRAFFIC_FROM=$(echo "$CONTEXT" | jq -r '.deployment.strategy_data.switched_traffic // 0')
+  if [[ "$TRAFFIC_TO" =~ ^[0-9]+$ ]] && [[ "$TRAFFIC_FROM" =~ ^[0-9]+$ ]]; then
+    np_scope_labels "deployment.id=${DEPLOYMENT_ID:-}" "scope.id=${SCOPE_ID:-}" "action=traffic-switch"
+    np_scope_explain --title "Switch traffic for deployment ${DEPLOYMENT_ID:-}" \
+      --what "Switching blue/green traffic for deployment ${DEPLOYMENT_ID:-} from ${TRAFFIC_FROM}% to ${TRAFFIC_TO}%"
+    np_scope_affordance "{\"kind\":\"traffic-switch\",\"deployment_id\":\"${DEPLOYMENT_ID:-}\",\"current_traffic\":$TRAFFIC_TO,\"new_traffic\":$TRAFFIC_TO,\"old_traffic\":$((100 - TRAFFIC_TO)),\"target_traffic\":100}"
+    np_scope_input traffic "{\"from\":$TRAFFIC_FROM,\"desired\":$TRAFFIC_TO}"
+    np_scope_output traffic "{\"switched\":$TRAFFIC_TO}"
+    np_scope_progress "$TRAFFIC_TO" 100 percent
+  fi
+fi
+
+if command -v np_trace_flush >/dev/null 2>&1; then
+  NP_TRACE_FLUSH_TIMEOUT=5 np_trace_flush
 fi
 
 source "$SERVICE_PATH/backup/backup_templates" --action="$ACTION" --files "${APPLIED_FILES[@]}"

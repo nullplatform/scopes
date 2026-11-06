@@ -1,0 +1,33 @@
+trace:
+  title: Wait for the running action on this scope
+  default: false
+  job:
+    name: k8s-deployment-lock-wait
+    namespace: "@context:scope.provider"
+    labels:
+      entity: deployment
+      operation: lock-wait
+      scope.provider: "@context:scope.provider"
+  groups:
+    - {key: waiting-lock, title: Waiting for the running action}
+include:
+  - "$SERVICE_PATH/values.yaml"
+steps:
+  - name: load logging
+    type: script
+    file: "$SERVICE_PATH/logging"
+    trace: false
+    output:
+      - name: log
+        type: function
+        parameters:
+          level: string
+          message: string
+  - name: wait for deployment lock
+    trace:
+      key: deployment-lock-wait
+      title: Wait for the running action
+      description: Another action is changing this scope; this one starts when it ends.
+      group: waiting-lock
+    type: script
+    file: "$SERVICE_PATH/deployment/wait_deployment_lock"

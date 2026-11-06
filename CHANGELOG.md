@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).
+- k8s, azure, azure-aro and onprem scopes default to `internal` visibility (was `public`); set `template_env_vars = { DEFAULT_VISIBILITY = "public" }` in `scope_definition` to keep `public`
+- k8s, azure, azure-aro and onprem scopes label the `internal` visibility option "Private" instead of "Main Account". The stored value is still `internal`
+
+## [1.20.0] - 2026-11-04
+- k8s and scheduled task scopes can run each nullplatform namespace in its own Kubernetes namespace: `cluster.namespace` (or `K8S_NAMESPACE`) accepts a pattern rendered by the resource naming engine, e.g. `{.namespace.slug}`, `{.account.slug}-{.namespace.slug}` or `{.namespace.slug}-{.scope.dimensions.environment}`. The namespace is created on first use. It reads the setting from the provider, so it works with orchestrated workers, where `NAMESPACE_OVERRIDE` from the channel does not arrive
+- Fix: k8s and scheduled task scopes and their deployments are kept in the namespace they were deployed to, even if the configured namespace changes
+- Fix: logs, instances, restart, pause/resume autoscaling, set instances, kill instance and diagnose of a k8s scope, and trigger, wait job, kill instance and logs of a scheduled task, now look for its pods in the namespace where the scope runs. Logs and instances always looked in `NAMESPACE_OVERRIDE` or `nullplatform`, and scheduled task logs in `nullplatform`
+- Fix: a k8s deployment now applies its manifests in dependency order (secrets, service, deployment, scaling, PDB, ingress last) and deletes them in reverse. The ingress was applied before the service it routes to existed, and the AWS Load Balancer Controller then failed the model of the whole ingress group (every scope on that ALB) for about a minute on every deploy
+
+## [1.19.0] - 2026-10-29
+- k8s scopes can wait in preStop with the kubelet sleep action instead of `/bin/sleep` (`PRESTOP_SLEEP_MODE=native` or `deployment.prestop_sleep_mode` in scope-configurations, Kubernetes 1.30+ on every node), so images without a shell (distroless, scratch) no longer stop at once and return 502s during pod replacements. The default stays `exec`
+- Fix: searching the logs of a k8s scope over a wide time range now finds matches past the first read of each pod, instead of returning "No logs" with an empty token that ended pagination
+- k8s deployment actions on the same scope now run one at a time: an action launched while another is running waits for it instead of overlapping
+- Fix: a k8s deployment action that arrives again after its deployment already moved past it (e.g. a late finalize) now ends successfully instead of failing
+- k8s scopes on Istio can publish their route on additional gateways with `additional_public_gateways` / `additional_private_gateways`
+- k8s scopes on Istio honor the gateway namespace set in `gateway_namespace` or in the container-orchestration provider, instead of always using `gateways`
+- Fix: a k8s deployment on Istio now fails when a configured gateway does not exist or rejects the route, instead of reporting success
+- The trace of initial, blue/green and traffic-switch k8s deployments shows a "Configure ingress" step; on Istio it shows each gateway the route is published on, with its validation and reconciliation status
+- Fix: the Pod Disruption Budget of a k8s scope now selects the deployment's pods. Its selector used an `app` label the pods never carry, so it protected nothing during node drains
+- Fix: a k8s scope's Pod Disruption Budget lets pods that are not ready be evicted, so a scope stuck in a crash loop never blocks a node drain
+- k8s scopes on AKS can make their Azure DNS calls as a managed identity chosen per dimension (AKS Workload Identity), configured through the Identity & Access provider or the `CONTAINERS_AZURE_CLIENT_ID` / `CONTAINERS_AZURE_CLIENT_ID_DEFAULT` env vars, instead of the agent's Service Principal client secret
+- Fix: the assume role step now runs only on EKS; on AKS/ARO it no longer tries `sts:AssumeRole` (which failed every workflow when the account also had an AWS IAM provider)
+- Fix: deleting a k8s scope on Azure DNS now fails with a hint when the DNS record cannot be deleted, instead of reporting success
+- Fix: deleting a k8s deployment now also removes the finalizers from the ingresses of its additional HTTP and GRPC ports
+- Fix: a `kubectl delete` in a k8s workflow now gives up after `KUBECTL_DELETE_TIMEOUT_SECONDS` (default 300) instead of waiting forever on a stuck finalizer
+- Fix: a k8s scope with a TCP health check now becomes ready on Alpine-based traffic manager images (1.8.1, v1.9.0). The sidecar probe checked `localhost`, which resolves to IPv6 there while nginx listens only on IPv4, so the pod never became ready and the deployment failed after 10 minutes
+- The trace of a failed k8s or scheduled task run labels its failure cause (`failure.reason`, plus the probe and its mode for health checks), so runs can be queried by cause, and a failed scheduled task Job reports how its container ended (e.g. OOMKilled, exit 137) instead of only `BackoffLimitExceeded`
+
+## [1.18.0] - 2026-09-29
+- Fix: the Instances tab of a k8s scope now reports the application container's CPU, memory and architecture, instead of the traffic sidecar's
+- Fix: diagnose on a k8s scope now attaches the application's logs to a pod stuck in not-ready, instead of the traffic sidecar's
+- Fix: k8s rollbacks now show why the rolled-back deployment failed (image pull error, crash loop, OOM, failed health check), instead of always printing the generic "Application Startup Issue Detected" hints
+- Fix: k8s scopes on Route53 keep the ALB their DNS record points to on every deployment, instead of silently falling back to least-loaded selection and moving the ingress to another ALB (which can leave the scope without traffic). The record is now looked up in both hosted zones, the one matching the scope visibility first, and aliases with the `dualstack.` prefix (as created from the AWS console) are matched
+- k8s scopes can name Kubernetes objects `checkout-api-production-789012` instead of `d-123456-789012`
+- k8s scopes can define their own object naming pattern with `naming.strategy: custom` and `naming.deployment_pattern`
+- A `custom` naming pattern missing its uniqueness id now gets it appended automatically instead of failing the deploy
+- Fix: manually triggering a scheduled task now reports an unreachable cluster or RBAC denial separately from a missing CronJob
+- Add a "Run once" option to scheduled task scopes: the task runs a single time when the scope is deployed instead of on a recurring schedule, and the deployment waits for it to finish
+
+## [1.17.0] - 2026-09-11
+- Fix: turning off the health check on a k8s, azure or azure-aro scope now removes the liveness, readiness and startup probes from every container of the pod
+- Fix: k8s scopes that have both a custom domain and additional ports now deploy, instead of failing with "Failed to build ingress template"
+
+## [1.16.3] - 2026-09-08
+- Add: remove resource level restriction for `elasticloadbalancing:Describe*` permissions as AWS does not support it.
+- Fix: k8s deployment logs no longer show a "np_trace_flush: command not found" error when tracing is disabled
+
+## [1.16.2] - 2026-09-08
+- Fix: the scheduled-task worker image now runs the k8s scope with the scheduled_task overlay (`NP_OVERRIDES_PATH`), like the legacy channel does — it previously executed the overlay's partial workflows as the whole scope — and ships aws-cli, which the k8s scripts need from the assume_role step onwards
+- The publish pipeline now registers every scope image artifact with its release tag, so packages can resolve a worker image by tag (`lookup = true` + `meta.tag`) instead of copying digests around
+- Publish pipeline fixes: image names corrected to the existing ECR repositories (scopes/scheduled-task, scopes/containers-datadog — v1.16.1's images were recovered via backfill), a `workflow_dispatch` recovery path that publishes an existing tag building the tag's own commit, and the GitHub release upsert no longer fails when the job has no checkout
+
+## [1.16.1] - 2026-09-02
+- Fix: the Instances tab of the performance view now shows every pod of a k8s scope. The instance list had a hard cap of 10 that nothing could override, so a scope with 20 pods showed only the first 10 and the table had no next page. A `limit` in the request is honored, the `LIMIT` env var on the agent stays as the operator override, and with neither every pod is returned
+
+## [1.16.0] - 2026-09-02
+- k8s scopes now show live, step-by-step progress in the dashboard when a scope is created, updated or deleted, and for every deployment action (deploy, switch traffic, finalize, rollback, delete, diagnose, kill instance, restart pods, pause/resume autoscaling, set instance count): each step with its duration, and long waits (load balancer, DNS, instance health) saying what they are waiting for. Requires `NP_API_KEY` on the agent; without it everything works as before
+- Failed k8s deployments now explain why on the step that failed, and what to do about it: image pull errors with the registry's message, out-of-memory kills, crash exit codes with the application's last log lines, and failing health checks with the path and response detected
+- k8s **diagnose** now shows what each check found (summary, severity, affected pods, recommended action) instead of a list of green steps
+- k8s scopes can now pin the traffic-manager sidecar version cluster-wide via the container-orchestration provider's `traffic_manager.version`, instead of only per-scope
+- Publish containers and scheduled task scopes as docker images
+- Remove unused cloudwatch annotations from deployment objects
+- Fix: log queries on k8s scopes now return the time range that was selected, instead of the most recent lines whatever range was chosen
+- Fix: paging through logs on k8s scopes no longer repeats lines already shown, and now reaches the end of the selected range
+- Fix: diagnose on k8s scopes no longer fails to publish its results when a check collects application logs
 
 ## [1.15.1] - 2026-08-12
 - Fix: gRPC additional ports on k8s scopes now leave the declared port free for the application, so a gRPC server can bind the port configured in the scope instead of failing to start with "address already in use". gRPC ports now work the same way HTTP ones already did

@@ -9,6 +9,15 @@ metadata:
     app.kubernetes.io/component: application
     app.kubernetes.io/instance: scopeslug
     app.kubernetes.io/name: scopeslug
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
   annotations:
 spec:
   ports:

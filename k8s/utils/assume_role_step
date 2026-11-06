@@ -21,6 +21,15 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/assume_role_lib"
 
+# AWS roles only make sense on EKS. On AKS/ARO/GKE an account may still carry an
+# aws-iam-configuration (e.g. shared with an AWS environment); assuming it from
+# those clusters fails and aborts the workflow. Unset means EKS (values.yaml
+# default).
+if [ -n "${K8S_FLAVOR:-}" ] && [ "$K8S_FLAVOR" != "eks" ]; then
+  log debug "   ✅ assume_role=skipped (K8S_FLAVOR=$K8S_FLAVOR)"
+  return 0
+fi
+
 CONTAINERS_ASSUME_ROLE_SELECTOR="${CONTAINERS_ASSUME_ROLE_SELECTOR:-containers}"
 
 # IAM provider as resolved for the scope's dimensions by the platform.

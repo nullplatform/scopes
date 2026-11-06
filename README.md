@@ -95,6 +95,23 @@ The script will:
 -   **`scheduled_task/`**: Scheduled Tasks scope implementation.
 -   **`agent/`**: Agent deployment scripts.
 
+## Tracing overrides
+
+Override workflows (`--overrides-path`) merge into the base workflow by step name. How their steps show up in the trace:
+
+-   **Replacing a base step** (same name) keeps the base step's `trace:` block unless the override declares its own.
+-   **Adding a step** to a workflow with `trace.default: false` (most deployment workflows) leaves it out of the trace. Give it a `trace:` block so it gets its own step, and its failures land there and not only on the run:
+
+    ```yaml
+    - name: register api gateway route
+      type: script
+      file: "$OVERRIDES_PATH/deployment/register_route"
+      trace:
+        title: Register the API gateway route
+        group: setting-up   # one of the base workflow's trace.groups
+    ```
+-   Override scripts share the workflow shell, so `log error` and the `np_scope_*` helpers from the scope type's `logging` work in them. `log error "❌ <cause>"` becomes the step's traced error, and `np_scope_failure <reason>` labels the step and run with `failure.reason`.
+
 ## IDE Support for Workflow YAML
 
 To enable autocomplete and validation for workflow YAML files (`**/workflows/*.yaml`), you can configure your IDE to use the provided `workflow.schema.json`.

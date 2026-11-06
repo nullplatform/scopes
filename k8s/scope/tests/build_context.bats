@@ -43,6 +43,7 @@ setup() {
   export CONTEXT='{
     "scope": {
       "id": "test-scope-123",
+      "slug": "test-scope",
       "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
       "domain": "test.nullapps.io",
       "capabilities": {
@@ -100,6 +101,7 @@ teardown() {
   assert_contains "$output" "✅ Namespace 'default-namespace' exists"
   assert_contains "$output" "📋 Scope: test-scope-123 | Visibility: public | Domain: test.nullapps.io"
   assert_contains "$output" "📋 Namespace: default-namespace | Region: us-east-1 | Gateway: co-gateway-public | ALB: co-balancer-public"
+  assert_contains "$output" "📋 Gateways: gateways/co-gateway-public"
   assert_contains "$output" "✅ Scope context built successfully"
 }
 
@@ -112,6 +114,7 @@ teardown() {
   local expected_json='{
     "scope": {
       "id": "test-scope-123",
+      "slug": "test-scope",
       "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
       "domain": "test.nullapps.io",
       "capabilities": {
@@ -152,10 +155,26 @@ teardown() {
     "k8s_namespace": "default-namespace",
     "region": "us-east-1",
     "gateway_name": "co-gateway-public",
+    "gateway_namespace": "gateways",
+    "gateways": [{"name": "co-gateway-public", "namespace": "gateways"}],
     "alb_name": "co-balancer-public",
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
-    "k8s_modifiers": {}
+    "k8s_modifiers": {},
+    "names": {
+      "deployment": "",
+      "service": "",
+      "hpa": "",
+      "pdb": "",
+      "secret": "",
+      "secret_files": "",
+      "cronjob": "",
+      "scope_ingress": "k-8-s-test-scope-test-scope-123-internet-facing",
+      "scope_dns": "k8s-test-app-test-scope-test-scope-123-dns",
+      "serving_cert": "d-test-scope-123",
+      "blue_deployment": "",
+      "blue_service": ""
+    }
   }'
 
   assert_json_equal "$CONTEXT" "$expected_json" "Complete CONTEXT (public)"
@@ -172,6 +191,7 @@ teardown() {
   local expected_json='{
     "scope": {
       "id": "test-scope-123",
+      "slug": "test-scope",
       "nrn": "nrn:organization=100:account=200:namespace=300:application=400",
       "domain": "test.nullapps.io",
       "capabilities": {
@@ -212,10 +232,26 @@ teardown() {
     "k8s_namespace": "default-namespace",
     "region": "us-east-1",
     "gateway_name": "co-gateway-private",
+    "gateway_namespace": "gateways",
+    "gateways": [{"name": "co-gateway-private", "namespace": "gateways"}],
     "alb_name": "co-balancer-private",
     "component": "test-namespace-test-app",
     "base_domain": "cloud-domain.io",
-    "k8s_modifiers": {}
+    "k8s_modifiers": {},
+    "names": {
+      "deployment": "",
+      "service": "",
+      "hpa": "",
+      "pdb": "",
+      "secret": "",
+      "secret_files": "",
+      "cronjob": "",
+      "scope_ingress": "k-8-s-test-scope-test-scope-123-internal",
+      "scope_dns": "k8s-test-app-test-scope-test-scope-123-dns",
+      "serving_cert": "d-test-scope-123",
+      "blue_deployment": "",
+      "blue_service": ""
+    }
   }'
 
   assert_json_equal "$CONTEXT" "$expected_json" "Complete CONTEXT (private)"
@@ -349,6 +385,71 @@ teardown() {
 }
 
 # =============================================================================
+# Namespace resolution: existing scopes stay, the configured value may be a
+# pattern (cluster.namespace = {.namespace.slug})
+# =============================================================================
+set_configured_namespace() {
+  export CONTEXT=$(echo "$CONTEXT" | jq --arg ns "$1" '.providers["container-orchestration"].cluster.namespace = $ns')
+
+  # Empty cluster: no scope objects, no namespaces yet
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")
+        [ "$#" -gt 3 ] && return 0
+        return 1 ;;
+      get*)
+        return 0 ;;
+      *)
+        echo "kubectl $*" >> "$NP_OUTPUT_DIR/kubectl.log"
+        return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+# Cluster where the scope already has objects in the given namespace
+scope_runs_in() {
+  export SCOPE_NAMESPACE="$1"
+  kubectl() {
+    case "$1 $2" in
+      "get deployments,services,cronjobs,jobs") printf '%s' "$SCOPE_NAMESPACE" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+@test "build_context: a namespace pattern creates the namespace of the nullplatform namespace" {
+  set_configured_namespace "{.namespace.slug}"
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Creating namespace 'test-namespace'..."
+  assert_contains "$output" "k8s_namespace=test-namespace"
+}
+
+@test "build_context: a namespace pattern keeps an existing scope in its namespace" {
+  set_configured_namespace "{.namespace.slug}"
+  scope_runs_in "default-namespace"
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=default-namespace"
+}
+
+@test "build_context: an existing scope stays in its namespace when the configured namespace changes" {
+  set_configured_namespace "new-namespace"
+  scope_runs_in "old-namespace"
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=old-namespace"
+}
+
+# =============================================================================
 # COMPONENT truncation
 # =============================================================================
 @test "build_context: COMPONENT truncates to 63 chars ending with alphanumeric" {
@@ -386,4 +487,156 @@ teardown() {
   assert_equal "$(echo "$CONTEXT" | jq -r .gateway_name)" "scope-gw-public"
   assert_equal "$(echo "$CONTEXT" | jq -r .alb_name)" "scope-alb-public"
   assert_equal "$GATEWAY_NAME" "scope-gw-public"
+}
+
+# =============================================================================
+# Gateway namespace and additional gateways
+# =============================================================================
+@test "build_context: gateway namespace defaults to gateways" {
+  unset GATEWAY_NAMESPACE
+
+  source "$SCRIPT"
+
+  assert_equal "$GATEWAY_NAMESPACE" "gateways"
+  assert_equal "$(echo "$CONTEXT" | jq -r .gateway_namespace)" "gateways"
+}
+
+@test "build_context: gateway namespace comes from the GATEWAY_NAMESPACE env var" {
+  export GATEWAY_NAMESPACE="env-gateways"
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"env-gateways"}]'
+}
+
+@test "build_context: gateway namespace from container-orchestration wins over the env var" {
+  export GATEWAY_NAMESPACE="env-gateways"
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].gateway.namespace = "co-gateways"')
+
+  source "$SCRIPT"
+
+  assert_equal "$GATEWAY_NAMESPACE" "co-gateways"
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"co-gateways"}]'
+}
+
+@test "build_context: gateway namespace from scope-configurations wins over container-orchestration" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["container-orchestration"].gateway.namespace = "co-gateways"
+    | .providers["scope-configurations"].networking.gateway_namespace = "scope-gateways"')
+
+  source "$SCRIPT"
+
+  assert_equal "$GATEWAY_NAMESPACE" "scope-gateways"
+  assert_equal "$(echo "$CONTEXT" | jq -r .gateway_namespace)" "scope-gateways"
+}
+
+@test "build_context: public scopes add the additional public gateways after the main one" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking = {
+    "additional_public_gateways": [{"name": "partners", "namespace": "edge"}, {"name": "mobile"}],
+    "additional_private_gateways": [{"name": "never-used", "namespace": "edge"}]
+  }')
+
+  run bash -c 'source "$SCRIPT"; echo "$CONTEXT" | jq -c .gateways'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 Gateways: gateways/co-gateway-public, edge/partners, gateways/mobile"
+  assert_contains "$output" '[{"name":"co-gateway-public","namespace":"gateways"},{"name":"partners","namespace":"edge"},{"name":"mobile","namespace":"gateways"}]'
+}
+
+@test "build_context: private scopes add the additional private gateways" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .scope.capabilities.visibility = "private"
+    | .providers["container-orchestration"].gateway.additional_private_gateways = [{"name": "vpn", "namespace": "corp"}]
+    | .providers["container-orchestration"].gateway.additional_public_gateways = [{"name": "never-used", "namespace": "edge"}]')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-private","namespace":"gateways"},{"name":"vpn","namespace":"corp"}]'
+}
+
+@test "build_context: additional gateways from scope-configurations win over container-orchestration" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["container-orchestration"].gateway.additional_public_gateways = [{"name": "co-extra", "namespace": "edge"}]
+    | .providers["scope-configurations"].networking.additional_public_gateways = [{"name": "scope-extra", "namespace": "edge"}]')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"gateways"},{"name":"scope-extra","namespace":"edge"}]'
+}
+
+@test "build_context: additional gateways inherit the configured gateway namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["container-orchestration"].gateway.namespace = "co-gateways"
+    | .providers["container-orchestration"].gateway.additional_public_gateways = [{"name": "partners"}, {"name": "mobile", "namespace": ""}]')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"co-gateways"},{"name":"partners","namespace":"co-gateways"},{"name":"mobile","namespace":"co-gateways"}]'
+}
+
+@test "build_context: an additional gateway equal to the main one is not repeated" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].gateway.additional_public_gateways = [
+    {"name": "co-gateway-public", "namespace": "gateways"},
+    {"name": "partners", "namespace": "edge"},
+    {"name": "partners", "namespace": "edge"}
+  ]')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"gateways"},{"name":"partners","namespace":"edge"}]'
+}
+
+@test "build_context: an empty additional gateways list keeps only the main gateway" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = []')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"gateways"}]'
+}
+
+@test "build_context: invalid additional gateways keep only the main gateway and are flagged" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"namespace": "edge"}]')
+
+  run bash -c 'source "$SCRIPT"; echo "gateways=$(echo "$CONTEXT" | jq -c .gateways)"; echo "flag=$INVALID_ADDITIONAL_GATEWAYS"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  Ignoring invalid additional_public_gateways: ["
+  assert_contains "$output" 'gateways=[{"name":"co-gateway-public","namespace":"gateways"}]'
+  assert_contains "$output" 'flag=['
+}
+
+@test "build_context: additional gateways that are not a list are flagged" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].gateway.additional_public_gateways = "partners,mobile"')
+
+  run bash -c 'source "$SCRIPT"; echo "flag=$INVALID_ADDITIONAL_GATEWAYS"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  Ignoring invalid additional_public_gateways: partners,mobile"
+  assert_contains "$output" "flag=partners,mobile"
+}
+
+@test "build_context: a gateway name that is not a Kubernetes name is flagged" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"name": "gw\n  - name: evil", "namespace": "edge"}]')
+
+  source "$SCRIPT"
+
+  [ -n "$INVALID_ADDITIONAL_GATEWAYS" ]
+  assert_equal "$(echo "$CONTEXT" | jq -c .gateways)" '[{"name":"co-gateway-public","namespace":"gateways"}]'
+}
+
+@test "build_context: a gateway namespace that is not a Kubernetes namespace is flagged" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"name": "partners", "namespace": 42}]')
+
+  source "$SCRIPT"
+
+  [ -n "$INVALID_ADDITIONAL_GATEWAYS" ]
+}
+
+@test "build_context: valid additional gateways are not flagged" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"name": "partners.v2", "namespace": "edge-1"}]')
+
+  source "$SCRIPT"
+
+  assert_equal "$INVALID_ADDITIONAL_GATEWAYS" ""
+  assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
 }

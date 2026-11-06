@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT TRAFFIC_PROXY GATEWAY_TYPE 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE TRAFFIC_PROXY GATEWAY_TYPE 2>/dev/null || true
 }
 
 # =============================================================================
@@ -213,22 +213,50 @@ teardown() {
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================
-@test "traffic container: uses websocket2 for web_sockets, latest for http" {
-  # web_sockets protocol
-  SCOPE_TRAFFIC_PROTOCOL="web_sockets"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
+resolve_traffic_container_version() {
+  local protocol="$1"
+  if [[ "$protocol" == "web_sockets" ]]; then
+    echo "websocket2"
+  else
+    get_config_value \
+      --provider '.providers["container-orchestration"].traffic_manager.version' \
+      --default "latest"
   fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "websocket2"
+}
 
-  # http protocol
-  SCOPE_TRAFFIC_PROTOCOL="http"
-  TRAFFIC_CONTAINER_VERSION="latest"
-  if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-    TRAFFIC_CONTAINER_VERSION="websocket2"
-  fi
-  assert_equal "$TRAFFIC_CONTAINER_VERSION" "latest"
+@test "traffic container: uses websocket2 for web_sockets, latest for http" {
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "latest"
+}
+
+@test "traffic container: http protocol uses container-orchestration provider version when set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "http")
+  assert_equal "$result" "1.8.0"
+}
+
+@test "traffic container: web_sockets protocol ignores container-orchestration provider version" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+
+  result=$(resolve_traffic_container_version "web_sockets")
+  assert_equal "$result" "websocket2"
+}
+
+@test "traffic container: provider version flows into the default image when no full-image override is set" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+  unset TRAFFIC_CONTAINER_IMAGE
+
+  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http")
+  result=$(get_config_value \
+    --env TRAFFIC_CONTAINER_IMAGE \
+    --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
+    --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
+  )
+  assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0"
 }
 
 # =============================================================================
@@ -1273,6 +1301,210 @@ EOF
   source "$SCRIPT"
 
   assert_equal "$(echo "$CONTEXT" | jq -r '.main_traffic_manager_port')" "10080"
+}
+
+@test "blue discovery: overwrites blue deployment and service names when found" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[{"metadata":{"name":"discovered-blue-dep"}}]}' ;;
+      "get service")    echo '{"items":[{"metadata":{"name":"discovered-blue-svc"},"spec":{"ports":[{"port":8080}]}}]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" "discovered-blue-dep"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_service')" "discovered-blue-svc"
+}
+
+@test "blue discovery: leaves the formula's names intact when discovery finds nothing" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" "d-test-scope-123-789011"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_service')" "d-test-scope-123-789011"
+}
+
+@test "blue discovery: aborts instead of falling back to the ids name when kubectl fails" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo "Error from server (Forbidden): ..." >&2; return 1 ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ Could not check the cluster for the existing blue deployment and service names
+
+💡 Possible causes:
+   - The cluster API server is unreachable
+   - RBAC denies reading service/deployment in namespace 'default-namespace'
+🔧 How to fix:
+   • Verify cluster connectivity and RBAC: kubectl get deployment -n default-namespace -l deployment_id=789011
+   • Verify cluster connectivity and RBAC: kubectl get service -n default-namespace -l deployment_id=789011
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "blue discovery: overwrites a per-port blue_service_name when its service is found" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9014,"type":"GRPC"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[
+        {"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}},
+        {"metadata":{"name":"grpc-blue-svc"},"spec":{"ports":[{"port":9014}]}}
+      ]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" "grpc-blue-svc"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "true"
+}
+
+@test "blue discovery: finds an HTTP additional port's blue service, which carries no port_type label" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9015,"type":"HTTP"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[
+        {"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}},
+        {"metadata":{"name":"http-blue-svc"},"spec":{"ports":[{"port":9015}]}}
+      ]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" "http-blue-svc"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["http-9015"]')" "true"
+}
+
+@test "blue discovery: per-port blue_service_name is untouched and the port is marked absent when not found" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9014,"type":"GRPC"}]'
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.current_active_deployment = "789011"')
+
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")  return 0 ;;
+      "get deployment") echo '{"items":[]}' ;;
+      "get service")    echo '{"items":[{"metadata":{"name":"main-blue-svc"},"spec":{"ports":[{"port":8080}]}}]}' ;;
+      *)                return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  local log_output
+  { source "$SCRIPT"; } > "$BATS_TEST_TMPDIR/blue_discovery.log"
+  log_output="$(cat "$BATS_TEST_TMPDIR/blue_discovery.log")"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.scope.capabilities.additional_ports[0].blue_service_name')" ""
+  assert_equal "$(echo "$CONTEXT" | jq -r '.blue_additional_port_services["grpc-9014"]')" "false"
+  assert_contains "$log_output" "🔍 No blue deployment service for additional port grpc-9014 — its traffic will route entirely to the green deployment"
+}
+
+@test "blue discovery: blue_additional_port_services is empty without an active blue deployment" {
+  setup_full_build_context
+  set_additional_ports '[{"port":9014,"type":"GRPC"}]'
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.blue_additional_port_services')" '{"grpc-9014":false}'
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names.blue_deployment')" ""
+}
+
+# =============================================================================
+# prestop_sleep_mode resolution
+# =============================================================================
+
+@test "prestop_sleep_mode: defaults to exec so existing scopes keep /bin/sleep" {
+  setup_full_build_context
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
+}
+
+@test "prestop_sleep_mode: native from scope-configurations" {
+  setup_full_build_context
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "native"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
+}
+
+@test "prestop_sleep_mode: PRESTOP_SLEEP_MODE env var honoured" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=native
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "native"
+}
+
+@test "prestop_sleep_mode: scope-configurations wins over the env var" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=native
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].deployment.prestop_sleep_mode = "exec"')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.prestop_sleep_mode')" "exec"
+}
+
+@test "prestop_sleep_mode: rejects unknown values" {
+  setup_full_build_context
+  export PRESTOP_SLEEP_MODE=auto
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ PRESTOP_SLEEP_MODE must be native or exec, got: 'auto'"
 }
 
 @test "traffic_proxy: default es nginx cuando no está configurado" {
