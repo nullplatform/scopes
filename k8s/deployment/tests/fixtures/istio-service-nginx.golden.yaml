@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-scope-123-deploy-456
+  namespace: ns-test
+  labels:
+    name: d-scope-123-deploy-456
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: scopeslug
+    app.kubernetes.io/name: scopeslug
+  annotations:
+spec:
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 80
+  selector:
+    nullplatform: "true"
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster

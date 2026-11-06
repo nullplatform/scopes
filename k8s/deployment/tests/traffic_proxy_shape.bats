@@ -1,31 +1,16 @@
 #!/usr/bin/env bats
-# =============================================================================
-# Tests estructurales + de render del flag traffic_proxy en el template del
-# deployment.
-#
-# La parte estructural es grep-based sobre el template, en la línea de
-# traffic_manager_port_shape.bats. La parte de render usa gomplate de verdad
-# contra el template, en la línea de grpc_port_shape.bats — necesaria porque
-# ningún test grep-based puede confirmar qué contenedor queda de pie ni a qué
-# puerto apuntan sus probes una vez que el template decide, en base al flag,
-# qué se renderiza.
-# =============================================================================
 
 setup() {
   export PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   source "$PROJECT_ROOT/testing/assertions.sh"
   export DEPLOYMENT="$PROJECT_ROOT/k8s/deployment/templates/deployment.yaml.tpl"
+  export SERVICE="$PROJECT_ROOT/k8s/deployment/templates/service.yaml.tpl"
+  export ISTIO_SERVICE="$PROJECT_ROOT/k8s/deployment/templates/istio/service.yaml.tpl"
   export GOLDEN_NGINX="$BATS_TEST_DIRNAME/fixtures/deployment-nginx.golden.yaml"
+  export GOLDEN_SERVICE_NGINX="$BATS_TEST_DIRNAME/fixtures/service-nginx.golden.yaml"
+  export GOLDEN_ISTIO_SERVICE_NGINX="$BATS_TEST_DIRNAME/fixtures/istio-service-nginx.golden.yaml"
 }
 
-# -----------------------------------------------------------------------------
-# Helpers estructurales
-# -----------------------------------------------------------------------------
-
-# Imprime la línea del {{- end }} que cierra el guard que arranca en la línea
-# $1, contando la profundidad de if/range anidados. Un simple "primer {{- end
-# }} después del guard" encuentra el end de un if anidado (p.ej. el de
-# traffic_manager_config_map) en vez del que realmente cierra el guard.
 find_guard_end() {
   local start="$1"
   awk -v start="$start" '
@@ -40,13 +25,6 @@ find_guard_end() {
   ' "$DEPLOYMENT"
 }
 
-# Imprime "if_line else_line end_line" del primer bloque {{- if }}/{{- else
-# }}/{{- end }} que aparece después de la primera línea que matchea $1.
-# Asume que ese bloque puntual no tiene ifs anidados propios (cierto para los
-# dos guards de drenaje: el preStop de application y terminationGracePeriod-
-# Seconds — cada uno es un if/else/end simple). Sirve para no repetir el
-# error de "el primer valor de cada tipo en el archivo, sea cual sea su
-# bloque", que es lo que hacía pasar estos tests por casualidad de orden.
 block_after() {
   local anchor="$1"
   local anchor_line if_line else_line end_line rel
@@ -65,22 +43,12 @@ block_after() {
   echo "$if_line $else_line $end_line"
 }
 
-# Primer número que matchea $3 (regex) dentro de las líneas [$1, $2] del
-# template. Acotar el rango al bloque real (via block_after) es lo que hace
-# que esto identifique el valor de una rama específica en vez de "el primero
-# que aparece en el archivo".
 value_between() {
   local from="$1" to="$2" pattern="$3"
   sed -n "${from},${to}p" "$DEPLOYMENT" | grep -oE "$pattern" | head -1 | grep -oE '[0-9]+'
 }
 
-# -----------------------------------------------------------------------------
-# Estructurales — condicionamiento de contenedores
-# -----------------------------------------------------------------------------
-
 @test "el contenedor http está condicionado al flag" {
-  # El contenedor http tiene que caer realmente dentro del rango que abarca
-  # el guard, no solo aparecer en alguna línea posterior del archivo.
   guard_line=$(grep -n 'ne .traffic_proxy "istio"' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   [ -n "$guard_line" ]
   guard_end=$(find_guard_end "$guard_line")
@@ -92,7 +60,6 @@ value_between() {
 }
 
 @test "los contenedores grpc también están condicionados" {
-  # Usan la misma imagen del traffic-manager: sin sidecar tampoco van.
   guard_line=$(grep -n 'ne .traffic_proxy "istio"' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   guard_end=$(find_guard_end "$guard_line")
   grpc_line=$(grep -n 'name: grpc-{{ .port }}' "$DEPLOYMENT" | head -1 | cut -d: -f1)
@@ -102,9 +69,6 @@ value_between() {
 }
 
 @test "el contenedor de la aplicación no está condicionado al flag" {
-  # Guarda contra un if mal cerrado que se lleve puesta la app: comprueba que
-  # 'name: application' cae fuera del rango que abarca el guard, no solo que
-  # la cadena aparezca en algún lado del archivo.
   guard_line=$(grep -n 'ne .traffic_proxy "istio"' "$DEPLOYMENT" | head -1 | cut -d: -f1)
   guard_end=$(find_guard_end "$guard_line")
   [ -n "$guard_end" ]
@@ -114,18 +78,9 @@ value_between() {
 }
 
 @test "con nginx sobreviven las tres probes TCP del sidecar (traffic_port)" {
-  # Cobertura acotada: solo pin-ea que las tres llamadas a probe.tcp del
-  # sidecar principal siguen usando main_traffic_manager_port. La garantía
-  # amplia de "el render nginx no cambió" la da el test de golden fixture de
-  # más abajo.
   count=$(grep -cF '"traffic_port" .main_traffic_manager_port' "$DEPLOYMENT")
   [ "$count" -eq 3 ]
 }
-
-# -----------------------------------------------------------------------------
-# Estructurales — drenaje (preStop / terminationGracePeriodSeconds), ancladas
-# al bloque real de cada rama, no al orden en que aparecen en el archivo.
-# -----------------------------------------------------------------------------
 
 @test "drenaje istio: preStop 15s y terminationGracePeriodSeconds 45s, con margen" {
   read -r if_l else_l end_l <<< "$(block_after 'preStop:')"
@@ -138,9 +93,6 @@ value_between() {
 
   [ "$istio_sleep" -eq 15 ]
   [ "$istio_grace" -eq 45 ]
-  # Margen real, no un < a secas: un preStop de 44s contra un grace de 45s
-  # pasaría un chequeo de "<" pero deja a kubelet un segundo de margen para
-  # matar el pod en medio del drenaje.
   margin=$((istio_grace - istio_sleep))
   [ "$margin" -ge 10 ]
 }
@@ -158,14 +110,6 @@ value_between() {
   [ "$margin" -ge 10 ]
 }
 
-# -----------------------------------------------------------------------------
-# Render — gomplate real, en la línea de grpc_port_shape.bats. Necesario
-# porque nada grep-based puede confirmar qué queda parado en el pod ni a qué
-# puerto apuntan sus probes una vez resuelto el condicional.
-# -----------------------------------------------------------------------------
-
-# $1: valor de traffic_proxy a inyectar en el contexto, o "" para omitir la
-# clave por completo (ejercita el default cuando el caller no la setea).
 _context() {
   local traffic_proxy_field=""
   if [ -n "${1:-}" ]; then
@@ -240,27 +184,16 @@ _render() {
   [ "$status" -eq 0 ]
   app=$(echo "$output" | awk '/- name: application/,0')
 
-  # Nada en el contenedor application debe apuntar al puerto 80 (main_traffic_
-  # manager_port): sin sidecar, ese puerto no lo escucha nadie y el pod
-  # quedaría permanentemente unready. "8080" no debe confundirse con "80".
   if echo "$app" | grep -qE '(port|containerPort): 80($|[^0-9])'; then
     echo "application probe/port still points at the departed sidecar's port 80"
     return 1
   fi
 
-  # Las tres probes (liveness/readiness/startup) sí deben apuntar al puerto
-  # real de la app.
   count=$(echo "$app" | grep -cE '^ *port: 8080$')
   [ "$count" -eq 3 ]
 }
 
 @test "render nginx: el golden fixture no cambió" {
-  # La garantía "el camino nginx no cambió" no puede vivir solo en un paso
-  # manual (diff a mano contra HEAD~1); institucionalizada acá, cualquier
-  # cambio futuro al render nginx —a propósito o no— tiene que tocar este
-  # fixture a mano para que el test pase, lo cual es la señal que se busca:
-  # los dos caminos conviven indefinidamente y el nginx no debe moverse salvo
-  # decisión explícita.
   local ctx="$BATS_TEST_TMPDIR/golden-ctx.json"
   cat > "$ctx" <<'CTXEOF'
 {
@@ -313,4 +246,81 @@ CTXEOF
   run gomplate -c .="$ctx" -f "$DEPLOYMENT"
   [ "$status" -eq 0 ]
   diff <(echo "$output") "$GOLDEN_NGINX"
+}
+
+_service_context() {
+  local traffic_proxy_field=""
+  if [ -n "${1:-}" ]; then
+    traffic_proxy_field="  \"traffic_proxy\": \"$1\","
+  fi
+  cat <<CTXEOF
+{
+$traffic_proxy_field
+  "account": {"id": "acc1", "slug": "acct"},
+  "namespace": {"id": "ns1", "slug": "nsps"},
+  "application": {"id": "app1", "slug": "appslug"},
+  "scope": {
+    "id": "scope-123",
+    "slug": "scopeslug",
+    "capabilities": {
+      "additional_ports": [
+        {"port": 9090, "type": "GRPC", "traffic_manager_port": 19090},
+        {"port": 9091, "type": "HTTP", "traffic_manager_port": 19091}
+      ],
+      "health_check": {"path": "/health", "timeout_seconds": 1, "period_seconds": 5}
+    }
+  },
+  "deployment": {"id": "deploy-456"},
+  "k8s_namespace": "ns-test",
+  "k8s_modifiers": {},
+  "main_http_port": 8080,
+  "main_traffic_manager_port": 80,
+  "component": "app"
+}
+CTXEOF
+}
+
+_render_service() {
+  local tpl="$1" traffic_proxy="$2"
+  local ctx="$BATS_TEST_TMPDIR/svc-ctx.json"
+  _service_context "$traffic_proxy" > "$ctx"
+  gomplate -c .="$ctx" -f "$tpl"
+}
+
+@test "render default service (nginx): el golden fixture no cambió" {
+  run _render_service "$SERVICE" nginx
+  [ "$status" -eq 0 ]
+  diff <(echo "$output") "$GOLDEN_SERVICE_NGINX"
+}
+
+@test "render default service (sin flag): igual al golden de nginx" {
+  run _render_service "$SERVICE" ""
+  [ "$status" -eq 0 ]
+  diff <(echo "$output") "$GOLDEN_SERVICE_NGINX"
+}
+
+@test "render istio service (nginx): el golden fixture no cambió" {
+  run _render_service "$ISTIO_SERVICE" nginx
+  [ "$status" -eq 0 ]
+  diff <(echo "$output") "$GOLDEN_ISTIO_SERVICE_NGINX"
+}
+
+@test "render istio service (sin flag): igual al golden de nginx" {
+  run _render_service "$ISTIO_SERVICE" ""
+  [ "$status" -eq 0 ]
+  diff <(echo "$output") "$GOLDEN_ISTIO_SERVICE_NGINX"
+}
+
+@test "render default service (istio): todos los targetPort apuntan a la aplicación" {
+  run _render_service "$SERVICE" istio
+  [ "$status" -eq 0 ]
+  target_ports=$(echo "$output" | grep -oE 'targetPort: [0-9]+' | cut -d' ' -f2 | sort -n | tr '\n' ' ')
+  [ "$target_ports" = "8080 9090 9091 " ]
+}
+
+@test "render istio service (istio): el targetPort apunta a la aplicación" {
+  run _render_service "$ISTIO_SERVICE" istio
+  [ "$status" -eq 0 ]
+  target_ports=$(echo "$output" | grep -oE 'targetPort: [0-9]+' | cut -d' ' -f2 | tr '\n' ' ')
+  [ "$target_ports" = "8080 " ]
 }
