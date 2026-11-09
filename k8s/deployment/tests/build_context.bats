@@ -1578,3 +1578,57 @@ EOF
 )
   assert_contains "$output" "$expected"
 }
+
+@test "traffic_proxy: rechaza istio cuando la ingress no es el gateway de Istio (ALB)" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export INITIAL_INGRESS_PATH='$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl'
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "needs the Istio gateway ingress"
+}
+
+@test "traffic_proxy: acepta istio con la ingress HTTPRoute de istio" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export INITIAL_INGRESS_PATH='$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl'
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "istio" ]
+}
+
+@test "traffic_proxy: rechaza istio con puertos adicionales" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export CONTEXT='{"scope":{"capabilities":{"additional_ports":[{"port":9090,"type":"GRPC"}]}}}'
+
+  run resolve_traffic_proxy
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "does not support additional ports"
+}
+
+@test "traffic_proxy: rechaza istio con TRAFFIC_MANAGER_CONFIG_MAP" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=istio
+  export TRAFFIC_MANAGER_CONFIG_MAP=custom-nginx
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "TRAFFIC_MANAGER_CONFIG_MAP 'custom-nginx' is set but TRAFFIC_PROXY is 'istio'"
+}
+
+@test "traffic_proxy: en istio no aplica la colisión del puerto del sidecar con main_http_port" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=istio
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.main_http_port = 80')
+  export MAIN_TRAFFIC_MANAGER_PORT=80
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
