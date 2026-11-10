@@ -120,7 +120,7 @@ the main gateway only. The agent needs `get` on `gateways` in every namespace co
 | **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `deployment.deployment_strategy` |
 | **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Maximum wait time for deployments (seconds) | `deployment.deployment_max_wait_seconds` |
 | **PRESTOP_SLEEP_MODE** | preStop wait before SIGTERM: `exec` (default, `/bin/sleep` in the image) or `native` (kubelet sleep action, works on images without `/bin/sleep`; every node must run Kubernetes >= 1.30) | `deployment.prestop_sleep_mode` |
-| **TRAFFIC_PROXY** | What carries a scope's HTTP traffic and metrics: `nginx` (default, traffic-manager sidecar in every pod) or `istio` (no sidecar; the Istio gateway access log feeds the logs-controller, which needs `ISTIO_ACCESS_LOGS_ENABLED`). Not supported with `GATEWAY_TYPE=aro_cluster` | `deployment.traffic_proxy` |
+| **TRAFFIC_PROXY** | What carries a scope's HTTP traffic and metrics: `nginx` (default, traffic-manager sidecar in every pod) or `istio` (no sidecar; the Istio gateway access log feeds the logs-controller, which needs `ISTIO_ACCESS_LOGS_ENABLED`). Additional ports run without their sidecars and only the main port gates readiness. Not supported with `GATEWAY_TYPE=aro_cluster` | `deployment.traffic_proxy` |
 | **KUBECTL_DELETE_TIMEOUT_SECONDS** | Maximum time a `kubectl delete` waits for the objects to be gone, finalizers included (seconds, default `300`). When it runs out, the deletion is logged as failed instead of hanging the workflow | - |
 
 #### Traffic Manager

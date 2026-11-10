@@ -1601,14 +1601,14 @@ EOF
   [ "$output" = "istio" ]
 }
 
-@test "traffic_proxy: rechaza istio con puertos adicionales" {
+@test "traffic_proxy: acepta istio con puertos adicionales" {
   eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
   export TRAFFIC_PROXY=istio
   export CONTEXT='{"scope":{"capabilities":{"additional_ports":[{"port":9090,"type":"GRPC"}]}}}'
 
   run resolve_traffic_proxy
-  [ "$status" -ne 0 ]
-  assert_contains "$output" "does not support additional ports"
+  [ "$status" -eq 0 ]
+  [ "$output" = "istio" ]
 }
 
 @test "traffic_proxy: rechaza istio con TRAFFIC_MANAGER_CONFIG_MAP" {

@@ -274,3 +274,11 @@ _grace_seconds() {
   pod_labels=$(echo "$output" | awk '/^  template:/,/^    spec:/')
   assert_contains "$pod_labels" 'traffic_proxy: "istio"'
 }
+
+@test "render istio: los puertos adicionales quedan declarados en application, sin sidecar" {
+  run _render istio
+  [ "$status" -eq 0 ]
+  app=$(echo "$output" | awk '/- name: application/,0')
+  echo "$app" | grep -qE '^ *- containerPort: 9090$'
+  ! echo "$output" | grep -qE '^ *- name: grpc-'
+}
