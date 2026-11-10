@@ -205,11 +205,70 @@ if [[ "$IAM_ENABLED" == "true" ]]; then
   SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
 fi
 
+resolve_traffic_proxy() {
+  local value
+  value=$(get_config_value \
+    --env TRAFFIC_PROXY \
+    --provider '.providers["scope-configurations"].deployment.traffic_proxy' \
+    --default "nginx"
+  )
+
+  if [[ "$value" != "nginx" && "$value" != "istio" ]]; then
+    log error "❌ TRAFFIC_PROXY must be 'nginx' or 'istio', got: '$value'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - Typo in the configured value (e.g. 'Istio' or 'envoy')"
+    log error "🔧 How to fix:"
+    log error "   • Set TRAFFIC_PROXY to one of: nginx, istio"
+    log error ""
+    return 1
+  fi
+
+  if [[ "$value" == "istio" && "${GATEWAY_TYPE:-istio}" == "aro_cluster" ]]; then
+    log error "❌ TRAFFIC_PROXY 'istio' is not supported with GATEWAY_TYPE 'aro_cluster'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - ARO scopes receive traffic through OpenShift Routes, not the Istio gateway, so there are no gateway access logs to build HTTP metrics from"
+    log error "🔧 How to fix:"
+    log error "   • Set TRAFFIC_PROXY to nginx for this scope"
+    log error ""
+    return 1
+  fi
+
+  if [[ "$value" == "istio" && -n "${INITIAL_INGRESS_PATH:-}" && "$INITIAL_INGRESS_PATH" != */istio/* ]]; then
+    log error "❌ TRAFFIC_PROXY 'istio' needs the Istio gateway ingress, but this scope uses: $INITIAL_INGRESS_PATH"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - The scope is exposed through a load balancer Ingress (e.g. ALB) that sends traffic straight to the pods, so there are no gateway access logs to build HTTP metrics from"
+    log error "🔧 How to fix:"
+    log error "   • Set TRAFFIC_PROXY to nginx for this scope, or use the istio HTTPRoute ingress templates"
+    log error ""
+    return 1
+  fi
+
+  echo "$value"
+}
+
+TRAFFIC_PROXY=$(resolve_traffic_proxy) || exit 1
+export TRAFFIC_PROXY
+log debug "📋 Traffic proxy: $TRAFFIC_PROXY"
+
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
   --env TRAFFIC_MANAGER_CONFIG_MAP \
   --provider '.providers["scope-configurations"].deployment.traffic_manager_config_map' \
   --default ""
 )
+
+if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" && "$TRAFFIC_PROXY" == "istio" ]]; then
+    log error "❌ TRAFFIC_MANAGER_CONFIG_MAP '$TRAFFIC_MANAGER_CONFIG_MAP' is set but TRAFFIC_PROXY is 'istio'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - The ConfigMap customizes the nginx sidecar, which istio mode removes, so its settings would be silently ignored"
+    log error "🔧 How to fix:"
+    log error "   • Remove TRAFFIC_MANAGER_CONFIG_MAP, or set TRAFFIC_PROXY to nginx for this scope"
+    log error ""
+    exit 1
+fi
 
 if [[ -n "$TRAFFIC_MANAGER_CONFIG_MAP" ]]; then
     log debug "🔍 Validating ConfigMap '$TRAFFIC_MANAGER_CONFIG_MAP' in namespace '$K8S_NAMESPACE'"
@@ -294,7 +353,7 @@ OVERFLOWING_PORT=$(echo "$CONTEXT" | jq -r '
   ] | first // empty
 ')
 
-if [[ -n "$OVERFLOWING_PORT" ]]; then
+if [[ -n "$OVERFLOWING_PORT" && "$TRAFFIC_PROXY" != "istio" ]]; then
     log error "❌ Additional port $OVERFLOWING_PORT is too high: its traffic-manager sidecar would need port $((OVERFLOWING_PORT + 10000))"
     log error ""
     log error "💡 Possible causes:"
@@ -341,7 +400,7 @@ if [[ "$MAIN_TRAFFIC_MANAGER_PORT" -lt 1 ]] || [[ "$MAIN_TRAFFIC_MANAGER_PORT" -
     exit 1
 fi
 
-if [[ "$MAIN_TRAFFIC_MANAGER_PORT" == "$MAIN_HTTP_PORT" ]]; then
+if [[ "$MAIN_TRAFFIC_MANAGER_PORT" == "$MAIN_HTTP_PORT" && "$TRAFFIC_PROXY" != "istio" ]]; then
     log error "❌ MAIN_TRAFFIC_MANAGER_PORT ($MAIN_TRAFFIC_MANAGER_PORT) collides with main_http_port ($MAIN_HTTP_PORT)"
     log error ""
     log error "💡 Possible causes:"
@@ -359,7 +418,7 @@ COLLIDING_ADDITIONAL_PORT=$(echo "$CONTEXT" | jq -r --argjson p "$MAIN_TRAFFIC_M
   ] | first // empty
 ')
 
-if [[ -n "$COLLIDING_ADDITIONAL_PORT" ]]; then
+if [[ -n "$COLLIDING_ADDITIONAL_PORT" && "$TRAFFIC_PROXY" != "istio" ]]; then
     log error "❌ MAIN_TRAFFIC_MANAGER_PORT ($MAIN_TRAFFIC_MANAGER_PORT) collides with additional port $COLLIDING_ADDITIONAL_PORT"
     log error ""
     log error "💡 Possible causes:"
@@ -450,6 +509,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           --arg green_replicas "$GREEN_REPLICAS" \
           --arg total_replicas "$REPLICAS" \
           --arg traffic_image "$TRAFFIC_CONTAINER_IMAGE" \
+          --arg traffic_proxy "$TRAFFIC_PROXY" \
           --argjson pull_secrets "$IMAGE_PULL_SECRETS" \
           --arg pdb_enabled "$PDB_ENABLED" \
           --arg pdb_max_unavailable "$PDB_MAX_UNAVAILABLE" \
@@ -467,6 +527,7 @@ CONTEXT=$(echo "$CONTEXT" | jq \
                 total_replicas: $total_replicas,
                 pull_secrets: $pull_secrets,
                 traffic_image: $traffic_image,
+                traffic_proxy: $traffic_proxy,
                 pdb_enabled: $pdb_enabled,
                 pdb_max_unavailable: $pdb_max_unavailable,
                 service_account_name: $service_account_name,
