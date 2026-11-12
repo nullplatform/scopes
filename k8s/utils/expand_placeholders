@@ -1,0 +1,125 @@
+#!/bin/bash
+
+# Expands ${np.<key>} placeholders in every string VALUE of a JSON document using
+# the scope context (object keys are never expanded). Only the literal "${np."
+# prefix is matched, so Go template syntax used by annotations
+# (e.g. "{{ with secret ... }}") passes through.
+#
+# A placeholder is unresolved when its key is unknown, its value is null or empty,
+# or it is malformed (not "${np.<key>}" with <key> in [a-zA-Z0-9_.-]).
+#
+# Public functions (callers must define `log`):
+#   expand_placeholders <json> <context_json>            strict: prints the expanded JSON, returns 1 on any unresolved placeholder
+#   expand_placeholder_string <string> <context_json>    strict, for a single string
+#   expand_resolvable_placeholders <json> <context_json> tolerant: drops every entry holding an unresolved placeholder, expands the rest
+#   drop_placeholder_entries <json>                      drops every entry holding "${np." (fallback when the context cannot be read)
+#   unresolved_placeholders <json> <context_json>        prints the unresolved placeholders as "np.a, np.b" (malformed tokens verbatim)
+#   unresolved_placeholder_paths <json> <context_json>   prints the paths expand_resolvable_placeholders drops, e.g. deployment.annotations."a/b"
+# A dropped entry is the map key holding the value or, inside a list, the whole list: a list
+# element missing a field (e.g. a toleration without its key) can match more than intended.
+# All of them log an error and return 1 when the document or the context is not valid JSON.
+
+_NP_PLACEHOLDER_JQ_DEFS='
+  def np_tokens: [scan("\\$\\{np\\.[^}]*(?:\\}|\\z)")];
+  def np_key: (capture("\\A\\$\\{np\\.(?<k>[a-zA-Z0-9_.-]+)\\}\\z").k) // null;
+  def np_unresolved($v): np_tokens | map(select(np_key as $k | $k == null or (($v[$k] // "") == "")));
+  def np_label: (np_key | if . == null then null else "np." + . end) // .;
+  def np_path: map(if type == "number" then "[\(.)]"
+                   elif test("\\A[A-Za-z_][A-Za-z0-9_]*\\z") then ".\(.)"
+                   else ".\(tojson)" end) | join("") | ltrimstr(".");
+  def np_cut: (map(type == "number") | index(true)) as $i | if $i == null then . else .[:$i] end;
+  def np_drop_paths(f): [paths(type == "string") as $p | select(getpath($p) | f) | $p | np_cut] | unique;
+  def np_dropped($v): np_drop_paths(np_unresolved($v) | length > 0);
+  def np_expand($v): walk(if type == "string"
+                          then gsub("\\$\\{np\\.(?<k>[a-zA-Z0-9_.-]+)\\}"; $v[.k])
+                          else . end);
+'
+
+# Builds the placeholder -> value map from the scope context. Null or empty values
+# stay null (unresolved). A non-object .scope.dimensions is treated as "no dimensions".
+_np_placeholder_values() {
+  local values
+  if ! values=$(echo "$1" | jq -c '
+    {
+      account_slug: .account.slug,
+      namespace_slug: .namespace.slug,
+      application_slug: .application.slug,
+      repository_name: ((.application.repository_url | if type == "string" then . else "" end)
+                        | sub("\\.git$"; "") | sub("/+$"; "") | (split("/") | last // "")
+                        | (split(":") | last // "")),
+      scope_slug: .scope.slug,
+      scope_id: .scope.id,
+      k8s_namespace: .k8s_namespace
+    } + ((if (.scope.dimensions | type) == "object" then .scope.dimensions else {} end)
+         | with_entries(.key = "dimension.\(.key)"))
+    | map_values(if . == null then null else tostring end | if . == "" then null else . end)' 2>/dev/null); then
+    log error "   ❌ Could not read the scope context to resolve placeholders"
+    return 1
+  fi
+  echo "$values"
+}
+
+# _np_placeholder_jq <json> <values> <filter>: runs a filter with the helper defs.
+_np_placeholder_jq() {
+  local out err
+  if out=$(echo "$1" | jq -c -r --argjson v "$2" "$_NP_PLACEHOLDER_JQ_DEFS $3" 2>/dev/null); then
+    echo "$out"
+    return 0
+  fi
+  if ! echo "$1" | jq empty >/dev/null 2>&1; then
+    log error "   ❌ Could not scan placeholders: the document is not valid JSON"
+  else
+    # Re-run only on failure to name jq's own error (e.g. a jq without the regex features used).
+    err=$(echo "$1" | jq -c -r --argjson v "$2" "$_NP_PLACEHOLDER_JQ_DEFS $3" 2>&1 >/dev/null | head -n 1) || true
+    log error "   ❌ Could not scan placeholders: ${err:-jq failed}"
+  fi
+  return 1
+}
+
+drop_placeholder_entries() {
+  _np_placeholder_jq "$1" '{}' 'delpaths(np_drop_paths(contains("${np.")))'
+}
+
+unresolved_placeholders() {
+  local values
+  values=$(_np_placeholder_values "$2") || return 1
+  _np_placeholder_jq "$1" "$values" \
+    '[.. | strings | np_unresolved($v)[] | np_label] | unique | join(", ")'
+}
+
+unresolved_placeholder_paths() {
+  local values
+  values=$(_np_placeholder_values "$2") || return 1
+  _np_placeholder_jq "$1" "$values" '[np_dropped($v)[] | np_path] | join(", ")'
+}
+
+expand_resolvable_placeholders() {
+  local values
+  values=$(_np_placeholder_values "$2") || return 1
+  _np_placeholder_jq "$1" "$values" 'delpaths(np_dropped($v)) | np_expand($v)'
+}
+
+expand_placeholders() {
+  local input="$1" values unknown supported
+  values=$(_np_placeholder_values "$2") || return 1
+  unknown=$(unresolved_placeholders "$input" "$2") || return 1
+  if [ -n "$unknown" ]; then
+    supported=$(echo "$values" | jq -r '[keys_unsorted[] | select(startswith("dimension.") | not) | "${np.\(.)}"] + ["${np.dimension.<key>}"] | join(" ")')
+    log error "   ❌ Unknown or unresolved placeholder(s): $unknown"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   A typo in the placeholder, a malformed one, a dimension the scope does not have, or an empty value"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Supported: $supported"
+    log error "   • Scope dimensions: $(echo "$2" | jq -r '(if (.scope.dimensions | type) == "object" then .scope.dimensions else {} end) | keys | join(", ")')"
+    return 1
+  fi
+  _np_placeholder_jq "$input" "$values" 'np_expand($v)'
+}
+
+expand_placeholder_string() {
+  local out
+  out=$(expand_placeholders "$(jq -n --arg s "$1" '{s: $s}')" "$2") || return 1
+  jq -r .s <<<"$out"
+}

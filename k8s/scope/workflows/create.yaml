@@ -48,6 +48,9 @@ steps:
       key: create-namespace
       title: Create namespace
       optional: true
+    configuration:
+      # Strict: an unresolved ${np.*} placeholder or invalid object_modifiers / ServiceAccount config fails here.
+      STRICT_PLACEHOLDERS: true
     output:
       - name: CONTEXT
         type: environment

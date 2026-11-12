@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Add a per-scope Kubernetes ServiceAccount without IAM: `security.service_account_enabled` / `security.service_account_name` run the pods with a dedicated ServiceAccount created and owned by the scope (an existing unlabeled one is used as-is; one owned by another scope fails the workflow). It is mutually exclusive with IAM (the `IAM` env var or `security.iam_enabled`): enabling both fails scope create/update and deployments, while other actions warn and keep the IAM ServiceAccount
+- Add `${np.*}` placeholders such as `${np.application_slug}` or `${np.dimension.environment}` in `object_modifiers` and the ServiceAccount name. An unresolved placeholder fails only scope create/update and deployment initial/blue-green; other actions drop the affected entries with a warning. Non-string values under `annotations`, `labels` and `nodeselector` follow the same rule, and the nested copy the API stores for dotted keys is dropped
 - k8s, azure, azure-aro and onprem scopes default to `internal` visibility (was `public`); set `template_env_vars = { DEFAULT_VISIBILITY = "public" }` in `scope_definition` to keep `public`
 - k8s, azure, azure-aro and onprem scopes label the `internal` visibility option "Private" instead of "Main Account". The stored value is still `internal`
 

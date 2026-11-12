@@ -39,6 +39,7 @@ teardown() {
   unset MANIFEST_BACKUP
   unset KUBECTL_DELETE_TIMEOUT_SECONDS
   unset K8S_NAMESPACE
+  unset SKIP_WHEN_EMPTY
   unset -f kubectl
 }
 
@@ -242,6 +243,67 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "❌ KUBECTL_DELETE_TIMEOUT_SECONDS must be a positive integer, got: ''"
+}
+
+# =============================================================================
+# SKIP_WHEN_EMPTY (opt-in): nothing to apply/delete closes the step as skipped
+# =============================================================================
+mock_np_step_skip() {
+  np_step_skip() { echo "np_step_skip: $*"; }
+  export -f np_step_skip
+}
+
+@test "apply_templates: without opt-in, no templates does not skip the step" {
+  mock_np_step_skip
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"np_step_skip"* ]] || false
+}
+
+@test "apply_templates: SKIP_WHEN_EMPTY with no templates closes the step as skipped" {
+  mock_np_step_skip
+  export SKIP_WHEN_EMPTY=true
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "np_step_skip: no manifests to apply"
+}
+
+@test "apply_templates: SKIP_WHEN_EMPTY with only empty templates closes the step as skipped" {
+  mock_np_step_skip
+  export SKIP_WHEN_EMPTY=true
+  export ACTION="delete"
+  touch "$OUTPUT_DIR/empty.yaml"
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "np_step_skip: no manifests to delete"
+}
+
+@test "apply_templates: SKIP_WHEN_EMPTY with a manifest does not skip the step" {
+  mock_np_step_skip
+  export SKIP_WHEN_EMPTY=true
+  echo "apiVersion: v1" > "$OUTPUT_DIR/valid.yaml"
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"np_step_skip"* ]] || false
+}
+
+@test "apply_templates: SKIP_WHEN_EMPTY without np_step_skip defined is silent" {
+  unset -f np_step_skip
+  export SKIP_WHEN_EMPTY=true
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"np_step_skip"* ]] || false
+  [[ "$output" != *"command not found"* ]] || false
 }
 
 # =============================================================================
