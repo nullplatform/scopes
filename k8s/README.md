@@ -173,6 +173,12 @@ AWS IAM configuration for Kubernetes service accounts.
 | **IAM_POLICIES** | List of IAM policies to attach to the role | `security.iam_policies` |
 | **IAM_BOUNDARY_ARN** | ARN of the permissions boundary policy | `security.iam_boundary_arn` |
 
+The `IAM` block in `values.yaml` also accepts:
+
+- `PREFIX` as a pattern rendered by the resource naming engine, e.g. `{.account.slug}-{.namespace.slug}`; the role and its service account are named `<rendered prefix>-<scope id>`. A prefix without `{` is used as is. A scope that already has a service account keeps its name if its role is tagged with the scope id. See `k8s/docs/resource-naming.md`.
+- `MODE`: `irsa` (default) trusts the cluster's OIDC provider and annotates the service account with the role ARN; `pod_identity` trusts EKS Pod Identity and creates a pod identity association for the scope's service account. The cluster needs the EKS Pod Identity Agent, and the agent role needs `eks:CreatePodIdentityAssociation`, `eks:ListPodIdentityAssociations`, `eks:DeletePodIdentityAssociation`, `eks:TagResource` and `iam:PassRole` on `/nullplatform/custom-scopes/`. The mode applies to scopes created after it changes; recreate a scope to move it to the other mode.
+- `TAGS`: additional tags for the role (and the pod identity association). A value with `{` is a pattern rendered by the same engine; any other value is used as is. A key that nullplatform already sets (`scope_id`, `application`, a dimension, …) is rejected.
+
 #### Assuming an IAM role for AWS operations
 
 By default the scope's AWS CLI calls (IAM, ELBv2, Route53, S3, CloudWatch) use

@@ -51,6 +51,11 @@ setup() {
   }
   export -f aws
 
+  kubectl() {
+    return 0
+  }
+  export -f kubectl
+
   # Mock rm
   rm() {
     command rm "$@" 2>/dev/null || true
@@ -60,7 +65,7 @@ setup() {
 
 teardown() {
   rm -rf "$OUTPUT_DIR" 2>/dev/null || true
-  unset -f aws rm 2>/dev/null || true
+  unset -f aws kubectl rm 2>/dev/null || true
 }
 
 # =============================================================================
@@ -416,4 +421,248 @@ teardown() {
   assert_contains "$output" "🔍 Getting AWS account ID..."
   assert_contains "$output" "📝 Creating IAM role: test-prefix-test-scope-123"
   assert_contains "$output" "✅ IAM role created successfully"
+}
+
+recording_aws() {
+  export AWS_LOG="$OUTPUT_DIR/aws.log"
+  export TRUST_POLICY_COPY="$OUTPUT_DIR/trust-policy-copy.json"
+  aws() {
+    echo "$*" >> "$AWS_LOG"
+    local previous="" arg
+    for arg in "$@"; do
+      if [ "$previous" = "--assume-role-policy-document" ]; then
+        command cp "${arg#file://}" "$TRUST_POLICY_COPY"
+      fi
+      previous="$arg"
+    done
+    case "$*" in
+      *"eks describe-cluster"*"cluster.identity.oidc.issuer"*)
+        echo "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF1234567890" ;;
+      *"eks describe-cluster"*"cluster.arn"*)
+        echo "arn:aws:eks:us-east-1:123456789012:cluster/test-cluster" ;;
+      *"sts get-caller-identity"*)
+        echo "123456789012" ;;
+      *"iam create-role"*)
+        echo '{"Role": {"Arn": "arn:aws:iam::123456789012:role/nullplatform/custom-scopes/test-prefix-test-scope-123"}}' ;;
+      *"eks create-pod-identity-association"*)
+        echo '{"association": {"associationId": "a-abc123"}}' ;;
+      *)
+        return 0 ;;
+    esac
+  }
+  export -f aws
+}
+
+@test "create_role: a pattern prefix names the role and the trusted service account from the context" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "{.account.slug}-{.namespace.slug}", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📝 Creating IAM role: test-account-test-namespace-test-scope-123"
+  assert_contains "$(cat "$AWS_LOG")" "--role-name test-account-test-namespace-test-scope-123"
+  assert_equal "$(jq -r '.Statement[0].Condition.StringEquals["oidc.eks.us-east-1.amazonaws.com/id/ABCDEF1234567890:sub"]' "$TRUST_POLICY_COPY")" \
+    "system:serviceaccount:test-ns:test-account-test-namespace-test-scope-123"
+}
+
+@test "create_role: a prefix that cannot be rendered fails before creating the role" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "{.account.slug | ascii}", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
+  if grep -q "iam create-role" "$AWS_LOG" 2>/dev/null; then created="true"; else created="false"; fi
+  assert_false "$created" "role created"
+}
+
+@test "create_role: additional tags are added to the role, rendering the patterned ones" {
+  recording_aws
+  export IAM='{
+    "ENABLED": "true",
+    "PREFIX": "test-prefix",
+    "TAGS": {"team": "{.namespace.slug}", "owner": "{.account.slug}-{.application.slug}", "CostCenter": "CC 1234/Payments"},
+    "ROLE": {"POLICIES": []}
+  }'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Adding tag: team=test-namespace"
+  assert_contains "$output" "📋 Adding tag: owner=test-account-test-app"
+  assert_contains "$output" "📋 Adding tag: CostCenter=CC 1234/Payments"
+  create_call="$(grep "iam create-role" "$AWS_LOG")"
+  assert_contains "$create_call" "Key=team,Value=test-namespace"
+  assert_contains "$create_call" "Key=owner,Value=test-account-test-app"
+  assert_contains "$create_call" "Key=CostCenter,Value=CC 1234/Payments"
+  assert_contains "$create_call" "Key=nullplatform,Value=true"
+}
+
+@test "create_role: an additional tag that redefines a nullplatform tag fails" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "TAGS": {"scope_id": "mine"}, "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Tag 'scope_id' in IAM.TAGS is already set by nullplatform"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Rename or remove 'scope_id' from IAM.TAGS"
+}
+
+@test "create_role: an additional tag with characters AWS rejects fails" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "TAGS": {"owners": "alice,bob"}, "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Tag 'owners' in IAM.TAGS has an invalid key or value 'alice,bob'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Use letters, digits, spaces and _ . : / = + - @ (keys up to 128 characters, values up to 256), and do not start a key with aws:"
+}
+
+@test "create_role: an additional tag whose pattern cannot be rendered fails" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "TAGS": {"team": "{.namespace.missing}"}, "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Naming path {.namespace.missing} resolves to an empty value"
+  assert_contains "$output" "❌ Could not render tag 'team' from pattern '{.namespace.missing}'"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Fix IAM.TAGS; see k8s/docs/resource-naming.md"
+}
+
+@test "create_role: an unknown IAM mode fails before creating anything" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Invalid IAM mode ''"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Set IAM.MODE to irsa or pod_identity, or remove it to use irsa"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}
+
+@test "create_role: pod_identity trusts the EKS Pod Identity service for this cluster and skips OIDC" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "pod_identity", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "🔍 Getting EKS cluster ARN for cluster: test-cluster"
+  if grep -q "cluster.identity.oidc.issuer" "$AWS_LOG"; then oidc="true"; else oidc="false"; fi
+  assert_false "$oidc" "OIDC issuer requested"
+  assert_equal "$(jq -r '.Statement[0].Principal.Service' "$TRUST_POLICY_COPY")" "pods.eks.amazonaws.com"
+  assert_equal "$(jq -c '.Statement[0].Action' "$TRUST_POLICY_COPY")" '["sts:AssumeRole","sts:TagSession"]'
+  assert_equal "$(jq -r '.Statement[0].Condition.StringEquals["aws:SourceAccount"]' "$TRUST_POLICY_COPY")" "123456789012"
+  assert_equal "$(jq -r '.Statement[0].Condition.ArnEquals["aws:SourceArn"]' "$TRUST_POLICY_COPY")" "arn:aws:eks:us-east-1:123456789012:cluster/test-cluster"
+}
+
+@test "create_role: pod_identity associates the role with the scope service account, with the role tags" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "pod_identity", "TAGS": {"team": "{.namespace.slug}"}, "ROLE": {"POLICIES": [{"TYPE": "arn", "VALUE": "arn:aws:iam::aws:policy/ReadOnlyAccess"}]}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📝 Creating pod identity association for service account: test-ns/test-prefix-test-scope-123"
+  assert_contains "$output" "✅ Pod identity association created successfully"
+  association_call="$(grep "eks create-pod-identity-association" "$AWS_LOG")"
+  assert_contains "$association_call" "--cluster-name test-cluster"
+  assert_contains "$association_call" "--namespace test-ns"
+  assert_contains "$association_call" "--service-account test-prefix-test-scope-123"
+  assert_contains "$association_call" "--role-arn arn:aws:iam::123456789012:role/nullplatform/custom-scopes/test-prefix-test-scope-123"
+  assert_contains "$association_call" '"team":"test-namespace"'
+  assert_contains "$association_call" '"scope_id":"scope-1"'
+  attach_line=$(grep -n "iam attach-role-policy" "$AWS_LOG" | cut -d: -f1)
+  association_line=$(grep -n "eks create-pod-identity-association" "$AWS_LOG" | cut -d: -f1)
+  [ "$attach_line" -lt "$association_line" ]
+}
+
+@test "create_role: irsa does not create a pod identity association" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "irsa", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  if grep -q "pod-identity-association" "$AWS_LOG"; then associated="true"; else associated="false"; fi
+  assert_false "$associated" "pod identity association created"
+}
+
+@test "create_role: pod_identity cluster lookup failure shows error with hints" {
+  recording_aws
+  aws() {
+    case "$*" in
+      *"eks describe-cluster"*)
+        echo "An error occurred (ResourceNotFoundException)" >&2
+        return 1 ;;
+    esac
+  }
+  export -f aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "pod_identity", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to get the ARN of EKS cluster 'test-cluster': An error occurred (ResourceNotFoundException)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The cluster name may be wrong or the agent lacks eks:DescribeCluster"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Verify the cluster exists: aws eks describe-cluster --name test-cluster"
+}
+
+@test "create_role: pod_identity association failure shows error with hints" {
+  recording_aws
+  aws() {
+    case "$*" in
+      *"eks describe-cluster"*) echo "arn:aws:eks:us-east-1:123456789012:cluster/test-cluster" ;;
+      *"sts get-caller-identity"*) echo "123456789012" ;;
+      *"iam create-role"*) echo '{"Role": {"Arn": "arn:aws:iam::123456789012:role/test-prefix-test-scope-123"}}' ;;
+      *"eks create-pod-identity-association"*)
+        echo "An error occurred (AccessDeniedException)" >&2
+        return 1 ;;
+    esac
+  }
+  export -f aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "pod_identity", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to create pod identity association for 'test-ns/test-prefix-test-scope-123': An error occurred (AccessDeniedException)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The association may already exist or the agent lacks eks:CreatePodIdentityAssociation or iam:PassRole"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Check existing associations: aws eks list-pod-identity-associations --cluster-name test-cluster --namespace test-ns"
+  assert_contains "$output" "• Verify the agent role can pass roles under /nullplatform/custom-scopes/"
+}
+
+@test "create_role: an additional tag that redefines a nullplatform tag in another case fails" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "TAGS": {"Scope": "mine"}, "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Tag 'Scope' in IAM.TAGS is already set by nullplatform"
+}
+
+@test "create_role: an additional tag with the reserved aws: prefix fails" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "TAGS": {"AWS:owner": "me"}, "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Tag 'AWS:owner' in IAM.TAGS has an invalid key or value 'me'"
+  assert_contains "$output" "• Use letters, digits, spaces and _ . : / = + - @ (keys up to 128 characters, values up to 256), and do not start a key with aws:"
 }

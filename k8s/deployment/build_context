@@ -202,7 +202,11 @@ IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 SERVICE_ACCOUNT_NAME=""
 
 if [[ "$IAM_ENABLED" == "true" ]]; then
-  SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+  if ! type -t resolve_iam_role_name >/dev/null 2>&1; then
+    source "$SERVICE_PATH/utils/resolve_iam_role_name"
+  fi
+  resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$K8S_NAMESPACE" || exit 1
+  SERVICE_ACCOUNT_NAME="$IAM_ROLE_NAME"
 fi
 
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \

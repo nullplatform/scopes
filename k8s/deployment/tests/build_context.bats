@@ -1506,3 +1506,44 @@ EOF
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ PRESTOP_SLEEP_MODE must be native or exec, got: 'auto'"
 }
+
+@test "service account: a patterned IAM prefix is rendered by the naming engine" {
+  local test_script="$BATS_TEST_TMPDIR/test_iam_prefix.sh"
+
+  cat > "$test_script" << 'SCRIPT'
+#!/bin/bash
+export SERVICE_PATH="$1"
+export SERVICE_ACTION="start-initial"
+export K8S_NAMESPACE="test-ns"
+export SCOPE_ID="123"
+export IAM='{"ENABLED":"true","PREFIX":"{.account.slug | ascii}"}'
+export CONTEXT='{
+  "deployment":{"status":"creating","id":"deploy-123"},
+  "scope":{"id":"123","capabilities":{"scaling_type":"fixed","fixed_instances":1}}
+}'
+
+mkdir -p "$SERVICE_PATH/scope"
+cat > "$SERVICE_PATH/scope/build_context" << 'MOCK_SCOPE'
+source "$SERVICE_PATH/utils/get_config_value"
+MOCK_SCOPE
+
+kubectl() {
+  return 0
+}
+export -f kubectl
+
+source "$SERVICE_PATH/deployment/build_context"
+SCRIPT
+  chmod +x "$test_script"
+
+  local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
+  mkdir -p "$mock_service/deployment" "$mock_service/utils" "$mock_service/naming"
+  cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
+  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$PROJECT_ROOT/k8s/utils/resolve_iam_role_name" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/naming/resolve_names" "$mock_service/naming/"
+
+  run "$test_script" "$mock_service"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
+}

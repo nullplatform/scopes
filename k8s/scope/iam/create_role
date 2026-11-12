@@ -12,22 +12,53 @@ if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
   return
 fi
 
-ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
-ROLE_PATH="/nullplatform/custom-scopes/"
-NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
-log debug "🔍 Getting EKS OIDC provider for cluster: $CLUSTER_NAME"
-OIDC_PROVIDER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.identity.oidc.issuer" --output text 2>&1 | sed -e "s/^https:\/\///") || {
-  log error "   ❌ Failed to get OIDC provider for EKS cluster '$CLUSTER_NAME'${OIDC_PROVIDER:+: $OIDC_PROVIDER}"
-  log error ""
-  log error "💡 Possible causes:"
-  log error "   The OIDC provider may not be configured for this EKS cluster"
+IAM_MODE=$(echo "$IAM" | jq -r 'if has("MODE") then .MODE else "irsa" end')
+if [[ "$IAM_MODE" != "irsa" && "$IAM_MODE" != "pod_identity" ]]; then
+  log error "   ❌ Invalid IAM mode '$IAM_MODE'"
   log error ""
   log error "🔧 How to fix:"
-  log error "   • Verify OIDC is enabled: aws eks describe-cluster --name $CLUSTER_NAME --query cluster.identity.oidc"
-  log error "   • Enable OIDC provider: eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve"
+  log error "   • Set IAM.MODE to irsa or pod_identity, or remove it to use irsa"
   log error ""
   exit 1
-}
+fi
+
+if ! type -t resolve_iam_role_name >/dev/null 2>&1; then
+  source "$(dirname "${BASH_SOURCE[0]}")/../../utils/resolve_iam_role_name"
+fi
+
+NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
+resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$NAMESPACE" || exit 1
+ROLE_NAME="$IAM_ROLE_NAME"
+ROLE_PATH="/nullplatform/custom-scopes/"
+
+if [[ "$IAM_MODE" == "irsa" ]]; then
+  log debug "🔍 Getting EKS OIDC provider for cluster: $CLUSTER_NAME"
+  OIDC_PROVIDER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.identity.oidc.issuer" --output text 2>&1 | sed -e "s/^https:\/\///") || {
+    log error "   ❌ Failed to get OIDC provider for EKS cluster '$CLUSTER_NAME'${OIDC_PROVIDER:+: $OIDC_PROVIDER}"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The OIDC provider may not be configured for this EKS cluster"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify OIDC is enabled: aws eks describe-cluster --name $CLUSTER_NAME --query cluster.identity.oidc"
+    log error "   • Enable OIDC provider: eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve"
+    log error ""
+    exit 1
+  }
+else
+  log debug "🔍 Getting EKS cluster ARN for cluster: $CLUSTER_NAME"
+  CLUSTER_ARN=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.arn" --output text 2>&1) || {
+    log error "   ❌ Failed to get the ARN of EKS cluster '$CLUSTER_NAME'${CLUSTER_ARN:+: $CLUSTER_ARN}"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The cluster name may be wrong or the agent lacks eks:DescribeCluster"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Verify the cluster exists: aws eks describe-cluster --name $CLUSTER_NAME"
+    log error ""
+    exit 1
+  }
+fi
 
 log debug "🔍 Getting AWS account ID..."
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1) || {
@@ -44,6 +75,7 @@ AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1)
 }
 TRUST_POLICY_PATH="$OUTPUT_DIR/trust-policy.json"
 
+if [[ "$IAM_MODE" == "irsa" ]]; then
 cat > "$TRUST_POLICY_PATH" <<EOF
 {
   "Version": "2012-10-17",
@@ -63,6 +95,20 @@ cat > "$TRUST_POLICY_PATH" <<EOF
   ]
 }
 EOF
+else
+  jq -n --arg account "$AWS_ACCOUNT_ID" --arg cluster "$CLUSTER_ARN" '{
+    Version: "2012-10-17",
+    Statement: [{
+      Effect: "Allow",
+      Principal: {Service: "pods.eks.amazonaws.com"},
+      Action: ["sts:AssumeRole", "sts:TagSession"],
+      Condition: {
+        StringEquals: {"aws:SourceAccount": $account},
+        ArnEquals: {"aws:SourceArn": $cluster}
+      }
+    }]
+  }' > "$TRUST_POLICY_PATH"
+fi
 
 BOUNDARY_ARN=$(echo "$IAM" | jq -r .ROLE.BOUNDARY_ARN)
 
@@ -98,6 +144,47 @@ if [[ -n "$DIMENSIONS" && "$DIMENSIONS" != "null" ]]; then
     fi
   done < <(echo "$DIMENSIONS" | jq -r 'keys[]')
 fi
+
+IAM_TAG_CHARSET='^[A-Za-z0-9 _.:/=+@-]*$'
+
+while IFS=$'\t' read -r key template; do
+  value="$template"
+  if [[ "$template" == *"{"* ]]; then
+    value=$(np_name_render 256 "$template") || {
+      log error "   ❌ Could not render tag '$key' from pattern '$template'"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Fix IAM.TAGS; see k8s/docs/resource-naming.md"
+      log error ""
+      exit 1
+    }
+  fi
+
+  key_lower=$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')
+  if [[ -z "$key" || ${#key} -gt 128 || ${#value} -gt 256 || "$key_lower" == aws:* ]] || ! [[ "$key$value" =~ $IAM_TAG_CHARSET ]]; then
+    log error "   ❌ Tag '$key' in IAM.TAGS has an invalid key or value '$value'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Use letters, digits, spaces and _ . : / = + - @ (keys up to 128 characters, values up to 256), and do not start a key with aws:"
+    log error ""
+    exit 1
+  fi
+
+  for tag in "${BASE_TAGS[@]}"; do
+    tag_lower=$(printf '%s' "$tag" | tr '[:upper:]' '[:lower:]')
+    if [[ "$tag_lower" == "key=$key_lower,value="* ]]; then
+      log error "   ❌ Tag '$key' in IAM.TAGS is already set by nullplatform"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Rename or remove '$key' from IAM.TAGS"
+      log error ""
+      exit 1
+    fi
+  done
+
+  log debug "📋 Adding tag: $key=$value"
+  BASE_TAGS+=("Key=$key,Value=$value")
+done < <(echo "$IAM" | jq -r '(.TAGS // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv')
 
 create_role_error() {
   log error "   ❌ Failed to create IAM role '$ROLE_NAME'${CREATE_ROLE_OUT:+: $CREATE_ROLE_OUT}"
@@ -191,3 +278,31 @@ for ((i=0; i<$POLICIES_COUNT; i++)); do
     log warn "⚠️  Unknown policy type: $POLICY_TYPE, skipping"
   fi
 done
+
+if [[ "$IAM_MODE" == "pod_identity" ]]; then
+  ROLE_ARN=$(echo "$CREATE_ROLE_OUT" | jq -r '.Role.Arn')
+  ASSOCIATION_TAGS=$(printf '%s\n' "${BASE_TAGS[@]}" | jq -cRn '[inputs | capture("^Key=(?<key>[^,]*),Value=(?<value>.*)$")] | from_entries')
+
+  log debug "📝 Creating pod identity association for service account: $NAMESPACE/$ROLE_NAME"
+  ASSOCIATION_OUT=$(aws eks create-pod-identity-association \
+    --cluster-name "$CLUSTER_NAME" \
+    --namespace "$NAMESPACE" \
+    --service-account "$ROLE_NAME" \
+    --role-arn "$ROLE_ARN" \
+    --tags "$ASSOCIATION_TAGS" 2>&1) || {
+    log error "   ❌ Failed to create pod identity association for '$NAMESPACE/$ROLE_NAME'${ASSOCIATION_OUT:+: $ASSOCIATION_OUT}"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   The association may already exist or the agent lacks eks:CreatePodIdentityAssociation or iam:PassRole"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Check existing associations: aws eks list-pod-identity-associations --cluster-name $CLUSTER_NAME --namespace $NAMESPACE"
+    log error "   • Verify the agent role can pass roles under $ROLE_PATH"
+    log error ""
+    exit 1
+  }
+  if [[ -n "$ASSOCIATION_OUT" ]]; then
+    echo "$ASSOCIATION_OUT"
+  fi
+  log info "   ✅ Pod identity association created successfully"
+fi
