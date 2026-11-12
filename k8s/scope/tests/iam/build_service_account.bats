@@ -201,3 +201,91 @@ teardown() {
   assert_contains "$output" "• Verify template exists: ls -la /templates/service_account.yaml"
   assert_contains "$output" "• Check the template is a valid Kubernetes ServiceAccount YAML with correct gomplate expressions"
 }
+
+render_real_template() {
+  unset -f gomplate
+  export SERVICE_ACCOUNT_TEMPLATE="$PROJECT_ROOT/k8s/scope/templates/service-account.yaml.tpl"
+  export CONTEXT='{
+    "k8s_namespace": "test-ns",
+    "k8s_modifiers": {},
+    "application": {"id": 42, "slug": "test-app"},
+    "scope": {"id": 123, "slug": "test-scope"},
+    "account": {"id": 20, "slug": "test-account"},
+    "namespace": {"id": 300, "slug": "test-namespace"}
+  }'
+}
+
+@test "build_service_account: a pattern prefix names the service account from the context" {
+  export IAM='{"ENABLED":"true","PREFIX":"{.account.slug}-{.namespace.slug}"}'
+  export CONTEXT='{"k8s_namespace":"test-ns","account":{"slug":"acme"},"namespace":{"slug":"payments"},"scope":{"id":"123"}}'
+  kubectl() { return 0; }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "🔍 Looking for IAM role: acme-payments-test-scope-123"
+}
+
+@test "build_service_account: a pattern prefix keeps the name of the scope's existing service account" {
+  export IAM='{"ENABLED":"true","PREFIX":"{.account.slug}-{.namespace.slug}"}'
+  export CONTEXT='{"k8s_namespace":"test-ns","account":{"slug":"acme"},"namespace":{"slug":"renamed"},"scope":{"id":"123"}}'
+  kubectl() {
+    case "$*" in
+      "get serviceaccounts -n test-ns -l scope_id=test-scope-123"*) printf '%s' "acme-payments-test-scope-123" ;;
+    esac
+  }
+  export -f kubectl
+  aws() {
+    case "$*" in
+      *"iam get-role"*"scope_id"*) echo "test-scope-123" ;;
+      *"iam get-role"*) echo "arn:aws:iam::123456789012:role/acme-payments-test-scope-123" ;;
+    esac
+  }
+  export -f aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "🔍 Looking for IAM role: acme-payments-test-scope-123"
+}
+
+@test "build_service_account: irsa annotates the service account with the role ARN" {
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+  render_real_template
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  assert_equal "$(yq -r '.metadata.annotations["eks.amazonaws.com/role-arn"]' "$rendered")" "arn:aws:iam::123456789012:role/test-prefix-test-scope-123"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "test-prefix-test-scope-123"
+}
+
+@test "build_service_account: pod_identity leaves the service account without the IRSA annotation" {
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"pod_identity"}'
+  render_real_template
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  assert_equal "$(yq -r '.metadata.annotations' "$rendered")" "null"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "test-prefix-test-scope-123"
+  assert_equal "$(yq -r '.metadata.labels.scope_id' "$rendered")" "123"
+}
+
+@test "build_service_account: a prefix that cannot be rendered fails before looking up the role" {
+  export IAM='{"ENABLED":"true","PREFIX":"{.account.slug | ascii}"}'
+  export CONTEXT='{"k8s_namespace":"test-ns","scope":{"id":"123"}}'
+  export AWS_LOG="$OUTPUT_DIR/aws.log"
+  kubectl() { return 0; }
+  aws() { echo "$*" >> "$AWS_LOG"; }
+  export -f kubectl aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}

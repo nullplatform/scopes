@@ -3,6 +3,7 @@
 
 # Build scope and tags env variables
 source "$SERVICE_PATH/scope/build_context"
+source "$SERVICE_PATH/utils/resolve_iam_role_name"
 
 BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq '.scope.current_active_deployment // empty' -r)
 SCALING_TYPE=$(echo "$CONTEXT" | jq -r .scope.capabilities.scaling_type)
@@ -202,7 +203,8 @@ IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 SERVICE_ACCOUNT_NAME=""
 
 if [[ "$IAM_ENABLED" == "true" ]]; then
-  SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+  resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$K8S_NAMESPACE" || exit 1
+  SERVICE_ACCOUNT_NAME="$IAM_ROLE_NAME"
 fi
 
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \

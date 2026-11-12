@@ -313,3 +313,152 @@ teardown() {
   assert_contains "$output" "• Check instance profiles: aws iam list-instance-profiles-for-role --role-name test-prefix-test-scope-123"
   assert_contains "$output" "✅ IAM role deletion completed"
 }
+
+recording_aws() {
+  export AWS_LOG="$(mktemp)"
+  export MOCK_TRUSTED_SERVICE="${1:-None}"
+  export MOCK_ASSOCIATIONS="${2:-}"
+  export CLUSTER_NAME="test-cluster"
+  export CONTEXT='{"k8s_namespace": "test-ns"}'
+  aws() {
+    echo "$*" >> "$AWS_LOG"
+    case "$*" in
+      *"iam get-role"*"Principal.Service"*) echo "$MOCK_TRUSTED_SERVICE" ;;
+      *"iam get-role"*) echo "arn:aws:iam::123456789012:role/$SERVICE_ACCOUNT_NAME" ;;
+      *"eks list-pod-identity-associations"*) echo "$MOCK_ASSOCIATIONS" ;;
+      *"iam list-attached-role-policies"*) echo "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f aws
+}
+
+@test "delete_role: a pattern prefix deletes the role named after the scope's service account" {
+  recording_aws
+  export IAM='{"ENABLED":"true","PREFIX":"{.account.slug}-{.namespace.slug}"}'
+  export SERVICE_ACCOUNT_NAME="acme-payments-test-scope-123"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📝 Deleting IAM role: acme-payments-test-scope-123"
+  assert_contains "$(cat "$AWS_LOG")" "iam delete-role --role-name acme-payments-test-scope-123"
+}
+
+@test "delete_role: a role trusted by EKS Pod Identity has its associations deleted before the role" {
+  recording_aws "pods.eks.amazonaws.com" "a-abc123	a-def456"
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📝 Deleting pod identity associations of service account: test-ns/test-prefix-test-scope-123"
+  assert_contains "$output" "✅ Deleted pod identity association: a-abc123"
+  assert_contains "$output" "✅ Deleted pod identity association: a-def456"
+  log_text="$(cat "$AWS_LOG")"
+  assert_contains "$log_text" "eks list-pod-identity-associations --cluster-name test-cluster --namespace test-ns --service-account test-prefix-test-scope-123"
+  assert_contains "$log_text" "eks delete-pod-identity-association --cluster-name test-cluster --association-id a-abc123"
+  assert_contains "$log_text" "eks delete-pod-identity-association --cluster-name test-cluster --association-id a-def456"
+  association_line=$(grep -n "delete-pod-identity-association" "$AWS_LOG" | tail -1 | cut -d: -f1)
+  role_line=$(grep -n "iam delete-role --role-name" "$AWS_LOG" | cut -d: -f1)
+  [ "$association_line" -lt "$role_line" ]
+}
+
+@test "delete_role: a role trusted by EKS Pod Identity without associations goes on to delete the role" {
+  recording_aws "pods.eks.amazonaws.com" "None"
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  if grep -q "delete-pod-identity-association" "$AWS_LOG"; then deleted="true"; else deleted="false"; fi
+  assert_false "$deleted" "pod identity association deleted"
+  assert_contains "$output" "✅ IAM role deletion completed"
+}
+
+@test "delete_role: an IRSA role never looks for pod identity associations, whatever IAM.MODE says now" {
+  recording_aws "None"
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"pod_identity"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  if grep -q "pod-identity" "$AWS_LOG"; then looked="true"; else looked="false"; fi
+  assert_false "$looked" "pod identity associations looked up"
+}
+
+@test "delete_role: failing to list pod identity associations stops before deleting the role" {
+  recording_aws "pods.eks.amazonaws.com"
+  aws() {
+    echo "$*" >> "$AWS_LOG"
+    case "$*" in
+      *"iam get-role"*"Principal.Service"*) echo "pods.eks.amazonaws.com" ;;
+      *"iam get-role"*) echo "arn:aws:iam::123456789012:role/test-prefix-test-scope-123" ;;
+      *"eks list-pod-identity-associations"*) echo "An error occurred (AccessDeniedException)" >&2; return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f aws
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to list pod identity associations of 'test-ns/test-prefix-test-scope-123': An error occurred (AccessDeniedException)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The agent lacks eks:ListPodIdentityAssociations or eks:DeletePodIdentityAssociation"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Check the associations: aws eks list-pod-identity-associations --cluster-name test-cluster --namespace test-ns"
+  if grep -q "iam delete-role --role-name" "$AWS_LOG"; then deleted="true"; else deleted="false"; fi
+  assert_false "$deleted" "role deleted"
+}
+
+@test "delete_role: failing to delete a pod identity association stops before deleting the role" {
+  recording_aws "pods.eks.amazonaws.com"
+  aws() {
+    echo "$*" >> "$AWS_LOG"
+    case "$*" in
+      *"iam get-role"*"Principal.Service"*) echo "pods.eks.amazonaws.com" ;;
+      *"iam get-role"*) echo "arn:aws:iam::123456789012:role/test-prefix-test-scope-123" ;;
+      *"eks list-pod-identity-associations"*) echo "a-abc123" ;;
+      *"eks delete-pod-identity-association"*) echo "An error occurred (AccessDeniedException)" >&2; return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f aws
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to delete pod identity association 'a-abc123': An error occurred (AccessDeniedException)"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "The agent lacks eks:ListPodIdentityAssociations or eks:DeletePodIdentityAssociation"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Check the associations: aws eks list-pod-identity-associations --cluster-name test-cluster --namespace test-ns"
+  if grep -q "iam delete-role --role-name" "$AWS_LOG"; then deleted="true"; else deleted="false"; fi
+  assert_false "$deleted" "role deleted"
+}
+
+@test "delete_role: failing to read the role trust policy stops before deleting the role" {
+  recording_aws
+  aws() {
+    echo "$*" >> "$AWS_LOG"
+    case "$*" in
+      *"iam get-role"*"Principal.Service"*) echo "An error occurred (AccessDenied)" >&2; return 1 ;;
+      *"iam get-role"*) echo "arn:aws:iam::123456789012:role/test-prefix-test-scope-123" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f aws
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to read the trust policy of IAM role 'test-prefix-test-scope-123': An error occurred (AccessDenied)"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Check IAM permissions for the agent role"
+  if grep -q "iam delete-role --role-name" "$AWS_LOG"; then deleted="true"; else deleted="false"; fi
+  assert_false "$deleted" "role deleted"
+}

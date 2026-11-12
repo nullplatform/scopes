@@ -31,7 +31,51 @@ ROLE_ARN=$(aws iam get-role --role-name "$SERVICE_ACCOUNT_NAME" --query 'Role.Ar
   exit 1
 }
 
-ROLE_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+ROLE_NAME="$SERVICE_ACCOUNT_NAME"
+
+pod_identity_association_error() {
+  log error "   ❌ $1"
+  log error ""
+  log error "💡 Possible causes:"
+  log error "   The agent lacks eks:ListPodIdentityAssociations or eks:DeletePodIdentityAssociation"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Check the associations: aws eks list-pod-identity-associations --cluster-name $CLUSTER_NAME --namespace $NAMESPACE"
+  log error ""
+  exit 1
+}
+
+TRUSTED_SERVICES=$(aws iam get-role --role-name "$ROLE_NAME" \
+  --query 'Role.AssumeRolePolicyDocument.Statement[].Principal.Service' --output text 2>&1) || {
+  log error "   ❌ Failed to read the trust policy of IAM role '$ROLE_NAME'${TRUSTED_SERVICES:+: $TRUSTED_SERVICES}"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Check IAM permissions for the agent role"
+  log error ""
+  exit 1
+}
+
+if [[ "$TRUSTED_SERVICES" == *"pods.eks.amazonaws.com"* ]]; then
+  NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
+  log debug "📝 Deleting pod identity associations of service account: $NAMESPACE/$ROLE_NAME"
+  ASSOCIATION_IDS=$(aws eks list-pod-identity-associations \
+    --cluster-name "$CLUSTER_NAME" \
+    --namespace "$NAMESPACE" \
+    --service-account "$ROLE_NAME" \
+    --query 'associations[].associationId' --output text 2>&1) \
+    || pod_identity_association_error "Failed to list pod identity associations of '$NAMESPACE/$ROLE_NAME'${ASSOCIATION_IDS:+: $ASSOCIATION_IDS}"
+
+  for association_id in $ASSOCIATION_IDS; do
+    if [[ "$association_id" == "None" ]]; then
+      continue
+    fi
+    DELETE_ASSOCIATION_OUT=$(aws eks delete-pod-identity-association \
+      --cluster-name "$CLUSTER_NAME" \
+      --association-id "$association_id" 2>&1) \
+      || pod_identity_association_error "Failed to delete pod identity association '$association_id'${DELETE_ASSOCIATION_OUT:+: $DELETE_ASSOCIATION_OUT}"
+    log info "   ✅ Deleted pod identity association: $association_id"
+  done
+fi
 
 log debug "📝 Detaching managed policies..."
 aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[].PolicyArn' --output text | \
