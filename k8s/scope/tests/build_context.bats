@@ -33,7 +33,6 @@ setup() {
 
   # Default values from values.yaml
   export K8S_NAMESPACE="nullplatform"
-  export DOMAIN="nullapps.io"
   export USE_ACCOUNT_SLUG="false"
   export PUBLIC_GATEWAY_NAME="gateway-public"
   export PRIVATE_GATEWAY_NAME="gateway-internal"
@@ -384,6 +383,71 @@ teardown() {
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "Create the namespace manually: kubectl create namespace default-namespace"
   assert_contains "$output" "Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
+}
+
+# =============================================================================
+# Namespace resolution: existing scopes stay, the configured value may be a
+# pattern (cluster.namespace = {.namespace.slug})
+# =============================================================================
+set_configured_namespace() {
+  export CONTEXT=$(echo "$CONTEXT" | jq --arg ns "$1" '.providers["container-orchestration"].cluster.namespace = $ns')
+
+  # Empty cluster: no scope objects, no namespaces yet
+  kubectl() {
+    case "$1 $2" in
+      "get namespace")
+        [ "$#" -gt 3 ] && return 0
+        return 1 ;;
+      get*)
+        return 0 ;;
+      *)
+        echo "kubectl $*" >> "$NP_OUTPUT_DIR/kubectl.log"
+        return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+# Cluster where the scope already has objects in the given namespace
+scope_runs_in() {
+  export SCOPE_NAMESPACE="$1"
+  kubectl() {
+    case "$1 $2" in
+      "get deployments,services,cronjobs,jobs") printf '%s' "$SCOPE_NAMESPACE" ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+}
+
+@test "build_context: a namespace pattern creates the namespace of the nullplatform namespace" {
+  set_configured_namespace "{.namespace.slug}"
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📝 Creating namespace 'test-namespace'..."
+  assert_contains "$output" "k8s_namespace=test-namespace"
+}
+
+@test "build_context: a namespace pattern keeps an existing scope in its namespace" {
+  set_configured_namespace "{.namespace.slug}"
+  scope_runs_in "default-namespace"
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=default-namespace"
+}
+
+@test "build_context: an existing scope stays in its namespace when the configured namespace changes" {
+  set_configured_namespace "new-namespace"
+  scope_runs_in "old-namespace"
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=old-namespace"
 }
 
 # =============================================================================
@@ -1046,4 +1110,26 @@ failing_helpers() {
 
   assert_equal "$INVALID_ADDITIONAL_GATEWAYS" ""
   assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
+}
+
+@test "build_context: public scope without domain_name fails instead of defaulting to nullapps.io" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "public"')
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "No domain configured for scope (visibility: public)"
+  assert_contains "$output" "Set networking.domain_name in scope-configurations or cloud-providers"
+  [[ "$output" != *"nullapps.io"* ]]
+}
+
+@test "build_context: private scope without domain fails instead of defaulting to nullapps.io" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "private"')
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "No domain configured for scope (visibility: private)"
+  assert_contains "$output" "networking.private_domain_name (or networking.domain_name)"
+  [[ "$output" != *"nullapps.io"* ]]
 }

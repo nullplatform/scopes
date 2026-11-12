@@ -945,7 +945,7 @@ setup_full_build_context() {
     "application": {"slug": "test-app"},
     "deployment": {"id": "deploy-123", "status": "creating"},
     "providers": {
-      "cloud-providers": {"account": {"region": "us-east-1"}},
+      "cloud-providers": {"account": {"region": "us-east-1"}, "networking": {"domain_name": "nullapps.io"}},
       "container-orchestration": {
         "cluster": {"namespace": "default-namespace"},
         "gateway": {"public_name": "gw-pub", "private_name": "gw-priv"},

@@ -20,6 +20,11 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-nullplat
 ')
 
 SCOPE_ID=$(echo "$CONTEXT" | jq -r '.scope.id')
+
+# Find the namespace the scope actually runs in, which may differ from the configured one
+source "${SERVICE_PATH:-$(dirname "$0")/../../k8s}/utils/resolve_k8s_namespace"
+resolve_k8s_namespace "$K8S_NAMESPACE" "$SCOPE_ID" || exit 1
+
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
 JOB="job-$SCOPE_ID-$DEPLOYMENT_ID"
 

@@ -2,6 +2,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
+source "$SCRIPT_DIR/../utils/resolve_k8s_namespace"
 
 K8S_NAMESPACE=$(get_config_value \
   --env NAMESPACE_OVERRIDE \
@@ -10,6 +11,10 @@ K8S_NAMESPACE=$(get_config_value \
   --provider '.providers["container-orchestration"].cluster.namespace' \
   --default "nullplatform"
 )
+
+# An existing scope stays where it runs; the configured value may be a pattern
+# such as {.namespace.slug}
+resolve_k8s_namespace "$K8S_NAMESPACE" || exit 1
 
 # General configuration
 DNS_TYPE=$(get_config_value \
@@ -163,18 +168,30 @@ SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     DOMAIN=$(get_config_value \
       --provider '.providers["scope-configurations"].networking.domain_name' \
-      --provider '.providers["cloud-providers"].networking.domain_name' \
-      --default "nullapps.io"
+      --provider '.providers["cloud-providers"].networking.domain_name'
     )
 else
     DOMAIN=$(get_config_value \
       --provider '.providers["scope-configurations"].networking.private_domain_name' \
       --provider '.providers["cloud-providers"].networking.private_domain_name' \
       --provider '.providers["scope-configurations"].networking.domain_name' \
-      --provider '.providers["cloud-providers"].networking.domain_name' \
-      --default "nullapps.io"
+      --provider '.providers["cloud-providers"].networking.domain_name'
     )
 fi
+
+if [ -z "$DOMAIN" ]; then
+  if [ "$SCOPE_VISIBILITY" = "public" ]; then
+    DOMAIN_KEY="networking.domain_name"
+  else
+    DOMAIN_KEY="networking.private_domain_name (or networking.domain_name)"
+  fi
+  log error "❌ No domain configured for scope (visibility: $SCOPE_VISIBILITY)"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set $DOMAIN_KEY in scope-configurations or cloud-providers"
+  exit 1
+fi
+
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
 
 eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "
