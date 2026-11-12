@@ -581,9 +581,10 @@ SCRIPT
   chmod +x "$test_script"
 
   local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
-  mkdir -p "$mock_service/deployment" "$mock_service/utils"
+  mkdir -p "$mock_service/deployment" "$mock_service/utils" "$mock_service/naming"
   cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
-  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$PROJECT_ROOT/k8s/utils/resolve_iam_role_name" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/naming/resolve_names" "$mock_service/naming/"
 
   run "$test_script" "$mock_service"
 
@@ -629,9 +630,10 @@ SCRIPT
   chmod +x "$test_script"
 
   local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
-  mkdir -p "$mock_service/deployment" "$mock_service/utils"
+  mkdir -p "$mock_service/deployment" "$mock_service/utils" "$mock_service/naming"
   cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
-  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$PROJECT_ROOT/k8s/utils/resolve_iam_role_name" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/naming/resolve_names" "$mock_service/naming/"
 
   run "$test_script" "$mock_service"
 

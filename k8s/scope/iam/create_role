@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../utils/resolve_iam_role_name"
 
 IAM=${IAM-"{}"}
 
@@ -20,10 +21,6 @@ if [[ "$IAM_MODE" != "irsa" && "$IAM_MODE" != "pod_identity" ]]; then
   log error "   • Set IAM.MODE to irsa or pod_identity, or remove it to use irsa"
   log error ""
   exit 1
-fi
-
-if ! type -t resolve_iam_role_name >/dev/null 2>&1; then
-  source "$(dirname "${BASH_SOURCE[0]}")/../../utils/resolve_iam_role_name"
 fi
 
 NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
