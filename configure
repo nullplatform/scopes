@@ -145,12 +145,4 @@ start_spinner "Creating the notification channel."
 rm "$NOTIFICATION_CHANNEL_PATH"
 stop_spinner_success "Notification channel created successfully (id=$NOTIFICATION_CHANNEL_ID)."
 
-# --- Step 6: Patch NRN ---
-
-start_spinner "Configuring the NRN to use the external provider for logs and metrics."
-{
-  np nrn patch --nrn "$NRN" --body "{\"global.${SERVICE_SLUG}_metric_provider\": \"externalmetrics\", \"global.${SERVICE_SLUG}_log_provider\": \"external\"}" >/dev/null 2>&1
-} || stop_spinner_error "Failed to patch the NRN with external provider configuration."
-stop_spinner_success "NRN updated to use the external provider."
-
 echo -e "${GREEN}✔${NC} The custom scope setup process completed successfully."
