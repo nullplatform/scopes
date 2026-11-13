@@ -412,6 +412,7 @@ scope_runs_in() {
   kubectl() {
     case "$1 $2" in
       "get deployments,services,cronjobs,jobs") printf '%s' "$SCOPE_NAMESPACE" ;;
+      "get namespace") printf '%s/true' "$3" ;;  # created by nullplatform
       *) return 0 ;;
     esac
   }

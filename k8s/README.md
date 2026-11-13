@@ -47,13 +47,20 @@ placeholders and engine as the resource naming patterns (`docs/resource-naming.m
 
 Each placeholder must point at a single value (`{.scope.dimensions.environment}`, not `{.scope.dimensions}`), fixed
 text goes before the first placeholder or after the last one, and the rendered name must be a valid Kubernetes
-namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE_IF_NOT_EXIST` is true. Nothing is
-copied into it: image pull secrets, the traffic manager ConfigMap or any other object the scopes need there come from a
-workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
+namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE_IF_NOT_EXIST` is true, labeled
+`nullplatform=true`. Nothing is copied into it: image pull secrets, the traffic manager ConfigMap or any other object the
+scopes need there come from a workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
+
+A pattern never renders a namespace a scope must not run in: `default`, `kube-*`, the agent's own namespace, the
+gateway namespace (`GATEWAY_NAMESPACE`) and those of the additional gateways are refused. A rendered namespace that already exists is reused only if it carries
+the label `nullplatform=true`; label one created by hand with `kubectl label namespace <name> nullplatform=true`.
 
 A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`), so changing
 the namespace or its pattern only affects new scopes. Finding them lists deployments, services, cronjobs and jobs in
-every namespace; an agent without that permission falls back to the configured namespace. Kubernetes namespaces are never deleted.
+every namespace; an agent without that permission falls back to the configured namespace. Labels prove nothing (anyone
+who can create an object can set them), so the scope's objects must all be in one namespace, and that namespace must be
+the configured fixed name or carry `nullplatform=true`; otherwise the action fails instead of following the labels.
+After changing a fixed namespace, label the old one so its scopes keep working, `default` included. Kubernetes namespaces are never deleted.
 
 ### Networking
 

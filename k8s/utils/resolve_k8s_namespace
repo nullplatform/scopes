@@ -13,26 +13,90 @@
 # "{.namespace.slug}-{.scope.dimensions.environment}". A Kubernetes namespace
 # name cannot contain "{", so a value without one is used as is.
 #
+# Anyone who can create an object can set its labels, so a namespace other
+# than the configured fixed name is trusted only if it carries
+# nullplatform=true (a rendered one may also not exist yet), and a scope's
+# objects must all be in one namespace. A pattern also never renders a
+# reserved namespace: its input comes from nullplatform, not from the cluster.
+#
 # Usage (source this file, do not run it in a subshell):
 #   resolve_k8s_namespace <configured_namespace> [<scope_id>]
-# Sets K8S_NAMESPACE. Returns 1 when the pattern does not render a valid
-# Kubernetes namespace name.
+# Sets K8S_NAMESPACE. Returns 1 when the namespace cannot be trusted or the
+# pattern does not render a valid Kubernetes namespace name.
 
 _RESOLVE_K8S_NAMESPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 if [[ "$(type -t np_name_render 2>/dev/null)" != "function" ]]; then
   source "$_RESOLVE_K8S_NAMESPACE_DIR/../naming/resolve_names"
 fi
+if [[ "$(type -t get_config_value 2>/dev/null)" != "function" ]]; then
+  source "$_RESOLVE_K8S_NAMESPACE_DIR/get_config_value"
+fi
 
 K8S_NAMESPACE_NAME_BUDGET=63
 K8S_NAMESPACE_NAME_PATTERN='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+K8S_SERVICE_ACCOUNT_NAMESPACE_FILE="${K8S_SERVICE_ACCOUNT_NAMESPACE_FILE:-/var/run/secrets/kubernetes.io/serviceaccount/namespace}"
 
-# Namespace where the scope already has objects: deployments and services, or
-# the cronjobs and jobs of a scheduled_task scope.
-_k8s_namespace_of_scope() {
+# Namespaces where the scope already has objects, one per line: deployments
+# and services, or the cronjobs and jobs of a scheduled_task scope.
+_k8s_namespaces_of_scope() {
   local scope_id="$1"
   [ -n "$scope_id" ] || return 0
   kubectl get deployments,services,cronjobs,jobs -A -l "scope_id=$scope_id" \
-    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u || true
+}
+
+# "<name>/<nullplatform label>" of a namespace, empty when it does not exist.
+# Returns 1 when it cannot be read.
+_k8s_namespace_state() {
+  kubectl get namespace "$1" --ignore-not-found \
+    -o jsonpath='{.metadata.name}/{.metadata.labels.nullplatform}' 2>/dev/null
+}
+
+# Whether a namespace is the configured one, as the caller passed it or as
+# k8s/scope/build_context reads it: read actions only look at the
+# container-orchestration provider.
+_k8s_namespace_is_configured() {
+  local name="$1" configured="$2"
+  [ "$name" = "$configured" ] && return 0
+  [ "$name" = "$(get_config_value \
+    --env NAMESPACE_OVERRIDE \
+    --env K8S_NAMESPACE \
+    --provider '.providers["scope-configurations"].cluster.namespace' \
+    --provider '.providers["container-orchestration"].cluster.namespace' \
+    --default "nullplatform"
+  )" ]
+}
+
+# Namespaces a scope must never run in: the cluster's own, the agent's and the
+# gateways', additional gateways included.
+_k8s_namespace_is_reserved() {
+  local name="$1" agent_namespace gateway_namespace visibility gateways
+
+  case "$name" in default|kube-*) return 0 ;; esac
+
+  if [ -r "$K8S_SERVICE_ACCOUNT_NAMESPACE_FILE" ]; then
+    agent_namespace=$(cat "$K8S_SERVICE_ACCOUNT_NAMESPACE_FILE")
+    [ "$name" = "$agent_namespace" ] && return 0
+  fi
+
+  gateway_namespace=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.gateway_namespace' \
+    --provider '.providers["container-orchestration"].gateway.namespace' \
+    --env GATEWAY_NAMESPACE \
+    --default "gateways"
+  )
+  [ "$name" = "$gateway_namespace" ] && return 0
+
+  for visibility in public private; do
+    gateways=$(get_config_value \
+      --provider ".providers[\"scope-configurations\"].networking.additional_${visibility}_gateways" \
+      --provider ".providers[\"container-orchestration\"].gateway.additional_${visibility}_gateways" \
+      --default "[]"
+    )
+    echo "$gateways" | jq -e --arg name "$name" \
+      'type == "array" and any(.[]; type == "object" and .namespace == $name)' >/dev/null 2>&1 && return 0
+  done
+  return 1
 }
 
 # Namespace of the first pod matching a label selector, across namespaces.
@@ -43,14 +107,36 @@ k8s_namespace_of_pods() {
 }
 
 resolve_k8s_namespace() {
-  local configured="$1" scope_id="${2:-}" name
+  local configured="$1" scope_id="${2:-}" name namespaces state
 
   if [ -z "$scope_id" ]; then
     scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // .tags.scope_id // empty' 2>/dev/null || true)
   fi
-  name=$(_k8s_namespace_of_scope "$scope_id")
-  if [ -n "$name" ]; then
-    export K8S_NAMESPACE="$name"
+  namespaces=$(_k8s_namespaces_of_scope "$scope_id")
+  if [[ "$namespaces" == *$'\n'* ]]; then
+    np_scope_failure ScopeInSeveralNamespaces
+    log error "❌ Scope $scope_id has objects in more than one namespace: ${namespaces//$'\n'/, }"
+    log error "💡 Possible causes:"
+    log error "   Another object in the cluster carries the label scope_id=$scope_id"
+    log error "🔧 How to fix:"
+    log error "   • Find them: kubectl get deployments,services,cronjobs,jobs -A -l scope_id=$scope_id"
+    log error "   • Delete the objects that do not belong to the scope"
+    return 1
+  fi
+  if [ -n "$namespaces" ]; then
+    if ! _k8s_namespace_is_configured "$namespaces" "$configured"; then
+      if [ "$(_k8s_namespace_state "$namespaces")" != "$namespaces/true" ]; then
+        np_scope_failure NamespaceNotManaged
+        log error "❌ Scope $scope_id runs in namespace '$namespaces', which is not managed by nullplatform"
+        log error "💡 Possible causes:"
+        log error "   The namespace is not the configured one and lacks the label nullplatform=true"
+        log error "🔧 How to fix:"
+        log error "   • If the scope belongs there: kubectl label namespace $namespaces nullplatform=true"
+        log error "   • Otherwise delete the objects labeled scope_id=$scope_id in it"
+        return 1
+      fi
+    fi
+    export K8S_NAMESPACE="$namespaces"
     return 0
   fi
 
@@ -69,6 +155,31 @@ resolve_k8s_namespace() {
     log error "🔧 How to fix:"
     log error "   • Point each placeholder at a single value, e.g. {.scope.dimensions.environment}, not {.scope.dimensions}"
     log error "   • Use lowercase letters, digits and hyphens, and do not end the pattern with a hyphen"
+    return 1
+  fi
+
+  if _k8s_namespace_is_reserved "$name"; then
+    np_scope_failure NamespaceReserved
+    log error "❌ Namespace pattern '$configured' renders '$name', a namespace reserved for the cluster, the agent or the gateways"
+    log error "🔧 How to fix:"
+    log error "   • Rename the nullplatform entity the pattern reads, or add fixed text to the pattern, e.g. apps-{.namespace.slug}"
+    return 1
+  fi
+
+  if ! state=$(_k8s_namespace_state "$name"); then
+    log error "❌ Could not read namespace '$name' rendered from pattern '$configured'"
+    log error "🔧 How to fix:"
+    log error "   • Allow the agent to get namespaces"
+    return 1
+  fi
+  if [ -n "$state" ] && [ "$state" != "$name/true" ]; then
+    np_scope_failure NamespaceNotManaged
+    log error "❌ Namespace pattern '$configured' renders '$name', an existing namespace not managed by nullplatform"
+    log error "💡 Possible causes:"
+    log error "   The namespace was created outside nullplatform and lacks the label nullplatform=true"
+    log error "🔧 How to fix:"
+    log error "   • If scopes may run there: kubectl label namespace $name nullplatform=true"
+    log error "   • Otherwise change the pattern so it renders another name"
     return 1
   fi
 
