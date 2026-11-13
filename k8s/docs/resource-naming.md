@@ -91,7 +91,7 @@ cluster.namespace: "{.account.slug}-{.namespace.slug}"                  # acme-p
 cluster.namespace: "{.namespace.slug}-{.scope.dimensions.environment}"  # payments-production
 ```
 
-It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. Every placeholder must resolve to a single value (`{.scope.dimensions}` is an object) and the rendered name must be a valid Kubernetes namespace name. It must not be a reserved namespace (`default`, `kube-*`, the agent's, the gateways'), and an existing one must carry `nullplatform=true`. A scope that already has objects in the cluster keeps their namespace, whatever the configured value says now (`k8s/utils/resolve_k8s_namespace`); see the namespace section of `k8s/README.md`.
+It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. Every placeholder must resolve to a single value (`{.scope.dimensions}` is an object) and the rendered name must be a valid Kubernetes namespace name. It must not be a reserved namespace (`default`, `kube-*`, the agent's, the gateways' including additional gateways), and an existing one must carry `nullplatform=true`. A scope that already has objects in the cluster keeps their namespace, whatever the configured value says now (`k8s/utils/resolve_k8s_namespace`); see the namespace section of `k8s/README.md`.
 
 ## Known limitations
 

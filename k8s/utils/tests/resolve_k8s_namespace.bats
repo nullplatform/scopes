@@ -152,6 +152,36 @@ teardown() {
   assert_contains "$output" "which is not managed by nullplatform"
 }
 
+@test "resolve_k8s_namespace: refuses a reserved namespace even when it carries nullplatform=true" {
+  export MOCK_SCOPE_NS="kube-system"
+  export MOCK_NAMESPACES="kube-system=true"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "runs in namespace 'kube-system', a namespace reserved"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceReserved"
+}
+
+@test "resolve_k8s_namespace: refuses an additional gateway namespace the scope's labels point at" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"name": "edge", "namespace": "edge-gw"}]')
+  export MOCK_SCOPE_NS="edge-gw"
+  export MOCK_NAMESPACES="edge-gw=true"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "runs in namespace 'edge-gw', a namespace reserved"
+}
+
+@test "resolve_k8s_namespace: an existing scope in a configured reserved namespace stays there" {
+  export MOCK_SCOPE_NS="default"
+
+  resolve_k8s_namespace "default"
+
+  assert_equal "$K8S_NAMESPACE" "default"
+}
+
 @test "resolve_k8s_namespace: looks the scope up by the context scope id" {
   resolve_k8s_namespace "nullplatform"
 
@@ -257,6 +287,23 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "a namespace reserved"
+}
+
+@test "resolve_k8s_namespace: rejects the namespace of an additional gateway" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "edge-gw" | .providers["container-orchestration"].gateway.additional_private_gateways = [{"name": "edge", "namespace": "edge-gw"}]')
+
+  run resolve_k8s_namespace "{.namespace.slug}"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "a namespace reserved"
+}
+
+@test "resolve_k8s_namespace: an invalid additional gateways list reserves nothing extra" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = "not-a-list"')
+
+  resolve_k8s_namespace "{.namespace.slug}"
+
+  assert_equal "$K8S_NAMESPACE" "payments"
 }
 
 @test "resolve_k8s_namespace: rejects the agent's namespace" {

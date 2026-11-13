@@ -16,8 +16,8 @@
 # Labels can be set by anyone who can create an object, so neither step trusts
 # a namespace only because something in it carries the scope's labels:
 #   - sticky: the scope's objects must all live in one namespace, and that
-#     namespace must be the configured one (a fixed name) or carry
-#     nullplatform=true
+#     namespace must be the configured one (a fixed name) or a namespace that
+#     is not reserved and carries nullplatform=true
 #   - pattern: the rendered name must not be a reserved namespace (default,
 #     kube-*, the agent's, the gateways'), and an existing namespace must carry
 #     nullplatform=true. A missing one is created with it (k8s/scope/build_context)
@@ -77,9 +77,9 @@ _k8s_namespace_is_configured() {
 }
 
 # Namespaces a scope must never run in: the cluster's own, the agent's and the
-# gateways'.
+# gateways', additional gateways included.
 _k8s_namespace_is_reserved() {
-  local name="$1" agent_namespace gateway_namespace
+  local name="$1" agent_namespace gateway_namespace visibility gateways
 
   case "$name" in default|kube-*) return 0 ;; esac
 
@@ -94,7 +94,18 @@ _k8s_namespace_is_reserved() {
     --env GATEWAY_NAMESPACE \
     --default "gateways"
   )
-  [ "$name" = "$gateway_namespace" ]
+  [ "$name" = "$gateway_namespace" ] && return 0
+
+  for visibility in public private; do
+    gateways=$(get_config_value \
+      --provider ".providers[\"scope-configurations\"].networking.additional_${visibility}_gateways" \
+      --provider ".providers[\"container-orchestration\"].gateway.additional_${visibility}_gateways" \
+      --default "[]"
+    )
+    echo "$gateways" | jq -e --arg name "$name" \
+      'type == "array" and any(.[]; type == "object" and .namespace == $name)' >/dev/null 2>&1 && return 0
+  done
+  return 1
 }
 
 # Namespace of the first pod matching a label selector, across namespaces.
@@ -123,6 +134,15 @@ resolve_k8s_namespace() {
   fi
   if [ -n "$namespaces" ]; then
     if ! _k8s_namespace_is_configured "$namespaces" "$configured"; then
+      if _k8s_namespace_is_reserved "$namespaces"; then
+        np_scope_failure NamespaceReserved
+        log error "❌ Scope $scope_id runs in namespace '$namespaces', a namespace reserved for the cluster, the agent or the gateways"
+        log error "💡 Possible causes:"
+        log error "   Another object in that namespace carries the label scope_id=$scope_id"
+        log error "🔧 How to fix:"
+        log error "   • Delete the objects labeled scope_id=$scope_id in it: kubectl get deployments,services,cronjobs,jobs -n $namespaces -l scope_id=$scope_id"
+        return 1
+      fi
       if ! label=$(_k8s_namespace_managed_label "$namespaces") || [ "$label" != "true" ]; then
         np_scope_failure NamespaceNotManaged
         log error "❌ Scope $scope_id runs in namespace '$namespaces', which is not managed by nullplatform"
