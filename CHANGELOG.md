@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - k8s, azure, azure-aro and onprem scopes default to `internal` visibility (was `public`); set `template_env_vars = { DEFAULT_VISIBILITY = "public" }` in `scope_definition` to keep `public`
 - k8s, azure, azure-aro and onprem scopes label the `internal` visibility option "Private" instead of "Main Account". The stored value is still `internal`
+- Fix: k8s and scheduled task scopes no longer follow the `scope_id` label into any namespace. A scope whose objects are in more than one namespace fails, and one found outside the configured namespace is used only if that namespace carries `nullplatform=true`. After changing a fixed `cluster.namespace`, label the old namespace (`kubectl label namespace <old> nullplatform=true`) so its scopes keep working
+- Fix: a namespace pattern (`cluster.namespace: "{.namespace.slug}"`) no longer renders `default`, `kube-*`, the agent's namespace or the gateway namespace, and reuses an existing namespace only if it carries `nullplatform=true`
 
 ## [1.20.0] - 2026-11-04
 - k8s and scheduled task scopes can run each nullplatform namespace in its own Kubernetes namespace: `cluster.namespace` (or `K8S_NAMESPACE`) accepts a pattern rendered by the resource naming engine, e.g. `{.namespace.slug}`, `{.account.slug}-{.namespace.slug}` or `{.namespace.slug}-{.scope.dimensions.environment}`. The namespace is created on first use. It reads the setting from the provider, so it works with orchestrated workers, where `NAMESPACE_OVERRIDE` from the channel does not arrive
