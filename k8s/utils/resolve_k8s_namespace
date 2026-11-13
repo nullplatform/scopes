@@ -13,14 +13,10 @@
 # "{.namespace.slug}-{.scope.dimensions.environment}". A Kubernetes namespace
 # name cannot contain "{", so a value without one is used as is.
 #
-# Labels can be set by anyone who can create an object, so neither step trusts
-# a namespace only because something in it carries the scope's labels:
-#   - sticky: the scope's objects must all live in one namespace, and that
-#     namespace must be the configured one (a fixed name) or a namespace that
-#     is not reserved and carries nullplatform=true
-#   - pattern: the rendered name must not be a reserved namespace (default,
-#     kube-*, the agent's, the gateways'), and an existing namespace must carry
-#     nullplatform=true. A missing one is created with it (k8s/scope/build_context)
+# Anyone who can create an object can set its labels, so a namespace other
+# than the configured fixed name is trusted only if it is not reserved and
+# carries nullplatform=true (a rendered one may also not exist yet), and a
+# scope's objects must all be in one namespace.
 #
 # Usage (source this file, do not run it in a subshell):
 #   resolve_k8s_namespace <configured_namespace> [<scope_id>]
@@ -48,17 +44,11 @@ _k8s_namespaces_of_scope() {
     -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u || true
 }
 
-# The nullplatform label of a namespace: "true", "" when it has none, or
-# "absent" when the namespace does not exist. Returns 1 when it cannot be read.
-_k8s_namespace_managed_label() {
-  local found
-  found=$(kubectl get namespace "$1" --ignore-not-found \
-    -o jsonpath='{.metadata.name}/{.metadata.labels.nullplatform}' 2>/dev/null) || return 1
-  if [ -z "$found" ]; then
-    echo "absent"
-  else
-    echo "${found#*/}"
-  fi
+# "<name>/<nullplatform label>" of a namespace, empty when it does not exist.
+# Returns 1 when it cannot be read.
+_k8s_namespace_state() {
+  kubectl get namespace "$1" --ignore-not-found \
+    -o jsonpath='{.metadata.name}/{.metadata.labels.nullplatform}' 2>/dev/null
 }
 
 # Whether a namespace is the configured one, as the caller passed it or as
@@ -116,13 +106,13 @@ k8s_namespace_of_pods() {
 }
 
 resolve_k8s_namespace() {
-  local configured="$1" scope_id="${2:-}" name namespaces label
+  local configured="$1" scope_id="${2:-}" name namespaces state
 
   if [ -z "$scope_id" ]; then
     scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // .tags.scope_id // empty' 2>/dev/null || true)
   fi
   namespaces=$(_k8s_namespaces_of_scope "$scope_id")
-  if [ "$(printf '%s' "$namespaces" | grep -c .)" -gt 1 ]; then
+  if [[ "$namespaces" == *$'\n'* ]]; then
     np_scope_failure ScopeInSeveralNamespaces
     log error "❌ Scope $scope_id has objects in more than one namespace: ${namespaces//$'\n'/, }"
     log error "💡 Possible causes:"
@@ -143,7 +133,7 @@ resolve_k8s_namespace() {
         log error "   • Delete the objects labeled scope_id=$scope_id in it: kubectl get deployments,services,cronjobs,jobs -n $namespaces -l scope_id=$scope_id"
         return 1
       fi
-      if ! label=$(_k8s_namespace_managed_label "$namespaces") || [ "$label" != "true" ]; then
+      if [ "$(_k8s_namespace_state "$namespaces")" != "$namespaces/true" ]; then
         np_scope_failure NamespaceNotManaged
         log error "❌ Scope $scope_id runs in namespace '$namespaces', which is not managed by nullplatform"
         log error "💡 Possible causes:"
@@ -184,13 +174,13 @@ resolve_k8s_namespace() {
     return 1
   fi
 
-  if ! label=$(_k8s_namespace_managed_label "$name"); then
+  if ! state=$(_k8s_namespace_state "$name"); then
     log error "❌ Could not read namespace '$name' rendered from pattern '$configured'"
     log error "🔧 How to fix:"
     log error "   • Allow the agent to get namespaces"
     return 1
   fi
-  if [ "$label" != "true" ] && [ "$label" != "absent" ]; then
+  if [ -n "$state" ] && [ "$state" != "$name/true" ]; then
     np_scope_failure NamespaceNotManaged
     log error "❌ Namespace pattern '$configured' renders '$name', an existing namespace not managed by nullplatform"
     log error "💡 Possible causes:"
