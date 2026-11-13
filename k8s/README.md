@@ -59,8 +59,8 @@ A scope that already has objects in the cluster stays in their namespace (`utils
 the namespace or its pattern only affects new scopes. Finding them lists deployments, services, cronjobs and jobs in
 every namespace; an agent without that permission falls back to the configured namespace. Labels prove nothing (anyone
 who can create an object can set them), so the scope's objects must all be in one namespace, and that namespace must be
-the configured fixed name or a namespace that is not reserved and carries `nullplatform=true`; otherwise the action fails instead of following the labels.
-After changing a fixed namespace, label the old one so its scopes keep working. Kubernetes namespaces are never deleted.
+the configured fixed name or carry `nullplatform=true`; otherwise the action fails instead of following the labels.
+After changing a fixed namespace, label the old one so its scopes keep working, `default` included. Kubernetes namespaces are never deleted.
 
 ### Networking
 

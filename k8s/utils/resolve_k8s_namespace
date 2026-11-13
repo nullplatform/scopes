@@ -14,9 +14,10 @@
 # name cannot contain "{", so a value without one is used as is.
 #
 # Anyone who can create an object can set its labels, so a namespace other
-# than the configured fixed name is trusted only if it is not reserved and
-# carries nullplatform=true (a rendered one may also not exist yet), and a
-# scope's objects must all be in one namespace.
+# than the configured fixed name is trusted only if it carries
+# nullplatform=true (a rendered one may also not exist yet), and a scope's
+# objects must all be in one namespace. A pattern also never renders a
+# reserved namespace: its input comes from nullplatform, not from the cluster.
 #
 # Usage (source this file, do not run it in a subshell):
 #   resolve_k8s_namespace <configured_namespace> [<scope_id>]
@@ -124,15 +125,6 @@ resolve_k8s_namespace() {
   fi
   if [ -n "$namespaces" ]; then
     if ! _k8s_namespace_is_configured "$namespaces" "$configured"; then
-      if _k8s_namespace_is_reserved "$namespaces"; then
-        np_scope_failure NamespaceReserved
-        log error "❌ Scope $scope_id runs in namespace '$namespaces', a namespace reserved for the cluster, the agent or the gateways"
-        log error "💡 Possible causes:"
-        log error "   Another object in that namespace carries the label scope_id=$scope_id"
-        log error "🔧 How to fix:"
-        log error "   • Delete the objects labeled scope_id=$scope_id in it: kubectl get deployments,services,cronjobs,jobs -n $namespaces -l scope_id=$scope_id"
-        return 1
-      fi
       if [ "$(_k8s_namespace_state "$namespaces")" != "$namespaces/true" ]; then
         np_scope_failure NamespaceNotManaged
         log error "❌ Scope $scope_id runs in namespace '$namespaces', which is not managed by nullplatform"

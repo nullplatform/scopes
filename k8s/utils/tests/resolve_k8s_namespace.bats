@@ -152,26 +152,24 @@ teardown() {
   assert_contains "$output" "which is not managed by nullplatform"
 }
 
-@test "resolve_k8s_namespace: refuses a reserved namespace even when it carries nullplatform=true" {
-  export MOCK_SCOPE_NS="kube-system"
-  export MOCK_NAMESPACES="kube-system=true"
+@test "resolve_k8s_namespace: a scope left in default by an old fixed namespace stays there once default is labeled" {
+  export MOCK_SCOPE_NS="default"
+  export MOCK_NAMESPACES="default=true"
 
-  run resolve_k8s_namespace "nullplatform"
+  resolve_k8s_namespace "{.namespace.slug}"
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "runs in namespace 'kube-system', a namespace reserved"
-  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceReserved"
+  assert_equal "$K8S_NAMESPACE" "default"
 }
 
-@test "resolve_k8s_namespace: refuses an additional gateway namespace the scope's labels point at" {
-  CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.additional_public_gateways = [{"name": "edge", "namespace": "edge-gw"}]')
-  export MOCK_SCOPE_NS="edge-gw"
-  export MOCK_NAMESPACES="edge-gw=true"
+@test "resolve_k8s_namespace: a scope left in an unlabeled default is told to label it" {
+  export MOCK_SCOPE_NS="default"
+  export MOCK_NAMESPACES="default="
 
-  run resolve_k8s_namespace "nullplatform"
+  run resolve_k8s_namespace "{.namespace.slug}"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "runs in namespace 'edge-gw', a namespace reserved"
+  assert_contains "$output" "kubectl label namespace default nullplatform=true"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceNotManaged"
 }
 
 @test "resolve_k8s_namespace: an existing scope in a configured reserved namespace stays there" {
