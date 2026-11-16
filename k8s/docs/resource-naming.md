@@ -93,6 +93,18 @@ cluster.namespace: "{.namespace.slug}-{.scope.dimensions.environment}"  # paymen
 
 It follows the pattern rules above (placeholders separated by a single hyphen, a slug first) with a 63-character budget, and no discriminant is appended: a namespace is shared by the scopes it groups. Every placeholder must resolve to a single value (`{.scope.dimensions}` is an object) and the rendered name must be a valid Kubernetes namespace name. A scope that already has objects in the cluster keeps their namespace, whatever the configured value says now (`k8s/utils/resolve_k8s_namespace`); see the namespace section of `k8s/README.md`.
 
+## IAM role name and tags
+
+When the scope creates an IAM role (`IAM.ENABLED`), `IAM.PREFIX` may be a pattern too. The role and its Kubernetes service account are named `<rendered prefix>-<scope id>`: the prefix is trimmed to fit IAM's 64-character limit and the scope id is never trimmed. A prefix without `{` is used as is, exactly as before.
+
+```
+IAM.PREFIX: "{.account.slug}-{.namespace.slug}"   # acme-payments-123456
+```
+
+A scope whose service account already exists keeps its name, as long as the IAM role with that name is tagged with the scope's id, so renaming a slug or changing the prefix never orphans the role (`k8s/utils/resolve_iam_role_name`).
+
+Values in `IAM.TAGS` with a `{` are rendered by the same engine, with the same rules: lowercase, placeholders separated by a single hyphen, starting with a letter. A value without `{` is used as is.
+
 ## Known limitations
 
 scheduled_task's `cronjob.*` metrics (`execution_count`, `success_count`, `failure_count`, `cpu_usage`, `memory_usage`) match Prometheus series by parsing the scope id back out of the job/pod name with a `job-${SCOPE_ID}-.*` regex. Under `qualified` or `custom`, job and pod names carry the application and scope slugs instead of that fixed shape, so the regex stops matching and these metrics return no data.
