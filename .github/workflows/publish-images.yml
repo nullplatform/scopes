@@ -10,6 +10,10 @@ name: publish-images
 #   scopes/scheduled-task        <- scheduled_task/ (leaner)
 #   scopes/containers-datadog    <- containers + datadog/  overlay (metric)
 #
+# Each image is also tagged latest when the tag is a stable release and the
+# highest version published (the reusable workflow enforces it), so a
+# prerelease or a backfill through existing_tag never moves latest.
+#
 # Image names use hyphens; the ECR repositories must exist under these exact
 # names (ECR never creates on push).
 #
@@ -52,6 +56,7 @@ jobs:
       dockerfile: docker/containers.Dockerfile
       tag: ${{ inputs.existing_tag || github.ref_name }}
       ref: ${{ inputs.existing_tag || '' }}
+      also_tag_latest: true
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -86,6 +91,7 @@ jobs:
       dockerfile: docker/scheduled-task.Dockerfile
       tag: ${{ inputs.existing_tag || github.ref_name }}
       ref: ${{ inputs.existing_tag || '' }}
+      also_tag_latest: true
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
 
@@ -121,6 +127,7 @@ jobs:
       dockerfile: docker/containers-datadog.Dockerfile
       tag: ${{ inputs.existing_tag || github.ref_name }}
       ref: ${{ inputs.existing_tag || '' }}
+      also_tag_latest: true
       build_args: BASE_VERSION=${{ inputs.existing_tag || github.ref_name }}
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
