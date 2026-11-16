@@ -335,6 +335,59 @@ teardown() {
   assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
 }
 
+# The namespace appears between the existence check and the create
+namespace_created_meanwhile() {
+  export MEANWHILE_LABEL="$1"
+  kubectl() {
+    case "$*" in
+      "get namespace default-namespace") return 1 ;;
+      "get namespace default-namespace -o "*) printf '%s' "$MEANWHILE_LABEL" ;;
+      "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "default-namespace" already exists' >&2; return 1 ;;
+      "create namespace "*|"label --local "*) cat 2>/dev/null; echo "kind: Namespace" ;;
+      *) return 0 ;;
+    esac
+  }
+  np_scope_failure() { echo "FAILURE $1"; }
+  export -f kubectl np_scope_failure
+}
+
+@test "build_context: a namespace created meanwhile by nullplatform is used" {
+  namespace_created_meanwhile "true"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
+}
+
+@test "build_context: a namespace created meanwhile outside nullplatform is not adopted" {
+  namespace_created_meanwhile ""
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE NamespaceNotManaged"
+  assert_contains "$output" "kubectl label namespace default-namespace nullplatform=true"
+}
+
+@test "build_context: fails when the namespace cannot be created" {
+  kubectl() {
+    case "$*" in
+      "get "*) return 1 ;;
+      "create -f -") cat >/dev/null; echo 'namespaces is forbidden' >&2; return 1 ;;
+      *) echo "kind: Namespace" ;;
+    esac
+  }
+  np_scope_failure() { echo "FAILURE $1"; }
+  export -f kubectl np_scope_failure
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE NamespaceCreateFailed"
+  assert_contains "$output" "Could not create namespace 'default-namespace': namespaces is forbidden"
+}
+
 @test "build_context: fails when namespace does not exist and creation is disabled" {
   kubectl() {
     if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then

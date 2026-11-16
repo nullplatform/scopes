@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # =============================================================================
 # Unit tests for resolve_k8s_namespace - the Kubernetes namespace a scope runs
-# in: where it already is, or the configured value, which may be a pattern
+# in: where it already is, if trusted, or the configured value, which may be a
+# pattern
 # =============================================================================
 
 setup() {
@@ -20,26 +21,29 @@ setup() {
 
   # Cluster state the kubectl mock answers from
   export MOCK_SCOPE_NS=""        # namespaces where the scope already has objects, one per line
+  export MOCK_LOOKUP_ERROR=""    # error listing the scope's objects
   export MOCK_PODS_NS=""         # namespace of the pods matching a selector
   export MOCK_NAMESPACES=""      # existing namespaces as name=<nullplatform label>, space separated
-  export MOCK_NAMESPACE_ERROR="" # reading a namespace fails
+  export MOCK_NAMESPACE_ERROR="" # error reading a namespace
 
   kubectl() {
     echo "$*" >> "$KUBECTL_LOG"
     case "$*" in
       "get deployments,services,cronjobs,jobs -A -l scope_id="*)
+        [ -z "$MOCK_LOOKUP_ERROR" ] || { echo "$MOCK_LOOKUP_ERROR" >&2; return 1; }
         printf '%b' "$MOCK_SCOPE_NS" ;;
       "get pods -A -l "*)
         printf '%s' "$MOCK_PODS_NS" ;;
-      "get namespace "*)
-        [ -z "$MOCK_NAMESPACE_ERROR" ] || return 1
+      "get namespace "*" --ignore-not-found "*)
+        [ -z "$MOCK_NAMESPACE_ERROR" ] || { echo "$MOCK_NAMESPACE_ERROR" >&2; return 1; }
         local entry
         for entry in $MOCK_NAMESPACES; do
           [ "${entry%%=*}" = "$3" ] && printf '%s/%s' "$3" "${entry#*=}"
         done
         return 0 ;;
       *)
-        return 0 ;;
+        echo "unexpected kubectl $*" >&2
+        return 1 ;;
     esac
   }
   export -f kubectl
@@ -57,6 +61,10 @@ setup() {
 teardown() {
   rm -f "$KUBECTL_LOG" "$FAILURE_LOG"
   unset -f kubectl log np_scope_failure
+}
+
+assert_no_namespace_read() {
+  [ -z "$(grep -F "get namespace " "$KUBECTL_LOG")" ]
 }
 
 # =============================================================================
@@ -77,10 +85,17 @@ teardown() {
   assert_equal "$(cat "$KUBECTL_LOG")" ""
 }
 
+@test "resolve_k8s_namespace: a fixed configured namespace is never checked, default included" {
+  resolve_k8s_namespace "default"
+
+  assert_equal "$K8S_NAMESPACE" "default"
+  assert_no_namespace_read
+}
+
 # =============================================================================
-# Existing scopes never move
+# Existing scopes stay in a trusted namespace
 # =============================================================================
-@test "resolve_k8s_namespace: an existing scope stays where its objects are when the configured namespace changes" {
+@test "resolve_k8s_namespace: an existing scope stays in a labeled namespace when the configured namespace changes" {
   export MOCK_SCOPE_NS="old-namespace"
   export MOCK_NAMESPACES="old-namespace=true"
 
@@ -89,21 +104,25 @@ teardown() {
   assert_equal "$K8S_NAMESPACE" "old-namespace"
 }
 
-@test "resolve_k8s_namespace: an existing scope stays where its objects are when a pattern is configured" {
-  export MOCK_SCOPE_NS="nullplatform"
-
-  resolve_k8s_namespace "{.namespace.slug}"
-
-  assert_equal "$K8S_NAMESPACE" "nullplatform"
-}
-
 @test "resolve_k8s_namespace: an existing scope in the configured namespace needs no label" {
   export MOCK_SCOPE_NS="apps"
 
   resolve_k8s_namespace "apps"
 
   assert_equal "$K8S_NAMESPACE" "apps"
-  [ -z "$(grep -F "get namespace apps" "$KUBECTL_LOG")" ]
+  assert_no_namespace_read
+}
+
+@test "resolve_k8s_namespace: a legacy scope in an unlabeled nullplatform namespace stays there when a pattern is configured" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
+  export K8S_NAMESPACE="{.namespace.slug}"
+  export MOCK_SCOPE_NS="nullplatform"
+  export MOCK_NAMESPACES="nullplatform="
+
+  resolve_k8s_namespace "{.namespace.slug}"
+
+  assert_equal "$K8S_NAMESPACE" "nullplatform"
+  assert_no_namespace_read
 }
 
 @test "resolve_k8s_namespace: the configured namespace is also read from scope-configurations, as build_context reads it" {
@@ -114,42 +133,21 @@ teardown() {
   resolve_k8s_namespace "nullplatform"
 
   assert_equal "$K8S_NAMESPACE" "apps"
+  assert_no_namespace_read
 }
 
-# =============================================================================
-# Labels are not proof: anyone who can create an object can set them
-# =============================================================================
-@test "resolve_k8s_namespace: fails when the scope's objects are in more than one namespace" {
-  export MOCK_SCOPE_NS="nullplatform\nattacker\n"
-  export MOCK_NAMESPACES="nullplatform=true attacker=true"
+@test "resolve_k8s_namespace: the configured namespace is also read from NAMESPACE_OVERRIDE and K8S_NAMESPACE" {
+  export MOCK_SCOPE_NS="apps"
+  local variable
+  for variable in NAMESPACE_OVERRIDE K8S_NAMESPACE; do
+    unset NAMESPACE_OVERRIDE K8S_NAMESPACE
+    export "$variable=apps"
 
-  run resolve_k8s_namespace "nullplatform"
+    resolve_k8s_namespace "nullplatform"
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "has objects in more than one namespace: attacker, nullplatform"
-  assert_equal "$(cat "$FAILURE_LOG")" "ScopeInSeveralNamespaces"
-}
-
-@test "resolve_k8s_namespace: refuses a namespace that is not the configured one and lacks nullplatform=true" {
-  export MOCK_SCOPE_NS="attacker"
-  export MOCK_NAMESPACES="attacker="
-
-  run resolve_k8s_namespace "nullplatform"
-
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "runs in namespace 'attacker', which is not managed by nullplatform"
-  assert_contains "$output" "kubectl label namespace attacker nullplatform=true"
-  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceNotManaged"
-}
-
-@test "resolve_k8s_namespace: refuses the scope's namespace when it cannot be read" {
-  export MOCK_SCOPE_NS="old-namespace"
-  export MOCK_NAMESPACE_ERROR=1
-
-  run resolve_k8s_namespace "nullplatform"
-
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "which is not managed by nullplatform"
+    assert_equal "$K8S_NAMESPACE" "apps"
+  done
+  assert_no_namespace_read
 }
 
 @test "resolve_k8s_namespace: a scope left in default by an old fixed namespace stays there once default is labeled" {
@@ -159,17 +157,6 @@ teardown() {
   resolve_k8s_namespace "{.namespace.slug}"
 
   assert_equal "$K8S_NAMESPACE" "default"
-}
-
-@test "resolve_k8s_namespace: a scope left in an unlabeled default is told to label it" {
-  export MOCK_SCOPE_NS="default"
-  export MOCK_NAMESPACES="default="
-
-  run resolve_k8s_namespace "{.namespace.slug}"
-
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "kubectl label namespace default nullplatform=true"
-  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceNotManaged"
 }
 
 @test "resolve_k8s_namespace: an existing scope in a configured reserved namespace stays there" {
@@ -198,6 +185,75 @@ teardown() {
   resolve_k8s_namespace "nullplatform"
 
   assert_contains "$(cat "$KUBECTL_LOG")" "scope_id=scope-2"
+}
+
+# =============================================================================
+# Labels are not proof: anyone who can create an object can set them
+# =============================================================================
+@test "resolve_k8s_namespace: ignores the scope's labels in an untrusted namespace when a trusted one has its objects" {
+  export MOCK_SCOPE_NS="nullplatform\nattacker\n"
+  export MOCK_NAMESPACES="attacker="
+
+  resolve_k8s_namespace "nullplatform" > "$BATS_TEST_TMPDIR/output"
+
+  assert_equal "$K8S_NAMESPACE" "nullplatform"
+  assert_contains "$(cat "$BATS_TEST_TMPDIR/output")" "Ignoring objects labeled scope_id=scope-1 in namespaces not managed by nullplatform: attacker"
+}
+
+@test "resolve_k8s_namespace: fails when the scope's objects are in more than one trusted namespace" {
+  export MOCK_SCOPE_NS="nullplatform\nattacker\n"
+  export MOCK_NAMESPACES="attacker=true"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "has objects in more than one namespace: attacker nullplatform"
+  assert_equal "$(cat "$FAILURE_LOG")" "ScopeInSeveralNamespaces"
+}
+
+@test "resolve_k8s_namespace: refuses a scope whose objects are only in untrusted namespaces" {
+  export MOCK_SCOPE_NS="old-namespace"
+  export MOCK_NAMESPACES="old-namespace="
+
+  run resolve_k8s_namespace "{.namespace.slug}"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "has objects only in namespaces not managed by nullplatform: old-namespace"
+  assert_contains "$output" "kubectl label namespace <namespace> nullplatform=true"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceNotManaged"
+}
+
+@test "resolve_k8s_namespace: fails when a namespace with the scope's objects cannot be read" {
+  export MOCK_SCOPE_NS="old-namespace"
+  export MOCK_NAMESPACE_ERROR="the server is currently unable to handle the request"
+
+  run resolve_k8s_namespace "nullplatform"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Could not read namespace 'old-namespace': the server is currently unable to handle the request"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceUnreadable"
+}
+
+# =============================================================================
+# The scope's objects cannot be listed
+# =============================================================================
+@test "resolve_k8s_namespace: with a fixed namespace, a failed lookup uses it and warns" {
+  export MOCK_LOOKUP_ERROR="deployments.apps is forbidden"
+
+  resolve_k8s_namespace "nullplatform" > "$BATS_TEST_TMPDIR/output"
+
+  assert_equal "$K8S_NAMESPACE" "nullplatform"
+  assert_contains "$(cat "$BATS_TEST_TMPDIR/output")" "using 'nullplatform': deployments.apps is forbidden"
+}
+
+@test "resolve_k8s_namespace: with a pattern, a failed lookup fails instead of rendering a new namespace" {
+  export MOCK_LOOKUP_ERROR="deployments.apps is forbidden"
+
+  run resolve_k8s_namespace "{.namespace.slug}"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Could not look up the namespace scope scope-1 runs in: deployments.apps is forbidden"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceLookupFailed"
 }
 
 # =============================================================================
@@ -236,6 +292,14 @@ teardown() {
   assert_equal "$K8S_NAMESPACE" "billing"
 }
 
+@test "resolve_k8s_namespace: a rendered name longer than 63 characters is cut to 63" {
+  CONTEXT=$(echo "$CONTEXT" | jq --arg slug "$(printf 'a%.0s' {1..70})" '.namespace.slug = $slug')
+
+  resolve_k8s_namespace "{.namespace.slug}"
+
+  assert_equal "${#K8S_NAMESPACE}" "63"
+}
+
 @test "resolve_k8s_namespace: a rendered namespace that exists with nullplatform=true is reused" {
   export MOCK_NAMESPACES="payments=true"
 
@@ -256,12 +320,13 @@ teardown() {
 }
 
 @test "resolve_k8s_namespace: fails when the rendered namespace cannot be read" {
-  export MOCK_NAMESPACE_ERROR=1
+  export MOCK_NAMESPACE_ERROR="namespaces \"payments\" is forbidden"
 
   run resolve_k8s_namespace "{.namespace.slug}"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Could not read namespace 'payments'"
+  assert_contains "$output" "Could not read namespace 'payments': namespaces \"payments\" is forbidden"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceUnreadable"
 }
 
 @test "resolve_k8s_namespace: rejects reserved namespaces" {
@@ -278,22 +343,38 @@ teardown() {
   done
 }
 
-@test "resolve_k8s_namespace: rejects the configured gateway namespace" {
+@test "resolve_k8s_namespace: rejects the configured gateway namespace, from a provider or GATEWAY_NAMESPACE" {
   CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "istio-gw" | .providers["scope-configurations"].networking.gateway_namespace = "istio-gw"')
 
   run resolve_k8s_namespace "{.namespace.slug}"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "a namespace reserved"
-}
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceReserved"
 
-@test "resolve_k8s_namespace: rejects the namespace of an additional gateway" {
-  CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "edge-gw" | .providers["container-orchestration"].gateway.additional_private_gateways = [{"name": "edge", "namespace": "edge-gw"}]')
+  CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers)')
+  export GATEWAY_NAMESPACE="istio-gw"
 
   run resolve_k8s_namespace "{.namespace.slug}"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "a namespace reserved"
+  assert_contains "$output" "renders 'istio-gw', a namespace reserved"
+}
+
+@test "resolve_k8s_namespace: rejects the namespaces of public and private additional gateways" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "edge-gw" | .providers["scope-configurations"].networking.additional_public_gateways = [{"name": "edge", "namespace": "edge-gw"}]')
+
+  run resolve_k8s_namespace "{.namespace.slug}"
+
+  [ "$status" -eq 1 ]
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceReserved"
+
+  : > "$FAILURE_LOG"
+  CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers) | .providers["container-orchestration"].gateway.additional_private_gateways = [{"name": "edge", "namespace": "edge-gw"}]')
+
+  run resolve_k8s_namespace "{.namespace.slug}"
+
+  [ "$status" -eq 1 ]
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceReserved"
 }
 
 @test "resolve_k8s_namespace: an invalid additional gateways list reserves nothing extra" {
@@ -311,14 +392,16 @@ teardown() {
   run resolve_k8s_namespace "{.namespace.slug}"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "a namespace reserved"
+  assert_contains "$output" "renders 'np-agent', a namespace reserved"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespaceReserved"
 }
 
-@test "resolve_k8s_namespace: a fixed configured namespace is never checked, default included" {
-  resolve_k8s_namespace "default"
+@test "resolve_k8s_namespace: outside the agent pod, without a service account file, the agent's namespace is unknown" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.namespace.slug = "np-agent"')
 
-  assert_equal "$K8S_NAMESPACE" "default"
-  [ -z "$(grep -F "get namespace default" "$KUBECTL_LOG")" ]
+  resolve_k8s_namespace "{.namespace.slug}"
+
+  assert_equal "$K8S_NAMESPACE" "np-agent"
 }
 
 @test "resolve_k8s_namespace: rejects a pattern the naming engine rejects" {
@@ -326,6 +409,7 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "Could not render the Kubernetes namespace from pattern"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespacePatternInvalid"
 }
 
 @test "resolve_k8s_namespace: rejects a placeholder that is an object, not a single value" {
@@ -334,6 +418,7 @@ teardown() {
   [ "$status" -eq 1 ]
   assert_contains "$output" "which is not a valid Kubernetes namespace name"
   assert_contains "$output" "{.scope.dimensions.environment}"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespacePatternInvalid"
 }
 
 @test "resolve_k8s_namespace: rejects a rendered name that is not a valid namespace name" {
@@ -341,6 +426,7 @@ teardown() {
 
   [ "$status" -eq 1 ]
   assert_contains "$output" "renders 'payments-', which is not a valid Kubernetes namespace name"
+  assert_equal "$(cat "$FAILURE_LOG")" "NamespacePatternInvalid"
 }
 
 @test "resolve_k8s_namespace: fails when the pattern reads a field the context lacks" {

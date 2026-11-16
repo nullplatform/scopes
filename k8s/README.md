@@ -51,16 +51,21 @@ namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE
 `nullplatform=true`. Nothing is copied into it: image pull secrets, the traffic manager ConfigMap or any other object the
 scopes need there come from a workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
 
-A pattern never renders a namespace a scope must not run in: `default`, `kube-*`, the agent's own namespace, the
-gateway namespace (`GATEWAY_NAMESPACE`) and those of the additional gateways are refused. A rendered namespace that already exists is reused only if it carries
-the label `nullplatform=true`; label one created by hand with `kubectl label namespace <name> nullplatform=true`.
+A pattern never renders a namespace a scope must not run in: `default`, `kube-*`, the gateway namespace
+(`GATEWAY_NAMESPACE`), those of the additional gateways and, when the agent runs in the cluster, its own namespace are
+refused. A rendered namespace that already exists is reused only if it carries the label `nullplatform=true`; label one
+created by hand with `kubectl label namespace <name> nullplatform=true`.
 
-A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`), so changing
-the namespace or its pattern only affects new scopes. Finding them lists deployments, services, cronjobs and jobs in
-every namespace; an agent without that permission falls back to the configured namespace. Labels prove nothing (anyone
-who can create an object can set them), so the scope's objects must all be in one namespace, and that namespace must be
-the configured fixed name or carry `nullplatform=true`; otherwise the action fails instead of following the labels.
-After changing a fixed namespace, label the old one so its scopes keep working, `default` included. Kubernetes namespaces are never deleted.
+A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`) if that
+namespace is trusted: the configured fixed name, the default `nullplatform`, or one labeled `nullplatform=true`. Labels
+prove nothing (anyone who can create an object can set them), so objects in other namespaces are ignored when a trusted
+one has the scope's objects, the action fails when several trusted namespaces have them, and it fails when only
+untrusted ones do. After changing a fixed namespace, label the old one so its scopes keep working, `default` included.
+
+Finding them lists deployments, services, cronjobs and jobs in every namespace. If the agent cannot, a fixed namespace
+is used as configured; with a pattern the action fails instead of rendering a new namespace for an existing scope.
+Diagnose still runs when the namespace is refused, in the namespace of the scope's pods. Kubernetes namespaces are never
+deleted.
 
 ### Networking
 
