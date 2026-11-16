@@ -335,14 +335,17 @@ teardown() {
   assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
 }
 
-# The namespace appears between the existence check and the create
-namespace_created_meanwhile() {
-  export MEANWHILE_LABEL="$1"
+# A pattern renders test-namespace, missing when the resolver looks it up, that
+# appears meanwhile with label $2: before build_context's existence check when
+# $1 is "before", or during its create otherwise
+rendered_namespace_appears() {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
+  export APPEARS="$1" APPEARED_LABEL="$2"
   kubectl() {
     case "$*" in
-      "get namespace default-namespace") return 1 ;;
-      "get namespace default-namespace -o "*) printf '%s' "$MEANWHILE_LABEL" ;;
-      "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "default-namespace" already exists' >&2; return 1 ;;
+      "get namespace test-namespace") [ "$APPEARS" = "before" ] ;;
+      "get namespace test-namespace -o "*) printf '%s' "$APPEARED_LABEL" ;;
+      "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "test-namespace" already exists' >&2; return 1 ;;
       "create namespace "*|"label --local "*) cat 2>/dev/null; echo "kind: Namespace" ;;
       *) return 0 ;;
     esac
@@ -351,8 +354,42 @@ namespace_created_meanwhile() {
   export -f kubectl np_scope_failure
 }
 
-@test "build_context: a namespace created meanwhile by nullplatform is used" {
-  namespace_created_meanwhile "true"
+@test "build_context: a rendered namespace created meanwhile by nullplatform is used" {
+  local appears
+  for appears in during before; do
+    rendered_namespace_appears "$appears" "true"
+
+    run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+    [ "$status" -eq 0 ]
+    assert_contains "$output" "k8s_namespace=test-namespace"
+  done
+}
+
+@test "build_context: a rendered namespace created meanwhile outside nullplatform is not adopted" {
+  local appears
+  for appears in during before; do
+    rendered_namespace_appears "$appears" ""
+
+    run bash -c 'source "$SCRIPT"'
+
+    [ "$status" -eq 1 ]
+    assert_contains "$output" "FAILURE NamespaceNotManaged"
+    assert_contains "$output" "kubectl label namespace test-namespace nullplatform=true"
+  done
+}
+
+@test "build_context: a fixed namespace created meanwhile is used without checking its label" {
+  kubectl() {
+    case "$*" in
+      "get namespace default-namespace") return 1 ;;
+      "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "default-namespace" already exists' >&2; return 1 ;;
+      "create namespace "*|"label --local "*) cat 2>/dev/null; echo "kind: Namespace" ;;
+      "get namespace default-namespace -o "*) echo "unexpected label read" >&2; return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
 
   run bash -c 'source "$SCRIPT"'
 
@@ -360,14 +397,21 @@ namespace_created_meanwhile() {
   assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
 }
 
-@test "build_context: a namespace created meanwhile outside nullplatform is not adopted" {
-  namespace_created_meanwhile ""
+@test "build_context: a pattern keeps a legacy scope in the unlabeled nullplatform namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
+  kubectl() {
+    case "$*" in
+      "get deployments,services,cronjobs,jobs -A "*) printf 'nullplatform\n' ;;
+      "get namespace nullplatform -o "*) printf '' ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "FAILURE NamespaceNotManaged"
-  assert_contains "$output" "kubectl label namespace default-namespace nullplatform=true"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=nullplatform"
 }
 
 @test "build_context: fails when the namespace cannot be created" {
@@ -407,6 +451,18 @@ namespace_created_meanwhile() {
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "Create the namespace manually: kubectl create namespace default-namespace"
   assert_contains "$output" "Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
+  [[ "$output" != *"kubectl label namespace"* ]]
+}
+
+@test "build_context: with a pattern and creation disabled, the hint also labels the namespace" {
+  rendered_namespace_appears "never" ""
+  export CREATE_K8S_NAMESPACE_IF_NOT_EXIST="false"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Create the namespace manually: kubectl create namespace test-namespace"
+  assert_contains "$output" "and label it, since a pattern renders it: kubectl label namespace test-namespace nullplatform=true"
 }
 
 @test "build_context: CREATE_K8S_NAMESPACE_IF_NOT_EXIST resolves from provider" {

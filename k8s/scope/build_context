@@ -108,6 +108,18 @@ export VAULT_TOKEN
 
 log debug "🔍 Validating namespace '$K8S_NAMESPACE' exists..."
 
+# A namespace rendered from the pattern may appear after the resolver found it
+# missing; it is used only if nullplatform=true says it is managed
+require_rendered_namespace_managed() {
+  [ "${K8S_NAMESPACE_RENDERED:-}" = "true" ] || return 0
+  [ "$(kubectl get namespace "$K8S_NAMESPACE" -o jsonpath='{.metadata.labels.nullplatform}' 2>/dev/null)" = "true" ] && return 0
+  np_scope_failure NamespaceNotManaged
+  log error "   ❌ Namespace '$K8S_NAMESPACE' was just created outside nullplatform and lacks the label nullplatform=true"
+  log error "🔧 How to fix:"
+  log error "   • If scopes may run there: kubectl label namespace $K8S_NAMESPACE nullplatform=true"
+  exit 1
+}
+
 if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   log error "   ❌ Namespace '$K8S_NAMESPACE' does not exist in the cluster"
 
@@ -120,8 +132,8 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   if [ "$CREATE_K8S_NAMESPACE_IF_NOT_EXIST" = "true" ]; then
     log debug "📝 Creating namespace '$K8S_NAMESPACE'..."
 
-    # create, not apply: a namespace created by someone else since the check
-    # must not be adopted and labeled
+    # create, not apply: apply would label a namespace created by someone else
+    # since the check
     if ! NAMESPACE_CREATE_OUTPUT=$(kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
       kubectl label --local -f - nullplatform=true --dry-run=client -o yaml | \
       kubectl create -f - 2>&1); then
@@ -130,13 +142,7 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
         log error "   ❌ Could not create namespace '$K8S_NAMESPACE': $NAMESPACE_CREATE_OUTPUT"
         exit 1
       fi
-      if [ "$(kubectl get namespace "$K8S_NAMESPACE" -o jsonpath='{.metadata.labels.nullplatform}' 2>/dev/null)" != "true" ]; then
-        np_scope_failure NamespaceNotManaged
-        log error "   ❌ Namespace '$K8S_NAMESPACE' was just created outside nullplatform and lacks the label nullplatform=true"
-        log error "🔧 How to fix:"
-        log error "   • If scopes may run there: kubectl label namespace $K8S_NAMESPACE nullplatform=true"
-        exit 1
-      fi
+      require_rendered_namespace_managed
     fi
 
     log info "   ✅ Namespace '$K8S_NAMESPACE' created successfully"
@@ -150,11 +156,15 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
     log error ""
     log error "🔧 How to fix:"
     log error "   • Create the namespace manually: kubectl create namespace $K8S_NAMESPACE"
+    if [ "${K8S_NAMESPACE_RENDERED:-}" = "true" ]; then
+      log error "     and label it, since a pattern renders it: kubectl label namespace $K8S_NAMESPACE nullplatform=true"
+    fi
     log error "   • Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
     log error ""
     exit 1
   fi
 else
+  require_rendered_namespace_managed
   log info "   ✅ Namespace '$K8S_NAMESPACE' exists"
   if command -v np_step_skip >/dev/null 2>&1; then
     np_step_skip "namespace '$K8S_NAMESPACE' already exists"

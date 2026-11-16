@@ -22,8 +22,9 @@
 #
 # Usage (source this file, do not run it in a subshell):
 #   resolve_k8s_namespace <configured_namespace> [<scope_id>]
-# Sets K8S_NAMESPACE. Returns 1 when the namespace cannot be resolved or
-# trusted; the cause is logged and set as the trace's failure.reason.
+# Sets K8S_NAMESPACE, and K8S_NAMESPACE_RENDERED=true when it was rendered from
+# the pattern. Returns 1 when the namespace cannot be resolved or trusted; the
+# cause is logged and set as the trace's failure.reason.
 
 _RESOLVE_K8S_NAMESPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 if [[ "$(type -t np_name_render 2>/dev/null)" != "function" ]]; then
@@ -127,6 +128,7 @@ k8s_namespace_of_pods() {
 
 resolve_k8s_namespace() {
   local configured="$1" scope_id="${2:-}" name ns trust trusted="" untrusted=""
+  export K8S_NAMESPACE_RENDERED=false
 
   if [ -z "$scope_id" ]; then
     scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // .tags.scope_id // empty' 2>/dev/null || true)
@@ -230,4 +232,5 @@ resolve_k8s_namespace() {
   fi
 
   export K8S_NAMESPACE="$name"
+  export K8S_NAMESPACE_RENDERED=true
 }
