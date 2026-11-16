@@ -646,8 +646,8 @@ scope_runs_in() {
   run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "No domain configured for scope (visibility: public), using the default: nullapps.io"
-  assert_contains "$output" "Set networking.domain_name in scope-configurations or cloud-providers"
+  assert_contains "$output" "Using the default domain nullapps.io for scope (visibility: public)"
+  assert_contains "$output" "Set networking.domain_name (or networking.private_domain_name for private scopes) in scope-configurations or cloud-providers"
   assert_contains "$output" "DOMAIN=nullapps.io"
 }
 
@@ -657,8 +657,7 @@ scope_runs_in() {
   run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
   [ "$status" -eq 0 ]
-  assert_contains "$output" "No domain configured for scope (visibility: private), using the default: nullapps.io"
-  assert_contains "$output" "networking.private_domain_name (or networking.domain_name)"
+  assert_contains "$output" "Using the default domain nullapps.io for scope (visibility: private)"
   assert_contains "$output" "DOMAIN=nullapps.io"
 }
 
@@ -666,6 +665,6 @@ scope_runs_in() {
   run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"No domain configured"* ]]
+  [[ "$output" != *"Using the default domain"* ]]
   [[ "$output" != *"DOMAIN=nullapps.io"* ]]
 }

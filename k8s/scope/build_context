@@ -168,28 +168,22 @@ SCOPE_VISIBILITY=$(echo "$CONTEXT" | jq -r '.scope.capabilities.visibility')
 if [ "$SCOPE_VISIBILITY" = "public" ]; then
     DOMAIN=$(get_config_value \
       --provider '.providers["scope-configurations"].networking.domain_name' \
-      --provider '.providers["cloud-providers"].networking.domain_name'
+      --provider '.providers["cloud-providers"].networking.domain_name' \
+      --default "nullapps.io"
     )
 else
     DOMAIN=$(get_config_value \
       --provider '.providers["scope-configurations"].networking.private_domain_name' \
       --provider '.providers["cloud-providers"].networking.private_domain_name' \
       --provider '.providers["scope-configurations"].networking.domain_name' \
-      --provider '.providers["cloud-providers"].networking.domain_name'
+      --provider '.providers["cloud-providers"].networking.domain_name' \
+      --default "nullapps.io"
     )
 fi
 
-# No domain configured: keep the historical nullapps.io default, so installations that
-# rely on it keep working, but say so: the scope's domain is generated (and stored) under it.
-if [ -z "$DOMAIN" ]; then
-  if [ "$SCOPE_VISIBILITY" = "public" ]; then
-    DOMAIN_KEY="networking.domain_name"
-  else
-    DOMAIN_KEY="networking.private_domain_name (or networking.domain_name)"
-  fi
-  DOMAIN="nullapps.io"
-  log warn "⚠️  No domain configured for scope (visibility: $SCOPE_VISIBILITY), using the default: $DOMAIN"
-  log warn "   • Set $DOMAIN_KEY in scope-configurations or cloud-providers to use your own domain"
+if [ "$DOMAIN" = "nullapps.io" ]; then
+  log warn "⚠️  Using the default domain nullapps.io for scope (visibility: $SCOPE_VISIBILITY)"
+  log warn "   • Set networking.domain_name (or networking.private_domain_name for private scopes) in scope-configurations or cloud-providers to use your own domain"
 fi
 
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
