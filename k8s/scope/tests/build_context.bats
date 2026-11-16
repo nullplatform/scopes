@@ -346,7 +346,8 @@ rendered_namespace_appears() {
       "get namespace test-namespace") [ "$APPEARS" = "before" ] ;;
       "get namespace test-namespace -o "*) printf '%s' "$APPEARED_LABEL" ;;
       "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "test-namespace" already exists' >&2; return 1 ;;
-      "create namespace "*|"label --local "*) cat 2>/dev/null; echo "kind: Namespace" ;;
+      "create namespace "*) echo "kind: Namespace" ;;
+      "label --local "*) cat ;;
       *) return 0 ;;
     esac
   }
@@ -401,7 +402,8 @@ rendered_namespace_appears() {
     case "$*" in
       "get namespace default-namespace") return 1 ;;
       "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "default-namespace" already exists' >&2; return 1 ;;
-      "create namespace "*|"label --local "*) cat 2>/dev/null; echo "kind: Namespace" ;;
+      "create namespace "*) echo "kind: Namespace" ;;
+      "label --local "*) cat ;;
       "get namespace default-namespace -o "*) echo "unexpected label read" >&2; return 1 ;;
       *) return 0 ;;
     esac
