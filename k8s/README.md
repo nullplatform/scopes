@@ -62,10 +62,10 @@ prove nothing (anyone who can create an object can set them), so objects in othe
 one has the scope's objects, the action fails when several trusted namespaces have them, and it fails when only
 untrusted ones do. After changing a fixed namespace, label the old one so its scopes keep working, `default` included.
 
-Finding them lists deployments, services, cronjobs and jobs in every namespace. If the agent cannot, a fixed namespace
-is used as configured; with a pattern the action fails instead of rendering a new namespace for an existing scope.
-Diagnose still runs when the namespace is refused, in the namespace of the scope's pods. Kubernetes namespaces are never
-deleted.
+Finding a scope's objects lists deployments, services, cronjobs and jobs in every namespace. If the agent cannot, a
+fixed namespace is used as configured; with a pattern the action fails instead of rendering a new namespace for an
+existing scope. Diagnose still runs when the namespace is refused, in the namespace of the scope's pods. Kubernetes
+namespaces are never deleted.
 
 ### Networking
 

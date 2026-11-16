@@ -335,9 +335,9 @@ teardown() {
   assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
 }
 
-# A pattern renders test-namespace, missing when the resolver looks it up, that
-# appears meanwhile with label $2: before build_context's existence check when
-# $1 is "before", or during its create otherwise
+# A pattern renders test-namespace, missing when the resolver looks it up. With
+# $1 "before" it exists by build_context's own check; otherwise its create finds
+# it already there. Either way its nullplatform label is $2
 rendered_namespace_appears() {
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
   export APPEARS="$1" APPEARED_LABEL="$2"
@@ -377,6 +377,23 @@ rendered_namespace_appears() {
     assert_contains "$output" "FAILURE NamespaceNotManaged"
     assert_contains "$output" "kubectl label namespace test-namespace nullplatform=true"
   done
+}
+
+@test "build_context: fails when the label of a rendered namespace cannot be read" {
+  rendered_namespace_appears "before" ""
+  kubectl() {
+    case "$*" in
+      "get namespace test-namespace -o "*) echo "the server is currently unable to handle the request" >&2; return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE NamespaceUnreadable"
+  assert_contains "$output" "Could not read namespace 'test-namespace': the server is currently unable to handle the request"
 }
 
 @test "build_context: a fixed namespace created meanwhile is used without checking its label" {

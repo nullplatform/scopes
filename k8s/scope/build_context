@@ -111,8 +111,14 @@ log debug "🔍 Validating namespace '$K8S_NAMESPACE' exists..."
 # A namespace rendered from the pattern may appear after the resolver found it
 # missing; it is used only if nullplatform=true says it is managed
 require_rendered_namespace_managed() {
+  local label
   [ "${K8S_NAMESPACE_RENDERED:-}" = "true" ] || return 0
-  [ "$(kubectl get namespace "$K8S_NAMESPACE" -o jsonpath='{.metadata.labels.nullplatform}' 2>/dev/null)" = "true" ] && return 0
+  if ! label=$(kubectl get namespace "$K8S_NAMESPACE" -o jsonpath='{.metadata.labels.nullplatform}' 2>&1); then
+    np_scope_failure NamespaceUnreadable
+    log error "   ❌ Could not read namespace '$K8S_NAMESPACE': $label"
+    exit 1
+  fi
+  [ "$label" = "true" ] && return 0
   np_scope_failure NamespaceNotManaged
   log error "   ❌ Namespace '$K8S_NAMESPACE' was just created outside nullplatform and lacks the label nullplatform=true"
   log error "🔧 How to fix:"
