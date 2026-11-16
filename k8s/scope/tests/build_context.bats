@@ -640,24 +640,32 @@ scope_runs_in() {
   assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
 }
 
-@test "build_context: public scope without domain_name fails instead of defaulting to nullapps.io" {
+@test "build_context: public scope without domain_name defaults to nullapps.io with a warning" {
   export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "public"')
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "No domain configured for scope (visibility: public)"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "No domain configured for scope (visibility: public), using the default: nullapps.io"
   assert_contains "$output" "Set networking.domain_name in scope-configurations or cloud-providers"
-  [[ "$output" != *"nullapps.io"* ]]
+  assert_contains "$output" "DOMAIN=nullapps.io"
 }
 
-@test "build_context: private scope without domain fails instead of defaulting to nullapps.io" {
+@test "build_context: private scope without domain defaults to nullapps.io with a warning" {
   export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "private"')
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "No domain configured for scope (visibility: private)"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "No domain configured for scope (visibility: private), using the default: nullapps.io"
   assert_contains "$output" "networking.private_domain_name (or networking.domain_name)"
-  [[ "$output" != *"nullapps.io"* ]]
+  assert_contains "$output" "DOMAIN=nullapps.io"
+}
+
+@test "build_context: a configured domain logs no default-domain warning" {
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"No domain configured"* ]]
+  [[ "$output" != *"DOMAIN=nullapps.io"* ]]
 }

@@ -179,17 +179,17 @@ else
     )
 fi
 
+# No domain configured: keep the historical nullapps.io default, so installations that
+# rely on it keep working, but say so: the scope's domain is generated (and stored) under it.
 if [ -z "$DOMAIN" ]; then
   if [ "$SCOPE_VISIBILITY" = "public" ]; then
     DOMAIN_KEY="networking.domain_name"
   else
     DOMAIN_KEY="networking.private_domain_name (or networking.domain_name)"
   fi
-  log error "❌ No domain configured for scope (visibility: $SCOPE_VISIBILITY)"
-  log error ""
-  log error "🔧 How to fix:"
-  log error "   • Set $DOMAIN_KEY in scope-configurations or cloud-providers"
-  exit 1
+  DOMAIN="nullapps.io"
+  log warn "⚠️  No domain configured for scope (visibility: $SCOPE_VISIBILITY), using the default: $DOMAIN"
+  log warn "   • Set $DOMAIN_KEY in scope-configurations or cloud-providers to use your own domain"
 fi
 
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
