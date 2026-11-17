@@ -259,6 +259,28 @@ resolve_traffic_container_version() {
   assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0"
 }
 
+@test "traffic container: warns when the default image is left on latest" {
+  eval "$(sed -n '/^warn_traffic_manager_latest()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+
+  run warn_traffic_manager_latest "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "The traffic manager sidecar is using the 'latest' tag because no version is configured"
+  assert_contains "$output" "Set 'traffic_manager.version' in the container-orchestration provider to pin it"
+}
+
+@test "traffic container: no warning for a pinned version, websocket2 or a custom image" {
+  eval "$(sed -n '/^warn_traffic_manager_latest()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+
+  for image in \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0" \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:websocket2" \
+    "custom.ecr.aws/traffic:latest"; do
+    run warn_traffic_manager_latest "$image"
+    [ "$status" -eq 0 ]
+    assert_empty "$output"
+  done
+}
+
 # =============================================================================
 # Image Pull Secrets Tests
 # =============================================================================
