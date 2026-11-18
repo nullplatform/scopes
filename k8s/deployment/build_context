@@ -155,6 +155,19 @@ TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
   --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
 )
 
+# `latest` follows the newest stable release, so a scope left on it changes sidecar version
+# on its own. It stays the default; the deployment only says so.
+warn_traffic_manager_latest() {
+  local image="$1"
+  if [[ "$image" == "public.ecr.aws/nullplatform/k8s-traffic-manager:latest" ]]; then
+    log warn "⚠️  The traffic manager sidecar is using the 'latest' tag because no version is configured"
+    log warn "   'latest' moves with every release, so the sidecar can change between deployments"
+    log warn "   Set 'traffic_manager.version' in the container-orchestration provider to pin it"
+  fi
+}
+
+warn_traffic_manager_latest "$TRAFFIC_CONTAINER_IMAGE"
+
 # Pod Disruption Budget configuration
 PDB_ENABLED=$(get_config_value \
   --env POD_DISRUPTION_BUDGET_ENABLED \

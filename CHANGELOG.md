@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- k8s deployments now warn when the traffic manager sidecar runs on the `latest` tag because no version is configured. `latest` stays the default; set `traffic_manager.version` in the container-orchestration provider to pin it
 - k8s scopes can give their pods an IAM role through EKS Pod Identity instead of IRSA with `IAM.MODE: pod_identity`
 - k8s scopes accept a pattern such as `{.account.slug}-{.namespace.slug}` in `IAM.PREFIX` and additional role tags in `IAM.TAGS`, rendered by the resource naming engine
 - k8s, azure, azure-aro and onprem scopes default to `internal` visibility (was `public`); set `template_env_vars = { DEFAULT_VISIBILITY = "public" }` in `scope_definition` to keep `public`

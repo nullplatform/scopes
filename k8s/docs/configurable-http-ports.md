@@ -217,7 +217,7 @@ Aligning GRPC with the `port + 10000` convention restores what those application
 
 **Minimum image: traffic-manager `1.7.0`.** The sidecar only binds `port + 10000` on an image that honours `LISTENER_PORT`, and the gRPC nginx config shipped an invalid buffer combination (`proxy_busy_buffers_size 8m` against `proxy_buffers 8 1m`, which violates nginx's `busy < (N-1) × buffer_size`) until [`5430906`](https://github.com/nullplatform/k8s-tools/commit/5430906) landed in `1.7.0`. On an older image nginx exits with `[emerg]` and never listens — and because `start.sh` does not check nginx's exit code, the container stays `Running` with no proxy inside it, so the only symptom is `Startup probe failed: ... failed to connect service`.
 
-Note that `TRAFFIC_CONTAINER_VERSION` still defaults to `latest`, which is not a released tag. Scopes with gRPC additional ports should pin `traffic_container_image` explicitly.
+Note that `TRAFFIC_CONTAINER_VERSION` still defaults to `latest`, and the deployment logs a warning when it does. Scopes with gRPC additional ports should pin the version, with `traffic_manager.version` in the container-orchestration provider or with `traffic_container_image`.
 
 Two more cases need attention when rolling this out:
 
