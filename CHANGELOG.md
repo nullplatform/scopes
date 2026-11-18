@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix: with a namespace pattern, a k8s or scheduled task action fails when the agent cannot list the scope's objects, instead of deploying the scope again in a newly rendered namespace
 - Fix: a namespace pattern (`cluster.namespace: "{.namespace.slug}"`) no longer renders `default`, `kube-*`, a gateway namespace (additional gateways included) or, when the agent runs in the cluster, the agent's namespace. It reuses an existing namespace only if it carries `nullplatform=true`, and does not adopt one created by someone else while the scope creates it
 - k8s diagnose runs even when the scope's namespace is refused, in the namespace of the scope's pods
+- k8s scopes log a warning when no `networking.domain_name` (or `networking.private_domain_name` for private scopes) is configured in scope-configurations or cloud-providers and they fall back to the default `nullapps.io` domain
 
 ## [1.20.0] - 2026-11-04
 - k8s and scheduled task scopes can run each nullplatform namespace in its own Kubernetes namespace: `cluster.namespace` (or `K8S_NAMESPACE`) accepts a pattern rendered by the resource naming engine, e.g. `{.namespace.slug}`, `{.account.slug}-{.namespace.slug}` or `{.namespace.slug}-{.scope.dimensions.environment}`. The namespace is created on first use. It reads the setting from the provider, so it works with orchestrated workers, where `NAMESPACE_OVERRIDE` from the channel does not arrive

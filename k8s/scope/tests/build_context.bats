@@ -769,24 +769,31 @@ scope_runs_in() {
   assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
 }
 
-@test "build_context: public scope without domain_name fails instead of defaulting to nullapps.io" {
+@test "build_context: public scope without domain_name defaults to nullapps.io with a warning" {
   export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "public"')
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "No domain configured for scope (visibility: public)"
-  assert_contains "$output" "Set networking.domain_name in scope-configurations or cloud-providers"
-  [[ "$output" != *"nullapps.io"* ]]
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Using the default domain nullapps.io for scope (visibility: public)"
+  assert_contains "$output" "Set networking.domain_name (or networking.private_domain_name for private scopes) in scope-configurations or cloud-providers"
+  assert_contains "$output" "DOMAIN=nullapps.io"
 }
 
-@test "build_context: private scope without domain fails instead of defaulting to nullapps.io" {
+@test "build_context: private scope without domain defaults to nullapps.io with a warning" {
   export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "private"')
 
-  run bash -c 'source "$SCRIPT"'
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "No domain configured for scope (visibility: private)"
-  assert_contains "$output" "networking.private_domain_name (or networking.domain_name)"
-  [[ "$output" != *"nullapps.io"* ]]
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Using the default domain nullapps.io for scope (visibility: private)"
+  assert_contains "$output" "DOMAIN=nullapps.io"
+}
+
+@test "build_context: a configured domain logs no default-domain warning" {
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Using the default domain"* ]]
+  [[ "$output" != *"DOMAIN=nullapps.io"* ]]
 }
