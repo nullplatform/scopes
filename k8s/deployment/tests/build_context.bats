@@ -213,44 +213,94 @@ teardown() {
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================
-resolve_traffic_container_version() {
-  local protocol="$1"
-  if [[ "$protocol" == "web_sockets" ]]; then
-    echo "websocket2"
-  else
-    get_config_value \
-      --provider '.providers["container-orchestration"].traffic_manager.version' \
-      --default "latest"
-  fi
+# Loads the real version helpers from build_context, so the tests cannot drift from the script.
+load_traffic_version_helpers() {
+  eval "$(sed -n '/^TRAFFIC_MANAGER_WEBSOCKET_MIN_VERSION=/p;/^TRAFFIC_MANAGER_LEGACY_WEBSOCKET_VERSION=/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  eval "$(sed -n '/^traffic_manager_version_below()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  eval "$(sed -n '/^resolve_traffic_container_version()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  eval "$(sed -n '/^warn_traffic_manager_legacy_websocket()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
 }
 
-@test "traffic container: uses websocket2 for web_sockets, latest for http" {
-  result=$(resolve_traffic_container_version "web_sockets")
-  assert_equal "$result" "websocket2"
+configured_traffic_manager_version() {
+  get_config_value \
+    --provider '.providers["container-orchestration"].traffic_manager.version' \
+    --default "latest"
+}
 
-  result=$(resolve_traffic_container_version "http")
+@test "traffic container: http and web_sockets default to latest when no version is configured" {
+  load_traffic_version_helpers
+
+  result=$(resolve_traffic_container_version "http" "$(configured_traffic_manager_version)")
+  assert_equal "$result" "latest"
+
+  result=$(resolve_traffic_container_version "web_sockets" "$(configured_traffic_manager_version)")
   assert_equal "$result" "latest"
 }
 
 @test "traffic container: http protocol uses container-orchestration provider version when set" {
+  load_traffic_version_helpers
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
 
-  result=$(resolve_traffic_container_version "http")
+  result=$(resolve_traffic_container_version "http" "$(configured_traffic_manager_version)")
   assert_equal "$result" "1.8.0"
 }
 
-@test "traffic container: web_sockets protocol ignores container-orchestration provider version" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+@test "traffic container: web_sockets protocol uses the provider version when it supports WebSocket" {
+  load_traffic_version_helpers
 
-  result=$(resolve_traffic_container_version "web_sockets")
-  assert_equal "$result" "websocket2"
+  for version in "1.8.0" "1.8.1" "v1.9.1" "2.0.0" "1.10.0" "beta" "my-custom-tag"; do
+    result=$(resolve_traffic_container_version "web_sockets" "$version")
+    assert_equal "$result" "$version"
+  done
+}
+
+@test "traffic container: web_sockets protocol keeps websocket2 for a version without WebSocket support" {
+  load_traffic_version_helpers
+
+  for version in "1.7.1" "1.7.0" "v1.5.0" "1.1.1" "0.9.9"; do
+    result=$(resolve_traffic_container_version "web_sockets" "$version")
+    assert_equal "$result" "websocket2"
+  done
+}
+
+@test "traffic container: http protocol never falls back to websocket2" {
+  load_traffic_version_helpers
+
+  for version in "1.7.1" "1.1.1" "latest"; do
+    result=$(resolve_traffic_container_version "http" "$version")
+    assert_equal "$result" "$version"
+  done
+}
+
+@test "traffic container: warns when a web_sockets scope stays on the legacy websocket2 build" {
+  load_traffic_version_helpers
+
+  run warn_traffic_manager_legacy_websocket "public.ecr.aws/nullplatform/k8s-traffic-manager:websocket2" "1.7.1"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "The traffic manager sidecar is using the legacy 'websocket2' build, which no longer gets security fixes"
+  assert_contains "$output" "The configured version '1.7.1' does not proxy WebSocket connections"
+  assert_contains "$output" "Set 'traffic_manager.version' in the container-orchestration provider to 1.8.0 or newer"
+}
+
+@test "traffic container: no legacy websocket warning for a current version or a custom image" {
+  load_traffic_version_helpers
+
+  for image in \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:v1.9.1" \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:latest" \
+    "custom.ecr.aws/traffic:websocket2"; do
+    run warn_traffic_manager_legacy_websocket "$image" "1.7.1"
+    [ "$status" -eq 0 ]
+    assert_empty "$output"
+  done
 }
 
 @test "traffic container: provider version flows into the default image when no full-image override is set" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
   unset TRAFFIC_CONTAINER_IMAGE
 
-  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http")
+  load_traffic_version_helpers
+  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http" "$(configured_traffic_manager_version)")
   result=$(get_config_value \
     --env TRAFFIC_CONTAINER_IMAGE \
     --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
