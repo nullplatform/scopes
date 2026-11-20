@@ -101,11 +101,11 @@ validate_alb_config() {
         done < <(echo "$_additional_ports" | jq -c '.[]')
     fi
 
-    local all_domains_found=true
+    local any_domain_missing=false any_domain_pending=false
 
     for domain in "${ALL_DOMAINS[@]}"; do
         log debug "📝 Checking domain: $domain"
-        local domain_found=false
+        local domain_state=missing
 
         LISTENER_ARNS=$(echo "$LISTENERS" | jq -r '.Listeners[].ListenerArn')
 
@@ -171,10 +171,10 @@ validate_alb_config() {
 
                     if [ "$TARGET_GROUP_COUNT" = "1" ]; then
                         log info "   ✅ Single target group on listener port $LISTENER_PORT (traffic is no longer split between deployments)"
-                        domain_found=true
+                        domain_state=ok
                     else
                         log error "   ❌ Rule still has $TARGET_GROUP_COUNT target groups on listener port $LISTENER_PORT: the ALB has not finished reconciling"
-                        domain_found=false
+                        domain_state=pending
                     fi
                 elif [ "${VERIFY_WEIGHTS:-false}" = "true" ]; then
                     if [ "$is_blue_missing_port" = "true" ]; then
@@ -214,39 +214,97 @@ validate_alb_config() {
                     if [ -n "$EXPECTED_WEIGHTS" ] && [ -n "$ACTUAL_WEIGHTS" ]; then
                         if [ "$EXPECTED_WEIGHTS" == "$ACTUAL_WEIGHTS" ]; then
                             log info "   ✅ Weights match on listener port $LISTENER_PORT (GREEN: $GREEN_WEIGHT, BLUE: $BLUE_WEIGHT)"
-                            domain_found=true
+                            domain_state=ok
                         else
                             local _exp_fmt _act_fmt
                             _exp_fmt=$(echo "$EXPECTED_WEIGHTS" | tr '\n' '/' | sed 's/\/$//')
                             _act_fmt=$(echo "$ACTUAL_WEIGHTS" | tr '\n' '/' | sed 's/\/$//')
                             log error "   ❌ Weights mismatch on listener port $LISTENER_PORT: expected=$_exp_fmt actual=$_act_fmt"
-                            domain_found=false
+                            domain_state=pending
                         fi
                     else
                         log warn "   ⚠️  Could not extract weights for comparison"
-                        domain_found=false
+                        domain_state=pending
                     fi
                 else
                     log info "   ✅ Found rule for domain: $domain"
-                    domain_found=true
+                    domain_state=ok
                 fi
                 break
             fi
         done
 
-        if [ "$domain_found" = false ]; then
-            log error "   ❌ Domain not found in ALB rules: $domain"
-            all_domains_found=false
-        fi
+        case "$domain_state" in
+            missing)
+                log error "   ❌ Domain not found in ALB rules: $domain"
+                any_domain_missing=true
+                ;;
+            pending)
+                any_domain_pending=true
+                ;;
+        esac
     done
 
-    if [ "$all_domains_found" = true ]; then
-        log info "✅ All domains configured in ALB"
-        return 0
-    else
+    if [ "$any_domain_missing" = true ]; then
         log warn "⚠️  Some domains missing from ALB configuration"
         return 1
     fi
+    if [ "$any_domain_pending" = true ]; then
+        return 1
+    fi
+    log info "✅ All domains configured in ALB"
+    return 0
+}
+
+fail_verification() {
+    local failure_reason="$1"
+    local summary="$2"
+
+    if command -v np_scope_failure >/dev/null 2>&1; then
+        np_scope_failure "$failure_reason"
+    fi
+    if command -v np_scope_step_end >/dev/null 2>&1; then
+        np_scope_step_end 1 "$summary"
+    fi
+    exit 1
+}
+
+report_controller_sync_failure() {
+    local message="$1"
+
+    if [[ "$message" == *"Not enough IP space available"* ]]; then
+        local subnet="the ALB subnets"
+        local subnet_label="One of the ALB subnets"
+        if [[ "$message" =~ (subnet-[0-9a-f]+) ]]; then
+            subnet="${BASH_REMATCH[1]}"
+            subnet_label="Subnet $subnet"
+        fi
+        log error "❌ ALB Ingress Controller is failing to sync the ALB rules for ingress $INGRESS_NAME"
+        log error "❌ $subnet_label has fewer than the 8 free IP addresses the ALB needs in each subnet"
+        log error "💡 Message: $message"
+        log error "🔧 How to fix:"
+        log error "   - Free IP addresses in $subnet, or move the ALB to subnets with more free addresses (alb.ingress.kubernetes.io/subnets)"
+        fail_verification subnet_ip_exhaustion "$subnet_label has no free IP addresses for the ALB"
+    fi
+
+    local ingress_pattern='ingress: ([a-z0-9.-]+)/([a-z0-9.-]+): (.*)$'
+    if [[ "$message" =~ $ingress_pattern ]]; then
+        local broken_namespace="${BASH_REMATCH[1]}"
+        local broken_ingress="${BASH_REMATCH[2]}"
+        local cause="${BASH_REMATCH[3]}"
+        log error "❌ ALB Ingress Controller is failing to sync the ALB rules for ingress $INGRESS_NAME"
+        if [ "$broken_namespace" = "$K8S_NAMESPACE" ] && [ "$broken_ingress" = "$INGRESS_NAME" ]; then
+            log error "❌ Ingress $INGRESS_NAME is invalid: $cause"
+        else
+            log error "❌ Ingress $broken_namespace/$broken_ingress is invalid and blocks every ingress in its ALB group: $cause"
+        fi
+        log error "🔧 How to fix:"
+        log error "   - Fix or delete the invalid ingress: kubectl describe ingress $broken_ingress -n $broken_namespace"
+        fail_verification invalid_ingress_in_group "ingress $broken_namespace/$broken_ingress is invalid: $cause"
+    fi
+
+    log warn "⚠️  ALB Ingress Controller is failing to sync the ALB rules for ingress $INGRESS_NAME, retrying"
+    log warn "   - $message"
 }
 
 if command -v np_scope_step_begin >/dev/null 2>&1; then
@@ -321,7 +379,9 @@ while [ $elapsed -lt $MAX_WAIT_SECONDS ]; do
             exit 1
         fi
 
-        if [ "$event_type" == "Warning" ]; then
+        if [ "$event_type" == "Warning" ] && [[ "$event_reason" == Failed*Model ]]; then
+            report_controller_sync_failure "$event_message"
+        elif [ "$event_type" == "Warning" ]; then
             log warn "⚠️  Potential issues with ingress:"
             echo "$relevant_events" | jq -r '.[] | "   - \(.message)"'
         fi
