@@ -33,7 +33,6 @@ setup() {
 
   # Default values from values.yaml
   export K8S_NAMESPACE="nullplatform"
-  export DOMAIN="nullapps.io"
   export USE_ACCOUNT_SLUG="false"
   export PUBLIC_GATEWAY_NAME="gateway-public"
   export PRIVATE_GATEWAY_NAME="gateway-internal"
@@ -336,6 +335,122 @@ teardown() {
   assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
 }
 
+# A pattern renders test-namespace, missing when the resolver looks it up. With
+# $1 "before" it exists by build_context's own check; otherwise its create finds
+# it already there. Either way its nullplatform label is $2
+rendered_namespace_appears() {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
+  export APPEARS="$1" APPEARED_LABEL="$2"
+  kubectl() {
+    case "$*" in
+      "get namespace test-namespace") [ "$APPEARS" = "before" ] ;;
+      "get namespace test-namespace -o "*) printf '%s' "$APPEARED_LABEL" ;;
+      "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "test-namespace" already exists' >&2; return 1 ;;
+      "create namespace "*) echo "kind: Namespace" ;;
+      "label --local "*) cat ;;
+      *) return 0 ;;
+    esac
+  }
+  np_scope_failure() { echo "FAILURE $1"; }
+  export -f kubectl np_scope_failure
+}
+
+@test "build_context: a rendered namespace created meanwhile by nullplatform is used" {
+  local appears
+  for appears in during before; do
+    rendered_namespace_appears "$appears" "true"
+
+    run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+    [ "$status" -eq 0 ]
+    assert_contains "$output" "k8s_namespace=test-namespace"
+  done
+}
+
+@test "build_context: a rendered namespace created meanwhile outside nullplatform is not adopted" {
+  local appears
+  for appears in during before; do
+    rendered_namespace_appears "$appears" ""
+
+    run bash -c 'source "$SCRIPT"'
+
+    [ "$status" -eq 1 ]
+    assert_contains "$output" "FAILURE NamespaceNotManaged"
+    assert_contains "$output" "kubectl label namespace test-namespace nullplatform=true"
+  done
+}
+
+@test "build_context: fails when the label of a rendered namespace cannot be read" {
+  rendered_namespace_appears "before" ""
+  kubectl() {
+    case "$*" in
+      "get namespace test-namespace -o "*) echo "the server is currently unable to handle the request" >&2; return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE NamespaceUnreadable"
+  assert_contains "$output" "Could not read namespace 'test-namespace': the server is currently unable to handle the request"
+}
+
+@test "build_context: a fixed namespace created meanwhile is used without checking its label" {
+  kubectl() {
+    case "$*" in
+      "get namespace default-namespace") return 1 ;;
+      "create -f -") cat >/dev/null; echo 'Error from server (AlreadyExists): namespaces "default-namespace" already exists' >&2; return 1 ;;
+      "create namespace "*) echo "kind: Namespace" ;;
+      "label --local "*) cat ;;
+      "get namespace default-namespace -o "*) echo "unexpected label read" >&2; return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "✅ Namespace 'default-namespace' created successfully"
+}
+
+@test "build_context: a pattern keeps a legacy scope in the unlabeled nullplatform namespace" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"].cluster.namespace = "{.namespace.slug}"')
+  kubectl() {
+    case "$*" in
+      "get deployments,services,cronjobs,jobs -A "*) printf 'nullplatform\n' ;;
+      "get namespace nullplatform -o "*) printf '' ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+
+  run bash -c 'source "$SCRIPT" && echo "k8s_namespace=$(echo "$CONTEXT" | jq -r .k8s_namespace)"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "k8s_namespace=nullplatform"
+}
+
+@test "build_context: fails when the namespace cannot be created" {
+  kubectl() {
+    case "$*" in
+      "get "*) return 1 ;;
+      "create -f -") cat >/dev/null; echo 'namespaces is forbidden' >&2; return 1 ;;
+      *) echo "kind: Namespace" ;;
+    esac
+  }
+  np_scope_failure() { echo "FAILURE $1"; }
+  export -f kubectl np_scope_failure
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "FAILURE NamespaceCreateFailed"
+  assert_contains "$output" "Could not create namespace 'default-namespace': namespaces is forbidden"
+}
+
 @test "build_context: fails when namespace does not exist and creation is disabled" {
   kubectl() {
     if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then
@@ -355,6 +470,18 @@ teardown() {
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "Create the namespace manually: kubectl create namespace default-namespace"
   assert_contains "$output" "Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
+  [[ "$output" != *"kubectl label namespace"* ]]
+}
+
+@test "build_context: with a pattern and creation disabled, the hint also labels the namespace" {
+  rendered_namespace_appears "never" ""
+  export CREATE_K8S_NAMESPACE_IF_NOT_EXIST="false"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Create the namespace manually: kubectl create namespace test-namespace"
+  assert_contains "$output" "and label it, since a pattern renders it: kubectl label namespace test-namespace nullplatform=true"
 }
 
 @test "build_context: CREATE_K8S_NAMESPACE_IF_NOT_EXIST resolves from provider" {
@@ -413,6 +540,7 @@ scope_runs_in() {
   kubectl() {
     case "$1 $2" in
       "get deployments,services,cronjobs,jobs") printf '%s' "$SCOPE_NAMESPACE" ;;
+      "get namespace") printf '%s/true' "$3" ;;  # created by nullplatform
       *) return 0 ;;
     esac
   }
@@ -639,4 +767,33 @@ scope_runs_in() {
 
   assert_equal "$INVALID_ADDITIONAL_GATEWAYS" ""
   assert_equal "$(echo "$CONTEXT" | jq -c '.gateways[1]')" '{"name":"partners.v2","namespace":"edge-1"}'
+}
+
+@test "build_context: public scope without domain_name defaults to nullapps.io with a warning" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "public"')
+
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Using the default domain nullapps.io for scope (visibility: public)"
+  assert_contains "$output" "Set networking.domain_name (or networking.private_domain_name for private scopes) in scope-configurations or cloud-providers"
+  assert_contains "$output" "DOMAIN=nullapps.io"
+}
+
+@test "build_context: private scope without domain defaults to nullapps.io with a warning" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.providers[]?.networking.domain_name, .providers[]?.networking.private_domain_name) | .scope.capabilities.visibility = "private"')
+
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "Using the default domain nullapps.io for scope (visibility: private)"
+  assert_contains "$output" "DOMAIN=nullapps.io"
+}
+
+@test "build_context: a configured domain logs no default-domain warning" {
+  run bash -c 'source "$SCRIPT" && echo "DOMAIN=$DOMAIN"'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Using the default domain"* ]]
+  [[ "$output" != *"DOMAIN=nullapps.io"* ]]
 }

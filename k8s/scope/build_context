@@ -4,16 +4,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
 source "$SCRIPT_DIR/../utils/resolve_k8s_namespace"
 
-K8S_NAMESPACE=$(get_config_value \
-  --env NAMESPACE_OVERRIDE \
-  --env K8S_NAMESPACE \
-  --provider '.providers["scope-configurations"].cluster.namespace' \
-  --provider '.providers["container-orchestration"].cluster.namespace' \
-  --default "nullplatform"
-)
+K8S_NAMESPACE=$(k8s_configured_namespace)
 
-# An existing scope stays where it runs; the configured value may be a pattern
-# such as {.namespace.slug}
+# An existing scope stays where it runs if that namespace is trusted; the
+# configured value may be a pattern such as {.namespace.slug}
 resolve_k8s_namespace "$K8S_NAMESPACE" || exit 1
 
 # General configuration
@@ -114,6 +108,24 @@ export VAULT_TOKEN
 
 log debug "🔍 Validating namespace '$K8S_NAMESPACE' exists..."
 
+# A namespace rendered from the pattern may appear after the resolver found it
+# missing; it is used only if nullplatform=true says it is managed
+require_rendered_namespace_managed() {
+  local label
+  [ "${K8S_NAMESPACE_RENDERED:-}" = "true" ] || return 0
+  if ! label=$(kubectl get namespace "$K8S_NAMESPACE" -o jsonpath='{.metadata.labels.nullplatform}' 2>&1); then
+    np_scope_failure NamespaceUnreadable
+    log error "   ❌ Could not read namespace '$K8S_NAMESPACE': $label"
+    exit 1
+  fi
+  [ "$label" = "true" ] && return 0
+  np_scope_failure NamespaceNotManaged
+  log error "   ❌ Namespace '$K8S_NAMESPACE' was just created outside nullplatform and lacks the label nullplatform=true"
+  log error "🔧 How to fix:"
+  log error "   • If scopes may run there: kubectl label namespace $K8S_NAMESPACE nullplatform=true"
+  exit 1
+}
+
 if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   log error "   ❌ Namespace '$K8S_NAMESPACE' does not exist in the cluster"
 
@@ -126,9 +138,18 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
   if [ "$CREATE_K8S_NAMESPACE_IF_NOT_EXIST" = "true" ]; then
     log debug "📝 Creating namespace '$K8S_NAMESPACE'..."
 
-    kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
+    # create, not apply: apply would label a namespace created by someone else
+    # since the check
+    if ! NAMESPACE_CREATE_OUTPUT=$(kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | \
       kubectl label --local -f - nullplatform=true --dry-run=client -o yaml | \
-      kubectl apply -f -
+      kubectl create -f - 2>&1); then
+      if [[ "$NAMESPACE_CREATE_OUTPUT" != *AlreadyExists* ]]; then
+        np_scope_failure NamespaceCreateFailed
+        log error "   ❌ Could not create namespace '$K8S_NAMESPACE': $NAMESPACE_CREATE_OUTPUT"
+        exit 1
+      fi
+      require_rendered_namespace_managed
+    fi
 
     log info "   ✅ Namespace '$K8S_NAMESPACE' created successfully"
     if command -v np_scope_produces >/dev/null 2>&1; then
@@ -141,11 +162,15 @@ if ! kubectl get namespace "$K8S_NAMESPACE" &> /dev/null; then
     log error ""
     log error "🔧 How to fix:"
     log error "   • Create the namespace manually: kubectl create namespace $K8S_NAMESPACE"
+    if [ "${K8S_NAMESPACE_RENDERED:-}" = "true" ]; then
+      log error "     and label it, since a pattern renders it: kubectl label namespace $K8S_NAMESPACE nullplatform=true"
+    fi
     log error "   • Or set CREATE_K8S_NAMESPACE_IF_NOT_EXIST=true in values.yaml"
     log error ""
     exit 1
   fi
 else
+  require_rendered_namespace_managed
   log info "   ✅ Namespace '$K8S_NAMESPACE' exists"
   if command -v np_step_skip >/dev/null 2>&1; then
     np_step_skip "namespace '$K8S_NAMESPACE' already exists"
@@ -180,6 +205,12 @@ else
       --default "nullapps.io"
     )
 fi
+
+if [ "$DOMAIN" = "nullapps.io" ]; then
+  log warn "⚠️  Using the default domain nullapps.io for scope (visibility: $SCOPE_VISIBILITY)"
+  log warn "   • Set networking.domain_name (or networking.private_domain_name for private scopes) in scope-configurations or cloud-providers to use your own domain"
+fi
+
 SCOPE_DOMAIN=$(echo "$CONTEXT" | jq .scope.domain -r)
 
 eval "$(echo "$CONTEXT" | jq -r '.scope.nrn | "

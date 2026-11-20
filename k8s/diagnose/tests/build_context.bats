@@ -69,6 +69,26 @@ run_build_context() {
   assert_equal "$NAMESPACE" "default-ns"
 }
 
+@test "build_context: diagnoses the pods' namespace when the scope's namespace is refused" {
+  log() { echo "$2"; }
+  np_scope_failure() { echo "FAILURE $1"; }
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.id = "scope-123"')
+  kubectl() {
+    case "$*" in
+      "get deployments,services,cronjobs,jobs -A "*) printf 'untrusted\n' ;;
+      "get namespace untrusted "*) printf 'untrusted/' ;;
+      "get pods -A "*) printf 'untrusted' ;;
+      *) echo '{"items":[]}' ;;
+    esac
+  }
+
+  output=$(run_build_context; echo "namespace=$NAMESPACE")
+
+  assert_contains "$output" "FAILURE NamespaceNotManaged"
+  assert_contains "$output" "Diagnosing namespace 'untrusted'"
+  assert_contains "$output" "namespace=untrusted"
+}
+
 # =============================================================================
 # Label Selectors
 # =============================================================================

@@ -164,7 +164,7 @@ teardown() {
 
 @test "wait_job: timeout is traced as its own cause" {
   export JOB_WAIT_TIMEOUT=5
-  kubectl() { echo '{"status":{}}'; return 0; }
+  kubectl() { [ "$1 $2" = "get job" ] && echo '{"status":{}}'; return 0; }
   np_scope_failure() { echo "FAILURE $*"; }
   export -f kubectl np_scope_failure
 

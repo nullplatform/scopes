@@ -3,8 +3,10 @@ kind: ServiceAccount
 metadata:
   name: {{ .service_account_name }}
   namespace: {{ .k8s_namespace }}
+{{- if eq .iam_mode "irsa" }}
   annotations:
     eks.amazonaws.com/role-arn: {{ .role_arn }}
+{{- end }}
   labels:
     nullplatform: "true"
     account: {{ .account.slug }}
