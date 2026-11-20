@@ -794,3 +794,131 @@ teardown() {
   assert_contains "$output" "💡 Error messages:"
   assert_contains "$output" "- Failed to sync ALB"
 }
+
+run_finalize_with_controller_event() {
+  local reason="$1"
+  local message="$2"
+  local events_file="$BATS_TEST_TMPDIR/events.json"
+  jq -n --arg reason "$reason" --arg message "$message" '{items: [
+    {type: "Normal", reason: "SuccessfullyReconciled", message: "Successfully reconciled", involvedObject: {resourceVersion: "12345"}, lastTimestamp: "2024-01-01T00:00:00Z"},
+    {type: "Warning", reason: $reason, message: $message, involvedObject: {resourceVersion: "12345"}, lastTimestamp: "2024-01-01T00:01:00Z"}
+  ]}' > "$events_file"
+
+  local ctx='{"scope":{"slug":"my-app","domain":"app.example.com","current_active_deployment":"deploy-old"},"alb_name":"k8s-test-alb","deployment":{"strategy":"blue_green","strategy_data":{"desired_switched_traffic":10}},"names":{"scope_ingress":"k-8-s-my-app-scope-123-internet-facing"}}'
+
+  run bash -c "
+    kubectl() {
+      case \"\$2\" in
+        ingress) echo '{\"metadata\": {\"resourceVersion\": \"12345\"}}' ;;
+        events) cat '$events_file' ;;
+      esac
+      return 0
+    }
+    aws() {
+      case \"\$2\" in
+        describe-load-balancers)
+          echo 'arn:aws:elasticloadbalancing:us-east-1:123456789:loadbalancer/app/test-alb/abc123'
+          ;;
+        describe-listeners)
+          echo '{\"Listeners\":[{\"ListenerArn\":\"arn:aws:listener/443\",\"Port\":443}]}'
+          ;;
+        describe-rules)
+          echo '{\"Rules\":[{\"Conditions\":[{\"Field\":\"host-header\",\"Values\":[\"app.example.com\"]}],\"Actions\":[{\"Type\":\"forward\",\"ForwardConfig\":{\"TargetGroups\":[{\"Weight\":90},{\"Weight\":10}]}}]}]}'
+          ;;
+      esac
+      return 0
+    }
+    np_scope_step_begin() { :; }
+    np_scope_wait_heartbeat() { :; }
+    np_scope_failure() { echo \"TRACE failure \$*\"; }
+    np_scope_step_end() { echo \"TRACE step_end \$*\"; }
+    np_scope_step_timeout() { echo \"TRACE step_timeout \$*\"; }
+    export -f kubectl aws
+    export K8S_NAMESPACE='$K8S_NAMESPACE' SCOPE_ID='$SCOPE_ID' INGRESS_VISIBILITY='$INGRESS_VISIBILITY'
+    export MAX_WAIT_SECONDS='1' CHECK_INTERVAL='1'
+    export ALB_RECONCILIATION_ENABLED='true' EXPECT_SINGLE_TARGET_GROUP='true' REGION='$REGION'
+    export CONTEXT='$ctx'
+    source '$BATS_TEST_DIRNAME/../verify_ingress_reconciliation'
+  "
+}
+
+@test "verify_ingress_reconciliation: a rule that has not converged is not reported as a missing domain" {
+  run_finalize_with_controller_event "FailedDeployModel" "Failed deploy model due to RequestLimitExceeded: Rate exceeded"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
+  [[ "$output" != *"Domain not found in ALB rules"* ]] || false
+  [[ "$output" != *"Some domains missing from ALB configuration"* ]] || false
+}
+
+@test "verify_ingress_reconciliation: fails at once naming the subnet when the ALB subnet runs out of IP addresses" {
+  local message="Failed deploy model due to operation error Elastic Load Balancing v2: SetSubnets, https response error StatusCode: 400, RequestID: 9c825a5c, InvalidSubnet: Not enough IP space available in subnet-0447d54d45b7405b0. ELB requires at least 8 free IP addresses in each subnet."
+  run_finalize_with_controller_event "FailedDeployModel" "$message"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Rule still has 2 target groups on listener port 443: the ALB has not finished reconciling"
+  assert_contains "$output" "❌ ALB Ingress Controller is failing to sync the ALB rules for ingress k-8-s-my-app-scope-123-internet-facing"
+  assert_contains "$output" "❌ Subnet subnet-0447d54d45b7405b0 has fewer than the 8 free IP addresses the ALB needs in each subnet"
+  assert_contains "$output" "💡 Message: $message"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   - Free IP addresses in subnet-0447d54d45b7405b0, or move the ALB to subnets with more free addresses (alb.ingress.kubernetes.io/subnets)"
+  assert_contains "$output" "TRACE failure subnet_ip_exhaustion"
+  assert_contains "$output" "TRACE step_end 1 Subnet subnet-0447d54d45b7405b0 has no free IP addresses for the ALB"
+  [[ "$output" == *"target groups"*"failing to sync"*"Subnet subnet-0447d54d45b7405b0"* ]] || false
+  [[ "$output" != *"Potential issues with ingress"* ]] || false
+  [[ "$output" != *"Timeout waiting for ingress reconciliation"* ]] || false
+}
+
+@test "verify_ingress_reconciliation: fails at once naming another invalid ingress that blocks the ALB group" {
+  run_finalize_with_controller_event "FailedBuildModel" "Failed build model due to ingress: other-ns/broken-ingress: services \"missing-svc\" not found"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ ALB Ingress Controller is failing to sync the ALB rules for ingress k-8-s-my-app-scope-123-internet-facing"
+  assert_contains "$output" "❌ Ingress other-ns/broken-ingress is invalid and blocks every ingress in its ALB group: services \"missing-svc\" not found"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "   - Fix or delete the invalid ingress: kubectl describe ingress broken-ingress -n other-ns"
+  assert_contains "$output" "TRACE failure invalid_ingress_in_group"
+  assert_contains "$output" "TRACE step_end 1 ingress other-ns/broken-ingress is invalid: services \"missing-svc\" not found"
+  [[ "$output" != *"Timeout waiting for ingress reconciliation"* ]] || false
+}
+
+@test "verify_ingress_reconciliation: fails at once when its own ingress is invalid" {
+  run_finalize_with_controller_event "FailedBuildModel" "Failed build model due to ingress: test-namespace/k-8-s-my-app-scope-123-internet-facing: conflicting scheme: [internal internet-facing]"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ Ingress k-8-s-my-app-scope-123-internet-facing is invalid: conflicting scheme: [internal internet-facing]"
+  assert_contains "$output" "   - Fix or delete the invalid ingress: kubectl describe ingress k-8-s-my-app-scope-123-internet-facing -n test-namespace"
+  assert_contains "$output" "TRACE failure invalid_ingress_in_group"
+  [[ "$output" != *"blocks every ingress in its ALB group"* ]] || false
+}
+
+@test "verify_ingress_reconciliation: keeps waiting on an unrecognized controller sync failure" {
+  run_finalize_with_controller_event "FailedDeployModel" "Failed deploy model due to RequestLimitExceeded: Rate exceeded"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "⚠️  ALB Ingress Controller is failing to sync the ALB rules for ingress k-8-s-my-app-scope-123-internet-facing, retrying"
+  assert_contains "$output" "   - Failed deploy model due to RequestLimitExceeded: Rate exceeded"
+  assert_contains "$output" "❌ Timeout waiting for ingress reconciliation after 1s"
+  assert_contains "$output" "TRACE step_timeout ingress k-8-s-my-app-scope-123-internet-facing not reconciled after 1s"
+  [[ "$output" != *"TRACE failure"* ]] || false
+}
+
+@test "verify_ingress_reconciliation: names a generic subnet when the controller omits the subnet id" {
+  run_finalize_with_controller_event "FailedDeployModel" "Failed deploy model: Not enough IP space available. ELB requires at least 8 free IP addresses in each subnet."
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ One of the ALB subnets has fewer than the 8 free IP addresses the ALB needs in each subnet"
+  assert_contains "$output" "   - Free IP addresses in the ALB subnets, or move the ALB to subnets with more free addresses (alb.ingress.kubernetes.io/subnets)"
+  assert_contains "$output" "TRACE failure subnet_ip_exhaustion"
+}
+
+@test "verify_ingress_reconciliation: a warning that is not a model failure keeps the generic warning" {
+  run_finalize_with_controller_event "FailedToUpdate" "Failed deploy model due to ingress: other-ns/broken-ingress: boom"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "⚠️  Potential issues with ingress:"
+  assert_contains "$output" "   - Failed deploy model due to ingress: other-ns/broken-ingress: boom"
+  assert_contains "$output" "❌ Timeout waiting for ingress reconciliation after 1s"
+  [[ "$output" != *"blocks every ingress in its ALB group"* ]] || false
+  [[ "$output" != *"TRACE failure"* ]] || false
+}
