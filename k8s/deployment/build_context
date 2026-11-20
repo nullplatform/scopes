@@ -198,7 +198,6 @@ warn_traffic_manager_latest() {
   fi
 }
 
-warn_traffic_manager_latest "$TRAFFIC_CONTAINER_IMAGE"
 
 # The legacy WebSocket build is frozen: it does not get nginx security fixes.
 warn_traffic_manager_legacy_websocket() {
@@ -210,7 +209,6 @@ warn_traffic_manager_legacy_websocket() {
   fi
 }
 
-warn_traffic_manager_legacy_websocket "$TRAFFIC_CONTAINER_IMAGE" "$TRAFFIC_MANAGER_CONFIGURED_VERSION"
 
 # Pod Disruption Budget configuration
 PDB_ENABLED=$(get_config_value \
@@ -311,6 +309,12 @@ resolve_traffic_proxy() {
 TRAFFIC_PROXY=$(resolve_traffic_proxy) || exit 1
 export TRAFFIC_PROXY
 log debug "📋 Traffic proxy: $TRAFFIC_PROXY"
+
+# Istio scopes run no sidecar, so its version warnings do not apply.
+if [[ "$TRAFFIC_PROXY" != "istio" ]]; then
+  warn_traffic_manager_latest "$TRAFFIC_CONTAINER_IMAGE"
+  warn_traffic_manager_legacy_websocket "$TRAFFIC_CONTAINER_IMAGE" "$TRAFFIC_MANAGER_CONFIGURED_VERSION"
+fi
 
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
   --env TRAFFIC_MANAGER_CONFIG_MAP \

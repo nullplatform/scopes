@@ -1707,6 +1707,27 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
 
+@test "traffic_proxy: en istio no avisa sobre la versión del sidecar" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=istio
+  export TRAFFIC_CONTAINER_IMAGE="public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *"traffic manager sidecar is using"* ]] || { echo "$output"; false; }
+}
+
+@test "traffic_proxy: en nginx avisa cuando el sidecar usa latest" {
+  setup_full_build_context
+  export TRAFFIC_CONTAINER_IMAGE="public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  assert_contains "$output" "The traffic manager sidecar is using the 'latest' tag"
+}
+
 @test "service account: a patterned IAM prefix is rendered by the naming engine" {
   local test_script="$BATS_TEST_TMPDIR/test_iam_prefix.sh"
 
