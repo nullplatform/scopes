@@ -152,9 +152,9 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 log debug "🔍 Running kubectl $COMMAND (namespace: $K8S_NAMESPACE)"
-# NP_TRACE is cleared for the wrapper: it loads its own logging, which would
-# otherwise write its tracing notices into the output.
-NP_TRACE="" "$WRAPPER" ${ARGS[@]+"${ARGS[@]}"} > "$WORK_DIR/out" 2> "$WORK_DIR/err"
+# The wrapper loads its own logging and writes to stdout: with tracing or
+# debug logging on, its notices would end up inside the output.
+NP_TRACE="" LOG_LEVEL=error "$WRAPPER" ${ARGS[@]+"${ARGS[@]}"} > "$WORK_DIR/out" 2> "$WORK_DIR/err"
 EXIT_CODE=$?
 
 # Keep the end of the output: for logs the last lines are the useful ones.
