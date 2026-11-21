@@ -34,3 +34,25 @@ jobs:
 
       - name: Run unit tests
         run: make test-unit
+
+  worker:
+    name: Worker
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type-check
+        run: bunx tsc --noEmit -p .
+
+      - name: Run the worker's tests
+        run: bun test

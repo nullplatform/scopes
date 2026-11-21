@@ -1,0 +1,76 @@
+{
+  "notification": {
+    "action": "metric:list",
+    "arguments": {
+      "application_id": "4",
+      "limit": 50,
+      "service": null,
+      "service_specification": null,
+      "scope_type": "custom",
+      "scope_provider": "34ef2d7d-bde1-453c-a7c8-4e33f7b2f6d3"
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "results"
+      ],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "unit",
+              "available_filters",
+              "available_group_by"
+            ]
+          }
+        }
+      }
+    },
+    "entity_nrn": "organization=1:account=2:namespace=3:application=4:scope=5",
+    "scope": {
+      "id": 5,
+      "slug": "checkout-dev",
+      "name": "checkout-dev",
+      "type": "custom",
+      "nrn": "organization=1:account=2:namespace=3:application=4:scope=5",
+      "provider": "34ef2d7d-bde1-453c-a7c8-4e33f7b2f6d3",
+      "profiles": [
+        "environment_example",
+        "country_example",
+        "site_example"
+      ]
+    },
+    "service": {
+      "id": "4b7ab43f-c6e0-4397-8d20-b2260175b53a",
+      "dimensions": {
+        "environment": "example-environment",
+        "country": "example-country"
+      }
+    },
+    "parameters": {
+      "scope_id": 5
+    },
+    "tags": {
+      "organization": "acme-corp",
+      "organization_id": 1,
+      "organization_name": "Acme Corp",
+      "account": "acme-main",
+      "account_id": 2,
+      "account_name": "Acme Main",
+      "namespace": "payments",
+      "namespace_id": 3,
+      "namespace_name": "Payments",
+      "application": "checkout",
+      "application_id": 4,
+      "application_name": "Checkout",
+      "repository_url": "https://github.com/acme-corp/checkout",
+      "scope": "checkout-dev",
+      "scope_id": 5,
+      "scope_name": "checkout-dev",
+      "scope_type": "custom"
+    }
+  }
+}
