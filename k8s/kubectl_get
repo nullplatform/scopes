@@ -173,7 +173,12 @@ if involves_secrets "${ARGS[@]}"; then
 
   log debug "📋 Running: kubectl get ${STRIPPED[*]} | jq <strip secret data>"
 
-  kubectl get "${STRIPPED[@]}" | jq 'if .items then .items |= map(del(.data, .stringData)) else del(.data, .stringData) end'
+  # last-applied-configuration holds a full copy of the secret when it was
+  # created with `kubectl apply`.
+  kubectl get "${STRIPPED[@]}" | jq '
+    def redact: del(.data, .stringData, .metadata.managedFields,
+                    .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]);
+    if .items then .items |= map(redact) else redact end'
   exit "${PIPESTATUS[0]}"
 fi
 

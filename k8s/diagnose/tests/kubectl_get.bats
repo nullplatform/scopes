@@ -411,3 +411,19 @@ EOF
   [ "$status" -eq 1 ]
   assert_contains "$output" "Refusing argument '-f'"
 }
+
+@test "kubectl_get: strips the last-applied-configuration copy of a secret" {
+  kubectl() {
+    echo '{"items":[{"metadata":{"name":"foo","annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{\"data\":{\"password\":\"YXBwbGllZHNlY3JldA==\"}}","team":"payments"},"managedFields":[{"manager":"kubectl"}]},"type":"Opaque","data":{"password":"c3VwZXJzZWNyZXQ="}}]}'
+  }
+  export -f kubectl
+
+  run bash "$SCRIPT" secrets
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "\"name\": \"foo\""
+  assert_contains "$output" "\"team\": \"payments\""
+  [[ "$output" != *"YXBwbGllZHNlY3JldA=="* ]]
+  [[ "$output" != *"last-applied-configuration"* ]]
+  [[ "$output" != *"managedFields"* ]]
+}
