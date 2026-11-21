@@ -32,6 +32,8 @@ setup() {
           echo '{"items":[{"metadata":{"name":"s1"},"data":{"password":"c2VjcmV0"}}]}'
         elif [[ " $* " == *" -l scope_id="* ]]; then
           return 0
+        elif [[ "${KUBECTL_PRINT_TRACE:-}" == "true" ]]; then
+          echo "NP_TRACE=[${NP_TRACE:-}]"
         elif [[ "${KUBECTL_FAIL:-}" == "true" ]]; then
           echo "Error from server (NotFound): pods \"missing\" not found" >&2
           return 1
@@ -62,7 +64,7 @@ setup() {
 
 teardown() {
   unset -f kubectl np log
-  unset KUBECTL_FAIL KUBECTL_BIG_OUTPUT NP_EXIT_CODE K8S_READ_MAX_BYTES K8S_READ_ALLOWED_NAMESPACES
+  unset KUBECTL_FAIL KUBECTL_PRINT_TRACE NP_TRACE KUBECTL_BIG_OUTPUT NP_EXIT_CODE K8S_READ_MAX_BYTES K8S_READ_ALLOWED_NAMESPACES
 }
 
 action_context() {
@@ -401,6 +403,17 @@ action_context() {
 # =============================================================================
 # Output handling
 # =============================================================================
+@test "k8s_read: runs the wrapper with tracing off, so its notices stay out of the output" {
+  export NP_TRACE=1
+  export KUBECTL_PRINT_TRACE=true
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_equal "$(jq -r '.results.output' "$BODY_COPY")" "NP_TRACE=[]"
+}
+
 @test "k8s_read: secret values never reach the results" {
   export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["secrets"]}')
 
