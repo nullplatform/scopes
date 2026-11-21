@@ -427,3 +427,10 @@ EOF
   [[ "$output" != *"last-applied-configuration"* ]]
   [[ "$output" != *"managedFields"* ]]
 }
+
+@test "kubectl_get: rejects stacked short flags (-As would hide -s)" {
+  run bash "$SCRIPT" pods -As https://evil.example
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-As'"
+}

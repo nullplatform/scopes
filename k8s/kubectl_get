@@ -69,8 +69,10 @@ BLOCKED_FLAGS=(
 
 is_blocked() {
   local flag_name="${1%%=*}"
-  # -s takes its value attached too (-shttps://host): it is --server.
-  if [[ "$1" == -s* && "$1" != --* ]]; then
+  # A short flag is one letter: "-shttps://host" is --server with its value
+  # attached and "-As" stacks -s behind -A. Neither can be told apart from a
+  # harmless flag by name, so a short flag takes its value as the next argument.
+  if [[ "$1" == -[!-]?* ]]; then
     return 0
   fi
   for blocked in "${BLOCKED_FLAGS[@]}"; do

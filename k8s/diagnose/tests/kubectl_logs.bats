@@ -249,3 +249,10 @@ teardown() {
   [ "$status" -eq 1 ]
   assert_contains "$output" "Refusing argument '--profile-output=/tmp/x'"
 }
+
+@test "kubectl_logs: rejects stacked short flags (-As would hide -s)" {
+  run bash "$SCRIPT" my-pod -As https://evil.example
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-As'"
+}
