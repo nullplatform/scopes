@@ -53,6 +53,7 @@ BLOCKED_FLAGS=(
   -w
   --watch
   --watch-only
+  --raw
 )
 
 is_blocked() {

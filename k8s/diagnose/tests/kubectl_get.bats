@@ -166,6 +166,20 @@ teardown() {
   assert_contains "$output" "Refusing argument '--insecure-skip-tls-verify'"
 }
 
+@test "kubectl_get: rejects --raw (would read any API path, secret values included)" {
+  run bash "$SCRIPT" --raw /api/v1/namespaces/default/secrets
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '--raw'"
+}
+
+@test "kubectl_get: rejects --raw=value form" {
+  run bash "$SCRIPT" --raw=/api/v1/namespaces/default/secrets
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '--raw=/api/v1/namespaces/default/secrets'"
+}
+
 @test "kubectl_get: rejects -w (avoid hangs)" {
   run bash "$SCRIPT" pods -w
 

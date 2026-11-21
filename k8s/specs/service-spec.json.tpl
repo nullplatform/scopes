@@ -14,7 +14,8 @@
     "restart-pods",
     "kill-instance",
     "diagnose-deployment",
-    "diagnose-scope"
+    "diagnose-scope",
+    "k8s-read"
   ],
   "assignable_to": "any",
   "attributes": {

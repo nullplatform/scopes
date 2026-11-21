@@ -1,0 +1,90 @@
+#!/bin/bash
+# Runs a read-only kubectl query for a scope and stores its output in the
+# action's results. The verb is one of the wrappers next to this folder
+# (kubectl_get, kubectl_logs), which keep the query read-only: they hardcode
+# the verb, reject auth/context/streaming flags and strip secret values.
+#
+# Parameters (action): command ("get" | "logs"), args (array of strings).
+# Without a namespace flag the query runs in the scope's namespace.
+
+set -uo pipefail
+
+SERVICE_PATH="${SERVICE_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+PARAMETERS=$(echo "$NP_ACTION_CONTEXT" | jq -c '.notification.parameters // {}')
+COMMAND=$(echo "$PARAMETERS" | jq -r '.command // empty')
+
+case "$COMMAND" in
+  get)  WRAPPER="$SERVICE_PATH/kubectl_get" ;;
+  logs) WRAPPER="$SERVICE_PATH/kubectl_logs" ;;
+  *)
+    log error "❌ Unsupported command '$COMMAND'"
+    log error ""
+    log error "🔧 How to fix:"
+    log error "   • Set the 'command' parameter to 'get' or 'logs'"
+    exit 1
+    ;;
+esac
+
+if ! echo "$PARAMETERS" | jq -e '(.args // []) | type == "array" and all(.[]; type == "string")' >/dev/null; then
+  log error "❌ The 'args' parameter must be an array of strings"
+  exit 1
+fi
+
+# One argument per array item, NUL-separated so spaces and newlines survive.
+ARGS=()
+while IFS= read -r -d '' ARG; do
+  ARGS+=("$ARG")
+done < <(echo "$PARAMETERS" | jq -j '(.args // [])[] | . + "\u0000"')
+
+K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-}" '
+  .providers["container-orchestration"].cluster.namespace // $default
+')
+
+# Find the namespace the scope actually runs in, which may differ from the configured one
+source "$SERVICE_PATH/utils/resolve_k8s_namespace"
+resolve_k8s_namespace "$K8S_NAMESPACE" || exit 1
+export K8S_NAMESPACE
+
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+log debug "🔍 Running kubectl $COMMAND (namespace: $K8S_NAMESPACE)"
+"$WRAPPER" ${ARGS[@]+"${ARGS[@]}"} > "$WORK_DIR/out" 2> "$WORK_DIR/err"
+EXIT_CODE=$?
+
+# Keep the end of the output: for logs the last lines are the useful ones.
+MAX_BYTES="${K8S_READ_MAX_BYTES:-200000}"
+TRUNCATED=false
+if [[ $(wc -c < "$WORK_DIR/out") -gt $MAX_BYTES ]]; then
+  tail -c "$MAX_BYTES" "$WORK_DIR/out" > "$WORK_DIR/out.cut" && mv "$WORK_DIR/out.cut" "$WORK_DIR/out"
+  TRUNCATED=true
+  log warn "⚠️  Output truncated to the last $MAX_BYTES bytes"
+fi
+
+# The body travels as a file: Linux caps a single argv entry at 128 KiB, and np
+# reads --body from disk only when the value ends in .json.
+jq -n \
+  --rawfile output "$WORK_DIR/out" \
+  --rawfile error "$WORK_DIR/err" \
+  --argjson exit_code "$EXIT_CODE" \
+  --argjson truncated "$TRUNCATED" \
+  --arg namespace "$K8S_NAMESPACE" \
+  '{results: {exit_code: $exit_code, output: $output, error: $error, truncated: $truncated, namespace: $namespace}}' \
+  > "$WORK_DIR/body.json"
+
+ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
+SERVICE_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.service.id')
+
+if ! np service action patch --id "$ACTION_ID" --serviceId "$SERVICE_ID" --body "$WORK_DIR/body.json" --no-output; then
+  log error "❌ Failed to store the output in the action results"
+  exit 1
+fi
+
+if [[ $EXIT_CODE -ne 0 ]]; then
+  log error "❌ kubectl $COMMAND exited with code $EXIT_CODE"
+  log error "$(tail -n 20 "$WORK_DIR/err")"
+  exit "$EXIT_CODE"
+fi
+
+log info "✅ kubectl $COMMAND completed ($(wc -c < "$WORK_DIR/out" | tr -d ' ') bytes)"
