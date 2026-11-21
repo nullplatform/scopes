@@ -383,3 +383,31 @@ EOF
 
   [ "$status" -eq 1 ]
 }
+
+@test "kubectl_get: rejects -s (short for --server)" {
+  run bash "$SCRIPT" pods -s https://evil.example
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-s'"
+}
+
+@test "kubectl_get: rejects -s with the value attached" {
+  run bash "$SCRIPT" pods -shttps://evil.example
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-shttps://evil.example'"
+}
+
+@test "kubectl_get: rejects --profile-output (would write a file)" {
+  run bash "$SCRIPT" pods --profile-output=/tmp/x
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '--profile-output=/tmp/x'"
+}
+
+@test "kubectl_get: rejects -f (would read a local manifest and skip the secret filter)" {
+  run bash "$SCRIPT" -f /tmp/secret.yaml
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-f'"
+}

@@ -28,7 +28,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Arguments for the verb, one per item, e.g. [\"pods\", \"-o\", \"wide\"]"
+          "description": "Arguments for the verb, one per item, e.g. [\"pods\", \"-o\", \"wide\"]. Only read-only flags are accepted, and a short flag takes its value as the next item"
         }
       }
     },

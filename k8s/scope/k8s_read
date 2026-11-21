@@ -1,11 +1,19 @@
 #!/bin/bash
 # Runs a read-only kubectl query for a scope and stores its output in the
-# action's results. The verb is one of the wrappers next to this folder
-# (kubectl_get, kubectl_logs), which keep the query read-only: they hardcode
-# the verb, reject auth/context/streaming flags and strip secret values.
+# action's results.
+#
+# The agent's identity can usually do anything in the cluster, so what keeps
+# this action read-only is decided here, by allowlist:
+#   - the verb: "get" or "logs", run through kubectl_get / kubectl_logs, which
+#     hardcode it and strip secret values
+#   - the flags: only the ones listed below. Anything else that starts with "-"
+#     is refused, so a flag that changes the server (-s), reads a local file
+#     (-f, -o go-template-file=) or writes one (--profile-output) never reaches
+#     kubectl
+#   - the namespace: the scope's own, plus the ones in
+#     K8S_READ_ALLOWED_NAMESPACES (comma separated; "*" allows any, and -A)
 #
 # Parameters (action): command ("get" | "logs"), args (array of strings).
-# Without a namespace flag the query runs in the scope's namespace.
 
 set -uo pipefail
 
@@ -37,6 +45,98 @@ while IFS= read -r -d '' ARG; do
   ARGS+=("$ARG")
 done < <(echo "$PARAMETERS" | jq -j '(.args // [])[] | . + "\u0000"')
 
+# Flags that take a value, as "-x value", "--flag value" or "--flag=value".
+GET_VALUE_FLAGS=(-n --namespace -l --selector -o --output --sort-by --field-selector -L --label-columns)
+GET_SWITCH_FLAGS=(-A --all-namespaces --show-labels --no-headers --show-kind --ignore-not-found)
+LOGS_VALUE_FLAGS=(-n --namespace -l --selector -c --container --tail --since --since-time --max-log-requests --limit-bytes)
+LOGS_SWITCH_FLAGS=(--all-containers -p --previous --timestamps --prefix)
+
+in_list() {
+  local needle="$1" item
+  shift
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+refuse() {
+  log error "❌ $1"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • $2"
+  exit 1
+}
+
+namespace_allowed() {
+  local namespace="$1" allowed item
+  [[ "$namespace" == "$K8S_NAMESPACE" ]] && return 0
+  IFS=',' read -ra allowed <<< "${K8S_READ_ALLOWED_NAMESPACES:-}"
+  for item in ${allowed[@]+"${allowed[@]}"}; do
+    item="${item//[[:space:]]/}"
+    [[ "$item" == "*" || "$item" == "$namespace" ]] && return 0
+  done
+  return 1
+}
+
+check_flag_value() {
+  local flag="$1" value="$2"
+  case "$flag" in
+    -n|--namespace)
+      namespace_allowed "$value" || refuse \
+        "Namespace '$value' is not allowed" \
+        "Query the scope's namespace ($K8S_NAMESPACE) or add '$value' to K8S_READ_ALLOWED_NAMESPACES"
+      ;;
+    -o|--output)
+      # Formats that take a file (go-template-file=, jsonpath-file=, ...) would print a local file.
+      case "$value" in
+        json|yaml|wide|name|jsonpath=*|jsonpath-as-json=*|custom-columns=*) ;;
+        *) refuse "Output format '$value' is not allowed" \
+             "Use json, yaml, wide, name, jsonpath=<expr>, jsonpath-as-json=<expr> or custom-columns=<spec>" ;;
+      esac
+      ;;
+  esac
+}
+
+validate_args() {
+  local -a value_flags switch_flags
+  if [[ "$COMMAND" == "get" ]]; then
+    value_flags=("${GET_VALUE_FLAGS[@]}"); switch_flags=("${GET_SWITCH_FLAGS[@]}")
+  else
+    value_flags=("${LOGS_VALUE_FLAGS[@]}"); switch_flags=("${LOGS_SWITCH_FLAGS[@]}")
+  fi
+
+  local i=0 arg name value
+  while (( i < ${#ARGS[@]} )); do
+    arg="${ARGS[$i]}"
+    i=$((i + 1))
+    [[ "$arg" != -* ]] && continue
+
+    name="$arg"
+    [[ "$arg" == --*=* ]] && name="${arg%%=*}"
+
+    if in_list "$name" "${value_flags[@]}"; then
+      if [[ "$arg" == --*=* ]]; then
+        value="${arg#*=}"
+      else
+        if (( i >= ${#ARGS[@]} )) || [[ "${ARGS[$i]}" == -* ]]; then
+          refuse "Flag '$name' needs a value" "Pass the value as the next item of 'args', or as $name=<value> for a long flag"
+        fi
+        value="${ARGS[$i]}"
+        i=$((i + 1))
+      fi
+      check_flag_value "$name" "$value"
+    elif in_list "$name" "${switch_flags[@]}"; then
+      if [[ "$name" == "-A" || "$name" == "--all-namespaces" ]] && ! namespace_allowed "*"; then
+        refuse "Flag '$name' is not allowed" "Query one namespace, or set K8S_READ_ALLOWED_NAMESPACES to '*'"
+      fi
+    else
+      refuse "Flag '$arg' is not allowed for '$COMMAND'" \
+        "Allowed flags: ${value_flags[*]} ${switch_flags[*]}. Short flags take their value as a separate item"
+    fi
+  done
+}
+
 K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-}" '
   .providers["container-orchestration"].cluster.namespace // $default
 ')
@@ -45,6 +145,8 @@ K8S_NAMESPACE=$(echo "$CONTEXT" | jq -r --arg default "${K8S_NAMESPACE:-}" '
 source "$SERVICE_PATH/utils/resolve_k8s_namespace"
 resolve_k8s_namespace "$K8S_NAMESPACE" || exit 1
 export K8S_NAMESPACE
+
+validate_args
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT

@@ -228,3 +228,24 @@ teardown() {
 
   [ "$status" -eq 1 ]
 }
+
+@test "kubectl_logs: rejects -s (short for --server)" {
+  run bash "$SCRIPT" my-pod -s https://evil.example
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-s'"
+}
+
+@test "kubectl_logs: rejects -s with the value attached" {
+  run bash "$SCRIPT" my-pod -shttps://evil.example
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '-shttps://evil.example'"
+}
+
+@test "kubectl_logs: rejects --profile-output (would write a file)" {
+  run bash "$SCRIPT" my-pod --profile-output=/tmp/x
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Refusing argument '--profile-output=/tmp/x'"
+}

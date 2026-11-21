@@ -47,12 +47,21 @@ BLOCKED_FLAGS=(
   --cluster
   --context
   --insecure-skip-tls-verify
+  -s
+  --tls-server-name
+  --profile
+  --profile-output
+  --cache-dir
   -f
   --follow
 )
 
 is_blocked() {
   local flag_name="${1%%=*}"
+  # -s takes its value attached too (-shttps://host): it is --server.
+  if [[ "$1" == -s* && "$1" != --* ]]; then
+    return 0
+  fi
   for blocked in "${BLOCKED_FLAGS[@]}"; do
     if [[ "$flag_name" == "$blocked" ]]; then
       return 0
