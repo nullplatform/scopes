@@ -415,14 +415,131 @@ action_context() {
   assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "NP_TRACE=[] LOG_LEVEL=[error]"
 }
 
-@test "k8s_read: secret values never reach the results" {
+# =============================================================================
+# Resources
+# =============================================================================
+@test "k8s_read: refuses secrets" {
   export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["secrets"]}')
 
   run bash "$SCRIPT"
 
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'secrets' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a single secret" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["secret/db-credentials", "-o", "yaml"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'secret' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses secrets in a list of types" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods,secrets"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'pods,secrets' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses secrets written in another case" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["Secrets"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'Secrets' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses secrets by their full name" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["secrets.v1."]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'secrets.v1.' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a secret after an allowed resource" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods/web", "secret/db-credentials"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'secret' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a resource type outside the list" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["clusterrolebindings"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'clusterrolebindings' cannot be read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a get without a resource" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["-o", "yaml"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "No resource to read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a get without args" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": []}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "No resource to read"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: allows a resource by type and name" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["deployment/web", "-o", "yaml"]}')
+
+  run bash "$SCRIPT"
+
   [ "$status" -eq 0 ]
-  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" '"name": "s1"'
-  [[ "$(cat "$BODY_COPY")" != *"c2VjcmV0"* ]]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [deployment/web] [-o] [yaml]"
+}
+
+@test "k8s_read: allows names after a resource type" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "web-1", "web-2"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [pods] [web-1] [web-2]"
+}
+
+@test "k8s_read: the resource pattern of the action spec accepts exactly the listed types" {
+  local pattern types type
+  pattern=$(sed 's/{{[^}]*}}/x/' "$PROJECT_ROOT/k8s/specs/actions/k8s-read.json.tpl" \
+    | jq -r '.parameters.schema.allOf[0].then.properties.args.items[0].pattern')
+  types=$(sed -n '/^GET_RESOURCES=(/,/^)/p' "$SCRIPT" | sed '1d;$d')
+
+  [ -n "$types" ]
+  for type in $types; do
+    echo "$type" | grep -Eq "$pattern" || { echo "spec pattern rejects $type"; return 1; }
+    echo "$type/web-1" | grep -Eq "$pattern" || { echo "spec pattern rejects $type/web-1"; return 1; }
+  done
+  for type in secrets secret Secrets pods,secrets secrets.v1. clusterroles "pods secrets" ""; do
+    ! echo "$type" | grep -Eq "$pattern" || { echo "spec pattern accepts '$type'"; return 1; }
+  done
 }
 
 @test "k8s_read: truncates a large output to its last bytes" {
