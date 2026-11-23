@@ -171,6 +171,7 @@ jobs:
       stack_dir: k8s/publish
       tag: ${{ inputs.existing_tag || github.ref_name }}
       image_digest: ${{ needs.containers.outputs.image_digest }}
+      tools: gomplate # the stack renders the spec templates with gomplate
     secrets:
       np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
       state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
@@ -186,6 +187,7 @@ jobs:
       stack_dir: onprem/publish
       tag: ${{ inputs.existing_tag || github.ref_name }}
       image_digest: ${{ needs.containers.outputs.image_digest }}
+      tools: gomplate # the stack renders the spec templates with gomplate
     secrets:
       np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
       state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
@@ -201,6 +203,7 @@ jobs:
       stack_dir: scheduled_task/publish
       tag: ${{ inputs.existing_tag || github.ref_name }}
       image_digest: ${{ needs.scheduled-task.outputs.image_digest }}
+      tools: gomplate # the stack renders the spec templates with gomplate
     secrets:
       np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
       state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
