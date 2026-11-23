@@ -27,12 +27,14 @@ name: publish-images
 # workflow collapses `image_digest` to a single value (matrix outputs overwrite
 # each other), which would register every artifact against the same image.
 #
-# Packages: each spec directory is then published as a global package (visible
-# to every organization) pinning the image its scope runs, by the shared
-# publish-package workflow applied at the tag: the four containers flavors
-# (k8s, azure, azure-aro, onprem) pin scopes/containers, scheduled_task pins
-# scopes/scheduled-task. The datadog overlay is not a package: it is the same
-# spec with another image. The package version is the tag; a prerelease tag
+# Packages: three of the spec directories are then published as global
+# packages (visible to every organization) pinning the image their scope runs,
+# by the shared publish-package workflow applied at the tag: k8s and onprem pin
+# scopes/containers, scheduled_task pins scopes/scheduled-task. azure and
+# azure-aro are not packages: in the worker model they are np-containers with
+# DNS_TYPE and K8S_FLAVOR from the agent, and their specs lag k8s's. The
+# datadog overlay is not a package either: it is the same spec with another
+# image. The package version is the tag; a prerelease tag
 # (v1.21.0-beta.1) publishes without moving the package default. Each stack
 # keeps its state as <repository>/<stack>.tfstate in the organization's state
 # bucket (secrets PACKAGE_STATE_AWS_ACCOUNT_ID, PACKAGE_TFSTATE_BUCKET and
@@ -159,44 +161,14 @@ jobs:
             --visible-to "organization=*"
 
   # ── packages ───────────────────────────────────────────────────────────────
-  # One job per stack: publish-package takes one digest, and the four
-  # containers flavors share the containers one.
+  # One job per stack: publish-package takes one digest, and k8s and onprem
+  # share the containers one.
   publish-np-containers:
     name: Publish np-containers
     needs: [containers, register-containers]
     uses: nullplatform/actions-nullplatform/.github/workflows/publish-package.yml@v1
     with:
       stack_dir: k8s/publish
-      tag: ${{ inputs.existing_tag || github.ref_name }}
-      image_digest: ${{ needs.containers.outputs.image_digest }}
-    secrets:
-      np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
-      state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
-      state_role_arn: ${{ secrets.AWS_ROLE_ARN_PACKAGE_STATE }}
-      tfstate_bucket: ${{ secrets.PACKAGE_TFSTATE_BUCKET }}
-      tfstate_region: ${{ secrets.PACKAGE_TFSTATE_REGION }}
-
-  publish-np-containers-azure:
-    name: Publish np-containers-azure
-    needs: [containers, register-containers]
-    uses: nullplatform/actions-nullplatform/.github/workflows/publish-package.yml@v1
-    with:
-      stack_dir: azure/publish
-      tag: ${{ inputs.existing_tag || github.ref_name }}
-      image_digest: ${{ needs.containers.outputs.image_digest }}
-    secrets:
-      np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
-      state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
-      state_role_arn: ${{ secrets.AWS_ROLE_ARN_PACKAGE_STATE }}
-      tfstate_bucket: ${{ secrets.PACKAGE_TFSTATE_BUCKET }}
-      tfstate_region: ${{ secrets.PACKAGE_TFSTATE_REGION }}
-
-  publish-np-containers-aro:
-    name: Publish np-containers-aro
-    needs: [containers, register-containers]
-    uses: nullplatform/actions-nullplatform/.github/workflows/publish-package.yml@v1
-    with:
-      stack_dir: azure-aro/publish
       tag: ${{ inputs.existing_tag || github.ref_name }}
       image_digest: ${{ needs.containers.outputs.image_digest }}
     secrets:

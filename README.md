@@ -7,17 +7,15 @@ Each top-level directory (e.g., `k8s`, `azure`, `scheduled_task`) represents a d
 
 ## Install in your organization
 
-The scopes of this repository are published as **global packages**, visible to every organization, one per spec directory. You do not copy their specs: you install a package and use it read-only. How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to these scopes.
+The scopes of this repository are published as **global packages**, visible to every organization. You do not copy their specs: you install a package and use it read-only. How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to these scopes.
 
 | Package | Directory | Scope type it publishes | Worker image | Overlay |
 |---|---|---|---|---|
 | `np-containers` | `k8s/` | Containers | `scopes/containers` | none |
-| `np-containers-azure` | `azure/` | Containers (Azure) | `scopes/containers` | `NP_OVERRIDES_PATH=/app/pkg/azure` |
-| `np-containers-aro` | `azure-aro/` | Containers (Azure Red Hat OpenShift) | `scopes/containers` | `NP_OVERRIDES_PATH=/app/pkg/azure-aro` |
 | `np-containers-on-premise` | `onprem/` | Containers (On-Premise), with a scope configuration | `scopes/containers` | `NP_OVERRIDES_PATH=/app/pkg/onprem` |
 | `np-scheduled-task` | `scheduled_task/` | Scheduled task | `scopes/scheduled-task` | baked into the image |
 
-The four containers packages pin the same image: it bakes the whole repository, and the flavor is the overlay its worker runs, set through `NP_OVERRIDES_PATH` on the worker pod (the image bakes `k8s`; `scheduled_task` sets its own overlay in its image). The datadog overlay (`containers-datadog`) is not a package: it is the same spec with another image.
+Both containers packages pin the same image: it bakes the whole repository with `k8s` as the service path, and on-premise is the overlay its worker runs, set through `NP_OVERRIDES_PATH` on the worker pod (`scheduled_task` sets its own overlay in its image). **AKS and ARO clusters install `np-containers`**: the code is the same, and what the `azure/` and `azure-aro/` directories set (`DNS_TYPE`, `K8S_FLAVOR`) comes from the agent's environment in the worker model, as it does today. The datadog overlay (`containers-datadog`) is not a package: it is the same spec with another image.
 
 Already registered a copy with `./configure` or tofu-modules' `scope_definition` (slug `containers`, `scheduled-task`, ...)? It keeps working: those specs stay in every release, and the packages install next to it, as the guide explains. The `np-` prefix is what lets both live in one organization: channels route by specification slug.
 
@@ -29,7 +27,7 @@ Installing a package touches the same three layers as registering a scope yourse
 | nullplatform (nullplatform API key) | The installation of the package, the scope type, the NRN settings and, for on-premise, the scope-configuration schema | tofu-modules' `scope_package_installation` |
 | bindings | The agent channel, the role under selector `containers` in your IAM provider (`CONTAINERS_ASSUME_ROLE_SELECTOR`), and the agent's worker settings | tofu-modules' `scope_definition_agent_association`, `nullplatform/agent`, your providers |
 
-Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/scopes/releases)) and use its version in every place below. `np-containers` shown; the other packages change the slug, the name and, for the overlays, the worker patch.
+Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/scopes/releases)) and use its version in every place below. `np-containers` shown; the other two change the slug and the name, on-premise also sets `create_scope_configuration` and the worker patch.
 
 ```hcl
 # ── infrastructure layer (AWS) ───────────────────────────────────────
@@ -87,19 +85,22 @@ module "containers_channel" {
 #   { selector = "containers", arn = local.containers_requirements.permissions_role_arn }
 
 # ── agent (tofu-modules' nullplatform/agent) ─────────────────────────
-# Every containers package runs the k8s scope code, so it needs the k8s
-# environment the module injects (worker_k8s_packages) and the agent's
-# identity (worker_orchestrated_packages). The overlays also need the
-# worker patch that picks their directory.
+# Every package here runs the k8s scope code, so it needs the k8s
+# environment the module injects (worker_k8s_packages: DNS_TYPE, K8S_NAMESPACE,
+# CLUSTER_NAME, the template paths, extra_envs) and the agent's identity
+# (worker_orchestrated_packages). On AKS and ARO, dns_type = "azure" and
+# extra_envs = { K8S_FLAVOR = "aks" } (or "aro") are what the azure/ and
+# azure-aro/ directories used to set. On-premise also needs the worker patch
+# that picks its overlay directory.
 #   worker_orchestrated_packages = ["np-containers", "np-scheduled-task"]
 #   worker_k8s_packages          = ["np-containers", "np-scheduled-task"]
 #
 #   worker = {
 #     patches = [{
-#       target = { package = "np-containers-azure" }
+#       target = { package = "np-containers-on-premise" }
 #       merge  = { spec = { containers = [{
 #         name = "worker"
-#         env  = [{ name = "NP_OVERRIDES_PATH", value = "/app/pkg/azure" }]
+#         env  = [{ name = "NP_OVERRIDES_PATH", value = "/app/pkg/onprem" }]
 #       }] } }
 #     }]
 #   }
@@ -109,7 +110,7 @@ The scope's settings (`k8s/values.yaml` keys, documented in [`k8s/README.md`](./
 
 Prerequisites: an agent whose `TAGS` match the channel's `tags_selectors`, with the package slugs in `worker_orchestrated_packages` and `worker_k8s_packages`, and `public.ecr.aws/nullplatform/*` in `worker.allowedRegistries`.
 
-Every tag publishes a new revision of each package from this repository: [`publish-images.yml`](./.github/workflows/publish-images.yml) pushes the images, registers them as artifacts and applies each `<directory>/publish` stack (tofu-modules' `scope_package_publish`) with the digest of the image that scope runs. The package version is the tag; a prerelease tag (`v1.21.0-beta.1`) publishes without moving the package default.
+Every tag publishes a new revision of the three packages from this repository: [`publish-images.yml`](./.github/workflows/publish-images.yml) pushes the images, registers them as artifacts and applies each `<directory>/publish` stack (tofu-modules' `scope_package_publish`) with the digest of the image that scope runs. The package version is the tag; a prerelease tag (`v1.21.0-beta.1`) publishes without moving the package default.
 
 ## Installing a Custom Scope
 
@@ -200,7 +201,8 @@ The script will:
     -   `metric/`: Metrics collection workflows.
     -   `parameters/`: Parameter management workflows.
     -   `publish/`: publishes the scope as the global package `np-containers` (release workflow only).
--   **`azure/`**, **`azure-aro/`**, **`onprem/`**: config overlays of the Kubernetes scope (specs and `values.yaml`), each with its own `publish/`.
+-   **`azure/`**, **`azure-aro/`**: config overlays of the Kubernetes scope for the legacy git-clone channel (specs and `values.yaml`); not packages.
+-   **`onprem/`**: config overlay for clusters with no cloud behind them, with its scope-configuration schema and its `publish/`.
 -   **`scheduled_task/`**: Scheduled Tasks scope implementation, with its `publish/`.
 -   **`agent/`**: Agent deployment scripts.
 
