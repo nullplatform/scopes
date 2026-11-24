@@ -1,0 +1,51 @@
+#!/bin/bash
+
+_RESOLVE_IAM_ROLE_NAME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+if [[ "$(type -t np_name_render 2>/dev/null)" != "function" ]]; then
+  source "$_RESOLVE_IAM_ROLE_NAME_DIR/../naming/resolve_names"
+fi
+
+IAM_ROLE_NAME_BUDGET=64
+
+_iam_service_account_of_scope() {
+  kubectl get serviceaccounts -n "$1" -l "scope_id=$2" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || return 1
+}
+
+_iam_role_scope_id() {
+  aws iam get-role --role-name "$1" \
+    --query "Role.Tags[?Key=='scope_id'].Value | [0]" --output text 2>/dev/null || true
+}
+
+resolve_iam_role_name() {
+  local prefix="$1" scope_id="$2" namespace="$3" name
+
+  if [[ "$prefix" != *"{"* ]]; then
+    IAM_ROLE_NAME="$prefix-$scope_id"
+    return 0
+  fi
+
+  if ! name=$(_iam_service_account_of_scope "$namespace" "$scope_id"); then
+    log error "❌ Could not look up the service account of scope $scope_id in namespace '$namespace'"
+    log error "🔧 How to fix:"
+    log error "   • Check that the agent can list serviceaccounts in '$namespace'"
+    return 1
+  fi
+  name="${name%% *}"
+  if [ -n "$name" ]; then
+    if [ "$(_iam_role_scope_id "$name")" = "$scope_id" ]; then
+      IAM_ROLE_NAME="$name"
+      return 0
+    fi
+    log warn "⚠️  Ignoring service account '$name': its IAM role is not tagged with scope_id=$scope_id"
+  fi
+
+  if ! name=$(np_name_render "$((IAM_ROLE_NAME_BUDGET - ${#scope_id} - 1))" "$prefix"); then
+    log error "❌ Could not render the IAM role name from prefix '$prefix'"
+    log error "🔧 How to fix:"
+    log error "   • Fix IAM.PREFIX; see k8s/docs/resource-naming.md"
+    return 1
+  fi
+
+  IAM_ROLE_NAME="$name-$scope_id"
+}

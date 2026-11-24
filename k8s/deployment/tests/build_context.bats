@@ -24,7 +24,7 @@ setup() {
 teardown() {
   unset -f validate_status 2>/dev/null || true
   unset CONTEXT DEPLOY_STRATEGY POD_DISRUPTION_BUDGET_ENABLED POD_DISRUPTION_BUDGET_MAX_UNAVAILABLE 2>/dev/null || true
-  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE 2>/dev/null || true
+  unset TRAFFIC_CONTAINER_IMAGE TRAFFIC_MANAGER_CONFIG_MAP IMAGE_PULL_SECRETS IAM CONTAINER_MEMORY_IN_MEMORY CONTAINER_CPU_IN_MILLICORES MAIN_TRAFFIC_MANAGER_PORT PRESTOP_SLEEP_MODE TRAFFIC_PROXY GATEWAY_TYPE 2>/dev/null || true
 }
 
 # =============================================================================
@@ -213,50 +213,122 @@ teardown() {
 # =============================================================================
 # Traffic Container Image Version Tests
 # =============================================================================
-resolve_traffic_container_version() {
-  local protocol="$1"
-  if [[ "$protocol" == "web_sockets" ]]; then
-    echo "websocket2"
-  else
-    get_config_value \
-      --provider '.providers["container-orchestration"].traffic_manager.version' \
-      --default "latest"
-  fi
+# Loads the real version helpers from build_context, so the tests cannot drift from the script.
+load_traffic_version_helpers() {
+  eval "$(sed -n '/^TRAFFIC_MANAGER_WEBSOCKET_MIN_VERSION=/p;/^TRAFFIC_MANAGER_LEGACY_WEBSOCKET_VERSION=/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  eval "$(sed -n '/^traffic_manager_version_below()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  eval "$(sed -n '/^resolve_traffic_container_version()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  eval "$(sed -n '/^warn_traffic_manager_legacy_websocket()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
 }
 
-@test "traffic container: uses websocket2 for web_sockets, latest for http" {
-  result=$(resolve_traffic_container_version "web_sockets")
-  assert_equal "$result" "websocket2"
+configured_traffic_manager_version() {
+  get_config_value \
+    --provider '.providers["container-orchestration"].traffic_manager.version' \
+    --default "latest"
+}
 
-  result=$(resolve_traffic_container_version "http")
+@test "traffic container: http and web_sockets default to latest when no version is configured" {
+  load_traffic_version_helpers
+
+  result=$(resolve_traffic_container_version "http" "$(configured_traffic_manager_version)")
+  assert_equal "$result" "latest"
+
+  result=$(resolve_traffic_container_version "web_sockets" "$(configured_traffic_manager_version)")
   assert_equal "$result" "latest"
 }
 
 @test "traffic container: http protocol uses container-orchestration provider version when set" {
+  load_traffic_version_helpers
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
 
-  result=$(resolve_traffic_container_version "http")
+  result=$(resolve_traffic_container_version "http" "$(configured_traffic_manager_version)")
   assert_equal "$result" "1.8.0"
 }
 
-@test "traffic container: web_sockets protocol ignores container-orchestration provider version" {
-  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
+@test "traffic container: web_sockets protocol uses the provider version when it supports WebSocket" {
+  load_traffic_version_helpers
 
-  result=$(resolve_traffic_container_version "web_sockets")
-  assert_equal "$result" "websocket2"
+  for version in "1.8.0" "1.8.1" "v1.9.1" "2.0.0" "1.10.0" "beta" "my-custom-tag"; do
+    result=$(resolve_traffic_container_version "web_sockets" "$version")
+    assert_equal "$result" "$version"
+  done
+}
+
+@test "traffic container: web_sockets protocol keeps websocket2 for a version without WebSocket support" {
+  load_traffic_version_helpers
+
+  for version in "1.7.1" "1.7.0" "v1.5.0" "1.1.1" "0.9.9"; do
+    result=$(resolve_traffic_container_version "web_sockets" "$version")
+    assert_equal "$result" "websocket2"
+  done
+}
+
+@test "traffic container: http protocol never falls back to websocket2" {
+  load_traffic_version_helpers
+
+  for version in "1.7.1" "1.1.1" "latest"; do
+    result=$(resolve_traffic_container_version "http" "$version")
+    assert_equal "$result" "$version"
+  done
+}
+
+@test "traffic container: warns when a web_sockets scope stays on the legacy websocket2 build" {
+  load_traffic_version_helpers
+
+  run warn_traffic_manager_legacy_websocket "public.ecr.aws/nullplatform/k8s-traffic-manager:websocket2" "1.7.1"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "The traffic manager sidecar is using the legacy 'websocket2' build, which no longer gets security fixes"
+  assert_contains "$output" "The configured version '1.7.1' does not proxy WebSocket connections"
+  assert_contains "$output" "Set 'traffic_manager.version' in the container-orchestration provider to 1.8.0 or newer"
+}
+
+@test "traffic container: no legacy websocket warning for a current version or a custom image" {
+  load_traffic_version_helpers
+
+  for image in \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:v1.9.1" \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:latest" \
+    "custom.ecr.aws/traffic:websocket2"; do
+    run warn_traffic_manager_legacy_websocket "$image" "1.7.1"
+    [ "$status" -eq 0 ]
+    assert_empty "$output"
+  done
 }
 
 @test "traffic container: provider version flows into the default image when no full-image override is set" {
   export CONTEXT=$(echo "$CONTEXT" | jq '.providers["container-orchestration"] = {"traffic_manager": {"version": "1.8.0"}}')
   unset TRAFFIC_CONTAINER_IMAGE
 
-  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http")
+  load_traffic_version_helpers
+  TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "http" "$(configured_traffic_manager_version)")
   result=$(get_config_value \
     --env TRAFFIC_CONTAINER_IMAGE \
     --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
     --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
   )
   assert_equal "$result" "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0"
+}
+
+@test "traffic container: warns when the default image is left on latest" {
+  eval "$(sed -n '/^warn_traffic_manager_latest()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+
+  run warn_traffic_manager_latest "public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "The traffic manager sidecar is using the 'latest' tag because no version is configured"
+  assert_contains "$output" "Set 'traffic_manager.version' in the container-orchestration provider to pin it"
+}
+
+@test "traffic container: no warning for a pinned version, websocket2 or a custom image" {
+  eval "$(sed -n '/^warn_traffic_manager_latest()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+
+  for image in \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:1.8.0" \
+    "public.ecr.aws/nullplatform/k8s-traffic-manager:websocket2" \
+    "custom.ecr.aws/traffic:latest"; do
+    run warn_traffic_manager_latest "$image"
+    [ "$status" -eq 0 ]
+    assert_empty "$output"
+  done
 }
 
 # =============================================================================
@@ -581,9 +653,10 @@ SCRIPT
   chmod +x "$test_script"
 
   local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
-  mkdir -p "$mock_service/deployment" "$mock_service/utils"
+  mkdir -p "$mock_service/deployment" "$mock_service/utils" "$mock_service/naming"
   cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
-  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$PROJECT_ROOT/k8s/utils/resolve_iam_role_name" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/naming/resolve_names" "$mock_service/naming/"
 
   run "$test_script" "$mock_service"
 
@@ -629,9 +702,10 @@ SCRIPT
   chmod +x "$test_script"
 
   local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
-  mkdir -p "$mock_service/deployment" "$mock_service/utils"
+  mkdir -p "$mock_service/deployment" "$mock_service/utils" "$mock_service/naming"
   cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
-  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$PROJECT_ROOT/k8s/utils/resolve_iam_role_name" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/naming/resolve_names" "$mock_service/naming/"
 
   run "$test_script" "$mock_service"
 
@@ -901,7 +975,7 @@ setup_full_build_context() {
     "application": {"slug": "test-app"},
     "deployment": {"id": "deploy-123", "status": "creating"},
     "providers": {
-      "cloud-providers": {"account": {"region": "us-east-1"}},
+      "cloud-providers": {"account": {"region": "us-east-1"}, "networking": {"domain_name": "nullapps.io"}},
       "container-orchestration": {
         "cluster": {"namespace": "default-namespace"},
         "gateway": {"public_name": "gw-pub", "private_name": "gw-priv"},
@@ -1505,4 +1579,192 @@ EOF
 
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ PRESTOP_SLEEP_MODE must be native or exec, got: 'auto'"
+}
+
+@test "traffic_proxy: default es nginx cuando no está configurado" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  unset TRAFFIC_PROXY
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "nginx" ]
+}
+
+@test "traffic_proxy: acepta istio" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "istio" ]
+}
+
+@test "traffic_proxy: rechaza un valor desconocido" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=envoy
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "TRAFFIC_PROXY"
+}
+
+@test "traffic_proxy: rechaza istio en clusters ARO, que no pasan por el gateway de Istio" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export GATEWAY_TYPE=aro_cluster
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "aro_cluster"
+}
+
+@test "traffic_proxy: nginx sigue permitido en clusters ARO" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  unset TRAFFIC_PROXY
+  export GATEWAY_TYPE=aro_cluster
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "nginx" ]
+}
+
+@test "traffic_proxy: an invalid value aborts the full build_context, not just the isolated function" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=envoy
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  local expected
+  expected=$(cat <<'EOF'
+❌ TRAFFIC_PROXY must be 'nginx' or 'istio', got: 'envoy'
+
+💡 Possible causes:
+   - Typo in the configured value (e.g. 'Istio' or 'envoy')
+🔧 How to fix:
+   • Set TRAFFIC_PROXY to one of: nginx, istio
+EOF
+)
+  assert_contains "$output" "$expected"
+}
+
+@test "traffic_proxy: rechaza istio cuando la ingress no es el gateway de Istio (ALB)" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export INITIAL_INGRESS_PATH='$SERVICE_PATH/deployment/templates/initial-ingress.yaml.tpl'
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "needs the Istio gateway ingress"
+}
+
+@test "traffic_proxy: acepta istio con la ingress HTTPRoute de istio" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export INITIAL_INGRESS_PATH='$SERVICE_PATH/deployment/templates/istio/initial-httproute.yaml.tpl'
+  export CONTEXT='{}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "istio" ]
+}
+
+@test "traffic_proxy: acepta istio con puertos adicionales" {
+  eval "$(sed -n '/^resolve_traffic_proxy()/,/^}/p' "$PROJECT_ROOT/k8s/deployment/build_context")"
+  export TRAFFIC_PROXY=istio
+  export CONTEXT='{"scope":{"capabilities":{"additional_ports":[{"port":9090,"type":"GRPC"}]}}}'
+
+  run resolve_traffic_proxy
+  [ "$status" -eq 0 ]
+  [ "$output" = "istio" ]
+}
+
+@test "traffic_proxy: rechaza istio con TRAFFIC_MANAGER_CONFIG_MAP" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=istio
+  export TRAFFIC_MANAGER_CONFIG_MAP=custom-nginx
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "TRAFFIC_MANAGER_CONFIG_MAP 'custom-nginx' is set but TRAFFIC_PROXY is 'istio'"
+}
+
+@test "traffic_proxy: en istio no aplica la colisión del puerto del sidecar con main_http_port" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=istio
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.capabilities.main_http_port = 80')
+  export MAIN_TRAFFIC_MANAGER_PORT=80
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "traffic_proxy: en istio no avisa sobre la versión del sidecar" {
+  setup_full_build_context
+  export TRAFFIC_PROXY=istio
+  export TRAFFIC_CONTAINER_IMAGE="public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *"traffic manager sidecar is using"* ]] || { echo "$output"; false; }
+}
+
+@test "traffic_proxy: en nginx avisa cuando el sidecar usa latest" {
+  setup_full_build_context
+  export TRAFFIC_CONTAINER_IMAGE="public.ecr.aws/nullplatform/k8s-traffic-manager:latest"
+
+  run source "$SCRIPT"
+
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  assert_contains "$output" "The traffic manager sidecar is using the 'latest' tag"
+}
+
+@test "service account: a patterned IAM prefix is rendered by the naming engine" {
+  local test_script="$BATS_TEST_TMPDIR/test_iam_prefix.sh"
+
+  cat > "$test_script" << 'SCRIPT'
+#!/bin/bash
+export SERVICE_PATH="$1"
+export SERVICE_ACTION="start-initial"
+export K8S_NAMESPACE="test-ns"
+export SCOPE_ID="123"
+export IAM='{"ENABLED":"true","PREFIX":"{.account.slug | ascii}"}'
+export CONTEXT='{
+  "deployment":{"status":"creating","id":"deploy-123"},
+  "scope":{"id":"123","capabilities":{"scaling_type":"fixed","fixed_instances":1}}
+}'
+
+mkdir -p "$SERVICE_PATH/scope"
+cat > "$SERVICE_PATH/scope/build_context" << 'MOCK_SCOPE'
+source "$SERVICE_PATH/utils/get_config_value"
+MOCK_SCOPE
+
+kubectl() {
+  return 0
+}
+export -f kubectl
+
+source "$SERVICE_PATH/deployment/build_context"
+SCRIPT
+  chmod +x "$test_script"
+
+  local mock_service="$BATS_TEST_TMPDIR/mock_k8s"
+  mkdir -p "$mock_service/deployment" "$mock_service/utils" "$mock_service/naming"
+  cp "$PROJECT_ROOT/k8s/deployment/build_context" "$mock_service/deployment/"
+  cp "$PROJECT_ROOT/k8s/utils/get_config_value" "$PROJECT_ROOT/k8s/utils/resolve_iam_role_name" "$mock_service/utils/"
+  cp "$PROJECT_ROOT/k8s/naming/resolve_names" "$mock_service/naming/"
+
+  run "$test_script" "$mock_service"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
 }

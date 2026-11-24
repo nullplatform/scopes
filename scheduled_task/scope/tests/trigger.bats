@@ -99,6 +99,7 @@ teardown() {
   kubectl() {
     case "$*" in
       "get deployments,services,cronjobs,jobs -A -l scope_id=scope-123"*) printf 'old-namespace' ;;
+      "get namespace old-namespace "*) printf 'old-namespace/true' ;;
       "get cronjob -n old-namespace -l scope_id=scope-123 -o jsonpath={.items[*].metadata.name}") echo "my-cronjob" ;;
       "create job --from=cronjob/my-cronjob"*) echo "kubectl $*" ;;
     esac

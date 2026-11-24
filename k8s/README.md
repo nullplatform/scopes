@@ -47,13 +47,25 @@ placeholders and engine as the resource naming patterns (`docs/resource-naming.m
 
 Each placeholder must point at a single value (`{.scope.dimensions.environment}`, not `{.scope.dimensions}`), fixed
 text goes before the first placeholder or after the last one, and the rendered name must be a valid Kubernetes
-namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE_IF_NOT_EXIST` is true. Nothing is
-copied into it: image pull secrets, the traffic manager ConfigMap or any other object the scopes need there come from a
-workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
+namespace name. The namespace is created on first use when `CREATE_K8S_NAMESPACE_IF_NOT_EXIST` is true, labeled
+`nullplatform=true`. Nothing is copied into it: image pull secrets, the traffic manager ConfigMap or any other object the
+scopes need there come from a workflow override (`OVERRIDES_PATH`) or from the cluster's own tooling.
 
-A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`), so changing
-the namespace or its pattern only affects new scopes. Finding them lists deployments, services, cronjobs and jobs in
-every namespace; an agent without that permission falls back to the configured namespace. Kubernetes namespaces are never deleted.
+A pattern never renders a namespace a scope must not run in: `default`, `kube-*`, the gateway namespace
+(`GATEWAY_NAMESPACE`), those of the additional gateways and, when the agent runs in the cluster, its own namespace are
+refused. A rendered namespace that already exists is reused only if it carries the label `nullplatform=true`; label one
+created by hand with `kubectl label namespace <name> nullplatform=true`.
+
+A scope that already has objects in the cluster stays in their namespace (`utils/resolve_k8s_namespace`) if that
+namespace is trusted: the configured fixed name, the default `nullplatform`, or one labeled `nullplatform=true`. Labels
+prove nothing (anyone who can create an object can set them), so objects in other namespaces are ignored when a trusted
+one has the scope's objects, the action fails when several trusted namespaces have them, and it fails when only
+untrusted ones do. After changing a fixed namespace, label the old one so its scopes keep working, `default` included.
+
+Finding a scope's objects lists deployments, services, cronjobs and jobs in every namespace. If the agent cannot, a
+fixed namespace is used as configured; with a pattern the action fails instead of rendering a new namespace for an
+existing scope. Diagnose still runs when the namespace is refused, in the namespace of the scope's pods. Kubernetes
+namespaces are never deleted.
 
 ### Networking
 
@@ -120,6 +132,7 @@ the main gateway only. The agent needs `get` on `gateways` in every namespace co
 | **DEPLOY_STRATEGY** | Deployment strategy (rolling or blue-green) | `deployment.deployment_strategy` |
 | **DEPLOYMENT_MAX_WAIT_IN_SECONDS** | Maximum wait time for deployments (seconds) | `deployment.deployment_max_wait_seconds` |
 | **PRESTOP_SLEEP_MODE** | preStop wait before SIGTERM: `exec` (default, `/bin/sleep` in the image) or `native` (kubelet sleep action, works on images without `/bin/sleep`; every node must run Kubernetes >= 1.30) | `deployment.prestop_sleep_mode` |
+| **TRAFFIC_PROXY** | What carries a scope's HTTP traffic and metrics: `nginx` (default, traffic-manager sidecar in every pod) or `istio` (no sidecar; the Istio gateway access log feeds the logs-controller, which needs `ISTIO_ACCESS_LOGS_ENABLED`). Additional ports run without their sidecars and only the main port gates readiness. Not supported with `GATEWAY_TYPE=aro_cluster` | `deployment.traffic_proxy` |
 | **KUBECTL_DELETE_TIMEOUT_SECONDS** | Maximum time a `kubectl delete` waits for the objects to be gone, finalizers included (seconds, default `300`). When it runs out, the deletion is logged as failed instead of hanging the workflow | - |
 
 #### Traffic Manager
@@ -172,6 +185,12 @@ AWS IAM configuration for Kubernetes service accounts.
 | **IAM_PREFIX** | Prefix for IAM role names | `security.iam_prefix` |
 | **IAM_POLICIES** | List of IAM policies to attach to the role | `security.iam_policies` |
 | **IAM_BOUNDARY_ARN** | ARN of the permissions boundary policy | `security.iam_boundary_arn` |
+
+The `IAM` block in `values.yaml` also accepts:
+
+- `PREFIX` as a pattern rendered by the resource naming engine, e.g. `{.account.slug}-{.namespace.slug}`; the role and its service account are named `<rendered prefix>-<scope id>`. A prefix without `{` is used as is. A scope that already has a service account keeps its name if its role is tagged with the scope id. See `k8s/docs/resource-naming.md`.
+- `MODE`: `irsa` (default) trusts the cluster's OIDC provider and annotates the service account with the role ARN; `pod_identity` trusts EKS Pod Identity and creates a pod identity association for the scope's service account. The cluster needs the EKS Pod Identity Agent, and the agent role needs `eks:CreatePodIdentityAssociation`, `eks:ListPodIdentityAssociations`, `eks:DeletePodIdentityAssociation`, `eks:TagResource` and `iam:PassRole` on `/nullplatform/custom-scopes/`. The mode applies to scopes created after it changes; recreate a scope to move it to the other mode.
+- `TAGS`: additional tags for the role (and the pod identity association). A value with `{` is a pattern rendered by the same engine; any other value is used as is. A key that nullplatform already sets (`scope_id`, `application`, a dimension, …) is rejected.
 
 #### Assuming an IAM role for AWS operations
 
