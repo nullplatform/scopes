@@ -40,7 +40,7 @@ module "publish" {
   service_path             = "onprem"
   image_repository         = "nullplatform/scopes/containers"
   local_specs_path         = abspath("${path.module}/..")
-  service_spec_description = "Docker containers on pods, on self-managed/on-premise clusters"
+  service_spec_description = "Docker containers on pods, in on-premise clusters"
 
   action_spec_names = [
     "create-scope",
