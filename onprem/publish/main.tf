@@ -43,6 +43,20 @@ module "publish" {
   service_spec_description = "Docker containers on pods, on self-managed/on-premise clusters"
 
   action_spec_names = [
-    "create-scope delete-deployment delete-scope diagnose-deployment diagnose-scope finalize-blue-green kill-instance pause-autoscaling restart-pods resume-autoscaling rollback-deployment set-desired-instance-count start-blue-green start-initial switch-traffic",
+    "create-scope",
+    "delete-deployment",
+    "delete-scope",
+    "diagnose-deployment",
+    "diagnose-scope",
+    "finalize-blue-green",
+    "kill-instance",
+    "pause-autoscaling",
+    "restart-pods",
+    "resume-autoscaling",
+    "rollback-deployment",
+    "set-desired-instance-count",
+    "start-blue-green",
+    "start-initial",
+    "switch-traffic",
   ]
 }

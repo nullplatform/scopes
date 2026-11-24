@@ -43,6 +43,14 @@ module "publish" {
   service_spec_description = "Allows you to deploy periodic jobs in Kubernetes"
 
   action_spec_names = [
-    "create-scope delete-deployment delete-scope finalize-blue-green kill-instance rollback-deployment start-blue-green start-initial trigger",
+    "create-scope",
+    "delete-deployment",
+    "delete-scope",
+    "finalize-blue-green",
+    "kill-instance",
+    "rollback-deployment",
+    "start-blue-green",
+    "start-initial",
+    "trigger",
   ]
 }
