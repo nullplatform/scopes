@@ -4,13 +4,14 @@
        form and becomes the default, so new scopes always get it. The schema keeps accepting both values:
        existing scopes keep a valid visibility. An unknown value or a list with no option left fails the
        render, so a typo never hides or exposes an option. */ -}}
+{{- $allowed := coll.Slice "public" "internal" -}}
 {{- $options := coll.Slice -}}
 {{- $optionsRaw := env.Getenv "VISIBILITY_OPTIONS" | strings.TrimSpace -}}
 {{- if eq $optionsRaw "" }}{{ $optionsRaw = "public,internal" }}{{ end -}}
 {{- range strings.Split "," $optionsRaw -}}
 {{- $option := . | strings.TrimSpace | strings.ToLower -}}
 {{- if eq $option "private" }}{{ $option = "internal" }}{{ end -}}
-{{- if and (ne $option "") (not (coll.Has (coll.Slice "public" "internal") $option)) -}}
+{{- if and (ne $option "") (not (coll.Has $allowed $option)) -}}
 {{- test.Fail (printf "VISIBILITY_OPTIONS: unknown visibility %q in %q (allowed: public, internal, private)" (strings.TrimSpace .) (env.Getenv "VISIBILITY_OPTIONS")) -}}
 {{- end -}}
 {{- if and (ne $option "") (not (coll.Has $options $option)) }}{{ $options = $options | coll.Append $option }}{{ end -}}
@@ -28,11 +29,11 @@
 {{- $visibility = "internal" -}}
 {{- if eq (len $options) 1 }}{{ $visibility = index $options 0 }}{{ end -}}
 {{- end -}}
-{{- if not (coll.Has (coll.Slice "public" "internal") $visibility) -}}
+{{- if not (coll.Has $allowed $visibility) -}}
 {{- test.Fail (printf "DEFAULT_VISIBILITY: unknown visibility %q (allowed: public, internal, private)" (env.Getenv "DEFAULT_VISIBILITY")) -}}
 {{- end -}}
 {{- if not (coll.Has $options $visibility) -}}
-{{- test.Fail (printf "DEFAULT_VISIBILITY: %q is not one of the VISIBILITY_OPTIONS %q" $visibility (env.Getenv "VISIBILITY_OPTIONS")) -}}
+{{- test.Fail (printf "DEFAULT_VISIBILITY: %q is not one of the VISIBILITY_OPTIONS %q" (strings.TrimSpace (env.Getenv "DEFAULT_VISIBILITY")) (env.Getenv "VISIBILITY_OPTIONS")) -}}
 {{- end -}}
 {
   "available_actions": [

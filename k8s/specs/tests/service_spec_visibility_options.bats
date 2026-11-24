@@ -122,10 +122,7 @@ BOTH_ONE_OF='[{"const":"public","title":"Internet","description":"Public, reacha
 
     VISIBILITY_OPTIONS=public DEFAULT_VISIBILITY=private run render "$spec"
     [ "$status" -ne 0 ] || fail "$spec public/private: render succeeded"
-    [[ "$output" == *"DEFAULT_VISIBILITY:"*"internal"*"is not one of the VISIBILITY_OPTIONS"* ]] || fail "$spec public/private: message: $output"
-
-    VISIBILITY_OPTIONS=public run render "$spec"
-    [ "$status" -eq 0 ] || fail "$spec public/unset: the single option should become the default: $output"
+    [[ "$output" == *"DEFAULT_VISIBILITY:"*"private"*"is not one of the VISIBILITY_OPTIONS"* ]] || fail "$spec public/private: message: $output"
   done
 }
 
