@@ -217,7 +217,7 @@ np_naming_strategy() {
 	if [ -n "${NAMING_STRATEGY+x}" ] && [ -z "$NAMING_STRATEGY" ]; then
 		log error "❌ NAMING_STRATEGY is set but empty"
 		log error "🔧 How to fix:"
-		log error "   • Remove it to use the default 'ids', or set one of: ids, qualified, custom"
+		log error "   • Remove it to use the default 'qualified', or set one of: ids, qualified, custom"
 		return 1
 	fi
 
@@ -226,7 +226,7 @@ np_naming_strategy() {
 		--provider '.providers["scope-configurations"].naming.strategy' \
 		--provider '.providers["container-orchestration"].naming.strategy' \
 		--env NAMING_STRATEGY \
-		--default "ids")"
+		--default "qualified")"
 
 	case "$strategy" in
 		ids|qualified|custom) echo "$strategy" ;;

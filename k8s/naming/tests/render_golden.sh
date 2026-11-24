@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 mkdir -p "$OUT_DIR"
 
+export NAMING_STRATEGY="ids"
+
 log() { if [ "$1" = "error" ]; then echo "$2" >&2; else echo "$2"; fi; }
 
 kubectl() {
