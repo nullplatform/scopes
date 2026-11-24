@@ -65,6 +65,10 @@ configuration:
   IAM:
     ENABLED: false
 #    PREFIX: nullplatform-scopes
+#    MODE: irsa
+#    TAGS:
+#      team: "{.namespace.slug}"
+#      cost-center: "CC-1234"
 #    ROLE:
 #      POLICIES:
 #        - TYPE: arn

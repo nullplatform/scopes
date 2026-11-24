@@ -1,3 +1,11 @@
+{{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal (default internal).
+       Trimmed and case-insensitive; empty means internal and private aliases internal (the UI label).
+       Anything else fails the render so a typo never silently becomes public. The oneOf keeps both values. */ -}}
+{{- $visibility := env.Getenv "DEFAULT_VISIBILITY" "internal" | strings.TrimSpace | strings.ToLower -}}
+{{- if eq $visibility "" "private" }}{{ $visibility = "internal" }}{{ end -}}
+{{- if not (coll.Has (coll.Slice "public" "internal") $visibility) -}}
+{{- test.Fail (printf "DEFAULT_VISIBILITY: unknown visibility %q (allowed: public, internal, private)" (env.Getenv "DEFAULT_VISIBILITY")) -}}
+{{- end -}}
 {
   "available_actions": [
     "create-scope",
@@ -375,12 +383,12 @@
                },
                {
                   "const":"internal",
-                  "title":"Main Account",
+                  "title":"Private",
                   "description":"Only visible inside your organization"
                }
             ],
             "title":"Visibility",
-            "default":"public",
+            "default":"{{ $visibility }}",
             "editableOn": [
                 "create"
             ],

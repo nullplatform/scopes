@@ -3,6 +3,7 @@
 
 # Build scope and tags env variables
 source "$SERVICE_PATH/scope/build_context"
+source "$SERVICE_PATH/utils/resolve_iam_role_name"
 
 BLUE_DEPLOYMENT_ID=$(echo "$CONTEXT" | jq '.scope.current_active_deployment // empty' -r)
 SCALING_TYPE=$(echo "$CONTEXT" | jq -r .scope.capabilities.scaling_type)
@@ -139,20 +140,77 @@ fi
 
 SCOPE_TRAFFIC_PROTOCOL=$(echo "$CONTEXT" | jq -r .scope.capabilities.protocol)
 
-if [[ "$SCOPE_TRAFFIC_PROTOCOL" == "web_sockets" ]]; then
-  TRAFFIC_CONTAINER_VERSION="websocket2"
-else
-  TRAFFIC_CONTAINER_VERSION=$(get_config_value \
-    --provider '.providers["container-orchestration"].traffic_manager.version' \
-    --default "latest"
-  )
-fi
+# First traffic manager release that proxies WebSocket connections. Before it, WebSocket scopes
+# ran on a separate build, `websocket2`, which is no longer updated and misses nginx security fixes.
+TRAFFIC_MANAGER_WEBSOCKET_MIN_VERSION="1.8.0"
+TRAFFIC_MANAGER_LEGACY_WEBSOCKET_VERSION="websocket2"
+
+# True when $1 is a release version (X.Y.Z, with or without a leading v) lower than $2.
+# Any other tag (latest, beta, a custom one) cannot be compared and counts as not lower.
+traffic_manager_version_below() {
+  local version="${1#v}" minimum="${2#v}"
+  [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  local -a have=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+  [[ "$minimum" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  local -a want=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+  local i
+  for i in 0 1 2; do
+    if (( 10#${have[i]} < 10#${want[i]} )); then return 0; fi
+    if (( 10#${have[i]} > 10#${want[i]} )); then return 1; fi
+  done
+  return 1
+}
+
+# A WebSocket scope runs the configured traffic manager version like any other scope. Only a
+# version pinned below the first one with WebSocket support keeps the legacy build, so the
+# scope keeps working until the pin is raised.
+resolve_traffic_container_version() {
+  local protocol="$1" configured="$2"
+  if [[ "$protocol" == "web_sockets" ]] \
+    && traffic_manager_version_below "$configured" "$TRAFFIC_MANAGER_WEBSOCKET_MIN_VERSION"; then
+    echo "$TRAFFIC_MANAGER_LEGACY_WEBSOCKET_VERSION"
+  else
+    echo "$configured"
+  fi
+}
+
+TRAFFIC_MANAGER_CONFIGURED_VERSION=$(get_config_value \
+  --provider '.providers["container-orchestration"].traffic_manager.version' \
+  --default "latest"
+)
+
+TRAFFIC_CONTAINER_VERSION=$(resolve_traffic_container_version "$SCOPE_TRAFFIC_PROTOCOL" "$TRAFFIC_MANAGER_CONFIGURED_VERSION")
 
 TRAFFIC_CONTAINER_IMAGE=$(get_config_value \
   --env TRAFFIC_CONTAINER_IMAGE \
   --provider '.providers["scope-configurations"].deployment.traffic_container_image' \
   --default "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_CONTAINER_VERSION"
 )
+
+# `latest` follows the newest stable release, so a scope left on it changes sidecar version
+# on its own. It stays the default; the deployment only says so.
+warn_traffic_manager_latest() {
+  local image="$1"
+  if [[ "$image" == "public.ecr.aws/nullplatform/k8s-traffic-manager:latest" ]]; then
+    log warn "⚠️  The traffic manager sidecar is using the 'latest' tag because no version is configured"
+    log warn "   'latest' moves with every release, so the sidecar can change between deployments"
+    log warn "   Set 'traffic_manager.version' in the container-orchestration provider to pin it"
+  fi
+}
+
+warn_traffic_manager_latest "$TRAFFIC_CONTAINER_IMAGE"
+
+# The legacy WebSocket build is frozen: it does not get nginx security fixes.
+warn_traffic_manager_legacy_websocket() {
+  local image="$1" configured="$2"
+  if [[ "$image" == "public.ecr.aws/nullplatform/k8s-traffic-manager:$TRAFFIC_MANAGER_LEGACY_WEBSOCKET_VERSION" ]]; then
+    log warn "⚠️  The traffic manager sidecar is using the legacy '$TRAFFIC_MANAGER_LEGACY_WEBSOCKET_VERSION' build, which no longer gets security fixes"
+    log warn "   The configured version '$configured' does not proxy WebSocket connections"
+    log warn "   Set 'traffic_manager.version' in the container-orchestration provider to $TRAFFIC_MANAGER_WEBSOCKET_MIN_VERSION or newer"
+  fi
+}
+
+warn_traffic_manager_legacy_websocket "$TRAFFIC_CONTAINER_IMAGE" "$TRAFFIC_MANAGER_CONFIGURED_VERSION"
 
 # Pod Disruption Budget configuration
 PDB_ENABLED=$(get_config_value \
@@ -202,7 +260,8 @@ IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 SERVICE_ACCOUNT_NAME=""
 
 if [[ "$IAM_ENABLED" == "true" ]]; then
-  SERVICE_ACCOUNT_NAME=$(echo "$IAM" | jq -r .PREFIX)-"$SCOPE_ID"
+  resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$K8S_NAMESPACE" || exit 1
+  SERVICE_ACCOUNT_NAME="$IAM_ROLE_NAME"
 fi
 
 TRAFFIC_MANAGER_CONFIG_MAP=$(get_config_value \
