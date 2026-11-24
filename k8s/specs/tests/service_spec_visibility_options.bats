@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Renders the k8s service spec with gomplate and checks how VISIBILITY_OPTIONS limits the visibility
 # options of the create form (a single option hides the selector; the schema keeps both values), and how
-# it combines with DEFAULT_VISIBILITY.
+# it combines with DEFAULT_VISIBILITY, plus the option labels VISIBILITY_PUBLIC_LABEL and VISIBILITY_INTERNAL_LABEL.
 # Every assertion ends in `|| fail`: a bare failing [[ ]] inside a loop does not fail the test on bash 3.2.
 
 SPECS=(k8s)
@@ -9,7 +9,7 @@ SPECS=(k8s)
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../.." && pwd)"
   export NRN="organization=1:account=2"
-  unset DEFAULT_VISIBILITY VISIBILITY_OPTIONS
+  unset DEFAULT_VISIBILITY VISIBILITY_OPTIONS VISIBILITY_PUBLIC_LABEL VISIBILITY_INTERNAL_LABEL
 
   if ! command -v gomplate >/dev/null 2>&1; then
     skip "gomplate not installed"
@@ -131,5 +131,49 @@ BOTH_ONE_OF='[{"const":"public","title":"Internet","description":"Public, reacha
     VISIBILITY_OPTIONS=internal DEFAULT_VISIBILITY=publik run render "$spec"
     [ "$status" -ne 0 ] || fail "$spec: render succeeded"
     [[ "$output" == *"DEFAULT_VISIBILITY: unknown visibility"* ]] || fail "$spec: message: $output"
+  done
+}
+
+without_titles() {
+  jq -S 'del(.attributes.schema.properties.visibility.oneOf[].title)'
+}
+
+@test "service spec: unset, empty or whitespace-only labels render the same spec as unset" {
+  for spec in "${SPECS[@]}"; do
+    local expected
+    expected="$(render "$spec")"
+    for value in "" "  "; do
+      VISIBILITY_PUBLIC_LABEL="$value" VISIBILITY_INTERNAL_LABEL="$value" run render "$spec"
+      [ "$status" -eq 0 ] || fail "$spec '$value': render failed: $output"
+      [ "$output" = "$expected" ] || fail "$spec '$value': differs from the unset render"
+    done
+  done
+}
+
+@test "service spec: VISIBILITY_PUBLIC_LABEL and VISIBILITY_INTERNAL_LABEL only change the option titles" {
+  for spec in "${SPECS[@]}"; do
+    local expected
+    expected="$(render "$spec" | without_titles)"
+    VISIBILITY_PUBLIC_LABEL=" Public internet " VISIBILITY_INTERNAL_LABEL="Internal" run render "$spec"
+    [ "$status" -eq 0 ] || fail "$spec: render failed: $output"
+    [ "$(visibility 'oneOf | map({const, title})')" = '[{"const":"public","title":"Public internet"},{"const":"internal","title":"Internal"}]' ] \
+      || fail "$spec: oneOf $(visibility oneOf)"
+    [ "$(echo "$output" | without_titles)" = "$expected" ] || fail "$spec: changes more than the titles"
+
+    VISIBILITY_INTERNAL_LABEL="Internal" run render "$spec"
+    [ "$status" -eq 0 ] || fail "$spec internal only: render failed: $output"
+    [ "$(visibility 'oneOf | map(.title)')" = '["Internet","Internal"]' ] || fail "$spec internal only: titles $(visibility 'oneOf | map(.title)')"
+  done
+}
+
+@test "service spec: labels with quotes, braces or markup stay valid JSON and are rendered as written" {
+  for spec in "${SPECS[@]}"; do
+    local label='Say "hi" {{ .x }} <b>&</b> \ ñ'
+    VISIBILITY_PUBLIC_LABEL="$label" VISIBILITY_INTERNAL_LABEL="$label" run render "$spec"
+    [ "$status" -eq 0 ] || fail "$spec: render failed: $output"
+    echo "$output" | jq -e . >/dev/null || fail "$spec: invalid JSON"
+    [ "$(echo "$output" | jq -r '.attributes.schema.properties.visibility.oneOf[0].title')" = "$label" ] || fail "$spec: public title $(visibility 'oneOf[0].title')"
+    [ "$(echo "$output" | jq -r '.attributes.schema.properties.visibility.oneOf[1].title')" = "$label" ] || fail "$spec: internal title $(visibility 'oneOf[1].title')"
+    [ "$(visibility 'oneOf | map(.const)')" = '["public","internal"]' ] || fail "$spec: values $(visibility 'oneOf | map(.const)')"
   done
 }

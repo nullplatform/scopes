@@ -35,6 +35,13 @@
 {{- if not (coll.Has $options $visibility) -}}
 {{- test.Fail (printf "DEFAULT_VISIBILITY: %q is not one of the VISIBILITY_OPTIONS %q" (strings.TrimSpace (env.Getenv "DEFAULT_VISIBILITY")) (env.Getenv "VISIBILITY_OPTIONS")) -}}
 {{- end -}}
+{{- /* VISIBILITY_PUBLIC_LABEL, VISIBILITY_INTERNAL_LABEL: the form label of each visibility option (default
+       Internet and Private). Only the text changes: the stored value is still public or internal. Trimmed;
+       empty means the default. Written as a JSON string, so any character is safe. */ -}}
+{{- $publicLabel := env.Getenv "VISIBILITY_PUBLIC_LABEL" | strings.TrimSpace -}}
+{{- if eq $publicLabel "" }}{{ $publicLabel = "Internet" }}{{ end -}}
+{{- $internalLabel := env.Getenv "VISIBILITY_INTERNAL_LABEL" | strings.TrimSpace -}}
+{{- if eq $internalLabel "" }}{{ $internalLabel = "Private" }}{{ end -}}
 {
   "available_actions": [
     "create-scope",
@@ -450,12 +457,12 @@
             "oneOf":[
                {
                   "const":"public",
-                  "title":"Internet",
+                  "title":{{ $publicLabel | data.ToJSON }},
                   "description":"Public, reachable by anyone"
                },
                {
                   "const":"internal",
-                  "title":"Private",
+                  "title":{{ $internalLabel | data.ToJSON }},
                   "description":"Only visible inside your organization"
                }
             ],

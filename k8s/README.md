@@ -304,11 +304,21 @@ These variables change the scope's create form, not its workflows. They are read
 |----------|-------------|---------|
 | **DEFAULT_VISIBILITY** | Visibility preselected for new scopes: `public` or `internal` (`private` is an alias of `internal`) | `internal`, or the only option left by `VISIBILITY_OPTIONS` |
 | **VISIBILITY_OPTIONS** | Comma-separated visibility options the form offers: `public` ("Internet"), `internal` ("Private"); `private` is an alias of `internal`. With a single option the form shows no Visibility selector and new scopes get that option | `public,internal` |
+| **VISIBILITY_PUBLIC_LABEL** | Label of the `public` option in the form. Only the text changes: the scope is still stored as `public` | `Internet` |
+| **VISIBILITY_INTERNAL_LABEL** | Label of the `internal` option in the form. Only the text changes: the scope is still stored as `internal` | `Private` |
 
-Both are trimmed and case-insensitive. The render fails on an unknown value, on a `VISIBILITY_OPTIONS` with no option left, or on a `DEFAULT_VISIBILITY` that `VISIBILITY_OPTIONS` does not offer. The spec's schema keeps accepting both values, so existing scopes stay valid whatever `VISIBILITY_OPTIONS` says. For example, to create only scopes reachable through the private gateway, with no Visibility selector in the form:
+All are trimmed, and an empty value means the default. `DEFAULT_VISIBILITY` and `VISIBILITY_OPTIONS` are case-insensitive; the labels are shown as written (`scope_definition` does not accept a single quote in any value). A label only shows when the form offers both options. The render fails on an unknown value, on a `VISIBILITY_OPTIONS` with no option left, or on a `DEFAULT_VISIBILITY` that `VISIBILITY_OPTIONS` does not offer. The spec's schema keeps accepting both values, so existing scopes stay valid whatever `VISIBILITY_OPTIONS` says. For example, to create only scopes reachable through the private gateway, with no Visibility selector in the form:
 
 ```hcl
 template_env_vars = {
   VISIBILITY_OPTIONS = "internal"
+}
+```
+
+Or, to keep both options and rename the private one:
+
+```hcl
+template_env_vars = {
+  VISIBILITY_INTERNAL_LABEL = "Internal"
 }
 ```
