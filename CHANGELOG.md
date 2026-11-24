@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- k8s scopes can limit the visibility options of the create form with `VISIBILITY_OPTIONS`, e.g. `template_env_vars = { VISIBILITY_OPTIONS = "internal" }` in `scope_definition` to offer only private scopes. It defaults to `public,internal`, the render fails on an unknown value or on a `DEFAULT_VISIBILITY` it does not offer, and a single option becomes the default when `DEFAULT_VISIBILITY` is unset
+- k8s scopes can limit the visibility options of the create form with `VISIBILITY_OPTIONS` (default `public,internal`). With a single option, e.g. `template_env_vars = { VISIBILITY_OPTIONS = "internal" }` in `scope_definition`, the form hides the Visibility selector and new scopes get that option; the spec keeps accepting both values, so existing scopes stay valid. The render fails on an unknown value or on a `DEFAULT_VISIBILITY` it does not offer
 
 ## [1.21.0] - 2026-11-24
 - k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).

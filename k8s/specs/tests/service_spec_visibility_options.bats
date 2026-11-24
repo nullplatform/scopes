@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
-# Renders the k8s service spec with gomplate and checks how VISIBILITY_OPTIONS filters the visibility
-# options of the create form, and how it combines with DEFAULT_VISIBILITY.
+# Renders the k8s service spec with gomplate and checks how VISIBILITY_OPTIONS limits the visibility
+# options of the create form (a single option hides the selector; the schema keeps both values), and how
+# it combines with DEFAULT_VISIBILITY.
 # Every assertion ends in `|| fail`: a bare failing [[ ]] inside a loop does not fail the test on bash 3.2.
 
 SPECS=(k8s)
@@ -28,13 +29,17 @@ visibility() {
   echo "$output" | jq -c ".attributes.schema.properties.visibility.$1"
 }
 
-options() {
-  echo "$output" | jq -c '[.attributes.schema.properties.visibility.oneOf[].const]'
+# Number of uiSchema controls bound to the visibility field (the form's selector).
+selector_controls() {
+  echo "$output" | jq '[.attributes.schema.uiSchema | .. | objects | select(.scope? == "#/properties/visibility")] | length'
 }
 
-without_visibility_options() {
-  jq -S 'del(.attributes.schema.properties.visibility.default, .attributes.schema.properties.visibility.oneOf)'
+without_selector_and_default() {
+  jq -S 'del(.attributes.schema.properties.visibility.default)
+    | del(.attributes.schema.uiSchema.elements[] | select(.scope? == "#/properties/visibility"))'
 }
+
+BOTH_ONE_OF='[{"const":"public","title":"Internet","description":"Public, reachable by anyone"},{"const":"internal","title":"Private","description":"Only visible inside your organization"}]'
 
 @test "service spec: unset, empty or both VISIBILITY_OPTIONS (any order, case or spacing) render the same spec as unset" {
   for spec in "${SPECS[@]}"; do
@@ -44,33 +49,35 @@ without_visibility_options() {
       VISIBILITY_OPTIONS="$value" run render "$spec"
       [ "$status" -eq 0 ] || fail "$spec '$value': render failed: $output"
       [ "$output" = "$expected" ] || fail "$spec '$value': differs from the unset render"
+      [ "$(selector_controls)" = 1 ] || fail "$spec '$value': expected the visibility selector, got $(selector_controls)"
     done
   done
 }
 
-@test "service spec: VISIBILITY_OPTIONS=internal offers only internal and defaults to it" {
+@test "service spec: VISIBILITY_OPTIONS=internal hides the selector, defaults to internal and keeps both values in the schema" {
   for spec in "${SPECS[@]}"; do
     local expected
-    expected="$(render "$spec" | without_visibility_options)"
+    expected="$(render "$spec" | without_selector_and_default)"
     for value in internal " Internal " private PRIVATE "internal,"; do
       VISIBILITY_OPTIONS="$value" run render "$spec"
       [ "$status" -eq 0 ] || fail "$spec '$value': render failed: $output"
       echo "$output" | jq -e . >/dev/null || fail "$spec '$value': invalid JSON"
-      [ "$(visibility oneOf)" = '[{"const":"internal","title":"Private","description":"Only visible inside your organization"}]' ] \
-        || fail "$spec '$value': oneOf $(visibility oneOf)"
+      [ "$(selector_controls)" = 0 ] || fail "$spec '$value': the visibility selector is still in the form"
       [ "$(visibility default)" = '"internal"' ] || fail "$spec '$value': default $(visibility default)"
-      [ "$(echo "$output" | without_visibility_options)" = "$expected" ] || fail "$spec '$value': changes more than the visibility options"
+      [ "$(visibility oneOf)" = "$BOTH_ONE_OF" ] || fail "$spec '$value': oneOf $(visibility oneOf)"
+      [ "$(echo "$output" | without_selector_and_default)" = "$expected" ] || fail "$spec '$value': changes more than the selector and the default"
     done
   done
 }
 
-@test "service spec: VISIBILITY_OPTIONS=public offers only public and defaults to it when DEFAULT_VISIBILITY is unset" {
+@test "service spec: VISIBILITY_OPTIONS=public hides the selector and defaults to public when DEFAULT_VISIBILITY is unset" {
   for spec in "${SPECS[@]}"; do
     VISIBILITY_OPTIONS=public run render "$spec"
     [ "$status" -eq 0 ] || fail "$spec: render failed: $output"
     echo "$output" | jq -e . >/dev/null || fail "$spec: invalid JSON"
-    [ "$(options)" = '["public"]' ] || fail "$spec: options $(options)"
+    [ "$(selector_controls)" = 0 ] || fail "$spec: the visibility selector is still in the form"
     [ "$(visibility default)" = '"public"' ] || fail "$spec: default $(visibility default)"
+    [ "$(visibility oneOf)" = "$BOTH_ONE_OF" ] || fail "$spec: oneOf $(visibility oneOf)"
   done
 }
 

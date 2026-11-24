@@ -1,7 +1,9 @@
 {{- /* VISIBILITY_OPTIONS: the visibility options the create form offers, a comma-separated list of
        public and internal (default public,internal). Each item is trimmed and case-insensitive, private
-       aliases internal and empty items are skipped; the form keeps the order public, internal. An unknown
-       value or a list with no option left fails the render, so a typo never hides or exposes an option. */ -}}
+       aliases internal and empty items are skipped. A single option removes the Visibility selector from the
+       form and becomes the default, so new scopes always get it. The schema keeps accepting both values:
+       existing scopes keep a valid visibility. An unknown value or a list with no option left fails the
+       render, so a typo never hides or exposes an option. */ -}}
 {{- $options := coll.Slice -}}
 {{- $optionsRaw := env.Getenv "VISIBILITY_OPTIONS" | strings.TrimSpace -}}
 {{- if eq $optionsRaw "" }}{{ $optionsRaw = "public,internal" }}{{ end -}}
@@ -78,6 +80,7 @@
                "label":"RAM Memory",
                "scope":"#/properties/ram_memory"
             },
+{{- if gt (len $options) 1 }}
             {
                "type":"Control",
                "label":"Visibility",
@@ -86,6 +89,7 @@
                   "format":"radio"
                }
             },
+{{- end }}
             {
                "type":"Categorization",
                "options":{
@@ -443,20 +447,16 @@
          "visibility":{
             "type":"string",
             "oneOf":[
-{{- if coll.Has $options "public" }}
                {
                   "const":"public",
                   "title":"Internet",
                   "description":"Public, reachable by anyone"
-               }{{ if coll.Has $options "internal" }},{{ end }}
-{{- end }}
-{{- if coll.Has $options "internal" }}
+               },
                {
                   "const":"internal",
                   "title":"Private",
                   "description":"Only visible inside your organization"
                }
-{{- end }}
             ],
             "title":"Visibility",
             "default":"{{ $visibility }}",

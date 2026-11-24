@@ -303,9 +303,9 @@ These variables change the scope's create form, not its workflows. They are read
 | Variable | Description | Default |
 |----------|-------------|---------|
 | **DEFAULT_VISIBILITY** | Visibility preselected for new scopes: `public` or `internal` (`private` is an alias of `internal`) | `internal`, or the only option left by `VISIBILITY_OPTIONS` |
-| **VISIBILITY_OPTIONS** | Comma-separated visibility options the form offers: `public` ("Internet"), `internal` ("Private"); `private` is an alias of `internal` | `public,internal` |
+| **VISIBILITY_OPTIONS** | Comma-separated visibility options the form offers: `public` ("Internet"), `internal` ("Private"); `private` is an alias of `internal`. With a single option the form shows no Visibility selector and new scopes get that option | `public,internal` |
 
-Both are trimmed and case-insensitive. The render fails on an unknown value, on a `VISIBILITY_OPTIONS` with no option left, or on a `DEFAULT_VISIBILITY` that `VISIBILITY_OPTIONS` does not offer. For example, to create only scopes reachable through the private gateway:
+Both are trimmed and case-insensitive. The render fails on an unknown value, on a `VISIBILITY_OPTIONS` with no option left, or on a `DEFAULT_VISIBILITY` that `VISIBILITY_OPTIONS` does not offer. The spec's schema keeps accepting both values, so existing scopes stay valid whatever `VISIBILITY_OPTIONS` says. For example, to create only scopes reachable through the private gateway, with no Visibility selector in the form:
 
 ```hcl
 template_env_vars = {
