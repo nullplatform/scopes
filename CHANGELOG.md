@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Fix: the on-premise containers scope spec is up to date with the k8s one again. It had stopped following it in May: scopes created from it now get `main_http_port`, the `HTTP` type (and default) of `additional_ports`, and `cpu_millicores_limit` / `ram_memory_limit`, with the form labels that came with them. Existing on-premise scopes stay valid: the three fields have defaults
+
 ## [1.20.0] - 2026-11-04
 - k8s and scheduled task scopes can run each nullplatform namespace in its own Kubernetes namespace: `cluster.namespace` (or `K8S_NAMESPACE`) accepts a pattern rendered by the resource naming engine, e.g. `{.namespace.slug}`, `{.account.slug}-{.namespace.slug}` or `{.namespace.slug}-{.scope.dimensions.environment}`. The namespace is created on first use. It reads the setting from the provider, so it works with orchestrated workers, where `NAMESPACE_OVERRIDE` from the channel does not arrive
 - Fix: k8s and scheduled task scopes and their deployments are kept in the namespace they were deployed to, even if the configured namespace changes
