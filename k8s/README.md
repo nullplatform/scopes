@@ -295,3 +295,20 @@ Advanced configuration options.
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
 | **K8S_MODIFIERS** | JSON string with dynamic modifications to Kubernetes objects | `object_modifiers` |
+
+## Create Form Variables
+
+These variables change the scope's create form, not its workflows. They are read by gomplate when `specs/service-spec.json.tpl` is rendered: pass them in `template_env_vars` of tofu-modules' `scope_definition`, or export them before running `./configure`. A published package (`np-containers`) renders its spec once, without them, so they do not apply to it.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| **DEFAULT_VISIBILITY** | Visibility preselected for new scopes: `public` or `internal` (`private` is an alias of `internal`) | `internal`, or the only option left by `VISIBILITY_OPTIONS` |
+| **VISIBILITY_OPTIONS** | Comma-separated visibility options the form offers: `public` ("Internet"), `internal` ("Private"); `private` is an alias of `internal` | `public,internal` |
+
+Both are trimmed and case-insensitive. The render fails on an unknown value, on a `VISIBILITY_OPTIONS` with no option left, or on a `DEFAULT_VISIBILITY` that `VISIBILITY_OPTIONS` does not offer. For example, to create only scopes reachable through the private gateway:
+
+```hcl
+template_env_vars = {
+  VISIBILITY_OPTIONS = "internal"
+}
+```

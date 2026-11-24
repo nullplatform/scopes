@@ -1,10 +1,36 @@
-{{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal (default internal).
-       Trimmed and case-insensitive; empty means internal and private aliases internal (the UI label).
-       Anything else fails the render so a typo never silently becomes public. The oneOf keeps both values. */ -}}
-{{- $visibility := env.Getenv "DEFAULT_VISIBILITY" "internal" | strings.TrimSpace | strings.ToLower -}}
-{{- if eq $visibility "" "private" }}{{ $visibility = "internal" }}{{ end -}}
+{{- /* VISIBILITY_OPTIONS: the visibility options the create form offers, a comma-separated list of
+       public and internal (default public,internal). Each item is trimmed and case-insensitive, private
+       aliases internal and empty items are skipped; the form keeps the order public, internal. An unknown
+       value or a list with no option left fails the render, so a typo never hides or exposes an option. */ -}}
+{{- $options := coll.Slice -}}
+{{- $optionsRaw := env.Getenv "VISIBILITY_OPTIONS" | strings.TrimSpace -}}
+{{- if eq $optionsRaw "" }}{{ $optionsRaw = "public,internal" }}{{ end -}}
+{{- range strings.Split "," $optionsRaw -}}
+{{- $option := . | strings.TrimSpace | strings.ToLower -}}
+{{- if eq $option "private" }}{{ $option = "internal" }}{{ end -}}
+{{- if and (ne $option "") (not (coll.Has (coll.Slice "public" "internal") $option)) -}}
+{{- test.Fail (printf "VISIBILITY_OPTIONS: unknown visibility %q in %q (allowed: public, internal, private)" (strings.TrimSpace .) (env.Getenv "VISIBILITY_OPTIONS")) -}}
+{{- end -}}
+{{- if and (ne $option "") (not (coll.Has $options $option)) }}{{ $options = $options | coll.Append $option }}{{ end -}}
+{{- end -}}
+{{- if eq (len $options) 0 -}}
+{{- test.Fail (printf "VISIBILITY_OPTIONS: no visibility in %q (allowed: public, internal, private)" (env.Getenv "VISIBILITY_OPTIONS")) -}}
+{{- end -}}
+{{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal. Unset or empty means internal,
+       or the only option when VISIBILITY_OPTIONS leaves one. Trimmed and case-insensitive; private aliases
+       internal (the UI label). Anything else, or a value VISIBILITY_OPTIONS hides, fails the render so a typo
+       never silently becomes public. */ -}}
+{{- $visibility := env.Getenv "DEFAULT_VISIBILITY" | strings.TrimSpace | strings.ToLower -}}
+{{- if eq $visibility "private" }}{{ $visibility = "internal" }}{{ end -}}
+{{- if eq $visibility "" -}}
+{{- $visibility = "internal" -}}
+{{- if eq (len $options) 1 }}{{ $visibility = index $options 0 }}{{ end -}}
+{{- end -}}
 {{- if not (coll.Has (coll.Slice "public" "internal") $visibility) -}}
 {{- test.Fail (printf "DEFAULT_VISIBILITY: unknown visibility %q (allowed: public, internal, private)" (env.Getenv "DEFAULT_VISIBILITY")) -}}
+{{- end -}}
+{{- if not (coll.Has $options $visibility) -}}
+{{- test.Fail (printf "DEFAULT_VISIBILITY: %q is not one of the VISIBILITY_OPTIONS %q" $visibility (env.Getenv "VISIBILITY_OPTIONS")) -}}
 {{- end -}}
 {
   "available_actions": [
@@ -417,16 +443,20 @@
          "visibility":{
             "type":"string",
             "oneOf":[
+{{- if coll.Has $options "public" }}
                {
                   "const":"public",
                   "title":"Internet",
                   "description":"Public, reachable by anyone"
-               },
+               }{{ if coll.Has $options "internal" }},{{ end }}
+{{- end }}
+{{- if coll.Has $options "internal" }}
                {
                   "const":"internal",
                   "title":"Private",
                   "description":"Only visible inside your organization"
                }
+{{- end }}
             ],
             "title":"Visibility",
             "default":"{{ $visibility }}",
