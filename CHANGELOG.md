@@ -6,9 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-<<<<<<< HEAD
-- Fix: the on-premise containers scope spec is up to date with the k8s one again. It had stopped following it in May: scopes created from it now get `main_http_port`, the `HTTP` type (and default) of `additional_ports`, and `cpu_millicores_limit` / `ram_memory_limit`, with the form labels that came with them. Existing on-premise scopes stay valid: the three fields have defaults
-=======
 - Fix: k8s scopes with the WebSocket protocol run the configured traffic manager version (`traffic_manager.version`, `latest` by default) instead of the frozen `websocket2` build, which misses nginx security fixes. A version pinned below 1.8.0, the first one that proxies WebSocket connections, keeps `websocket2` and logs a warning
 - k8s deployments now warn when the traffic manager sidecar runs on the `latest` tag because no version is configured. `latest` stays the default; set `traffic_manager.version` in the container-orchestration provider to pin it
 - k8s scopes can give their pods an IAM role through EKS Pod Identity instead of IRSA with `IAM.MODE: pod_identity`
@@ -22,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix: a namespace pattern (`cluster.namespace: "{.namespace.slug}"`) no longer renders `default`, `kube-*`, a gateway namespace (additional gateways included) or, when the agent runs in the cluster, the agent's namespace. It reuses an existing namespace only if it carries `nullplatform=true`, and does not adopt one created by someone else while the scope creates it
 - k8s diagnose runs even when the scope's namespace is refused, in the namespace of the scope's pods
 - k8s scopes log a warning when no `networking.domain_name` (or `networking.private_domain_name` for private scopes) is configured in scope-configurations or cloud-providers and they fall back to the default `nullapps.io` domain
->>>>>>> origin/beta
+- Fix: the on-premise containers scope spec is up to date with the k8s one again. It had stopped following it in May: scopes created from it now get `main_http_port`, the `HTTP` type (and default) of `additional_ports`, and `cpu_millicores_limit` / `ram_memory_limit`, with the form labels that came with them. Existing on-premise scopes stay valid: the three fields have defaults
 
 ## [1.20.0] - 2026-11-04
 - k8s and scheduled task scopes can run each nullplatform namespace in its own Kubernetes namespace: `cluster.namespace` (or `K8S_NAMESPACE`) accepts a pattern rendered by the resource naming engine, e.g. `{.namespace.slug}`, `{.account.slug}-{.namespace.slug}` or `{.namespace.slug}-{.scope.dimensions.environment}`. The namespace is created on first use. It reads the setting from the provider, so it works with orchestrated workers, where `NAMESPACE_OVERRIDE` from the channel does not arrive
