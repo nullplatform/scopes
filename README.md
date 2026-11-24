@@ -5,7 +5,116 @@ This repository contains the **default implementation** of Scope Providers provi
 
 Each top-level directory (e.g., `k8s`, `azure`, `scheduled_task`) represents a distinct **scope** implementation. When a user creates a scope in the nullplatform UI that matches one of these types, the platform sends a notification to the agent, which executes the scripts in this repository to provision and manage that scope.
 
+## Install in your organization
+
+The scopes of this repository are published as **global packages**, visible to every organization. You do not copy their specs: you install a package and use it read-only. How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to these scopes.
+
+| Package | Directory | Scope type it publishes | Worker image | Overlay |
+|---|---|---|---|---|
+| `np-containers` | `k8s/` | Containers | `scopes/containers` | none |
+| `np-containers-on-premise` | `onprem/` | Containers (On-Premise), with a scope configuration | `scopes/containers` | `NP_OVERRIDES_PATH=/app/pkg/onprem` |
+| `np-scheduled-task` | `scheduled_task/` | Scheduled task | `scopes/scheduled-task` | baked into the image |
+
+Both containers packages pin the same image: it bakes the whole repository with `k8s` as the service path, and on-premise is the overlay its worker runs, set through `NP_OVERRIDES_PATH` on the worker pod (`scheduled_task` sets its own overlay in its image). **AKS and ARO clusters install `np-containers`**: the code is the same, and what the `azure/` and `azure-aro/` directories set (`DNS_TYPE`, `K8S_FLAVOR`) comes from the agent's environment in the worker model, as it does today. The datadog overlay (`containers-datadog`) is not a package: it is the same spec with another image.
+
+Already registered a copy with `./configure` or tofu-modules' `scope_definition` (slug `containers`, `scheduled-task`, ...)? It keeps working: those specs stay in every release, and the packages install next to it, as the guide explains. The `np-` prefix is what lets both live in one organization: channels route by specification slug.
+
+Installing a package touches the same three layers as registering a scope yourself, and only the nullplatform layer changes:
+
+| Layer | What | Module |
+|---|---|---|
+| infrastructure (cloud credentials) | On AWS, the permissions role the worker assumes for IAM, ELBv2, Route 53, S3 and CloudWatch | [`k8s/specs/requirements/aws`](./k8s/specs/requirements/aws) |
+| nullplatform (nullplatform API key) | The installation of the package, the scope type, the NRN settings and, for on-premise, the scope-configuration schema | tofu-modules' `scope_package_installation` |
+| bindings | The agent channel, the role under selector `containers` in your IAM provider (`CONTAINERS_ASSUME_ROLE_SELECTOR`), and the agent's worker settings | tofu-modules' `scope_definition_agent_association`, `nullplatform/agent`, your providers |
+
+Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/scopes/releases)) and use its version in every place below. `np-containers` shown; the other two change the slug and the name, on-premise also sets `create_scope_configuration` and the worker patch.
+
+```hcl
+# ── infrastructure layer (AWS) ───────────────────────────────────────
+module "containers_requirements" {
+  source = "git::https://github.com/nullplatform/scopes.git//k8s/specs/requirements/aws?ref=vX.Y.Z"
+
+  cluster_name   = "my-cluster"
+  agent_role_arn = module.agent_iam.nullplatform_agent_role_arn
+}
+
+# The agent role must be allowed to assume it: add it to the assume_role_arns
+# of tofu-modules' infrastructure/aws/iam/agent.
+#   assume_role_arns = [..., module.containers_requirements.permissions_role_arn]
+
+# ── nullplatform layer ───────────────────────────────────────────────
+module "containers" {
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/scope_package_installation?ref=v9.16.0"
+
+  nrn             = var.nrn
+  np_api_key      = var.np_api_key # for the NRN settings patch (np nrn patch)
+  package_slug    = "np-containers"
+  package_version = "X.Y.Z" # the same release, without the v
+
+  # Yours, created from this repository's templates at the same release:
+  service_spec_name                = "Containers" # the scope type developers pick
+  service_spec_description         = "Docker containers on pods"
+  service_path                     = "k8s"
+  repository_scope_template        = "https://raw.githubusercontent.com/nullplatform/scopes/refs/tags"
+  repository_scope_template_branch = "vX.Y.Z" # the same release
+  create_scope_configuration       = false # true for np-containers-on-premise (service_path = "onprem")
+  create_agent_channel             = false # the channel lives in your bindings layer, below
+}
+
+# ── bindings layer ───────────────────────────────────────────────────
+# containers_requirements and containers come from the other layers (remote state).
+module "containers_channel" {
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/scope_definition_agent_association?ref=v9.16.0"
+
+  nrn                      = var.nrn
+  tags_selectors           = { cluster = "runtime" } # must match the agent's TAGS
+  scope_specification_id   = local.containers.service_specification_id
+  scope_specification_slug = local.containers.service_specification_slug
+  service_path             = "k8s"
+
+  # The channel template, from the same tag
+  repository_notification_channel        = "https://raw.githubusercontent.com/nullplatform/scopes/refs/tags"
+  repository_notification_channel_branch = "vX.Y.Z" # the same release
+
+  worker_orchestrator = true
+  package_slug        = local.containers.package_slug
+}
+
+# One aws-iam-configuration per NRN and dimensions: add the entry to the list
+# your IAM provider already has.
+#   { selector = "containers", arn = local.containers_requirements.permissions_role_arn }
+
+# ── agent (tofu-modules' nullplatform/agent) ─────────────────────────
+# Every package here runs the k8s scope code, so it needs the k8s
+# environment the module injects (worker_k8s_packages: DNS_TYPE, K8S_NAMESPACE,
+# CLUSTER_NAME, the template paths, extra_envs) and the agent's identity
+# (worker_orchestrated_packages). On AKS and ARO, dns_type = "azure" and
+# extra_envs = { K8S_FLAVOR = "aks" } (or "aro") are what the azure/ and
+# azure-aro/ directories used to set. On-premise also needs the worker patch
+# that picks its overlay directory.
+#   worker_orchestrated_packages = ["np-containers", "np-scheduled-task"]
+#   worker_k8s_packages          = ["np-containers", "np-scheduled-task"]
+#
+#   worker = {
+#     patches = [{
+#       target = { package = "np-containers-on-premise" }
+#       merge  = { spec = { containers = [{
+#         name = "worker"
+#         env  = [{ name = "NP_OVERRIDES_PATH", value = "/app/pkg/onprem" }]
+#       }] } }
+#     }]
+#   }
+```
+
+The scope's settings (`k8s/values.yaml` keys, documented in [`k8s/README.md`](./k8s/README.md)) are read from the worker environment and the providers, as for a registered copy. To upgrade, move the release in every layer: `ref` of the requirements module, `package_version` and `repository_scope_template_branch` of the installation and `repository_notification_channel_branch` of the channel. See tofu-modules' [`scope_package_installation`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/scope_package_installation) for its inputs and outputs.
+
+Prerequisites: an agent whose `TAGS` match the channel's `tags_selectors`, with the package slugs in `worker_orchestrated_packages` and `worker_k8s_packages`, and `public.ecr.aws/nullplatform/*` in `worker.allowedRegistries`.
+
+Every tag publishes a new revision of the three packages from this repository: [`publish-images.yml`](./.github/workflows/publish-images.yml) pushes the images, registers them as artifacts and applies each `<directory>/publish` stack (tofu-modules' `scope_package_publish`) with the digest of the image that scope runs. The package version is the tag; a prerelease tag (`v1.21.0-beta.1`) publishes without moving the package default.
+
 ## Installing a Custom Scope
+
+This is the own-copy path: it registers the specs of a checkout in your organization and the agent clones this repository. To use the published packages instead, see [Install in your organization](#install-in-your-organization).
 
 This guide follows the [Production-ready Kubernetes](https://docs.nullplatform.com/docs/how-to-guides/kubernetes-prod-ready) setup as a primary example, but the steps are similar for other scopes.
 
@@ -91,8 +200,10 @@ The script will:
     -   `log/`: Log collection and processing workflows.
     -   `metric/`: Metrics collection workflows.
     -   `parameters/`: Parameter management workflows.
--   **`azure/`**: Azure scope implementation.
--   **`scheduled_task/`**: Scheduled Tasks scope implementation.
+    -   `publish/`: publishes the scope as the global package `np-containers` (release workflow only).
+-   **`azure/`**, **`azure-aro/`**: config overlays of the Kubernetes scope for the legacy git-clone channel (specs and `values.yaml`); not packages.
+-   **`onprem/`**: config overlay for clusters with no cloud behind them, with its scope-configuration schema and its `publish/`.
+-   **`scheduled_task/`**: Scheduled Tasks scope implementation, with its `publish/`.
 -   **`agent/`**: Agent deployment scripts.
 
 ## Tracing overrides

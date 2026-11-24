@@ -26,6 +26,20 @@ name: publish-images
 # Explicit job per image on purpose: a matrixed job that calls the reusable
 # workflow collapses `image_digest` to a single value (matrix outputs overwrite
 # each other), which would register every artifact against the same image.
+#
+# Packages: three of the spec directories are then published as global
+# packages (visible to every organization) pinning the image their scope runs,
+# by the shared publish-package workflow applied at the tag: k8s and onprem pin
+# scopes/containers, scheduled_task pins scopes/scheduled-task. azure and
+# azure-aro are not packages: in the worker model they are np-containers with
+# DNS_TYPE and K8S_FLAVOR from the agent, and their specs lag k8s's. The
+# datadog overlay is not a package either: it is the same spec with another
+# image. The package version is the tag; a prerelease tag
+# (v1.21.0-beta.1) publishes without moving the package default. Each stack
+# keeps its state as <repository>/<stack>.tfstate in the organization's state
+# bucket (secrets PACKAGE_STATE_AWS_ACCOUNT_ID, PACKAGE_TFSTATE_BUCKET and
+# PACKAGE_TFSTATE_REGION), with the role github-actions-<repository>-package-state
+# by convention; AWS_ROLE_ARN_PACKAGE_STATE overrides it and is not set here.
 on:
   push:
     tags:
@@ -145,6 +159,57 @@ jobs:
             --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
             --tag "${{ inputs.existing_tag || github.ref_name }}" \
             --visible-to "organization=*"
+
+  # ── packages ───────────────────────────────────────────────────────────────
+  # One job per stack: publish-package takes one digest, and k8s and onprem
+  # share the containers one.
+  publish-np-containers:
+    name: Publish np-containers
+    needs: [containers, register-containers]
+    uses: nullplatform/actions-nullplatform/.github/workflows/publish-package.yml@v1
+    with:
+      stack_dir: k8s/publish
+      tag: ${{ inputs.existing_tag || github.ref_name }}
+      image_digest: ${{ needs.containers.outputs.image_digest }}
+      tools: gomplate # the stack renders the spec templates with gomplate
+    secrets:
+      np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+      state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
+      state_role_arn: ${{ secrets.AWS_ROLE_ARN_PACKAGE_STATE }}
+      tfstate_bucket: ${{ secrets.PACKAGE_TFSTATE_BUCKET }}
+      tfstate_region: ${{ secrets.PACKAGE_TFSTATE_REGION }}
+
+  publish-np-containers-on-premise:
+    name: Publish np-containers-on-premise
+    needs: [containers, register-containers]
+    uses: nullplatform/actions-nullplatform/.github/workflows/publish-package.yml@v1
+    with:
+      stack_dir: onprem/publish
+      tag: ${{ inputs.existing_tag || github.ref_name }}
+      image_digest: ${{ needs.containers.outputs.image_digest }}
+      tools: gomplate # the stack renders the spec templates with gomplate
+    secrets:
+      np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+      state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
+      state_role_arn: ${{ secrets.AWS_ROLE_ARN_PACKAGE_STATE }}
+      tfstate_bucket: ${{ secrets.PACKAGE_TFSTATE_BUCKET }}
+      tfstate_region: ${{ secrets.PACKAGE_TFSTATE_REGION }}
+
+  publish-np-scheduled-task:
+    name: Publish np-scheduled-task
+    needs: [scheduled-task, register-scheduled-task]
+    uses: nullplatform/actions-nullplatform/.github/workflows/publish-package.yml@v1
+    with:
+      stack_dir: scheduled_task/publish
+      tag: ${{ inputs.existing_tag || github.ref_name }}
+      image_digest: ${{ needs.scheduled-task.outputs.image_digest }}
+      tools: gomplate # the stack renders the spec templates with gomplate
+    secrets:
+      np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+      state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
+      state_role_arn: ${{ secrets.AWS_ROLE_ARN_PACKAGE_STATE }}
+      tfstate_bucket: ${{ secrets.PACKAGE_TFSTATE_BUCKET }}
+      tfstate_region: ${{ secrets.PACKAGE_TFSTATE_REGION }}
 
   # ── GitHub release with artifact metadata ──────────────────────────────────
   # Tags here are human-pushed and previously produced no GitHub release at
