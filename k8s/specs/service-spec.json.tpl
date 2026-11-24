@@ -6,9 +6,7 @@
        render, so a typo never hides or exposes an option. */ -}}
 {{- $allowed := coll.Slice "public" "internal" -}}
 {{- $options := coll.Slice -}}
-{{- $optionsRaw := env.Getenv "VISIBILITY_OPTIONS" | strings.TrimSpace -}}
-{{- if eq $optionsRaw "" }}{{ $optionsRaw = "public,internal" }}{{ end -}}
-{{- range strings.Split "," $optionsRaw -}}
+{{- range env.Getenv "VISIBILITY_OPTIONS" | strings.TrimSpace | conv.Default "public,internal" | strings.Split "," -}}
 {{- $option := . | strings.TrimSpace | strings.ToLower -}}
 {{- if eq $option "private" }}{{ $option = "internal" }}{{ end -}}
 {{- if and (ne $option "") (not (coll.Has $allowed $option)) -}}
@@ -21,8 +19,8 @@
 {{- end -}}
 {{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal. Unset or empty means internal,
        or the only option when VISIBILITY_OPTIONS leaves one. Trimmed and case-insensitive; private aliases
-       internal (the UI label). Anything else, or a value VISIBILITY_OPTIONS hides, fails the render so a typo
-       never silently becomes public. */ -}}
+       internal (the default UI label). Anything else, or a value VISIBILITY_OPTIONS hides, fails the render
+       so a typo never silently becomes public. */ -}}
 {{- $visibility := env.Getenv "DEFAULT_VISIBILITY" | strings.TrimSpace | strings.ToLower -}}
 {{- if eq $visibility "private" }}{{ $visibility = "internal" }}{{ end -}}
 {{- if eq $visibility "" -}}
@@ -38,10 +36,8 @@
 {{- /* VISIBILITY_PUBLIC_LABEL, VISIBILITY_INTERNAL_LABEL: the form label of each visibility option (default
        Internet and Private). Only the text changes: the stored value is still public or internal. Trimmed;
        empty means the default. Written as a JSON string, so any character is safe. */ -}}
-{{- $publicLabel := env.Getenv "VISIBILITY_PUBLIC_LABEL" | strings.TrimSpace -}}
-{{- if eq $publicLabel "" }}{{ $publicLabel = "Internet" }}{{ end -}}
-{{- $internalLabel := env.Getenv "VISIBILITY_INTERNAL_LABEL" | strings.TrimSpace -}}
-{{- if eq $internalLabel "" }}{{ $internalLabel = "Private" }}{{ end -}}
+{{- $publicLabel := env.Getenv "VISIBILITY_PUBLIC_LABEL" | strings.TrimSpace | conv.Default "Internet" -}}
+{{- $internalLabel := env.Getenv "VISIBILITY_INTERNAL_LABEL" | strings.TrimSpace | conv.Default "Private" -}}
 {
   "available_actions": [
     "create-scope",

@@ -303,7 +303,7 @@ These variables change the scope's create form, not its workflows. They are read
 | Variable | Description | Default |
 |----------|-------------|---------|
 | **DEFAULT_VISIBILITY** | Visibility preselected for new scopes: `public` or `internal` (`private` is an alias of `internal`) | `internal`, or the only option left by `VISIBILITY_OPTIONS` |
-| **VISIBILITY_OPTIONS** | Comma-separated visibility options the form offers: `public` ("Internet"), `internal` ("Private"); `private` is an alias of `internal`. With a single option the form shows no Visibility selector and new scopes get that option | `public,internal` |
+| **VISIBILITY_OPTIONS** | Comma-separated visibility options the form offers: `public` and `internal` (labeled "Internet" and "Private" by default); `private` is an alias of `internal`. With a single option the form shows no Visibility selector and new scopes get that option | `public,internal` |
 | **VISIBILITY_PUBLIC_LABEL** | Label of the `public` option in the form. Only the text changes: the scope is still stored as `public` | `Internet` |
 | **VISIBILITY_INTERNAL_LABEL** | Label of the `internal` option in the form. Only the text changes: the scope is still stored as `internal` | `Private` |
 
