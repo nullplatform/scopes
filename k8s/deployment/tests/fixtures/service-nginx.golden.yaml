@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-scope-123-deploy-456
+  namespace: ns-test
+  labels:
+    name: d-scope-123-deploy-456
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: scopeslug
+    app.kubernetes.io/name: scopeslug
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: d-scope-123
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '5'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '1'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/success-codes: 200-299
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+spec:
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 80
+  selector:
+    nullplatform: "true"
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
+
+
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-scope-123-deploy-456-grpc-9090
+  namespace: ns-test
+  labels:
+    name: d-scope-123-deploy-456-grpc-9090
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: scopeslug
+    app.kubernetes.io/name: scopeslug
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: d-scope-123-grpc-9090
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '10'
+    alb.ingress.kubernetes.io/healthcheck-path: /grpc.health.v1.Health/Check
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/success-codes: '0'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    alb.ingress.kubernetes.io/backend-protocol-version: GRPC
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http2.enabled=true
+spec:
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 19090
+  selector:
+    nullplatform: "true"
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
+
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-scope-123-deploy-456-http-9091
+  namespace: ns-test
+  labels:
+    name: d-scope-123-deploy-456-http-9091
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: scopeslug
+    app.kubernetes.io/name: scopeslug
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: d-scope-123-http-9091
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '5'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '1'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/success-codes: 200-299
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+spec:
+  ports:
+    - protocol: TCP
+      port: 9091
+      targetPort: 19091
+  selector:
+    nullplatform: "true"
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
