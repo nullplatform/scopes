@@ -17,8 +17,10 @@ _iam_role_scope_id() {
     --query "Role.Tags[?Key=='scope_id'].Value | [0]" --output text 2>/dev/null || true
 }
 
+# IAM.MODE gke has no IAM role: the scope's service account is trusted by its
+# scope_id label alone, without looking the role up in AWS.
 resolve_iam_role_name() {
-  local prefix="$1" scope_id="$2" namespace="$3" name
+  local prefix="$1" scope_id="$2" namespace="$3" mode="${4:-irsa}" name
 
   if [[ "$prefix" != *"{"* ]]; then
     IAM_ROLE_NAME="$prefix-$scope_id"
@@ -33,7 +35,7 @@ resolve_iam_role_name() {
   fi
   name="${name%% *}"
   if [ -n "$name" ]; then
-    if [ "$(_iam_role_scope_id "$name")" = "$scope_id" ]; then
+    if [ "$mode" = "gke" ] || [ "$(_iam_role_scope_id "$name")" = "$scope_id" ]; then
       IAM_ROLE_NAME="$name"
       return 0
     fi

@@ -158,3 +158,19 @@ teardown() {
 
   assert_equal "$IAM_ROLE_NAME" "acme-old-namespace-123456"
 }
+
+@test "resolve_iam_role_name: gke keeps the scope's labelled service account without asking AWS" {
+  export MOCK_SERVICE_ACCOUNT="acme-old-namespace-123456"
+
+  resolve_iam_role_name "{.account.slug}-{.namespace.slug}" "123456" "payments" "gke"
+
+  assert_equal "$IAM_ROLE_NAME" "acme-old-namespace-123456"
+  if grep -q "^iam " "$KUBECTL_LOG"; then asked="true"; else asked="false"; fi
+  assert_false "$asked" "AWS asked for the role tags"
+}
+
+@test "resolve_iam_role_name: gke renders the name from the prefix when the scope has no service account" {
+  resolve_iam_role_name "{.account.slug}-{.namespace.slug}" "123456" "payments" "gke"
+
+  assert_equal "$IAM_ROLE_NAME" "acme-payments-123456"
+}

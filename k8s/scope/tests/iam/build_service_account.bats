@@ -289,3 +289,43 @@ render_real_template() {
   assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
   assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
 }
+
+@test "build_service_account: gke builds the service account without an IAM role or the IRSA annotation" {
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"gke"}'
+  export AWS_LOG="$OUTPUT_DIR/aws.log"
+  aws() { echo "$*" >> "$AWS_LOG"; return 1; }
+  export -f aws
+  render_real_template
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 IAM mode is gke, building service account 'test-prefix-test-scope-123' without an IAM role"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+  rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "test-prefix-test-scope-123"
+  assert_equal "$(yq -r '.metadata.namespace' "$rendered")" "test-ns"
+  assert_equal "$(yq -r '.metadata.annotations' "$rendered")" "null"
+  assert_equal "$(yq -r '.metadata.labels.scope_id' "$rendered")" "123"
+}
+
+@test "build_service_account: gke on delete builds the service account to remove without calling AWS" {
+  export IAM='{"ENABLED":"true","PREFIX":"{.account.slug}-{.namespace.slug}","MODE":"gke"}'
+  export ACTION="delete"
+  export CONTEXT='{"k8s_namespace":"test-ns","account":{"slug":"acme"},"namespace":{"slug":"renamed"},"scope":{"id":"123"}}'
+  export AWS_LOG="$OUTPUT_DIR/aws.log"
+  kubectl() {
+    case "$*" in
+      "get serviceaccounts -n test-ns -l scope_id=test-scope-123"*) printf '%s' "acme-payments-test-scope-123" ;;
+    esac
+  }
+  aws() { echo "$*" >> "$AWS_LOG"; return 1; }
+  export -f kubectl aws
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 IAM mode is gke, building service account 'acme-payments-test-scope-123' without an IAM role"
+  assert_contains "$output" "✅ Service account template built successfully"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}

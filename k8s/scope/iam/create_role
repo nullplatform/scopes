@@ -14,13 +14,18 @@ if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
 fi
 
 IAM_MODE=$(echo "$IAM" | jq -r 'if has("MODE") then .MODE else "irsa" end')
-if [[ "$IAM_MODE" != "irsa" && "$IAM_MODE" != "pod_identity" ]]; then
+if [[ "$IAM_MODE" != "irsa" && "$IAM_MODE" != "pod_identity" && "$IAM_MODE" != "gke" ]]; then
   log error "   ❌ Invalid IAM mode '$IAM_MODE'"
   log error ""
   log error "🔧 How to fix:"
-  log error "   • Set IAM.MODE to irsa or pod_identity, or remove it to use irsa"
+  log error "   • Set IAM.MODE to irsa, pod_identity or gke, or remove it to use irsa"
   log error ""
   exit 1
+fi
+
+if [[ "$IAM_MODE" == "gke" ]]; then
+  log debug "📋 IAM mode is gke, skipping role creation: grant roles to the service account through Workload Identity"
+  return
 fi
 
 NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)

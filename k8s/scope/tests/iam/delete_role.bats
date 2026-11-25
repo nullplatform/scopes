@@ -462,3 +462,14 @@ recording_aws() {
   if grep -q "iam delete-role --role-name" "$AWS_LOG"; then deleted="true"; else deleted="false"; fi
   assert_false "$deleted" "role deleted"
 }
+
+@test "delete_role: gke skips role deletion without calling AWS" {
+  recording_aws
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"gke"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 IAM mode is gke, skipping role deletion"
+  assert_empty "$(cat "$AWS_LOG")"
+}

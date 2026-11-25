@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- k8s scopes can create a Kubernetes service account per scope for GKE Workload Identity with `IAM.MODE: gke`: no AWS calls, no IAM role and no EKS annotation. Grant GCP roles to the service account's Workload Identity principal
+
 ## [1.21.0] - 2026-11-24
 - k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).
 - Fix: k8s scopes with the WebSocket protocol run the configured traffic manager version (`traffic_manager.version`, `latest` by default) instead of the frozen `websocket2` build, which misses nginx security fixes. A version pinned below 1.8.0, the first one that proxies WebSocket connections, keeps `websocket2` and logs a warning

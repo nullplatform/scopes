@@ -12,6 +12,11 @@ if [[ "$IAM_ENABLED" == "false" || "$IAM_ENABLED" == "null" ]]; then
   return
 fi
 
+if [[ "$(echo "$IAM" | jq -r '.MODE // "irsa"')" == "gke" ]]; then
+  log debug "📋 IAM mode is gke, skipping role deletion"
+  return
+fi
+
 log debug "🔍 Looking for IAM role: $SERVICE_ACCOUNT_NAME"
 ROLE_ARN=$(aws iam get-role --role-name "$SERVICE_ACCOUNT_NAME" --query 'Role.Arn' --output text 2>&1) || {
   if [[ "$ROLE_ARN" == *"NoSuchEntity"* ]] && [[ "$ROLE_ARN" == *"cannot be found"* ]]; then

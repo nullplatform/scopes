@@ -101,7 +101,7 @@ When the scope creates an IAM role (`IAM.ENABLED`), `IAM.PREFIX` may be a patter
 IAM.PREFIX: "{.account.slug}-{.namespace.slug}"   # acme-payments-123456
 ```
 
-A scope whose service account already exists keeps its name, as long as the IAM role with that name is tagged with the scope's id, so renaming a slug or changing the prefix never orphans the role (`k8s/utils/resolve_iam_role_name`).
+A scope whose service account already exists keeps its name, as long as the IAM role with that name is tagged with the scope's id, so renaming a slug or changing the prefix never orphans the role (`k8s/utils/resolve_iam_role_name`). With `IAM.MODE: gke` there is no role: the service account labeled with the scope's id keeps its name without asking AWS.
 
 Values in `IAM.TAGS` with a `{` are rendered by the same engine, with the same rules: lowercase, placeholders separated by a single hyphen, starting with a letter. A value without `{` is used as is.
 
