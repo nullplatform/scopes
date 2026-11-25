@@ -527,6 +527,54 @@ gateway_logs() {
   [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "5" ]
 }
 
+@test "k8s_read: gateway logs stay narrowed when --timestamps and --prefix put text before each line" {
+  kubectl() {
+    case "$1" in
+      logs)
+        echo '[pod/gw-1/istio-proxy] 2026-11-25T10:00:00Z {"authority":"other-app.example.com","code":200,"path":"/private"}'
+        echo '[pod/gw-1/istio-proxy] 2026-11-25T10:00:01Z {"authority":"scope.example.com","code":503,"path":"/health"}'
+        echo '2026-11-25T10:00:02Z [2026-11-25T10:00:02.000Z] "GET /secret HTTP/1.1" 200 - "-" "other-app.example.com"'
+        ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+  export CONTEXT='{"scope": {"id": "scope-123", "domain": "scope.example.com"}, "providers": {"container-orchestration": {"cluster": {"namespace": "provider-namespace"}}}}'
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways", "--timestamps", "--prefix"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  local out; out=$(jq -r '.results.output' "$BODY_COPY")
+  assert_contains "$out" '"authority":"scope.example.com"'
+  [[ "$out" != *"other-app.example.com"* ]]
+}
+
+@test "k8s_read: gateway logs drop a request of another host that only names the scope domain" {
+  kubectl() {
+    case "$1" in
+      logs)
+        echo '{"authority":"other-app.example.com","code":200,"path":"/x?next=scope.example.com","agent":"scope.example.com"}'
+        echo '{"authority":"evil-scope.example.com","code":200,"path":"/"}'
+        echo '{"authority":"scope.example.com.evil.io","code":200,"path":"/"}'
+        echo '{"path":"/","authority": "Scope.Example.com:8443","code":200}'
+        echo '[2026-11-25T10:00:02.000Z] "GET /x?h=scope.example.com HTTP/1.1" 200 - "-" "other-app.example.com"'
+        ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+  export CONTEXT='{"scope": {"id": "scope-123", "domain": "scope.example.com"}, "providers": {"container-orchestration": {"cluster": {"namespace": "provider-namespace"}}}}'
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  local out; out=$(jq -r '.results.output' "$BODY_COPY")
+  assert_contains "$out" 'Scope.Example.com:8443'
+  [[ "$out" != *"other-app"* && "$out" != *"evil"* ]]
+}
+
 @test "k8s_read: gateway logs return no request when the scope has no domain" {
   gateway_logs
   export CONTEXT='{"scope": {"id": "scope-123"}, "providers": {"container-orchestration": {"cluster": {"namespace": "provider-namespace"}}}}'

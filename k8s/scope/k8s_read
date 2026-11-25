@@ -258,17 +258,39 @@ EXIT_CODE=$?
 LINES_READ=$(wc -l < "$WORK_DIR/out" | tr -d ' ')
 SCOPE_ONLY=false
 if [[ "$COMMAND" == "logs" && -n "$NETWORK_ONLY_NAMESPACE" ]]; then
-  # A request line is an access log entry: JSON with "authority", or Envoy's text format.
+  # A request line is an access log entry: JSON with "authority", or Envoy's
+  # text format. It is found anywhere in the line, because --timestamps and
+  # --prefix put text before it. A request comes back only when its authority
+  # is one of the scope's domains: the whole field, not a text inside the line,
+  # so a path or a header that names the domain does not count.
   K8S_READ_DOMAINS=$(echo "$CONTEXT" | jq -r '[.scope.domain, (.scope.domains // [])[].name] | map(select(. != null and . != "")) | .[]') \
     awk '
+      function authority(line,   value) {
+        if (!match(line, /"authority": ?"[^"]*"/)) return ""
+        value = substr(line, RSTART, RLENGTH)
+        sub(/^"authority": ?"/, "", value); sub(/"$/, "", value); sub(/:[0-9]+$/, "", value)
+        return tolower(value)
+      }
       BEGIN { n = split(tolower(ENVIRON["K8S_READ_DOMAINS"]), domains, "\n") }
       {
-        request = (substr($0, 1, 1) == "{" && index($0, "\"authority\"")) || ($0 ~ /^\[[^]]*\] "/)
-        if (!request) { print; next }
+        json = index($0, "\"authority\"") > 0
+        text = ($0 ~ /\] "[A-Z-]+ [^"]* [A-Z]+\/[0-9.]+"/) || ($0 ~ /\] "- - -"/)
+        if (!json && !text) { print; next }
+        if (json) {
+          host = authority($0)
+          for (i = 1; i <= n; i++) if (domains[i] != "" && host == domains[i]) { print; next }
+          next
+        }
         line = tolower($0)
-        for (i = 1; i <= n; i++) if (domains[i] != "" && index(line, domains[i])) { print; next }
+        for (i = 1; i <= n; i++)
+          if (domains[i] != "" && (index(line, "\"" domains[i] "\"") || index(line, "\"" domains[i] ":"))) { print; next }
       }
-    ' "$WORK_DIR/out" > "$WORK_DIR/out.scope" && mv "$WORK_DIR/out.scope" "$WORK_DIR/out"
+    ' "$WORK_DIR/out" > "$WORK_DIR/out.scope"
+  if [[ $? -ne 0 ]]; then
+    : > "$WORK_DIR/out"
+    refuse "The gateway logs could not be narrowed to the scope's requests" "Run the query again"
+  fi
+  mv "$WORK_DIR/out.scope" "$WORK_DIR/out"
   SCOPE_ONLY=true
 fi
 if [[ -n "$FILTER" ]]; then
