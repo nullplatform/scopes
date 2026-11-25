@@ -70,8 +70,10 @@ configuration:
 #    # gke only creates a Kubernetes service account, with no AWS calls and no annotation,
 #    # for GKE Workload Identity. It is shared by the scopes of an application in an
 #    # environment: np-<application id>-<environment>, from the scope's "environment"
-#    # dimension (required), lowercased, other characters turned into "-", cut to 63
-#    # characters. Deleting a scope keeps it. Grant it GCP roles through
+#    # dimension (required), lowercased and never rewritten: a value that is not a
+#    # DNS-1123 label, or a name over 63 characters, fails. An existing service account
+#    # with that name is reused only if its application_id and environment labels match.
+#    # Deleting a scope keeps it. Grant it GCP roles through
 #    # principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/<namespace>/sa/<service account>.
 #    # PREFIX, ROLE and TAGS are ignored in gke mode.
 #    TAGS:

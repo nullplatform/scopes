@@ -48,7 +48,7 @@ setup() {
 
 teardown() {
   rm -rf "$OUTPUT_DIR" 2>/dev/null || true
-  unset -f aws gomplate rm 2>/dev/null || true
+  unset -f aws gomplate rm kubectl 2>/dev/null || true
 }
 
 # =============================================================================
@@ -294,7 +294,8 @@ render_real_template() {
   export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"gke"}'
   export AWS_LOG="$OUTPUT_DIR/aws.log"
   aws() { echo "$*" >> "$AWS_LOG"; return 1; }
-  export -f aws
+  kubectl() { return 0; }
+  export -f aws kubectl
   render_real_template
   CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "Production"}')
 
@@ -308,12 +309,15 @@ render_real_template() {
   assert_equal "$(yq -r '.metadata.namespace' "$rendered")" "test-ns"
   assert_equal "$(yq -r '.metadata.annotations' "$rendered")" "null"
   assert_equal "$(yq -r '.metadata.labels.application_id' "$rendered")" "42"
+  assert_equal "$(yq -r '.metadata.labels.environment' "$rendered")" "production"
   assert_equal "$(yq -r '.metadata.labels.scope_id' "$rendered")" "null"
   assert_equal "$(yq -r '.metadata.labels.scope' "$rendered")" "null"
 }
 
 @test "build_service_account: gke renders the same service account for every scope of the application in the environment" {
   export IAM='{"ENABLED":"true","MODE":"gke"}'
+  kubectl() { return 0; }
+  export -f kubectl
   render_real_template
   CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
   first="$OUTPUT_DIR/first.yaml"
@@ -328,6 +332,61 @@ render_real_template() {
   assert_equal "$status" "0"
 
   assert_equal "$(cat "$OUTPUT_DIR/service_account-other-scope-456.yaml")" "$(cat "$first")"
+}
+
+@test "build_service_account: gke reuses an existing service account of the same application and environment" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  kubectl() {
+    case "$*" in
+      "get serviceaccount np-42-production -n test-ns"*) echo '{"metadata":{"labels":{"application_id":"42","environment":"production"}}}' ;;
+    esac
+  }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Reusing service account 'np-42-production' of application 42 in environment 'production'"
+  assert_equal "$(yq -r '.metadata.name' "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml")" "np-42-production"
+}
+
+@test "build_service_account: gke refuses an existing service account labelled for another application or environment" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+  for labels in '{"application_id":"7","environment":"production"}' '{"application_id":"42","environment":"staging"}' '{}'; do
+    export MOCK_LABELS="$labels"
+    kubectl() {
+      case "$*" in
+        "get serviceaccount np-42-production -n test-ns"*) echo "{\"metadata\":{\"labels\":$MOCK_LABELS}}" ;;
+      esac
+    }
+    export -f kubectl
+
+    run bash -c 'source "$SCRIPT"'
+
+    assert_equal "$status" "1"
+    assert_contains "$output" "❌ Service account 'test-ns/np-42-production' already exists with application_id/environment labels"
+    assert_contains "$output" "not '42 production'"
+    assert_contains "$output" "💡 Possible causes:"
+    assert_contains "$output" "🔧 How to fix:"
+    assert_equal "$(ls "$OUTPUT_DIR")" ""
+  done
+}
+
+@test "build_service_account: gke fails when it cannot look up the service account" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  kubectl() { echo "forbidden"; return 1; }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to look up service account 'test-ns/np-42-production': forbidden"
 }
 
 @test "build_service_account: gke fails when the scope has no environment dimension" {

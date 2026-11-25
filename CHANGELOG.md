@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- k8s scopes can run under a Kubernetes service account for GKE Workload Identity with `IAM.MODE: gke`: no AWS calls, no IAM role and no EKS annotation. The service account is shared by the scopes of an application in an environment and named `np-<application id>-<environment>` after the scope's `environment` dimension, so a service can grant GCP roles to its Workload Identity principal when it is linked, before the scope exists. Deleting a scope keeps the service account
+- k8s scopes can run under a Kubernetes service account for GKE Workload Identity with `IAM.MODE: gke`: no AWS calls, no IAM role and no EKS annotation. The service account is shared by the scopes of an application in an environment and named `np-<application id>-<environment>` after the scope's `environment` dimension (lowercased; a value that is not a DNS-1123 label or a name over 63 characters fails), so a service can grant GCP roles to its Workload Identity principal when it is linked, before the scope exists. Deleting a scope keeps the service account
 
 ## [1.21.0] - 2026-11-24
 - k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).

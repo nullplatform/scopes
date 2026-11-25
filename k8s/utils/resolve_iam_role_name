@@ -17,23 +17,25 @@ _iam_role_scope_id() {
     --query "Role.Tags[?Key=='scope_id'].Value | [0]" --output text 2>/dev/null || true
 }
 
-IAM_GKE_SERVICE_ACCOUNT_NAME_BUDGET=63
+IAM_GKE_SERVICE_ACCOUNT_NAME_MAX=63
 
 # IAM.MODE gke shares one Kubernetes service account among the scopes of an
 # application in an environment, so a service can grant it access when it is
 # linked, before the scope exists: np-<application id>-<environment>, where the
-# environment is the scope's "environment" dimension as a DNS-1123 label,
-# truncated to fit 63 characters. IAM.PREFIX is not used and AWS is never asked.
+# environment is the scope's "environment" dimension lowercased. The value is
+# never rewritten or truncated (two environments must never map to one name):
+# one that is not a DNS-1123 label, or a name over 63 characters, fails.
+# IAM.PREFIX is not used and AWS is never asked. Sets IAM_ROLE_NAME and
+# IAM_GKE_ENVIRONMENT.
 _iam_gke_service_account_name() {
-  local application_id environment
+  local application_id environment name
   application_id=$(echo "${CONTEXT:-}" | jq -r '.application.id // empty')
-  environment=$(echo "${CONTEXT:-}" | jq -r '.scope.dimensions.environment // empty' \
-    | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
+  environment=$(echo "${CONTEXT:-}" | jq -r '.scope.dimensions.environment // empty' | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
   if [ -z "$environment" ]; then
     log error "❌ Could not name the service account of scope $1: IAM.MODE gke needs the scope's 'environment' dimension"
     log error "💡 Possible causes:"
-    log error "   The scope has no 'environment' dimension, or its value has no letter or digit"
+    log error "   The scope has no 'environment' dimension"
     log error "🔧 How to fix:"
     log error "   • Create the scope with an 'environment' dimension, or set IAM.MODE to irsa or pod_identity"
     return 1
@@ -44,9 +46,26 @@ _iam_gke_service_account_name() {
     log error "   • Check that the scope belongs to an application"
     return 1
   fi
+  if ! [[ "$environment" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    log error "❌ Could not name the service account of scope $1: environment '$environment' is not a valid Kubernetes name"
+    log error "💡 Possible causes:"
+    log error "   IAM.MODE gke uses the 'environment' dimension, lowercased, as is: only letters, digits and inner hyphens are allowed"
+    log error "🔧 How to fix:"
+    log error "   • Use an 'environment' dimension value made of letters, digits and hyphens, starting and ending with a letter or digit"
+    return 1
+  fi
 
-  environment="${environment:0:$((IAM_GKE_SERVICE_ACCOUNT_NAME_BUDGET - ${#application_id} - 4))}"
-  IAM_ROLE_NAME="np-$application_id-${environment%-}"
+  name="np-$application_id-$environment"
+  if [ "${#name}" -gt "$IAM_GKE_SERVICE_ACCOUNT_NAME_MAX" ]; then
+    log error "❌ Could not name the service account of scope $1: '$name' has ${#name} characters, over $IAM_GKE_SERVICE_ACCOUNT_NAME_MAX"
+    log error "🔧 How to fix:"
+    log error "   • Use a shorter 'environment' dimension value (up to $((IAM_GKE_SERVICE_ACCOUNT_NAME_MAX - ${#application_id} - 4)) characters for application $application_id)"
+    return 1
+  fi
+
+  # shellcheck disable=SC2034  # read by build_service_account
+  IAM_GKE_ENVIRONMENT="$environment"
+  IAM_ROLE_NAME="$name"
 }
 
 resolve_iam_role_name() {

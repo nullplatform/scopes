@@ -1772,7 +1772,7 @@ SCRIPT
 @test "service account: gke runs the pods under the application and environment service account" {
   setup_full_build_context
   export IAM='{"ENABLED":"true","PREFIX":"np-role","MODE":"gke"}'
-  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 400 | .scope.dimensions = {"environment": "QA 1"}')
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 400 | .scope.dimensions = {"environment": "QA-1"}')
   export AWS_LOG="$NP_OUTPUT_DIR/aws.log"
   aws() { echo "$*" >> "$AWS_LOG"; return 1; }
   export -f aws
