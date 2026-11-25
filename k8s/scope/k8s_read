@@ -15,8 +15,10 @@
 #   - the namespace: the scope's own, plus the ones in
 #     K8S_READ_ALLOWED_NAMESPACES (comma separated; "*" allows any, and -A).
 #     The scope's routes attach to gateways that live in another namespace.
-#     That namespace is read from the parentRefs of the scope's own routes, so
-#     it needs no configuration and a scope without such a route opens none;
+#     That namespace is read from the status of the scope's own routes, and
+#     only when the gateway accepted the route: a route that merely names a
+#     namespace opens nothing, and neither does a system namespace (kube-*).
+#     It needs no configuration and a scope without such a route opens none;
 #     K8S_READ_NETWORK_NAMESPACES (comma separated) adds more. Those namespaces
 #     accept "logs", and "get" of the types listed in NETWORK_RESOURCES: the routing
 #     objects and the workloads behind them, and nothing else. A gateway serves
@@ -126,17 +128,17 @@ namespace_allowed() {
   return 1
 }
 
-# Namespaces of the gateways the scope's routes attach to, one per line.
-# Routes without the Gateway API installed, or without a parentRef namespace,
-# give none.
+# Namespaces of the gateways that accepted the scope's routes, one per line.
+# The status is written by the gateway controller, and it accepts a route only
+# for a gateway that exists and admits routes from the scope's namespace.
 scope_gateway_namespaces() {
   local scope_id kind
   scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // empty')
   [[ -n "$scope_id" ]] || return 0
   for kind in httproutes.gateway.networking.k8s.io grpcroutes.gateway.networking.k8s.io; do
     kubectl get "$kind" -n "$K8S_NAMESPACE" -l "scope_id=$scope_id" \
-      -o jsonpath='{range .items[*].spec.parentRefs[*]}{.namespace}{"\n"}{end}' 2>/dev/null || true
-  done
+      -o jsonpath='{range .items[*].status.parents[*]}{.parentRef.namespace}{" "}{.conditions[?(@.type=="Accepted")].status}{"\n"}{end}' 2>/dev/null || true
+  done | awk '$2 == "True" && $1 !~ /^kube-/ { print $1 }'
 }
 
 network_namespace() {
