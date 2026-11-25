@@ -575,6 +575,32 @@ gateway_logs() {
   [[ "$out" != *"other-app"* && "$out" != *"evil"* ]]
 }
 
+@test "k8s_read: gateway logs drop a request line that cannot be read" {
+  kubectl() {
+    case "$1" in
+      logs)
+        echo '{"agent":"curl","path":"/private?token=abc","upstream_host":"10.0.0.1'
+        echo '{":authority":"other-app.example.com","path":"/a"}'
+        echo '{":authority":"scope.example.com","path":"/b"}'
+        echo '[2026-11-25T10:00:02.000Z] "GET /cut?token=abc HTT'
+        echo '2026-11-25T10:00:03Z	warn	envoy config	gRPC config stream closed'
+        ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+  export CONTEXT='{"scope": {"id": "scope-123", "domain": "scope.example.com"}, "providers": {"container-orchestration": {"cluster": {"namespace": "provider-namespace"}}}}'
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways", "--limit-bytes=500"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  local out; out=$(jq -r '.results.output' "$BODY_COPY")
+  assert_contains "$out" '":authority":"scope.example.com"'
+  assert_contains "$out" "gRPC config stream closed"
+  [[ "$out" != *"token=abc"* && "$out" != *"other-app"* ]]
+}
+
 @test "k8s_read: gateway logs return no request when the scope has no domain" {
   gateway_logs
   export CONTEXT='{"scope": {"id": "scope-123"}, "providers": {"container-orchestration": {"cluster": {"namespace": "provider-namespace"}}}}'
