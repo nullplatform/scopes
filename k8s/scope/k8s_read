@@ -13,7 +13,10 @@
 #     (-f, -o go-template-file=) or writes one (--profile-output) never reaches
 #     kubectl
 #   - the namespace: the scope's own, plus the ones in
-#     K8S_READ_ALLOWED_NAMESPACES (comma separated; "*" allows any, and -A)
+#     K8S_READ_ALLOWED_NAMESPACES (comma separated; "*" allows any, and -A).
+#     The scope's routes attach to gateways that live in another namespace, so
+#     the ones in K8S_READ_NETWORK_NAMESPACES (default "gateways") accept "get"
+#     of the routing objects listed in NETWORK_RESOURCES, and nothing else
 #
 # Parameters (action): command ("get" | "logs"), args (array of strings).
 
@@ -75,6 +78,12 @@ GET_RESOURCES=(
   cr nodepools nodepool nodeclaims nodeclaim ec2nodeclasses ec2nodeclass
 )
 
+# Resource types "get" may query in the K8S_READ_NETWORK_NAMESPACES.
+NETWORK_RESOURCES=(
+  gateways gateway gtw gateways.gateway.networking.k8s.io gateways.networking.istio.io
+  httproutes httproute grpcroutes grpcroute services service svc
+)
+
 in_list() {
   local needle="$1" item
   shift
@@ -103,6 +112,16 @@ namespace_allowed() {
   return 1
 }
 
+network_namespace() {
+  local namespace="$1" allowed item
+  IFS=',' read -ra allowed <<< "${K8S_READ_NETWORK_NAMESPACES-gateways}"
+  for item in ${allowed[@]+"${allowed[@]}"}; do
+    item="${item//[[:space:]]/}"
+    [[ -n "$item" && "$item" == "$namespace" ]] && return 0
+  done
+  return 1
+}
+
 # The first positional argument is "<type>" or "<type>/<name>". After a bare
 # type the rest are names; after "<type>/<name>" each one is that form again.
 check_get_resource() {
@@ -113,6 +132,7 @@ check_get_resource() {
   in_list "$type" "${GET_RESOURCES[@]}" || refuse \
     "Resource '$type' cannot be read" \
     "Query one of: ${GET_RESOURCES[*]}"
+  REQUESTED_TYPES+=("$type")
   if [[ "$arg" == */* && ! "${arg#*/}" =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
     refuse "Resource name in '$arg' is not valid" "Use <type>/<name>"
   fi
@@ -122,9 +142,14 @@ check_flag_value() {
   local flag="$1" value="$2"
   case "$flag" in
     -n|--namespace)
-      namespace_allowed "$value" || refuse \
-        "Namespace '$value' is not allowed" \
-        "Query the scope's namespace ($K8S_NAMESPACE) or add '$value' to K8S_READ_ALLOWED_NAMESPACES"
+      if namespace_allowed "$value"; then
+        NETWORK_ONLY_NAMESPACE=""
+      elif network_namespace "$value"; then
+        NETWORK_ONLY_NAMESPACE="$value"
+      else
+        refuse "Namespace '$value' is not allowed" \
+          "Query the scope's namespace ($K8S_NAMESPACE) or add '$value' to K8S_READ_ALLOWED_NAMESPACES"
+      fi
       ;;
     -o|--output)
       # Formats that take a file (go-template-file=, jsonpath-file=, ...) would print a local file.
@@ -145,7 +170,9 @@ validate_args() {
     value_flags=("${LOGS_VALUE_FLAGS[@]}"); switch_flags=("${LOGS_SWITCH_FLAGS[@]}")
   fi
 
-  local i=0 positionals=0 arg name value
+  local i=0 positionals=0 arg name value type
+  NETWORK_ONLY_NAMESPACE=""
+  REQUESTED_TYPES=()
   while (( i < ${#ARGS[@]} )); do
     arg="${ARGS[$i]}"
     i=$((i + 1))
@@ -181,6 +208,17 @@ validate_args() {
 
   if [[ "$COMMAND" == "get" && "$positionals" -eq 0 ]]; then
     refuse "No resource to read" "Start 'args' with a resource type, e.g. [\"pods\"]"
+  fi
+
+  if [[ -n "$NETWORK_ONLY_NAMESPACE" ]]; then
+    [[ "$COMMAND" == "get" ]] || refuse \
+      "Logs cannot be read in namespace '$NETWORK_ONLY_NAMESPACE'" \
+      "Only 'get' of ${NETWORK_RESOURCES[*]} is available there"
+    for type in ${REQUESTED_TYPES[@]+"${REQUESTED_TYPES[@]}"}; do
+      in_list "$type" "${NETWORK_RESOURCES[@]}" || refuse \
+        "Resource '$type' cannot be read in namespace '$NETWORK_ONLY_NAMESPACE'" \
+        "Query one of: ${NETWORK_RESOURCES[*]}, or add '$NETWORK_ONLY_NAMESPACE' to K8S_READ_ALLOWED_NAMESPACES"
+    done
   fi
 }
 

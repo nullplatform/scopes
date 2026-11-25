@@ -64,7 +64,7 @@ setup() {
 
 teardown() {
   unset -f kubectl np log
-  unset KUBECTL_FAIL KUBECTL_PRINT_TRACE NP_TRACE LOG_LEVEL KUBECTL_BIG_OUTPUT NP_EXIT_CODE K8S_READ_MAX_BYTES K8S_READ_ALLOWED_NAMESPACES
+  unset KUBECTL_FAIL KUBECTL_PRINT_TRACE NP_TRACE LOG_LEVEL KUBECTL_BIG_OUTPUT NP_EXIT_CODE K8S_READ_MAX_BYTES K8S_READ_ALLOWED_NAMESPACES K8S_READ_NETWORK_NAMESPACES
 }
 
 action_context() {
@@ -388,6 +388,94 @@ action_context() {
 
   [ "$status" -eq 0 ]
   assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [logs] [istiod-abc] [-n] [istio-system]"
+}
+
+@test "k8s_read: allows gateways in the gateways namespace by default" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateways", "-n", "gateways", "-o", "yaml"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [gateways] [-n] [gateways] [-o] [yaml]"
+}
+
+@test "k8s_read: allows a named routing object in the gateways namespace" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["--namespace=gateways", "svc/gateway-public-istio", "httproute/main"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "[svc/gateway-public-istio] [httproute/main]"
+}
+
+@test "k8s_read: refuses pods in the gateways namespace" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'pods' cannot be read in namespace 'gateways'"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a second type that is not a routing object in the gateways namespace" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateway/public", "configmap/istio", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'configmap' cannot be read in namespace 'gateways'"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses logs in the gateways namespace" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["gateway-public-istio-abc", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Logs cannot be read in namespace 'gateways'"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: the last namespace given decides what can be read" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "-n", "provider-namespace", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Resource 'pods' cannot be read in namespace 'gateways'"
+}
+
+@test "k8s_read: reads routing objects from the namespaces in K8S_READ_NETWORK_NAMESPACES" {
+  export K8S_READ_NETWORK_NAMESPACES="istio-ingress, edge"
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateways", "-n", "edge"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [gateways] [-n] [edge]"
+}
+
+@test "k8s_read: refuses the gateways namespace when K8S_READ_NETWORK_NAMESPACES is empty" {
+  export K8S_READ_NETWORK_NAMESPACES=""
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateways", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Namespace 'gateways' is not allowed"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: reads anything in the gateways namespace when it is in the allowed list" {
+  export K8S_READ_ALLOWED_NAMESPACES="gateways"
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["gateway-public-istio-abc", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [logs] [gateway-public-istio-abc] [-n] [gateways]"
 }
 
 @test "k8s_read: allows any namespace and -A with a wildcard" {
