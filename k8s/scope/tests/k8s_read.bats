@@ -408,13 +408,22 @@ action_context() {
   assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "[svc/gateway-public-istio] [httproute/main]"
 }
 
-@test "k8s_read: refuses pods in the gateways namespace" {
+@test "k8s_read: allows pods in the gateways namespace" {
   export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "-n", "gateways"]}')
 
   run bash "$SCRIPT"
 
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [pods] [-n] [gateways]"
+}
+
+@test "k8s_read: refuses configmaps in the gateways namespace" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["configmaps", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Resource 'pods' cannot be read in namespace 'gateways'"
+  assert_contains "$output" "Resource 'configmaps' cannot be read in namespace 'gateways'"
   [ ! -f "$NP_CALL" ]
 }
 
@@ -428,23 +437,22 @@ action_context() {
   [ ! -f "$NP_CALL" ]
 }
 
-@test "k8s_read: refuses logs in the gateways namespace" {
-  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["gateway-public-istio-abc", "-n", "gateways"]}')
+@test "k8s_read: allows logs in the gateways namespace" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["gateway-public-istio-abc", "-n", "gateways", "--tail=50"]}')
 
   run bash "$SCRIPT"
 
-  [ "$status" -eq 1 ]
-  assert_contains "$output" "Logs cannot be read in namespace 'gateways'"
-  [ ! -f "$NP_CALL" ]
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [logs] [gateway-public-istio-abc] [-n] [gateways] [--tail=50]"
 }
 
 @test "k8s_read: the last namespace given decides what can be read" {
-  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "-n", "provider-namespace", "-n", "gateways"]}')
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["configmaps", "-n", "provider-namespace", "-n", "gateways"]}')
 
   run bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "Resource 'pods' cannot be read in namespace 'gateways'"
+  assert_contains "$output" "Resource 'configmaps' cannot be read in namespace 'gateways'"
 }
 
 @test "k8s_read: reads routing objects from the namespaces in K8S_READ_NETWORK_NAMESPACES" {

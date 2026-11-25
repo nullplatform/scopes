@@ -15,8 +15,9 @@
 #   - the namespace: the scope's own, plus the ones in
 #     K8S_READ_ALLOWED_NAMESPACES (comma separated; "*" allows any, and -A).
 #     The scope's routes attach to gateways that live in another namespace, so
-#     the ones in K8S_READ_NETWORK_NAMESPACES (default "gateways") accept "get"
-#     of the routing objects listed in NETWORK_RESOURCES, and nothing else
+#     the ones in K8S_READ_NETWORK_NAMESPACES (default "gateways") accept
+#     "logs", and "get" of the types listed in NETWORK_RESOURCES: the routing
+#     objects and the workloads behind them, and nothing else
 #
 # Parameters (action): command ("get" | "logs"), args (array of strings).
 
@@ -82,6 +83,8 @@ GET_RESOURCES=(
 NETWORK_RESOURCES=(
   gateways gateway gtw gateways.gateway.networking.k8s.io gateways.networking.istio.io
   httproutes httproute grpcroutes grpcroute services service svc
+  pods pod po deployments deployment deploy replicasets replicaset rs events event ev
+  horizontalpodautoscalers horizontalpodautoscaler hpa
 )
 
 in_list() {
@@ -211,9 +214,6 @@ validate_args() {
   fi
 
   if [[ -n "$NETWORK_ONLY_NAMESPACE" ]]; then
-    [[ "$COMMAND" == "get" ]] || refuse \
-      "Logs cannot be read in namespace '$NETWORK_ONLY_NAMESPACE'" \
-      "Only 'get' of ${NETWORK_RESOURCES[*]} is available there"
     for type in ${REQUESTED_TYPES[@]+"${REQUESTED_TYPES[@]}"}; do
       in_list "$type" "${NETWORK_RESOURCES[@]}" || refuse \
         "Resource '$type' cannot be read in namespace '$NETWORK_ONLY_NAMESPACE'" \
