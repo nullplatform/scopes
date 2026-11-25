@@ -28,7 +28,11 @@ setup() {
   kubectl() {
     case "$1" in
       get|logs)
-        if [[ " $* " == *" -o json "* && " $* " == *" secrets "* ]]; then
+        if [[ "$*" == *"parentRefs"* ]]; then
+          # The parentRefs lookup: the namespace of the gateways of the scope's routes.
+          [[ "$2" == httproutes.* && -n "${KUBECTL_GATEWAY_NAMESPACES-gateways}" ]] && echo "${KUBECTL_GATEWAY_NAMESPACES-gateways}"
+          return 0
+        elif [[ " $* " == *" -o json "* && " $* " == *" secrets "* ]]; then
           echo '{"items":[{"metadata":{"name":"s1"},"data":{"password":"c2VjcmV0"}}]}'
         elif [[ " $* " == *" -l scope_id="* ]]; then
           return 0
@@ -64,7 +68,7 @@ setup() {
 
 teardown() {
   unset -f kubectl np log
-  unset KUBECTL_FAIL KUBECTL_PRINT_TRACE NP_TRACE LOG_LEVEL KUBECTL_BIG_OUTPUT NP_EXIT_CODE K8S_READ_MAX_BYTES K8S_READ_ALLOWED_NAMESPACES K8S_READ_NETWORK_NAMESPACES
+  unset KUBECTL_FAIL KUBECTL_PRINT_TRACE NP_TRACE LOG_LEVEL KUBECTL_BIG_OUTPUT NP_EXIT_CODE K8S_READ_MAX_BYTES K8S_READ_ALLOWED_NAMESPACES K8S_READ_NETWORK_NAMESPACES KUBECTL_GATEWAY_NAMESPACES
 }
 
 action_context() {
@@ -390,7 +394,7 @@ action_context() {
   assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [logs] [istiod-abc] [-n] [istio-system]"
 }
 
-@test "k8s_read: allows gateways in the gateways namespace by default" {
+@test "k8s_read: allows gateways in the namespace of the gateway the scope route attaches to" {
   export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateways", "-n", "gateways", "-o", "yaml"]}')
 
   run bash "$SCRIPT"
@@ -465,8 +469,29 @@ action_context() {
   assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [gateways] [-n] [edge]"
 }
 
-@test "k8s_read: refuses the gateways namespace when K8S_READ_NETWORK_NAMESPACES is empty" {
-  export K8S_READ_NETWORK_NAMESPACES=""
+@test "k8s_read: allows the gateway namespace whatever its name" {
+  export KUBECTL_GATEWAY_NAMESPACES="istio-ingress"
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "-n", "istio-ingress"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [get] [pods] [-n] [istio-ingress]"
+}
+
+@test "k8s_read: refuses the gateways namespace when the gateway of the scope lives in another one" {
+  export KUBECTL_GATEWAY_NAMESPACES="istio-ingress"
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateways", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "Namespace 'gateways' is not allowed"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses the gateways namespace when the scope has no route to a gateway" {
+  export KUBECTL_GATEWAY_NAMESPACES=""
   export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["gateways", "-n", "gateways"]}')
 
   run bash "$SCRIPT"
@@ -491,6 +516,7 @@ action_context() {
 gateway_logs() {
   kubectl() {
     case "$1" in
+      get) [[ "$*" == *"parentRefs"* && "$2" == httproutes.* ]] && echo "gateways"; return 0 ;;
       logs)
         echo '2026-11-25T10:00:00Z	info	xdsproxy	connected to upstream XDS server'
         echo '{"authority":"scope.example.com","code":503,"path":"/health"}'
@@ -530,6 +556,7 @@ gateway_logs() {
 @test "k8s_read: gateway logs stay narrowed when --timestamps and --prefix put text before each line" {
   kubectl() {
     case "$1" in
+      get) [[ "$*" == *"parentRefs"* && "$2" == httproutes.* ]] && echo "gateways"; return 0 ;;
       logs)
         echo '[pod/gw-1/istio-proxy] 2026-11-25T10:00:00Z {"authority":"other-app.example.com","code":200,"path":"/private"}'
         echo '[pod/gw-1/istio-proxy] 2026-11-25T10:00:01Z {"authority":"scope.example.com","code":503,"path":"/health"}'
@@ -553,6 +580,7 @@ gateway_logs() {
 @test "k8s_read: gateway logs drop a request of another host that only names the scope domain" {
   kubectl() {
     case "$1" in
+      get) [[ "$*" == *"parentRefs"* && "$2" == httproutes.* ]] && echo "gateways"; return 0 ;;
       logs)
         echo '{"authority":"other-app.example.com","code":200,"path":"/x?next=scope.example.com","agent":"scope.example.com"}'
         echo '{"authority":"evil-scope.example.com","code":200,"path":"/"}'
@@ -578,6 +606,7 @@ gateway_logs() {
 @test "k8s_read: gateway logs drop a request line that cannot be read" {
   kubectl() {
     case "$1" in
+      get) [[ "$*" == *"parentRefs"* && "$2" == httproutes.* ]] && echo "gateways"; return 0 ;;
       logs)
         echo '{"agent":"curl","path":"/private?token=abc","upstream_host":"10.0.0.1'
         echo '{":authority":"other-app.example.com","path":"/a"}'

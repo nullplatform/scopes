@@ -14,9 +14,11 @@
 #     kubectl
 #   - the namespace: the scope's own, plus the ones in
 #     K8S_READ_ALLOWED_NAMESPACES (comma separated; "*" allows any, and -A).
-#     The scope's routes attach to gateways that live in another namespace, so
-#     the ones in K8S_READ_NETWORK_NAMESPACES (default "gateways") accept
-#     "logs", and "get" of the types listed in NETWORK_RESOURCES: the routing
+#     The scope's routes attach to gateways that live in another namespace.
+#     That namespace is read from the parentRefs of the scope's own routes, so
+#     it needs no configuration and a scope without such a route opens none;
+#     K8S_READ_NETWORK_NAMESPACES (comma separated) adds more. Those namespaces
+#     accept "logs", and "get" of the types listed in NETWORK_RESOURCES: the routing
 #     objects and the workloads behind them, and nothing else. A gateway serves
 #     every application, so from its logs only the requests to this scope's
 #     domains come back, plus the lines that are not requests
@@ -88,7 +90,7 @@ GET_RESOURCES=(
   cr nodepools nodepool nodeclaims nodeclaim ec2nodeclasses ec2nodeclass
 )
 
-# Resource types "get" may query in the K8S_READ_NETWORK_NAMESPACES.
+# Resource types "get" may query in the namespace of the scope's gateways.
 NETWORK_RESOURCES=(
   gateways gateway gtw gateways.gateway.networking.k8s.io gateways.networking.istio.io
   httproutes httproute grpcroutes grpcroute services service svc
@@ -124,13 +126,29 @@ namespace_allowed() {
   return 1
 }
 
+# Namespaces of the gateways the scope's routes attach to, one per line.
+# Routes without the Gateway API installed, or without a parentRef namespace,
+# give none.
+scope_gateway_namespaces() {
+  local scope_id kind
+  scope_id=$(echo "$CONTEXT" | jq -r '.scope.id // empty')
+  [[ -n "$scope_id" ]] || return 0
+  for kind in httproutes.gateway.networking.k8s.io grpcroutes.gateway.networking.k8s.io; do
+    kubectl get "$kind" -n "$K8S_NAMESPACE" -l "scope_id=$scope_id" \
+      -o jsonpath='{range .items[*].spec.parentRefs[*]}{.namespace}{"\n"}{end}' 2>/dev/null || true
+  done
+}
+
 network_namespace() {
   local namespace="$1" allowed item
-  IFS=',' read -ra allowed <<< "${K8S_READ_NETWORK_NAMESPACES-gateways}"
+  IFS=',' read -ra allowed <<< "${K8S_READ_NETWORK_NAMESPACES:-}"
   for item in ${allowed[@]+"${allowed[@]}"}; do
     item="${item//[[:space:]]/}"
     [[ -n "$item" && "$item" == "$namespace" ]] && return 0
   done
+  while IFS= read -r item; do
+    [[ -n "$item" && "$item" == "$namespace" ]] && return 0
+  done < <(scope_gateway_namespaces)
   return 1
 }
 
@@ -160,7 +178,7 @@ check_flag_value() {
         NETWORK_ONLY_NAMESPACE="$value"
       else
         refuse "Namespace '$value' is not allowed" \
-          "Query the scope's namespace ($K8S_NAMESPACE) or add '$value' to K8S_READ_ALLOWED_NAMESPACES"
+          "Query the scope's namespace ($K8S_NAMESPACE) or the namespace of the gateway its routes attach to, or add '$value' to K8S_READ_ALLOWED_NAMESPACES"
       fi
       ;;
     -o|--output)
