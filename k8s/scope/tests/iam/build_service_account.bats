@@ -290,42 +290,71 @@ render_real_template() {
   assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
 }
 
-@test "build_service_account: gke builds the service account without an IAM role or the IRSA annotation" {
+@test "build_service_account: gke builds the application and environment service account without an IAM role or scope labels" {
   export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"gke"}'
   export AWS_LOG="$OUTPUT_DIR/aws.log"
   aws() { echo "$*" >> "$AWS_LOG"; return 1; }
   export -f aws
   render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "Production"}')
 
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 IAM mode is gke, building service account 'test-prefix-test-scope-123' without an IAM role"
+  assert_contains "$output" "📋 IAM mode is gke, building service account 'np-42-production' without an IAM role"
   assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
   rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
-  assert_equal "$(yq -r '.metadata.name' "$rendered")" "test-prefix-test-scope-123"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "np-42-production"
   assert_equal "$(yq -r '.metadata.namespace' "$rendered")" "test-ns"
   assert_equal "$(yq -r '.metadata.annotations' "$rendered")" "null"
-  assert_equal "$(yq -r '.metadata.labels.scope_id' "$rendered")" "123"
+  assert_equal "$(yq -r '.metadata.labels.application_id' "$rendered")" "42"
+  assert_equal "$(yq -r '.metadata.labels.scope_id' "$rendered")" "null"
+  assert_equal "$(yq -r '.metadata.labels.scope' "$rendered")" "null"
 }
 
-@test "build_service_account: gke on delete builds the service account to remove without calling AWS" {
-  export IAM='{"ENABLED":"true","PREFIX":"{.account.slug}-{.namespace.slug}","MODE":"gke"}'
+@test "build_service_account: gke renders the same service account for every scope of the application in the environment" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+  first="$OUTPUT_DIR/first.yaml"
+
+  run bash -c 'source "$SCRIPT"'
+  assert_equal "$status" "0"
+  cp "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml" "$first"
+
+  export SCOPE_ID="other-scope-456"
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.id = 456 | .scope.slug = "other-scope"')
+  run bash -c 'source "$SCRIPT"'
+  assert_equal "$status" "0"
+
+  assert_equal "$(cat "$OUTPUT_DIR/service_account-other-scope-456.yaml")" "$(cat "$first")"
+}
+
+@test "build_service_account: gke fails when the scope has no environment dimension" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  render_real_template
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not name the service account of scope test-scope-123: IAM.MODE gke needs the scope's 'environment' dimension"
+  assert_equal "$(ls "$OUTPUT_DIR")" ""
+}
+
+@test "build_service_account: gke on delete keeps the shared service account without calling AWS" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
   export ACTION="delete"
-  export CONTEXT='{"k8s_namespace":"test-ns","account":{"slug":"acme"},"namespace":{"slug":"renamed"},"scope":{"id":"123"}}'
   export AWS_LOG="$OUTPUT_DIR/aws.log"
-  kubectl() {
-    case "$*" in
-      "get serviceaccounts -n test-ns -l scope_id=test-scope-123"*) printf '%s' "acme-payments-test-scope-123" ;;
-    esac
-  }
   aws() { echo "$*" >> "$AWS_LOG"; return 1; }
-  export -f kubectl aws
+  kubectl() { echo "kubectl $*" >> "$AWS_LOG"; }
+  export -f aws kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
 
   run bash -c 'source "$SCRIPT"'
 
   assert_equal "$status" "0"
-  assert_contains "$output" "📋 IAM mode is gke, building service account 'acme-payments-test-scope-123' without an IAM role"
-  assert_contains "$output" "✅ Service account template built successfully"
+  assert_contains "$output" "📋 IAM mode is gke, keeping the service account: other scopes of the application in this environment may use it"
   assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+  assert_equal "$(ls "$OUTPUT_DIR")" ""
 }

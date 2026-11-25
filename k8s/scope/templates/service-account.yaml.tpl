@@ -15,8 +15,10 @@ metadata:
     application_id: "{{ .application.id }}"
     namespace: {{ .namespace.slug }}
     namespace_id: "{{ .namespace.id }}"
+{{- if ne .iam_mode "gke" }}
     scope: {{ .scope.slug }}
     scope_id: "{{ .scope.id }}"
+{{- end }}
 {{- $global := index .k8s_modifiers "global" }}
 {{- if $global }}
   {{- $labels := index $global "labels" }}

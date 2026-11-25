@@ -67,10 +67,13 @@ configuration:
 #    PREFIX: nullplatform-scopes
 #    MODE: irsa
 #    # irsa (default) or pod_identity create an AWS IAM role per scope.
-#    # gke only creates the scope's Kubernetes service account (<PREFIX>-<scope id>),
-#    # with no AWS calls and no annotation, for GKE Workload Identity: grant it GCP roles
-#    # through principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/<namespace>/sa/<service account>.
-#    # ROLE and TAGS are ignored in gke mode.
+#    # gke only creates a Kubernetes service account, with no AWS calls and no annotation,
+#    # for GKE Workload Identity. It is shared by the scopes of an application in an
+#    # environment: np-<application id>-<environment>, from the scope's "environment"
+#    # dimension (required), lowercased, other characters turned into "-", cut to 63
+#    # characters. Deleting a scope keeps it. Grant it GCP roles through
+#    # principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/<namespace>/sa/<service account>.
+#    # PREFIX, ROLE and TAGS are ignored in gke mode.
 #    TAGS:
 #      team: "{.namespace.slug}"
 #      cost-center: "CC-1234"
