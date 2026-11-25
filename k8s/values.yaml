@@ -76,6 +76,10 @@ configuration:
 #    # Deleting a scope keeps it. Grant it GCP roles through
 #    # principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/<namespace>/sa/<service account>.
 #    # PREFIX, ROLE and TAGS are ignored in gke mode.
+#    DIMENSION: environment
+#    # gke only: the scope dimension whose value names the service account (default
+#    # environment). It must match the identity_dimension of the services that grant
+#    # access to it (e.g. services-gcp-cloud-storage).
 #    TAGS:
 #      team: "{.namespace.slug}"
 #      cost-center: "CC-1234"

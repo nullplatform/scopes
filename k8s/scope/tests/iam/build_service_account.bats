@@ -389,6 +389,21 @@ render_real_template() {
   assert_contains "$output" "❌ Failed to look up service account 'test-ns/np-42-production': forbidden"
 }
 
+@test "build_service_account: gke names the service account after the dimension set in IAM.DIMENSION" {
+  export IAM='{"ENABLED":"true","MODE":"gke","DIMENSION":"env"}'
+  kubectl() { return 0; }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production", "env": "qa"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "np-42-qa"
+  assert_equal "$(yq -r '.metadata.labels.environment' "$rendered")" "qa"
+}
+
 @test "build_service_account: gke fails when the scope has no environment dimension" {
   export IAM='{"ENABLED":"true","MODE":"gke"}'
   render_real_template

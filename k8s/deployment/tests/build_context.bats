@@ -1793,3 +1793,13 @@ SCRIPT
   [ "$status" -ne 0 ]
   assert_contains "$output" "IAM.MODE gke needs the scope's 'environment' dimension"
 }
+
+@test "service account: gke takes the environment from IAM.DIMENSION" {
+  setup_full_build_context
+  export IAM='{"ENABLED":"true","MODE":"gke","DIMENSION":"env"}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 400 | .scope.dimensions = {"environment": "production", "env": "dev"}')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.service_account_name')" "np-400-dev"
+}

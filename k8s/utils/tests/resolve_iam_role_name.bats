@@ -193,7 +193,7 @@ teardown() {
 
     assert_equal "$status" "1"
     assert_contains "$output" "is not a valid Kubernetes name"
-    assert_contains "$output" "• Use an 'environment' dimension value made of letters, digits and hyphens, starting and ending with a letter or digit"
+    assert_contains "$output" "• Use a 'environment' dimension value made of letters, digits and hyphens, starting and ending with a letter or digit"
   done
 }
 
@@ -224,7 +224,23 @@ teardown() {
   assert_contains "$output" "❌ Could not name the service account of scope 123456: IAM.MODE gke needs the scope's 'environment' dimension"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• Create the scope with an 'environment' dimension, or set IAM.MODE to irsa or pod_identity"
+  assert_contains "$output" "• Create the scope with a 'environment' dimension, set IAM.DIMENSION to the dimension that names the environment, or set IAM.MODE to irsa or pod_identity"
   assert_empty "$(cat "$KUBECTL_LOG")"
 }
 
+
+@test "resolve_iam_role_name: gke reads the environment from the dimension named by IAM.DIMENSION" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production", "env": "Staging"}')
+
+  resolve_iam_role_name "" "123456" "payments" "gke" "env"
+
+  assert_equal "$IAM_ROLE_NAME" "np-42-staging"
+}
+
+@test "resolve_iam_role_name: gke fails when the scope lacks the dimension named by IAM.DIMENSION" {
+  run resolve_iam_role_name "" "123456" "payments" "gke" "env"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not name the service account of scope 123456: IAM.MODE gke needs the scope's 'env' dimension"
+  assert_contains "$output" "The scope has no 'env' dimension (IAM.DIMENSION)"
+}

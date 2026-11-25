@@ -101,7 +101,7 @@ When the scope creates an IAM role (`IAM.ENABLED`), `IAM.PREFIX` may be a patter
 IAM.PREFIX: "{.account.slug}-{.namespace.slug}"   # acme-payments-123456
 ```
 
-A scope whose service account already exists keeps its name, as long as the IAM role with that name is tagged with the scope's id, so renaming a slug or changing the prefix never orphans the role (`k8s/utils/resolve_iam_role_name`). With `IAM.MODE: gke` there is no role and `IAM.PREFIX` is ignored: the service account is shared by the application's scopes in an environment and named `np-<application id>-<environment>` from the scope's `environment` dimension, lowercased; a value that is not a DNS-1123 label, or a name over 63 characters, fails instead of being rewritten (see `k8s/README.md`).
+A scope whose service account already exists keeps its name, as long as the IAM role with that name is tagged with the scope's id, so renaming a slug or changing the prefix never orphans the role (`k8s/utils/resolve_iam_role_name`). With `IAM.MODE: gke` there is no role and `IAM.PREFIX` is ignored: the service account is shared by the application's scopes in an environment and named `np-<application id>-<environment>` from the scope dimension named by `IAM.DIMENSION` (default `environment`, must match the service's `identity_dimension`), lowercased; a value that is not a DNS-1123 label, or a name over 63 characters, fails instead of being rewritten (see `k8s/README.md`).
 
 Values in `IAM.TAGS` with a `{` are rendered by the same engine, with the same rules: lowercase, placeholders separated by a single hyphen, starting with a letter. A value without `{` is used as is.
 
