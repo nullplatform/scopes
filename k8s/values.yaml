@@ -73,7 +73,8 @@ configuration:
 #    # dimension (required), lowercased and never rewritten: a value that is not a
 #    # DNS-1123 label, or a name over 63 characters, fails. An existing service account
 #    # with that name is reused only if its application_id and environment labels match.
-#    # Deleting a scope keeps it. Grant it GCP roles through
+#    # Deleting the last scope of the application with that value deletes it (the agent
+#    # lists the scopes with np; if that fails it is kept). Grant it GCP roles through
 #    # principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/<namespace>/sa/<service account>.
 #    # PREFIX, ROLE and TAGS are ignored in gke mode.
 #    DIMENSION: environment
