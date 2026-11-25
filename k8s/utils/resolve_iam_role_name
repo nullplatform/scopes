@@ -35,11 +35,21 @@ resolve_iam_role_name() {
   fi
   name="${name%% *}"
   if [ -n "$name" ]; then
-    if [ "$mode" = "gke" ] || [ "$(_iam_role_scope_id "$name")" = "$scope_id" ]; then
+    if [ "$mode" = "gke" ]; then
+      # The scope_id label alone can be set by anyone who edits labels, so in gke
+      # (no IAM role tag to check) adopt only a name this resolver issues:
+      # <rendered prefix>-<scope id>.
+      if [[ "$name" == *"-${scope_id}" ]]; then
+        IAM_ROLE_NAME="$name"
+        return 0
+      fi
+      log warn "⚠️  Ignoring service account '$name': its name does not end with -$scope_id"
+    elif [ "$(_iam_role_scope_id "$name")" = "$scope_id" ]; then
       IAM_ROLE_NAME="$name"
       return 0
+    else
+      log warn "⚠️  Ignoring service account '$name': its IAM role is not tagged with scope_id=$scope_id"
     fi
-    log warn "⚠️  Ignoring service account '$name': its IAM role is not tagged with scope_id=$scope_id"
   fi
 
   if ! name=$(np_name_render "$((IAM_ROLE_NAME_BUDGET - ${#scope_id} - 1))" "$prefix"); then

@@ -169,6 +169,14 @@ teardown() {
   assert_false "$asked" "AWS asked for the role tags"
 }
 
+@test "resolve_iam_role_name: gke ignores a labelled service account whose name was not issued for the scope" {
+  export MOCK_SERVICE_ACCOUNT="someone-elses-account"
+
+  resolve_iam_role_name "{.account.slug}-{.namespace.slug}" "123456" "payments" "gke"
+
+  assert_equal "$IAM_ROLE_NAME" "acme-payments-123456"
+}
+
 @test "resolve_iam_role_name: gke renders the name from the prefix when the scope has no service account" {
   resolve_iam_role_name "{.account.slug}-{.namespace.slug}" "123456" "payments" "gke"
 
