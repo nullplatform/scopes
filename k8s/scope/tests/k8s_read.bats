@@ -486,6 +486,134 @@ action_context() {
   assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "kubectl-called: [logs] [gateway-public-istio-abc] [-n] [gateways]"
 }
 
+# The log mock of these tests prints every level, so the wrapper's own
+# "Running: kubectl logs" notice counts as one more line that is not a request.
+gateway_logs() {
+  kubectl() {
+    case "$1" in
+      logs)
+        echo '2026-11-25T10:00:00Z	info	xdsproxy	connected to upstream XDS server'
+        echo '{"authority":"scope.example.com","code":503,"path":"/health"}'
+        echo '{"authority":"other-app.example.com","code":200,"path":"/private?token=abc"}'
+        echo '{"authority":"EXTRA.example.com:443","code":404,"path":"/"}'
+        echo '[2026-11-25T10:00:01.000Z] "GET /x HTTP/1.1" 200 - "-" "other-app.example.com"'
+        echo '[2026-11-25T10:00:02.000Z] "GET /y HTTP/1.1" 500 - "-" "scope.example.com"'
+        ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f kubectl
+  export CONTEXT='{
+    "scope": { "id": "scope-123", "domain": "scope.example.com", "domains": [{ "name": "extra.example.com" }] },
+    "providers": { "container-orchestration": { "cluster": { "namespace": "provider-namespace" } } }
+  }'
+}
+
+@test "k8s_read: gateway logs keep only the requests to the scope domains and the lines that are not requests" {
+  gateway_logs
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways", "--tail=100"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  local out; out=$(jq -r '.results.output' "$BODY_COPY")
+  assert_contains "$out" "xdsproxy"
+  assert_contains "$out" '"authority":"scope.example.com","code":503'
+  assert_contains "$out" '"authority":"EXTRA.example.com:443"'
+  assert_contains "$out" '"GET /y HTTP/1.1" 500'
+  [[ "$out" != *"other-app.example.com"* ]]
+  [ "$(jq -r '.results.scope_requests_only' "$BODY_COPY")" = "true" ]
+  [ "$(jq -r '.results.lines_read' "$BODY_COPY")" = "7" ]
+  [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "5" ]
+}
+
+@test "k8s_read: gateway logs return no request when the scope has no domain" {
+  gateway_logs
+  export CONTEXT='{"scope": {"id": "scope-123"}, "providers": {"container-orchestration": {"cluster": {"namespace": "provider-namespace"}}}}'
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "2" ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "xdsproxy"
+  [[ "$(jq -r '.results.output' "$BODY_COPY")" != *"authority"* ]]
+}
+
+@test "k8s_read: gateway logs are not narrowed when the namespace is in the allowed list" {
+  gateway_logs
+  export K8S_READ_ALLOWED_NAMESPACES="gateways"
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "7" ]
+  [ "$(jq -r '.results.scope_requests_only' "$BODY_COPY")" = "false" ]
+}
+
+@test "k8s_read: filter keeps the log lines that contain the text, in any case" {
+  gateway_logs
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["my-pod"], "filter": "XDSPROXY"}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "1" ]
+  [ "$(jq -r '.results.filter' "$BODY_COPY")" = "XDSPROXY" ]
+  assert_contains "$(jq -r '.results.output' "$BODY_COPY")" "xdsproxy"
+}
+
+@test "k8s_read: filter is a plain text, not a pattern or an option" {
+  gateway_logs
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["my-pod"], "filter": "-e .*"}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "0" ]
+}
+
+@test "k8s_read: filter with no match returns an empty output and succeeds" {
+  gateway_logs
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["my-pod"], "filter": "nothing-like-this"}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results.output' "$BODY_COPY")" = "" ]
+  [ "$(jq -r '.results.lines_read' "$BODY_COPY")" = "7" ]
+}
+
+@test "k8s_read: filter narrows gateway logs further, never past the scope domains" {
+  gateway_logs
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["deploy/gateway-public-istio", "-n", "gateways"], "filter": "other-app"}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results.lines_returned' "$BODY_COPY")" = "0" ]
+}
+
+@test "k8s_read: refuses filter on get" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods"], "filter": "x"}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "The 'filter' parameter only applies to logs"
+  [ ! -f "$NP_CALL" ]
+}
+
+@test "k8s_read: refuses a filter that is not a text" {
+  export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "logs", "args": ["my-pod"], "filter": ["a"]}')
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "The 'filter' parameter must be a text"
+}
+
 @test "k8s_read: allows any namespace and -A with a wildcard" {
   export K8S_READ_ALLOWED_NAMESPACES="*"
   export NP_ACTION_CONTEXT=$(action_context '{"scope_id": 123, "command": "get", "args": ["pods", "-A"]}')

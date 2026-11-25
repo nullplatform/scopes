@@ -35,6 +35,11 @@
             "maxLength": 500
           },
           "description": "Arguments for the verb, one per item, e.g. [\"pods\", \"-o\", \"wide\"]. For get, the first item is the resource type (or type/name) from a fixed list that leaves secrets out. Only read-only flags are accepted, and a short flag takes its value as the next item"
+        },
+        "filter": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "For logs: return only the lines that contain this text, in any case"
         }
       },
       "allOf": [
@@ -115,6 +120,18 @@
         },
         "namespace": {
           "type": "string"
+        },
+        "filter": {
+          "type": "string"
+        },
+        "scope_requests_only": {
+          "type": "boolean"
+        },
+        "lines_read": {
+          "type": "number"
+        },
+        "lines_returned": {
+          "type": "number"
         }
       }
     },

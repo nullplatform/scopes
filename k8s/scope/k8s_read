@@ -17,9 +17,12 @@
 #     The scope's routes attach to gateways that live in another namespace, so
 #     the ones in K8S_READ_NETWORK_NAMESPACES (default "gateways") accept
 #     "logs", and "get" of the types listed in NETWORK_RESOURCES: the routing
-#     objects and the workloads behind them, and nothing else
+#     objects and the workloads behind them, and nothing else. A gateway serves
+#     every application, so from its logs only the requests to this scope's
+#     domains come back, plus the lines that are not requests
 #
-# Parameters (action): command ("get" | "logs"), args (array of strings).
+# Parameters (action): command ("get" | "logs"), args (array of strings),
+# filter (logs only: keep the lines that contain this text, any case).
 
 set -uo pipefail
 
@@ -44,6 +47,12 @@ if ! echo "$PARAMETERS" | jq -e '(.args // []) | type == "array" and all(.[]; ty
   log error "❌ The 'args' parameter must be an array of strings"
   exit 1
 fi
+
+if ! echo "$PARAMETERS" | jq -e '(.filter // "") | type == "string" and length <= 200' >/dev/null; then
+  log error "❌ The 'filter' parameter must be a text of up to 200 characters"
+  exit 1
+fi
+FILTER=$(echo "$PARAMETERS" | jq -r '.filter // empty')
 
 # One argument per array item, NUL-separated so spaces and newlines survive.
 ARGS=()
@@ -233,6 +242,10 @@ export K8S_NAMESPACE
 
 validate_args
 
+if [[ -n "$FILTER" && "$COMMAND" != "logs" ]]; then
+  refuse "The 'filter' parameter only applies to logs" "Remove 'filter', or narrow a get with -l or --field-selector"
+fi
+
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -241,6 +254,28 @@ log debug "🔍 Running kubectl $COMMAND (namespace: $K8S_NAMESPACE)"
 # debug logging on, its notices would end up inside the output.
 NP_TRACE="" LOG_LEVEL=error "$WRAPPER" ${ARGS[@]+"${ARGS[@]}"} > "$WORK_DIR/out" 2> "$WORK_DIR/err"
 EXIT_CODE=$?
+
+LINES_READ=$(wc -l < "$WORK_DIR/out" | tr -d ' ')
+SCOPE_ONLY=false
+if [[ "$COMMAND" == "logs" && -n "$NETWORK_ONLY_NAMESPACE" ]]; then
+  # A request line is an access log entry: JSON with "authority", or Envoy's text format.
+  K8S_READ_DOMAINS=$(echo "$CONTEXT" | jq -r '[.scope.domain, (.scope.domains // [])[].name] | map(select(. != null and . != "")) | .[]') \
+    awk '
+      BEGIN { n = split(tolower(ENVIRON["K8S_READ_DOMAINS"]), domains, "\n") }
+      {
+        request = (substr($0, 1, 1) == "{" && index($0, "\"authority\"")) || ($0 ~ /^\[[^]]*\] "/)
+        if (!request) { print; next }
+        line = tolower($0)
+        for (i = 1; i <= n; i++) if (domains[i] != "" && index(line, domains[i])) { print; next }
+      }
+    ' "$WORK_DIR/out" > "$WORK_DIR/out.scope" && mv "$WORK_DIR/out.scope" "$WORK_DIR/out"
+  SCOPE_ONLY=true
+fi
+if [[ -n "$FILTER" ]]; then
+  grep -i -F -- "$FILTER" "$WORK_DIR/out" > "$WORK_DIR/out.filter"
+  mv "$WORK_DIR/out.filter" "$WORK_DIR/out"
+fi
+LINES_RETURNED=$(wc -l < "$WORK_DIR/out" | tr -d ' ')
 
 # Keep the end of the output: for logs the last lines are the useful ones.
 MAX_BYTES="${K8S_READ_MAX_BYTES:-200000}"
@@ -259,7 +294,12 @@ jq -n \
   --argjson exit_code "$EXIT_CODE" \
   --argjson truncated "$TRUNCATED" \
   --arg namespace "$K8S_NAMESPACE" \
-  '{results: {exit_code: $exit_code, output: $output, error: $error, truncated: $truncated, namespace: $namespace}}' \
+  --arg filter "$FILTER" \
+  --argjson scope_only "$SCOPE_ONLY" \
+  --argjson lines_read "$LINES_READ" \
+  --argjson lines_returned "$LINES_RETURNED" \
+  '{results: {exit_code: $exit_code, output: $output, error: $error, truncated: $truncated, namespace: $namespace,
+              filter: $filter, scope_requests_only: $scope_only, lines_read: $lines_read, lines_returned: $lines_returned}}' \
   > "$WORK_DIR/body.json"
 
 ACTION_ID=$(echo "$NP_ACTION_CONTEXT" | jq -r '.notification.id')
