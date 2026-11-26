@@ -1,0 +1,6 @@
+#!/bin/bash
+# Kept for anything that still runs this path directly (the overlay's own
+# workflows no longer do): the Datadog implementation lives in
+# k8s/metric/sources/datadog/metric.
+# shellcheck source=/dev/null
+. "$SERVICE_PATH/metric/sources/datadog/metric"
