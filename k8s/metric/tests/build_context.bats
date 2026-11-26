@@ -48,6 +48,25 @@ resolved() {
   assert_equal "$output" "datadog||dd-api|dd-app|datadoghq.eu|http.rpm|42"
 }
 
+@test "the scope id is taken from the enriched parameters when the arguments lack it, as metric:list sends it" {
+  export NP_PROVIDERS="{\"results\":[$DATADOG_PROVIDER]}"
+  export CONTEXT='{"arguments":{"application_id":"42"},"parameters":{"scope_id":"5678"},"tags":{"scope_id":"ignored-when-parameters-has-it"}}'
+  export METRICS_SOURCE_REQUIRED=false
+  run resolved
+  assert_equal "$status" 0
+  assert_contains "$output" "datadog||dd-api|dd-app|datadoghq.eu"
+  assert_contains "$(cat "$NP_CALLS_LOG")" "scope read --id 5678"
+}
+
+@test "a null scope id exported by the entrypoint is not sent to the platform" {
+  export CONTEXT='{"arguments":{"application_id":"42"},"parameters":{"scope_id":null}}'
+  export METRICS_SOURCE_REQUIRED=false
+  run resolved
+  assert_equal "$status" 0
+  assert_contains "$output" "prometheus|||||"
+  [ ! -f "$NP_CALLS_LOG" ]
+}
+
 @test "a Prometheus provider makes the source prometheus with its url" {
   export NP_PROVIDERS="{\"results\":[$PROMETHEUS_PROVIDER]}"
   run resolved

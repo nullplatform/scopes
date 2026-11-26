@@ -15,7 +15,14 @@
 # only querying them needs the provider (the metric workflow fails with the
 # message the UI shows).
 
-SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
+# The scope comes where the platform put it: metric:list carries it only in
+# the enriched parameters, a metric query in its arguments. Same lookup as the
+# image entrypoint, which exports SCOPE_ID; "null" is what that export holds
+# when nothing matched.
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.parameters.scope_id // .tags.scope_id // .arguments.scope_id // empty')
+if [[ -z "$SCOPE_ID" || "$SCOPE_ID" == "null" ]]; then
+  SCOPE_ID=""
+fi
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
 METRICS_SOURCE_REQUIRED=${METRICS_SOURCE_REQUIRED:-true}
 
