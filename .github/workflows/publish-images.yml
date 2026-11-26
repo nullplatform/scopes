@@ -4,11 +4,10 @@ name: publish-images
 # registers each as an oci_image platform artifact (visible-to organization=*)
 # carrying both the digest and the release tag, so packages can resolve it by
 # tag (`lookup = true` + meta.tag) instead of copying a digest around.
-# Same mold as scopes-lambda (publish-image.yml), fanned out to the 3 images:
+# Same mold as scopes-lambda (publish-image.yml), fanned out to the 2 images:
 #
 #   scopes/containers            <- k8s/            (base; FROM worker-bridge + tooling)
 #   scopes/scheduled-task        <- scheduled_task/ (leaner)
-#   scopes/containers-datadog    <- containers + datadog/  overlay (metric)
 #
 # Image names use hyphens; the ECR repositories must exist under these exact
 # names (ECR never creates on push).
@@ -17,11 +16,10 @@ name: publish-images
 # tag with the CURRENT workflow (a tag push runs the workflow at the tagged
 # commit, so fixes on main never reach old tags without this).
 #
-# The datadog overlay is FROM the containers base (which bakes the whole repo
-# into /app/pkg), so it must be pushed first — its build `needs: containers` and
-# passes BASE_VERSION so its Dockerfile can FROM containers:<tag>.
-# (azure / azure-aro are pure config overlays the tofu modules configure at
-# install time via NP_OVERRIDES_PATH, so they need no image of their own.)
+# azure / azure-aro are pure config overlays the tofu modules configure at
+# install time via NP_OVERRIDES_PATH, so they need no image of their own; the
+# metrics source (Prometheus or Datadog) is picked per scope from the
+# organization's metrics provider, so there is no datadog image either.
 #
 # Explicit job per image on purpose: a matrixed job that calls the reusable
 # workflow collapses `image_digest` to a single value (matrix outputs overwrite
@@ -33,8 +31,7 @@ name: publish-images
 # scopes/containers, scheduled_task pins scopes/scheduled-task. azure and
 # azure-aro are not packages: in the worker model they are np-containers with
 # DNS_TYPE and K8S_FLAVOR from the agent, and their specs lag k8s's. The
-# datadog overlay is not a package either: it is the same spec with another
-# image. The package version is the tag; a prerelease tag
+# package version is the tag; a prerelease tag
 # (v1.21.0-beta.1) publishes without moving the package default. Each stack
 # keeps its state as <repository>/<stack>.tfstate in the organization's state
 # bucket (secrets PACKAGE_STATE_AWS_ACCOUNT_ID, PACKAGE_TFSTATE_BUCKET and
@@ -124,42 +121,6 @@ jobs:
             --tag "${{ inputs.existing_tag || github.ref_name }}" \
             --visible-to "organization=*"
 
-  # ── containers-datadog (overlay) ───────────────────────────────────────────
-  containers-datadog:
-    needs: containers
-    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@main
-    with:
-      image_name: scopes/containers-datadog
-      context: .
-      submodules: true
-      dockerfile: docker/containers-datadog.Dockerfile
-      tag: ${{ inputs.existing_tag || github.ref_name }}
-      ref: ${{ inputs.existing_tag || '' }}
-      build_args: BASE_VERSION=${{ inputs.existing_tag || github.ref_name }}
-    secrets:
-      aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
-
-  register-containers-datadog:
-    name: Register containers-datadog artifact
-    needs: containers-datadog
-    runs-on: ubuntu-24.04
-    env:
-      NULLPLATFORM_API_KEY: ${{ secrets.ARTIFACT_NP_API_KEY }}
-      NP_ARTIFACT_NRN: ${{ vars.NP_ARTIFACT_NRN }}
-    steps:
-      - name: Install np CLI (2.10.0)
-        run: curl -s https://cli.nullplatform.com/install.sh | VERSION=2.10.0 sh
-      - name: Register scopes/containers-datadog image artifact (visible to everyone)
-        run: |
-          np artifact create \
-            --nrn "$NP_ARTIFACT_NRN" \
-            --type oci_image \
-            --registry public.ecr.aws \
-            --repository nullplatform/scopes/containers-datadog \
-            --digest "${{ needs.containers-datadog.outputs.image_digest }}" \
-            --tag "${{ inputs.existing_tag || github.ref_name }}" \
-            --visible-to "organization=*"
-
   # ── packages ───────────────────────────────────────────────────────────────
   # One job per stack: publish-package takes one digest, and k8s and onprem
   # share the containers one.
@@ -219,7 +180,7 @@ jobs:
   # actually published; the digest check keeps re-runs idempotent.
   finalize-release:
     name: Publish release with artifact metadata
-    needs: [containers, scheduled-task, containers-datadog, register-containers, register-scheduled-task, register-containers-datadog]
+    needs: [containers, scheduled-task, register-containers, register-scheduled-task]
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -230,7 +191,6 @@ jobs:
       REGISTRY: public.ecr.aws/nullplatform
       DIGEST_CONTAINERS: ${{ needs.containers.outputs.image_digest }}
       DIGEST_SCHEDULED: ${{ needs.scheduled-task.outputs.image_digest }}
-      DIGEST_DATADOG: ${{ needs.containers-datadog.outputs.image_digest }}
     steps:
       - name: Upsert release with artifact table
         run: |
@@ -239,10 +199,9 @@ jobs:
           IS_PRERELEASE=false
           case "$TAG" in *-*) IS_PRERELEASE=true ;; esac
 
-          SECTION=$(printf '## Artifacts\n\n| Image | Digest | Pinned reference |\n|---|---|---|\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |' \
+          SECTION=$(printf '## Artifacts\n\n| Image | Digest | Pinned reference |\n|---|---|---|\n| `%s:%s` | `%s` | `%s@%s` |\n| `%s:%s` | `%s` | `%s@%s` |' \
             "$REGISTRY/scopes/containers" "$TAG" "$DIGEST_CONTAINERS" "$REGISTRY/scopes/containers" "$DIGEST_CONTAINERS" \
-            "$REGISTRY/scopes/scheduled-task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled-task" "$DIGEST_SCHEDULED" \
-            "$REGISTRY/scopes/containers-datadog" "$TAG" "$DIGEST_DATADOG" "$REGISTRY/scopes/containers-datadog" "$DIGEST_DATADOG")
+            "$REGISTRY/scopes/scheduled-task" "$TAG" "$DIGEST_SCHEDULED" "$REGISTRY/scopes/scheduled-task" "$DIGEST_SCHEDULED")
 
           # Drafts are not resolvable via releases/tags/:tag — list and filter.
           RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \

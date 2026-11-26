@@ -29,8 +29,8 @@ RUN set -eux; \
     rm -rf "/tmp/linux-${TARGETARCH}"; \
     tofu version && kubectl version --client && helm version --short
 
-# Bake the whole repo in; the overlays (containers-azure, -datadog, -aro) are
-# FROM this image and only flip NP_OVERRIDES_PATH — no re-copy needed.
+# Bake the whole repo in; every overlay (onprem, azure, azure-aro) is served
+# from this same image by pointing NP_OVERRIDES_PATH at its directory.
 COPY . /app/pkg
 ENV NP_PACKAGE_NAME=containers \
     NP_SERVICE_PATH=/app/pkg/k8s \
