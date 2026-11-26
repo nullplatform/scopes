@@ -171,3 +171,29 @@ resolved() {
   assert_equal "$status" 1
   assert_contains "$output" "build_context must run first"
 }
+
+@test "metric and list only source the two known implementations" {
+  export METRICS_SOURCE="../../../etc"
+  run bash "$SERVICE_PATH/metric/metric"
+  assert_equal "$status" 1
+  assert_contains "$output" "METRICS_SOURCE must be prometheus or datadog"
+  run bash "$SERVICE_PATH/metric/list"
+  assert_equal "$status" 1
+  assert_contains "$output" "METRICS_SOURCE must be prometheus or datadog"
+}
+
+@test "command arguments become upper-case variables without being evaluated" {
+  export NP_PROVIDERS="{\"results\":[$PROMETHEUS_PROVIDER]}"
+  export CONTEXT='{"arguments":{"scope_id":"1234","metric":"http.rpm","group_by":["scope_id","instance_id"],"time_range":"$(touch /tmp/pwned); echo injected"}}'
+  run bash -c "source \"$BUILD_CONTEXT\" && echo \"\$GROUP_BY|\$TIME_RANGE\""
+  assert_equal "$status" 0
+  assert_equal "$output" 'scope_id,instance_id|$(touch /tmp/pwned); echo injected'
+}
+
+@test "command arguments can not retarget the source, its url, site or keys" {
+  export NP_PROVIDERS="{\"results\":[$DATADOG_PROVIDER]}"
+  export CONTEXT='{"arguments":{"scope_id":"1234","metric":"http.rpm","metrics_source":"../evil","datadog_site":"attacker.example.com","datadog_api_key":"stolen","prom_url":"http://attacker.example.com"}}'
+  run resolved
+  assert_equal "$status" 0
+  assert_equal "$output" "datadog||dd-api|dd-app|datadoghq.eu|http.rpm|"
+}

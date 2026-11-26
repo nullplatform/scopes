@@ -4,4 +4,11 @@
 # they share the context (METRIC_NAME, APPLICATION_ID, SCOPE_ID, time range)
 # and emit the same JSON shape.
 # shellcheck source=/dev/null
-. "$SERVICE_PATH/metric/sources/${METRICS_SOURCE:?build_context must run first}/metric"
+case "$METRICS_SOURCE" in
+  prometheus|datadog) ;;
+  *)
+    echo "METRICS_SOURCE must be prometheus or datadog (build_context must run first), got '$METRICS_SOURCE'." >&2
+    exit 1
+    ;;
+esac
+. "$SERVICE_PATH/metric/sources/$METRICS_SOURCE/metric"

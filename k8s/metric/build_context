@@ -92,14 +92,23 @@ case "$METRICS_SOURCE" in
     ;;
 esac
 
-while read -r line; do
-  eval "$line"
+# The command's arguments (metric, time range, group_by...) become upper-case
+# variables for the source scripts. They are assigned, never eval'd, and the
+# variables this script resolved above are not theirs to set: an argument can
+# not retarget the source, the Prometheus url, the Datadog site or the keys.
+while IFS=$'\t' read -r key value; do
+  case "$key" in
+    METRICS_SOURCE|METRICS_SOURCE_REQUIRED|PROM_URL|PROMETHEUS_URL|DATADOG_API_KEY|DATADOG_APP_KEY|DATADOG_SITE|K8S_NAMESPACE|SERVICE_PATH|OVERRIDES_PATH)
+      continue
+      ;;
+  esac
+  if [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+    export "$key=$value"
+  fi
 done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
-  if (.value | type) == "array" then
-    "export \(.key | ascii_upcase)=\(.value | join(","))"
-  else
-    "export \(.key | ascii_upcase)=\(.value)"
-  end')
+  [ (.key | ascii_upcase),
+    (if (.value | type) == "array" then (.value | join(",")) else (.value | tostring) end) ]
+  | @tsv')
 if [[ -n "$METRIC" ]]; then
   export METRIC_NAME="$METRIC"
 fi
