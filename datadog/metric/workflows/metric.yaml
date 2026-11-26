@@ -1,0 +1,9 @@
+# Compatibility overlay for legacy channels (see ../README.md): replaces the
+# base "build context" step with one that forces the Datadog source. New
+# installations need no overlay.
+steps:
+  - name: build context
+    type: script
+    file: "$OVERRIDES_PATH/metric/build_context"
+    configuration:
+      K8S_NAMESPACE: nullplatform

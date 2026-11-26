@@ -216,3 +216,11 @@ resolved() {
   assert_equal "$status" 0
   assert_equal "$output" "datadog||dd-api|dd-app|datadoghq.eu|http.rpm|"
 }
+
+@test "the datadog compatibility overlay forces the Datadog source for legacy channels, even over a Prometheus stand-in" {
+  export NP_PROVIDERS="{\"results\":[$PROMETHEUS_PROVIDER,$DATADOG_PROVIDER]}"
+  export PROMETHEUS_URL="http://localhost:9090"
+  run bash -c "source \"$PROJECT_ROOT/datadog/metric/build_context\" && echo \"\$METRICS_SOURCE|\$DATADOG_API_KEY|\$DATADOG_SITE\""
+  assert_equal "$status" 0
+  assert_equal "$output" "datadog|dd-api|datadoghq.eu"
+}

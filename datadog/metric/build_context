@@ -1,0 +1,10 @@
+#!/bin/bash
+# Compatibility overlay for legacy channels that still pass
+# --overrides-path=<scopes checkout>/datadog: forces the Datadog source and
+# runs the base build_context, which otherwise picks the source from the
+# organization's metrics provider. Exported here, not through the step's
+# configuration, so the value outlives this step the way the base step's
+# exports do.
+export METRICS_SOURCE=datadog
+# shellcheck source=/dev/null
+. "$SERVICE_PATH/metric/build_context"
