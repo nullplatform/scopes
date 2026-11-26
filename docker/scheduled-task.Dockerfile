@@ -19,7 +19,7 @@ COPY . /app/pkg
 # The scheduled task is the k8s scope run with the scheduled_task overlay (see
 # scheduled_task/specs/notification-channel.json.tpl: --service-path=k8s
 # --overrides-path=scheduled_task), so the base stays k8s and the overlay goes
-# in NP_OVERRIDES_PATH, like containers-datadog does.
+# in NP_OVERRIDES_PATH, like the on-premise package does on its worker.
 ENV NP_PACKAGE_NAME=scheduled-task \
     NP_SERVICE_PATH=/app/pkg/k8s \
     NP_OVERRIDES_PATH=/app/pkg/scheduled_task \

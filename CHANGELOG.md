@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- k8s scope metrics pick their source from the organization's metrics provider: a Datadog provider (`credentials.api_key`) queries Datadog, a Prometheus one (`server.url`) queries Prometheus, from the same `scopes/containers` image. The `containers-datadog` image is no longer published: an agent that ran it pins `scopes/containers` with no `NP_OVERRIDES_PATH`. `datadog/` stays as a deprecated compatibility overlay that forces the Datadog source, so legacy channels passing `--overrides-path=.../datadog` keep working unchanged
+
 ## [1.21.0] - 2026-11-24
 - k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).
 - Fix: k8s scopes with the WebSocket protocol run the configured traffic manager version (`traffic_manager.version`, `latest` by default) instead of the frozen `websocket2` build, which misses nginx security fixes. A version pinned below 1.8.0, the first one that proxies WebSocket connections, keeps `websocket2` and logs a warning

@@ -1,4 +1,12 @@
 steps:
+  - name: build context
+    type: script
+    file: "$SERVICE_PATH/metric/build_context"
+    configuration:
+      K8S_NAMESPACE: nullplatform
+      # A scope whose organization has no metrics provider yet still lists the
+      # default (Prometheus) metrics; only querying them needs the provider.
+      METRICS_SOURCE_REQUIRED: "false"
   - name: metrics
     type: script
     file: "$SERVICE_PATH/metric/list"

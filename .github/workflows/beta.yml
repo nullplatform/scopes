@@ -55,18 +55,3 @@ jobs:
     secrets:
       aws_role_arn: ${{ secrets.AWS_BETA_ROLE_ARN }}
       artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
-
-  beta-containers-datadog:
-    # Builds on the containers beta of this same pull request, not on a release.
-    needs: beta-containers
-    uses: nullplatform/actions-nullplatform/.github/workflows/publish-test-image-oci.yml@v1
-    with:
-      image_name: beta/scopes/containers-datadog
-      dockerfile: docker/containers-datadog.Dockerfile
-      submodules: true
-      build_args: |
-        BASE_IMAGE=public.ecr.aws/nullplatform/beta/scopes/containers
-        BASE_VERSION=${{ needs.beta-containers.outputs.image_tag }}
-    secrets:
-      aws_role_arn: ${{ secrets.AWS_BETA_ROLE_ARN }}
-      artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}

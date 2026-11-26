@@ -1,35 +1,127 @@
 #!/bin/bash
+# Resolves where this scope's metrics come from and exports what that source
+# needs. The source is the organization's metrics provider (category
+# "metrics"), read from the platform for the scope's NRN: a Datadog provider
+# carries credentials.api_key, a Prometheus one carries server.url. Nothing is
+# chosen by overlay or image: the same worker serves both.
+#
+# Environment overrides, for local runs and tests, win over the provider:
+# METRICS_SOURCE names the source (prometheus | datadog), PROMETHEUS_URL stands
+# in for a Prometheus provider and DATADOG_API_KEY + DATADOG_APP_KEY for a
+# Datadog one.
+#
+# The list workflow sets METRICS_SOURCE_REQUIRED=false: a scope whose
+# organization has no metrics provider yet still lists the Prometheus metrics,
+# only querying them needs the provider (the metric workflow fails with the
+# message the UI shows).
 
-SCOPE_ID=$(echo "$CONTEXT" | jq -r '.arguments.scope_id // empty')
+# The scope comes where the platform put it: metric:list carries it only in
+# the enriched parameters, a metric query in its arguments. Same lookup as the
+# image entrypoint, which exports SCOPE_ID; "null" is what that export holds
+# when nothing matched.
+SCOPE_ID=$(echo "$CONTEXT" | jq -r '.parameters.scope_id // .tags.scope_id // .arguments.scope_id // empty')
+if [[ -z "$SCOPE_ID" || "$SCOPE_ID" == "null" ]]; then
+  SCOPE_ID=""
+fi
 K8S_NAMESPACE=${K8S_NAMESPACE:-"nullplatform"}
+METRICS_SOURCE_REQUIRED=${METRICS_SOURCE_REQUIRED:-true}
 
-if [[ -z "$PROMETHEUS_URL" ]]; then
-  NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r .nrn)
+# Which source the environment already configures, if any.
+env_source=""
+if [[ -n "$PROMETHEUS_URL" ]]; then
+  env_source="prometheus"
+elif [[ -n "$DATADOG_API_KEY" && -n "$DATADOG_APP_KEY" ]]; then
+  env_source="datadog"
+fi
+METRICS_SOURCE=${METRICS_SOURCE:-$env_source}
 
-  PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
-
-  PROM_URL=$(echo "$PROVIDERS" | jq -r '.results[0].attributes.server.url // empty')
-else
-  PROM_URL="$PROMETHEUS_URL"
+# The provider is only read when the environment does not already carry the
+# source's settings, so local runs never need the platform.
+PROVIDER="{}"
+if [[ -z "$METRICS_SOURCE" || "$METRICS_SOURCE" != "$env_source" ]]; then
+  NRN=""
+  if [[ -n "$SCOPE_ID" ]]; then
+    NRN=$(np scope read --id "$SCOPE_ID" --format json | jq -r '.nrn // empty')
+  fi
+  if [[ -n "$NRN" ]]; then
+    PROVIDERS=$(np provider list --categories metrics --nrn "$NRN" --format json)
+    # Each provider is classified by its attributes; the first one matching the
+    # requested source wins, or the first classifiable one when none was
+    # requested.
+    PROVIDER=$(echo "$PROVIDERS" | jq -c --arg source "$METRICS_SOURCE" '
+      [ .results[]?
+        | (if (.attributes.credentials.api_key // "") != "" then "datadog"
+           elif (.attributes.server.url // "") != "" then "prometheus"
+           else "" end) as $kind
+        | select($kind != "" and ($source == "" or $source == $kind))
+        | {kind: $kind, attributes: .attributes} ]
+      | first // {}')
+    METRICS_SOURCE=${METRICS_SOURCE:-$(echo "$PROVIDER" | jq -r '.kind // empty')}
+  fi
 fi
 
-if [[ -z "$PROM_URL" ]]; then
-  echo "There is no prometheus provider configured. Please configure prometheus in Platform settings and try again." >&2
-  exit 1
-fi
-
-while read -r line; do
-  eval "$line"
-done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
-  if (.value | type) == "array" then
-    "export \(.key | ascii_upcase)=\(.value | join(","))"
+if [[ -z "$METRICS_SOURCE" ]]; then
+  if [[ "$METRICS_SOURCE_REQUIRED" == "false" ]]; then
+    METRICS_SOURCE="prometheus"
   else
-    "export \(.key | ascii_upcase)=\(.value)"
-  end')
+    echo "There is no metrics provider configured. Please configure Prometheus or Datadog in Platform settings and try again." >&2
+    exit 1
+  fi
+fi
+
+case "$METRICS_SOURCE" in
+  prometheus)
+    PROM_URL=${PROMETHEUS_URL:-$(echo "$PROVIDER" | jq -r '.attributes.server.url // empty')}
+    if [[ -z "$PROM_URL" && "$METRICS_SOURCE_REQUIRED" != "false" ]]; then
+      echo "There is no prometheus provider configured. Please configure prometheus in Platform settings and try again." >&2
+      exit 1
+    fi
+    export PROM_URL
+    ;;
+  datadog)
+    DATADOG_API_KEY=${DATADOG_API_KEY:-$(echo "$PROVIDER" | jq -r '.attributes.credentials.api_key // empty')}
+    DATADOG_APP_KEY=${DATADOG_APP_KEY:-$(echo "$PROVIDER" | jq -r '.attributes.credentials.app_key // empty')}
+    DATADOG_SITE=${DATADOG_SITE:-$(echo "$PROVIDER" | jq -r '.attributes.settings.site // empty')}
+    DATADOG_SITE=${DATADOG_SITE:-"datadoghq.com"}
+    if [[ -z "$DATADOG_API_KEY" && "$METRICS_SOURCE_REQUIRED" != "false" ]]; then
+      echo "There is no Datadog provider configured. Please configure Datadog in Platform settings and try again." >&2
+      exit 1
+    fi
+    if [[ -z "$DATADOG_APP_KEY" && "$METRICS_SOURCE_REQUIRED" != "false" ]]; then
+      echo "Datadog App Key is required. Please configure App Key in Platform settings and try again." >&2
+      exit 1
+    fi
+    export DATADOG_API_KEY DATADOG_APP_KEY DATADOG_SITE
+    ;;
+  *)
+    echo "Unknown metrics source '$METRICS_SOURCE' (expected prometheus or datadog)." >&2
+    exit 1
+    ;;
+esac
+
+# The command's arguments (metric, time range, group_by...) become upper-case
+# variables for the source scripts. They are assigned, never eval'd, and the
+# variables this script resolved above are not theirs to set: an argument can
+# not retarget the source, the Prometheus url, the Datadog site or the keys.
+while IFS=$'\t' read -r key value; do
+  case "$key" in
+    METRICS_SOURCE|METRICS_SOURCE_REQUIRED|PROM_URL|PROMETHEUS_URL|DATADOG_API_KEY|DATADOG_APP_KEY|DATADOG_SITE|K8S_NAMESPACE|SERVICE_PATH|OVERRIDES_PATH)
+      continue
+      ;;
+  esac
+  if [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+    export "$key=$value"
+  fi
+done < <(echo "$CONTEXT" | jq -r '.arguments | to_entries[] |
+  [ (.key | ascii_upcase),
+    (if (.value | type) == "array" then (.value | join(",")) else (.value | tostring) end) ]
+  | @tsv')
 if [[ -n "$METRIC" ]]; then
   export METRIC_NAME="$METRIC"
 fi
 
-export PROM_URL
+export METRICS_SOURCE
 export K8S_NAMESPACE
 export SCOPE_ID
+export SERVICE_NAME
+export ENVIRONMENT

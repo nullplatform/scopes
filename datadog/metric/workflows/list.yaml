@@ -1,4 +1,9 @@
+# Compatibility overlay for legacy channels (see ../README.md): lists the
+# Datadog metrics whatever provider the organization has.
 steps:
-  - name: metrics
+  - name: build context
     type: script
-    file: "$OVERRIDES_PATH/metric/list"
+    file: "$OVERRIDES_PATH/metric/build_context"
+    configuration:
+      K8S_NAMESPACE: nullplatform
+      METRICS_SOURCE_REQUIRED: "false"
