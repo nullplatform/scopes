@@ -25,6 +25,7 @@ APPLIED_FILES=()
 # appears). A delete goes in the reverse order. Unknown kinds go between.
 rank_of() {
   case "$(basename "$1")" in
+    service_account-*) echo 0 ;;
     secret-files-*) echo 1 ;;
     secret-*)       echo 0 ;;
     service-*)      echo 2 ;;

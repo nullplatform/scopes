@@ -266,6 +266,23 @@ teardown() {
   [ "$applied" = "secret-1-2.yaml secret-files-1-2.yaml service-1-2.yaml deployment-1-2.yaml scaling-1-2.yaml pdb-1-2.yaml dns-endpoint-1-2.yaml ingress-1-2.yaml " ]
 }
 
+# IAM.MODE gke: a scope created before the mode was on gets its service account
+# on deployment; the pods must not be created before it exists.
+@test "apply_templates: applies the service account before the deployment" {
+  for name in deployment-1-2 service-1-2 service_account-1; do
+    echo "apiVersion: v1" > "$OUTPUT_DIR/$name.yaml"
+  done
+  kubectl() { basename "$3" >> "$OUTPUT_DIR/kubectl.log"; return 0; }
+  export -f kubectl
+
+  run bash "$SERVICE_PATH/apply_templates"
+
+  [ "$status" -eq 0 ]
+  local applied
+  applied="$(tr '\n' ' ' < "$OUTPUT_DIR/kubectl.log")"
+  [ "$applied" = "service_account-1.yaml service-1-2.yaml deployment-1-2.yaml " ]
+}
+
 @test "apply_templates: deletes in the reverse order, the ingress first and the secrets last" {
   export ACTION="delete"
   for name in secret-1-2 service-1-2 deployment-1-2 ingress-1-2 scaling-1-2; do

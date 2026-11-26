@@ -87,6 +87,14 @@ steps:
       - name: INGRESS_FILE
         type: file
         file: "$OUTPUT_DIR/ingress-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
+  - name: ensure service account
+    type: script
+    file: "$SERVICE_PATH/deployment/ensure_service_account"
+    trace: false
+    output:
+      - name: SERVICE_ACCOUNT_TEMPLATE_PATH
+        type: file
+        file: "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
   - name: create deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"
