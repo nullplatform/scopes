@@ -24,7 +24,7 @@ Installing a package touches the same three layers as registering a scope yourse
 | Layer | What | Module |
 |---|---|---|
 | infrastructure (cloud credentials) | On AWS, the permissions role the worker assumes for IAM, ELBv2, Route 53, S3 and CloudWatch | [`k8s/specs/requirements/aws`](./k8s/specs/requirements/aws) |
-| nullplatform (nullplatform API key) | The installation of the package, the scope type, the NRN settings and, for on-premise, the scope-configuration schema | tofu-modules' `scope_package_installation` |
+| nullplatform (nullplatform API key) | The installation of the package, the scope type, the NRN settings and, optionally, the scope-configuration schema (required for on-premise) | tofu-modules' `scope_package_installation` |
 | bindings | The agent channel, the role under selector `containers` in your IAM provider (`CONTAINERS_ASSUME_ROLE_SELECTOR`), and the agent's worker settings | tofu-modules' `scope_definition_agent_association`, `nullplatform/agent`, your providers |
 
 Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/scopes/releases)) and use its version in every place below. `np-containers` shown; the other two change the slug and the name, on-premise also sets `create_scope_configuration` and the worker patch.
@@ -57,7 +57,7 @@ module "containers" {
   service_path                     = "k8s"
   repository_scope_template        = "https://raw.githubusercontent.com/nullplatform/scopes/refs/tags"
   repository_scope_template_branch = "vX.Y.Z" # the same release
-  create_scope_configuration       = false # true for np-containers-on-premise (service_path = "onprem")
+  create_scope_configuration       = false # true registers the k8s/specs schema; required for np-containers-on-premise (service_path = "onprem")
   create_agent_channel             = false # the channel lives in your bindings layer, below
 }
 

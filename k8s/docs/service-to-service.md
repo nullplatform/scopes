@@ -38,6 +38,8 @@ The bare `<svc>` is not a hostname in either mode, so clients in the same namesp
 
 `scope-configurations` provider, `networking.service_to_service.*`; falls back to `gateway.service_to_service.*` in the container-orchestration provider.
 
+To enable it per account, namespace or dimension, set **Networking → Service-to-service → Enabled** (and **Mode**) in a scope-configurations provider. Its schema is `k8s/specs/scope-configuration.json.tpl` (see [the k8s README](../README.md#the-scope-configurations-schema)). Cluster-wide, set `SERVICE_TO_SERVICE_ENABLED` on the agent instead.
+
 | Property | Env var | Default |
 |---|---|---|
 | `enabled` | `SERVICE_TO_SERVICE_ENABLED` | `false` |

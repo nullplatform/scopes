@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - k8s scopes on Istio can get a stable in-cluster name, `{app}-{scope}.{namespace}.svc.cluster.local`, that other workloads call on the scope's HTTP, WebSocket and gRPC ports. Calls go through an Istio gateway (the private one, or a dedicated `gateway-in-cluster`) and follow the scope's blue-green weights. Off by default; enable it with `networking.service_to_service.enabled` in scope-configurations. In `dedicated` mode the name also answers as `{app}-{scope}.{namespace}`; never as the bare `{app}-{scope}`, which would collide across namespaces. See `k8s/docs/service-to-service.md`
 - k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
+- k8s scopes ship a scope-configurations schema, `k8s/specs/scope-configuration.json.tpl`, with every key the scope reads from that provider (service-to-service included). Optional: register it with `create_scope_configuration = true` and `service_path = "k8s"`; orgs with their own schema keep it
 
 ## [1.22.0] - 2026-11-27
 - k8s scopes can limit the visibility options of the create form with `VISIBILITY_OPTIONS` (default `public,internal`). With a single option, e.g. `template_env_vars = { VISIBILITY_OPTIONS = "internal" }` in `scope_definition`, the form hides the Visibility selector and new scopes get that option; the spec keeps accepting both values, so existing scopes stay valid. The render fails on an unknown value or on a `DEFAULT_VISIBILITY` it does not offer

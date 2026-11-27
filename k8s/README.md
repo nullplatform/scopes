@@ -22,6 +22,10 @@ Configuration variables follow a priority hierarchy:
 
 A provider only falls through when its value is missing or `null`. A boolean `false` is a value: it wins over later providers, env vars and the default.
 
+### The scope-configurations schema
+
+`specs/scope-configuration.json.tpl` declares every key below that has a Scope Configuration Property, so the provider's form offers them. Register it with `create_scope_configuration = true` in tofu-modules' `scope_definition` or `scope_package_installation` (`service_path = "k8s"`). It is optional: an org that already has its own scope-configurations specification keeps it, and the scope reads the same keys either way. The schema sets no defaults, so a key left empty still falls back to the other providers and the agent's environment.
+
 ## Configuration Variables
 
 ### Cluster
