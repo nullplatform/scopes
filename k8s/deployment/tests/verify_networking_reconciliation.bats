@@ -85,3 +85,42 @@ teardown() {
   assert_contains "$output" "🔍 Verifying networking reconciliation for DNS type: unknown"
   assert_contains "$output" "⚠️ Ingress reconciliation not available for DNS type: unknown, skipping"
 }
+
+@test "verify_networking_reconciliation: an HTTPRoute scope verifies its HTTPRoutes with route53 or azure DNS" {
+  export SCOPE_ID="123" K8S_NAMESPACE="nullplatform" MAX_WAIT_SECONDS="10" CHECK_INTERVAL="10"
+  export CONTEXT='{"scope":{"slug":"my-app","id":"123","domain":"app.example.com"}}'
+  export INGRESS_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/istio/initial-httproute.yaml.tpl"
+
+  for dns in route53 azure; do
+    export DNS_TYPE="$dns"
+    run bash -c "
+      kubectl() {
+        echo '{\"status\":{\"parents\":[{\"conditions\":[{\"type\":\"Accepted\",\"status\":\"True\",\"reason\":\"Accepted\"},{\"type\":\"ResolvedRefs\",\"status\":\"True\",\"reason\":\"ResolvedRefs\"}]}]}}'
+      }
+      export -f kubectl
+      sleep() { return 0; }
+      export -f sleep
+      source '$BATS_TEST_DIRNAME/../verify_networking_reconciliation'
+    "
+    [ "$status" -eq 0 ] || return 1
+    assert_contains "$output" "🔍 Verifying HTTPRoute reconciliation..." || return 1
+    [[ "$output" != *"Verifying ingress reconciliation"* ]] || return 1
+  done
+}
+
+@test "verify_networking_reconciliation: the rendered file wins over the template and the DNS type" {
+  export DNS_TYPE="external_dns" CONTEXT='{"scope":{"slug":"my-app","domain":"app.example.com"},"deployment":{"strategy":"blue_green"}}'
+  export INGRESS_TEMPLATE="$PROJECT_ROOT/k8s/deployment/templates/istio/initial-httproute.yaml.tpl"
+  export INGRESS_FILE="$BATS_TEST_TMPDIR/ingress.yaml"
+  printf 'apiVersion: networking.k8s.io/v1\nkind: Ingress\n' > "$INGRESS_FILE"
+
+  run bash -c "
+    kubectl() { return 0; }
+    export -f kubectl
+    export ALB_RECONCILIATION_ENABLED=false
+    source '$BATS_TEST_DIRNAME/../verify_networking_reconciliation'
+  "
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "🔍 Verifying ingress reconciliation..."
+}

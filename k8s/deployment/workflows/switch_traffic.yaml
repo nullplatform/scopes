@@ -118,7 +118,7 @@ steps:
           trace:
             title: Verify networking
             group: switching-traffic
-            flavors: [route53, external_dns]
+            flavors: [route53, external_dns, azure]
           configuration:
             VERIFY_WEIGHTS: true
         - name: publish_alb_metrics
