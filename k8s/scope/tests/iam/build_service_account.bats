@@ -48,7 +48,7 @@ setup() {
 
 teardown() {
   rm -rf "$OUTPUT_DIR" 2>/dev/null || true
-  unset -f aws gomplate rm 2>/dev/null || true
+  unset -f aws gomplate rm kubectl np 2>/dev/null || true
 }
 
 # =============================================================================
@@ -288,4 +288,234 @@ render_real_template() {
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
   assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}
+
+@test "build_service_account: gke builds the application and environment service account without an IAM role or scope labels" {
+  export IAM='{"ENABLED":"true","PREFIX":"test-prefix","MODE":"gke"}'
+  export AWS_LOG="$OUTPUT_DIR/aws.log"
+  aws() { echo "$*" >> "$AWS_LOG"; return 1; }
+  kubectl() { return 0; }
+  export -f aws kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "Production"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 IAM mode is gke, building service account 'np-42-production' without an IAM role"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+  rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "np-42-production"
+  assert_equal "$(yq -r '.metadata.namespace' "$rendered")" "test-ns"
+  assert_equal "$(yq -r '.metadata.annotations' "$rendered")" "null"
+  assert_equal "$(yq -r '.metadata.labels.application_id' "$rendered")" "42"
+  assert_equal "$(yq -r '.metadata.labels.environment' "$rendered")" "production"
+  assert_equal "$(yq -r '.metadata.labels.scope_id' "$rendered")" "null"
+  assert_equal "$(yq -r '.metadata.labels.scope' "$rendered")" "null"
+}
+
+@test "build_service_account: gke renders the same service account for every scope of the application in the environment" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  kubectl() { return 0; }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+  first="$OUTPUT_DIR/first.yaml"
+
+  run bash -c 'source "$SCRIPT"'
+  assert_equal "$status" "0"
+  cp "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml" "$first"
+
+  export SCOPE_ID="other-scope-456"
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.id = 456 | .scope.slug = "other-scope"')
+  run bash -c 'source "$SCRIPT"'
+  assert_equal "$status" "0"
+
+  assert_equal "$(cat "$OUTPUT_DIR/service_account-other-scope-456.yaml")" "$(cat "$first")"
+}
+
+@test "build_service_account: gke reuses an existing service account of the same application and environment" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  kubectl() {
+    case "$*" in
+      "get serviceaccount np-42-production -n test-ns"*) echo '{"metadata":{"labels":{"application_id":"42","environment":"production"}}}' ;;
+    esac
+  }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 Service account 'np-42-production' belongs to application 42 in environment 'production'"
+  assert_equal "$(yq -r '.metadata.name' "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml")" "np-42-production"
+}
+
+@test "build_service_account: gke refuses an existing service account labelled for another application or environment" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+  for labels in '{"application_id":"7","environment":"production"}' '{"application_id":"42","environment":"staging"}' '{}'; do
+    export MOCK_LABELS="$labels"
+    kubectl() {
+      case "$*" in
+        "get serviceaccount np-42-production -n test-ns"*) echo "{\"metadata\":{\"labels\":$MOCK_LABELS}}" ;;
+      esac
+    }
+    export -f kubectl
+
+    run bash -c 'source "$SCRIPT"'
+
+    assert_equal "$status" "1"
+    assert_contains "$output" "❌ Service account 'test-ns/np-42-production' already exists with application_id/environment labels"
+    assert_contains "$output" "not '42 production'"
+    assert_contains "$output" "💡 Possible causes:"
+    assert_contains "$output" "🔧 How to fix:"
+    assert_equal "$(ls "$OUTPUT_DIR")" ""
+  done
+}
+
+@test "build_service_account: gke fails when it cannot look up the service account" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  kubectl() { echo "forbidden"; return 1; }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Failed to look up service account 'test-ns/np-42-production': forbidden"
+}
+
+@test "build_service_account: gke names the service account after the dimension set in IAM.DIMENSION" {
+  export IAM='{"ENABLED":"true","MODE":"gke","DIMENSION":"env"}'
+  kubectl() { return 0; }
+  export -f kubectl
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production", "env": "qa"}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  rendered="$OUTPUT_DIR/service_account-$SCOPE_ID.yaml"
+  assert_equal "$(yq -r '.metadata.name' "$rendered")" "np-42-qa"
+  assert_equal "$(yq -r '.metadata.labels.environment' "$rendered")" "qa"
+}
+
+@test "build_service_account: gke fails when the scope has no environment dimension" {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  render_real_template
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not name the service account of scope test-scope-123: IAM.MODE gke needs the scope's 'environment' dimension"
+  assert_equal "$(ls "$OUTPUT_DIR")" ""
+}
+
+gke_delete_setup() {
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  export ACTION="delete"
+  export AWS_LOG="$OUTPUT_DIR/aws.log"
+  export NP_LOG="$BATS_TEST_TMPDIR/np.log"
+  export MOCK_SA_LABELS='{"application_id":"42","environment":"production"}'
+  aws() { echo "$*" >> "$AWS_LOG"; return 1; }
+  kubectl() {
+    case "$*" in
+      "get serviceaccount np-42-production -n test-ns"*) echo "{\"metadata\":{\"labels\":$MOCK_SA_LABELS}}" ;;
+    esac
+  }
+  np() {
+    echo "$*" >> "$NP_LOG"
+    if [[ -n "${MOCK_NP_ERROR:-}" ]]; then echo "$MOCK_NP_ERROR"; return 1; fi
+    echo "$MOCK_SCOPES"
+  }
+  export -f aws kubectl np
+  render_real_template
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production"}')
+}
+
+@test "build_service_account: gke on delete of the last scope of the application in the environment deletes the service account" {
+  gke_delete_setup
+  export MOCK_SCOPES='{"results":[
+    {"id":123,"status":"deleting","dimensions":{"environment":"production"}},
+    {"id":7,"status":"deleted","dimensions":{"environment":"production"}},
+    {"id":8,"status":"active","dimensions":{"environment":"staging"}},
+    {"id":9,"status":"active","dimensions":{}}]}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 No other scope of application 42 in 'production' is left, deleting service account 'np-42-production'"
+  assert_contains "$(cat "$NP_LOG")" "scope list --application-id 42 --all --limit 200 --format json"
+  assert_equal "$(yq -r '.metadata.name' "$OUTPUT_DIR/service_account-$SCOPE_ID.yaml")" "np-42-production"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}
+
+@test "build_service_account: gke on delete keeps the service account while another scope of the application in the environment is left" {
+  gke_delete_setup
+  for other in '{"id":456,"status":"active","dimensions":{"environment":"Production"}}' \
+               '{"id":456,"status":"creating","dimensions":{"environment":"production"}}' \
+               '{"id":456,"status":"failed","dimensions":{"environment":"production"}}'; do
+    export MOCK_SCOPES="[{\"id\":123,\"status\":\"deleting\",\"dimensions\":{\"environment\":\"production\"}},$other]"
+
+    run bash -c 'source "$SCRIPT"'
+
+    assert_equal "$status" "0"
+    assert_contains "$output" "📋 Keeping service account 'np-42-production': scopes 456 of application 42 in 'production' still use it"
+    assert_equal "$(ls "$OUTPUT_DIR")" ""
+  done
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}
+
+@test "build_service_account: gke on delete keeps the service account when the scopes cannot be listed" {
+  gke_delete_setup
+  export MOCK_NP_ERROR="session expired"
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Keeping service account 'np-42-production': could not tell whether other scopes of application 42 in 'production' use it: session expired"
+  assert_contains "$output" "• Check that the agent can run: np scope list --application-id 42"
+  assert_equal "$(ls "$OUTPUT_DIR")" ""
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}
+
+@test "build_service_account: gke on delete keeps the service account when the scope list is not understood" {
+  gke_delete_setup
+  for scopes in 'not json' '{"items":[]}'; do
+    export MOCK_SCOPES="$scopes"
+
+    run bash -c 'source "$SCRIPT"'
+
+    assert_equal "$status" "0"
+    assert_contains "$output" "⚠️  Keeping service account 'np-42-production': could not tell whether other scopes"
+    assert_equal "$(ls "$OUTPUT_DIR")" ""
+  done
+}
+
+@test "build_service_account: gke on delete keeps a service account labelled for another application or environment" {
+  gke_delete_setup
+  export MOCK_SCOPES='[]'
+  export MOCK_SA_LABELS='{"application_id":"7","environment":"production"}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  Keeping service account 'test-ns/np-42-production': its application_id/environment labels '7 production' are not '42 production'"
+  assert_equal "$(ls "$OUTPUT_DIR")" ""
+}
+
+@test "build_service_account: gke on delete of a scope without the dimension deletes nothing" {
+  gke_delete_setup
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {}')
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "⚠️  IAM mode is gke and the scope's 'environment' dimension cannot name a service account: nothing to delete"
+  assert_empty "$(cat "$NP_LOG" 2>/dev/null)"
+  assert_equal "$(ls "$OUTPUT_DIR")" ""
 }

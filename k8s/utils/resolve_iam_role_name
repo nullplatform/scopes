@@ -17,8 +17,65 @@ _iam_role_scope_id() {
     --query "Role.Tags[?Key=='scope_id'].Value | [0]" --output text 2>/dev/null || true
 }
 
+IAM_GKE_SERVICE_ACCOUNT_NAME_MAX=63
+
+# IAM.MODE gke shares one Kubernetes service account among the scopes of an
+# application in an environment, so a service can grant it access when it is
+# linked, before the scope exists: np-<application id>-<environment>, where the
+# environment is the value of the scope's dimension named by IAM.DIMENSION
+# ("environment" by default), lowercased. The value is
+# never rewritten or truncated (two environments must never map to one name):
+# one that is not a DNS-1123 label, or a name over 63 characters, fails.
+# IAM.PREFIX is not used and AWS is never asked. Sets IAM_ROLE_NAME and
+# IAM_GKE_ENVIRONMENT.
+_iam_gke_service_account_name() {
+  local scope_id="$1" dimension="${2:-environment}" application_id environment name
+  application_id=$(echo "${CONTEXT:-}" | jq -r '.application.id // empty')
+  environment=$(echo "${CONTEXT:-}" | jq -r --arg d "$dimension" '.scope.dimensions[$d] // empty' | LC_ALL=C tr '[:upper:]' '[:lower:]')
+
+  if [ -z "$environment" ]; then
+    log error "❌ Could not name the service account of scope $scope_id: IAM.MODE gke needs the scope's '$dimension' dimension"
+    log error "💡 Possible causes:"
+    log error "   The scope has no '$dimension' dimension (IAM.DIMENSION)"
+    log error "🔧 How to fix:"
+    log error "   • Create the scope with a '$dimension' dimension, set IAM.DIMENSION to the dimension that names the environment, or set IAM.MODE to irsa or pod_identity"
+    return 1
+  fi
+  if [ -z "$application_id" ]; then
+    log error "❌ Could not name the service account of scope $scope_id: the context has no application id"
+    log error "🔧 How to fix:"
+    log error "   • Check that the scope belongs to an application"
+    return 1
+  fi
+  if ! [[ "$environment" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    log error "❌ Could not name the service account of scope $scope_id: dimension '$dimension' value '$environment' is not a valid Kubernetes name"
+    log error "💡 Possible causes:"
+    log error "   IAM.MODE gke uses the '$dimension' dimension, lowercased, as is: only letters, digits and inner hyphens are allowed"
+    log error "🔧 How to fix:"
+    log error "   • Use a '$dimension' dimension value made of letters, digits and hyphens, starting and ending with a letter or digit"
+    return 1
+  fi
+
+  name="np-$application_id-$environment"
+  if [ "${#name}" -gt "$IAM_GKE_SERVICE_ACCOUNT_NAME_MAX" ]; then
+    log error "❌ Could not name the service account of scope $scope_id: '$name' has ${#name} characters, over $IAM_GKE_SERVICE_ACCOUNT_NAME_MAX"
+    log error "🔧 How to fix:"
+    log error "   • Use a shorter '$dimension' dimension value (up to $((IAM_GKE_SERVICE_ACCOUNT_NAME_MAX - ${#application_id} - 4)) characters for application $application_id)"
+    return 1
+  fi
+
+  # shellcheck disable=SC2034  # read by build_service_account
+  IAM_GKE_ENVIRONMENT="$environment"
+  IAM_ROLE_NAME="$name"
+}
+
 resolve_iam_role_name() {
-  local prefix="$1" scope_id="$2" namespace="$3" name
+  local prefix="$1" scope_id="$2" namespace="$3" mode="${4:-irsa}" dimension="${5:-environment}" name
+
+  if [ "$mode" = "gke" ]; then
+    _iam_gke_service_account_name "$scope_id" "$dimension"
+    return
+  fi
 
   if [[ "$prefix" != *"{"* ]]; then
     IAM_ROLE_NAME="$prefix-$scope_id"

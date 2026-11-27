@@ -258,7 +258,8 @@ IAM_ENABLED=$(echo "$IAM" | jq -r '.ENABLED // false')
 SERVICE_ACCOUNT_NAME=""
 
 if [[ "$IAM_ENABLED" == "true" ]]; then
-  resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$K8S_NAMESPACE" || exit 1
+  resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$K8S_NAMESPACE" \
+    "$(echo "$IAM" | jq -r '.MODE // "irsa"')" "$(echo "$IAM" | jq -r '.DIMENSION // "environment"')" || exit 1
   SERVICE_ACCOUNT_NAME="$IAM_ROLE_NAME"
 fi
 

@@ -546,7 +546,7 @@ recording_aws() {
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Invalid IAM mode ''"
   assert_contains "$output" "🔧 How to fix:"
-  assert_contains "$output" "• Set IAM.MODE to irsa or pod_identity, or remove it to use irsa"
+  assert_contains "$output" "• Set IAM.MODE to irsa, pod_identity or gke, or remove it to use irsa"
   assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
 }
 
@@ -665,4 +665,15 @@ recording_aws() {
   assert_equal "$status" "1"
   assert_contains "$output" "❌ Tag 'AWS:owner' in IAM.TAGS has an invalid key or value 'me'"
   assert_contains "$output" "• Use letters, digits, spaces and _ . : / = + - @ (keys up to 128 characters, values up to 256), and do not start a key with aws:"
+}
+
+@test "create_role: gke skips role creation without calling AWS" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "MODE": "gke", "ROLE": {"POLICIES": [{"TYPE": "arn", "VALUE": "arn:aws:iam::aws:policy/ReadOnlyAccess"}]}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$output" "📋 IAM mode is gke, skipping role creation: grant roles to the service account through Workload Identity"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
 }

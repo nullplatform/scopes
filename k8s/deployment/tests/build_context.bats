@@ -1768,3 +1768,38 @@ SCRIPT
   [ "$status" -ne 0 ]
   assert_contains "$output" "❌ Could not render the IAM role name from prefix '{.account.slug | ascii}'"
 }
+
+@test "service account: gke runs the pods under the application and environment service account" {
+  setup_full_build_context
+  export IAM='{"ENABLED":"true","PREFIX":"np-role","MODE":"gke"}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 400 | .scope.dimensions = {"environment": "QA-1"}')
+  export AWS_LOG="$NP_OUTPUT_DIR/aws.log"
+  aws() { echo "$*" >> "$AWS_LOG"; return 1; }
+  export -f aws
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.service_account_name')" "np-400-qa-1"
+  assert_empty "$(cat "$AWS_LOG" 2>/dev/null)"
+}
+
+@test "service account: gke fails the deployment when the scope has no environment dimension" {
+  setup_full_build_context
+  export IAM='{"ENABLED":"true","MODE":"gke"}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 400')
+
+  run source "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  assert_contains "$output" "IAM.MODE gke needs the scope's 'environment' dimension"
+}
+
+@test "service account: gke takes the environment from IAM.DIMENSION" {
+  setup_full_build_context
+  export IAM='{"ENABLED":"true","MODE":"gke","DIMENSION":"env"}'
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 400 | .scope.dimensions = {"environment": "production", "env": "dev"}')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r '.service_account_name')" "np-400-dev"
+}

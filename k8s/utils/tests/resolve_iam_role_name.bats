@@ -158,3 +158,89 @@ teardown() {
 
   assert_equal "$IAM_ROLE_NAME" "acme-old-namespace-123456"
 }
+
+@test "resolve_iam_role_name: gke names the service account after the application id and environment" {
+  export MOCK_SERVICE_ACCOUNT="acme-payments-123456"
+
+  resolve_iam_role_name "{.account.slug}-{.namespace.slug}" "123456" "payments" "gke"
+
+  assert_equal "$IAM_ROLE_NAME" "np-42-production"
+  assert_empty "$(cat "$KUBECTL_LOG")"
+}
+
+@test "resolve_iam_role_name: gke ignores IAM.PREFIX, plain or pattern" {
+  resolve_iam_role_name "nullplatform-scopes" "123456" "payments" "gke"
+  assert_equal "$IAM_ROLE_NAME" "np-42-production"
+
+  resolve_iam_role_name "null" "123456" "payments" "gke"
+  assert_equal "$IAM_ROLE_NAME" "np-42-production"
+}
+
+@test "resolve_iam_role_name: gke lowercases the environment" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions.environment = "Pre-Prod-2"')
+
+  resolve_iam_role_name "" "123456" "payments" "gke"
+
+  assert_equal "$IAM_ROLE_NAME" "np-42-pre-prod-2"
+  assert_equal "$IAM_GKE_ENVIRONMENT" "pre-prod-2"
+}
+
+@test "resolve_iam_role_name: gke fails on an environment that is not a DNS-1123 label instead of rewriting it" {
+  for environment in "prod!" "pre prod" "pre_prod" "-prod" "prod-" "produção"; do
+    CONTEXT=$(echo "$CONTEXT" | jq --arg e "$environment" '.scope.dimensions.environment = $e')
+
+    run resolve_iam_role_name "" "123456" "payments" "gke"
+
+    assert_equal "$status" "1"
+    assert_contains "$output" "is not a valid Kubernetes name"
+    assert_contains "$output" "• Use a 'environment' dimension value made of letters, digits and hyphens, starting and ending with a letter or digit"
+  done
+}
+
+@test "resolve_iam_role_name: gke accepts a name of exactly 63 characters" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 42 | .scope.dimensions.environment = ("x" * 57)')
+
+  resolve_iam_role_name "" "123456" "payments" "gke"
+
+  assert_equal "${#IAM_ROLE_NAME}" "63"
+}
+
+@test "resolve_iam_role_name: gke fails on a name over 63 characters instead of truncating it" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.application.id = 42 | .scope.dimensions.environment = ("x" * 58)')
+
+  run resolve_iam_role_name "" "123456" "payments" "gke"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "has 64 characters, over 63"
+  assert_contains "$output" "• Use a shorter 'environment' dimension value (up to 57 characters for application 42)"
+}
+
+@test "resolve_iam_role_name: gke fails when the scope has no environment dimension" {
+  CONTEXT=$(echo "$CONTEXT" | jq 'del(.scope.dimensions.environment)')
+
+  run resolve_iam_role_name "" "123456" "payments" "gke"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not name the service account of scope 123456: IAM.MODE gke needs the scope's 'environment' dimension"
+  assert_contains "$output" "💡 Possible causes:"
+  assert_contains "$output" "🔧 How to fix:"
+  assert_contains "$output" "• Create the scope with a 'environment' dimension, set IAM.DIMENSION to the dimension that names the environment, or set IAM.MODE to irsa or pod_identity"
+  assert_empty "$(cat "$KUBECTL_LOG")"
+}
+
+
+@test "resolve_iam_role_name: gke reads the environment from the dimension named by IAM.DIMENSION" {
+  CONTEXT=$(echo "$CONTEXT" | jq '.scope.dimensions = {"environment": "production", "env": "Staging"}')
+
+  resolve_iam_role_name "" "123456" "payments" "gke" "env"
+
+  assert_equal "$IAM_ROLE_NAME" "np-42-staging"
+}
+
+@test "resolve_iam_role_name: gke fails when the scope lacks the dimension named by IAM.DIMENSION" {
+  run resolve_iam_role_name "" "123456" "payments" "gke" "env"
+
+  assert_equal "$status" "1"
+  assert_contains "$output" "❌ Could not name the service account of scope 123456: IAM.MODE gke needs the scope's 'env' dimension"
+  assert_contains "$output" "The scope has no 'env' dimension (IAM.DIMENSION)"
+}
