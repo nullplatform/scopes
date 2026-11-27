@@ -368,7 +368,13 @@ if [ -z "${NP_TRACE_LOADED:-}" ] \
   && [ -n "${NP_TRACE:-}" ]; then
   # shellcheck source=/dev/null
   . "$_NP_SCOPES_SDK"
-  np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" --no-trap
+  # The API authorizes each event by its NRN: without one it checks the org, which an account-level key cannot write.
+  _NP_SCOPES_NRN="${NP_TRACE_NRN:-}"
+  if [ -z "$_NP_SCOPES_NRN" ] && [ -n "${CONTEXT:-}" ]; then
+    _NP_SCOPES_NRN=$(printf '%s' "$CONTEXT" | jq -r 'first((.deployment.nrn, .scope.nrn, .application.nrn, .namespace.nrn, .account.nrn)
+      | select(type == "string" and . != "")) // empty' 2>/dev/null) || _NP_SCOPES_NRN=""
+  fi
+  np_trace_init --producer "nullplatform-scopes@1" --api-key "$NP_API_KEY" ${_NP_SCOPES_NRN:+--nrn "$_NP_SCOPES_NRN"} --no-trap
   trap '_np_scopes_on_err $?' ERR
   trap '_np_scopes_on_exit $?' EXIT
 elif [ -z "${NP_TRACE_LOADED:-}" ] \

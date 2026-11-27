@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Fix: scope workflow traces keep their sub-steps with an account-level agent API key. Events carry the deployment's or scope's NRN, so the tracing API no longer authorizes them at organization level and rejects them (403)
+
 ## [1.22.0] - 2026-11-27
 - k8s scopes can limit the visibility options of the create form with `VISIBILITY_OPTIONS` (default `public,internal`). With a single option, e.g. `template_env_vars = { VISIBILITY_OPTIONS = "internal" }` in `scope_definition`, the form hides the Visibility selector and new scopes get that option; the spec keeps accepting both values, so existing scopes stay valid. The render fails on an unknown value or on a `DEFAULT_VISIBILITY` it does not offer
 - k8s scopes can rename the visibility options of the create form with `VISIBILITY_PUBLIC_LABEL` (default "Internet") and `VISIBILITY_INTERNAL_LABEL` (default "Private"), e.g. `template_env_vars = { VISIBILITY_INTERNAL_LABEL = "Internal" }` in `scope_definition`. Only the text changes; scopes are still stored as `public` or `internal`
