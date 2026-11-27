@@ -1,11 +1,43 @@
-{{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal (default internal).
-       Trimmed and case-insensitive; empty means internal and private aliases internal (the UI label).
-       Anything else fails the render so a typo never silently becomes public. The oneOf keeps both values. */ -}}
-{{- $visibility := env.Getenv "DEFAULT_VISIBILITY" "internal" | strings.TrimSpace | strings.ToLower -}}
-{{- if eq $visibility "" "private" }}{{ $visibility = "internal" }}{{ end -}}
-{{- if not (coll.Has (coll.Slice "public" "internal") $visibility) -}}
+{{- /* VISIBILITY_OPTIONS: the visibility options the create form offers, a comma-separated list of
+       public and internal (default public,internal). Each item is trimmed and case-insensitive, private
+       aliases internal and empty items are skipped. A single option removes the Visibility selector from the
+       form and becomes the default, so new scopes always get it. The schema keeps accepting both values:
+       existing scopes keep a valid visibility. An unknown value or a list with no option left fails the
+       render, so a typo never hides or exposes an option. */ -}}
+{{- $allowed := coll.Slice "public" "internal" -}}
+{{- $options := coll.Slice -}}
+{{- range env.Getenv "VISIBILITY_OPTIONS" | strings.TrimSpace | conv.Default "public,internal" | strings.Split "," -}}
+{{- $option := . | strings.TrimSpace | strings.ToLower -}}
+{{- if eq $option "private" }}{{ $option = "internal" }}{{ end -}}
+{{- if and (ne $option "") (not (coll.Has $allowed $option)) -}}
+{{- test.Fail (printf "VISIBILITY_OPTIONS: unknown visibility %q in %q (allowed: public, internal, private)" (strings.TrimSpace .) (env.Getenv "VISIBILITY_OPTIONS")) -}}
+{{- end -}}
+{{- if and (ne $option "") (not (coll.Has $options $option)) }}{{ $options = $options | coll.Append $option }}{{ end -}}
+{{- end -}}
+{{- if eq (len $options) 0 -}}
+{{- test.Fail (printf "VISIBILITY_OPTIONS: no visibility in %q (allowed: public, internal, private)" (env.Getenv "VISIBILITY_OPTIONS")) -}}
+{{- end -}}
+{{- /* DEFAULT_VISIBILITY: default visibility of new scopes, public or internal. Unset or empty means internal,
+       or the only option when VISIBILITY_OPTIONS leaves one. Trimmed and case-insensitive; private aliases
+       internal (the default UI label). Anything else, or a value VISIBILITY_OPTIONS hides, fails the render
+       so a typo never silently becomes public. */ -}}
+{{- $visibility := env.Getenv "DEFAULT_VISIBILITY" | strings.TrimSpace | strings.ToLower -}}
+{{- if eq $visibility "private" }}{{ $visibility = "internal" }}{{ end -}}
+{{- if eq $visibility "" -}}
+{{- $visibility = "internal" -}}
+{{- if eq (len $options) 1 }}{{ $visibility = index $options 0 }}{{ end -}}
+{{- end -}}
+{{- if not (coll.Has $allowed $visibility) -}}
 {{- test.Fail (printf "DEFAULT_VISIBILITY: unknown visibility %q (allowed: public, internal, private)" (env.Getenv "DEFAULT_VISIBILITY")) -}}
 {{- end -}}
+{{- if not (coll.Has $options $visibility) -}}
+{{- test.Fail (printf "DEFAULT_VISIBILITY: %q is not one of the VISIBILITY_OPTIONS %q" (strings.TrimSpace (env.Getenv "DEFAULT_VISIBILITY")) (env.Getenv "VISIBILITY_OPTIONS")) -}}
+{{- end -}}
+{{- /* VISIBILITY_PUBLIC_LABEL, VISIBILITY_INTERNAL_LABEL: the form label of each visibility option (default
+       Internet and Private). Only the text changes: the stored value is still public or internal. Trimmed;
+       empty means the default. Written as a JSON string, so any character is safe. */ -}}
+{{- $publicLabel := env.Getenv "VISIBILITY_PUBLIC_LABEL" | strings.TrimSpace | conv.Default "Internet" -}}
+{{- $internalLabel := env.Getenv "VISIBILITY_INTERNAL_LABEL" | strings.TrimSpace | conv.Default "Private" -}}
 {
   "available_actions": [
     "create-scope",
@@ -52,6 +84,7 @@
                "label":"RAM Memory",
                "scope":"#/properties/ram_memory"
             },
+{{- if gt (len $options) 1 }}
             {
                "type":"Control",
                "label":"Visibility",
@@ -60,6 +93,7 @@
                   "format":"radio"
                }
             },
+{{- end }}
             {
                "type":"Categorization",
                "options":{
@@ -419,12 +453,12 @@
             "oneOf":[
                {
                   "const":"public",
-                  "title":"Internet",
+                  "title":{{ $publicLabel | data.ToJSON }},
                   "description":"Public, reachable by anyone"
                },
                {
                   "const":"internal",
-                  "title":"Private",
+                  "title":{{ $internalLabel | data.ToJSON }},
                   "description":"Only visible inside your organization"
                }
             ],
