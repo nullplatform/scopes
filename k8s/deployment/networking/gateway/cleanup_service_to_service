@@ -17,8 +17,9 @@ cleanup_service_to_service() {
 
   [ -n "$existing" ] || return 0
 
-  rendered=$(echo "$CONTEXT" | jq -r '
-    if .service_to_service.enabled == true then
+  # A deployment delete removes the scope's HTTPRoute, so nothing is kept.
+  rendered=$(echo "$CONTEXT" | jq -r --arg remove_all "${SERVICE_TO_SERVICE_REMOVE_ALL:-false}" '
+    if $remove_all != "true" and .service_to_service.enabled == true then
       (.names.stable_service) as $svc
       | "Service/\($svc)", (.service_to_service.ports[] | "HTTPRoute/\($svc)-http-\(.)")
     else empty end')

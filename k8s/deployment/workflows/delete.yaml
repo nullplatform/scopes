@@ -63,10 +63,12 @@ steps:
         type: environment
   - name: delete ingress finalizer
     type: script
+    trace: false
     file: "$SERVICE_PATH/deployment/delete_ingress_finalizer"
   - name: route traffic
     type: script
     file: "$SERVICE_PATH/scope/networking/gateway/build_gateway"
+    trace: false
     configuration:
       TEMPLATE: "$INITIAL_INGRESS_PATH"
     output:
@@ -76,6 +78,7 @@ steps:
   - name: build deployment
     type: script
     file: "$SERVICE_PATH/deployment/build_deployment"
+    trace: false
     output:
       - name: DEPLOYMENT_PATH
         type: file
@@ -90,6 +93,9 @@ steps:
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$DEPLOYMENT_ID.yaml"
   - name: delete deployment
+    trace:
+      title: Remove deployment
+      description: Deletes the deployment's workload and the scope's routing rules.
     type: script
     file: "$SERVICE_PATH/apply_templates"
     configuration:
@@ -101,3 +107,11 @@ steps:
       file: "$SERVICE_PATH/deployment/delete_cluster_objects"
       configuration:
         DEPLOYMENT: green
+  - name: remove service-to-service objects
+    trace:
+      title: Remove service-to-service objects
+      description: Deletes the scope's stable in-cluster name and its internal routes, if any are left.
+    type: script
+    file: "$SERVICE_PATH/deployment/networking/gateway/cleanup_service_to_service"
+    configuration:
+      SERVICE_TO_SERVICE_REMOVE_ALL: "true"

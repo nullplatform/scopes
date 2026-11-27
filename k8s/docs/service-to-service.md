@@ -55,5 +55,6 @@ The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses th
 | Gateway missing, or no listener for a port | Deployment fails before applying, listing what is missing |
 | A Service with the stable name exists and is not this scope's | Deployment fails; nothing is overwritten |
 | Disabled after being enabled, or a port removed | The next deployment deletes the objects no longer rendered |
+| Deployment deleted | Its objects are deleted, whether the feature is on or off |
 
 The agent needs `get` on `gateways` in the gateway namespace and `get`/`list`/`delete` on `services` and `httproutes` in the scope's namespace.

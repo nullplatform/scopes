@@ -137,3 +137,20 @@ np_scope_step_end 0'
   [ "$status" -eq 0 ]
   [ ! -f "$TRACE_LOG" ]
 }
+
+@test "cleanup_service_to_service: a deployment delete removes every object, even with the feature enabled" {
+  export EXISTING_FIXTURE="Service/checkout-api-production HTTPRoute/checkout-api-production-http-8080"
+  export SERVICE_TO_SERVICE_REMOVE_ALL=true
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(cat "$KUBECTL_LOG")" "delete service/checkout-api-production httproute/checkout-api-production-http-8080 -n apps --ignore-not-found"
+}
+
+@test "cleanup_service_to_service: the delete workflow runs it in remove-all mode" {
+  run yq -r '.steps[] | select(.file == "$SERVICE_PATH/deployment/networking/gateway/cleanup_service_to_service") | .configuration.SERVICE_TO_SERVICE_REMOVE_ALL' "$PROJECT_ROOT/k8s/deployment/workflows/delete.yaml"
+
+  [ "$status" -eq 0 ]
+  assert_equal "$output" "true"
+}
