@@ -124,12 +124,15 @@ d-123456-789012-http-8081"
 
 @test "golden: service-to-service during a gateway move keeps the ExternalName and adds the previous parents" {
 	GOLDEN_CONTEXT_PATCH='.service_to_service.external_name = "gateway-private-istio.gateways.svc.cluster.local"
-		| .service_to_service.previous_parents = {"8080": [{"name": "gateway-private", "namespace": "gateways", "sectionName": "in-cluster-8080"}]}' \
+		| .service_to_service.previous_parents = {"8080": [{"name": "gateway-private", "namespace": "gateways", "sectionName": "in-cluster-8080"}]}
+		| .service_to_service.previous_hostnames = ["checkout-api-production.nullplatform.svc.cluster.local"]' \
 		"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
 		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-s2s-dedicated-raw.json" "$RENDER_DIR"
 	for f in k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
 		run yq ea -N 'select(.spec.type == "ExternalName") | .spec.externalName' "$RENDER_DIR/$f"
 		assert_equal "$output" "gateway-private-istio.gateways.svc.cluster.local"
+		run yq ea -N 'select(.spec.type == "ExternalName") | .metadata.annotations["nullplatform.io/previous-hostnames"]' "$RENDER_DIR/$f"
+		assert_equal "$output" '["checkout-api-production.nullplatform.svc.cluster.local"]'
 		run yq ea -N 'select(.metadata.name == "checkout-api-production-http-8080") | .spec.parentRefs[] | .name + "/" + .sectionName' "$RENDER_DIR/$f"
 		assert_equal "$output" "gateway-in-cluster/in-cluster-8080
 gateway-private/in-cluster-8080"

@@ -41,9 +41,24 @@ fail_reconciliation() {
     exit 1
 }
 
+# While a service-to-service gateway move is pending, the new gateway's verdict is a warning:
+# callers still reach the route through the live one.
+skip_pending_gateway() {
+    local pending_parent
+    pending_parent=$(echo "$parents_status" | jq -c --arg gw "$VERIFY_PENDING_GATEWAY" '[.[] | select(.gateway == $gw)][0] // empty')
+    [ -n "$pending_parent" ] || return 0
+    if [ "$(echo "$pending_parent" | jq -r '.accepted.status // ""')" = "False" ] && [ -z "${_PENDING_WARNED:-}" ]; then
+        log warn "⚠️  HTTPRoute $HTTPROUTE_NAME not accepted by $VERIFY_PENDING_GATEWAY yet ($(echo "$pending_parent" | jq -r '"\(.accepted.reason): \(.accepted.message)"')); it is served through the live gateway until the move completes"
+        np_scope_output pending_gateway "$pending_parent"
+        _PENDING_WARNED=1
+    fi
+    parents_status=$(echo "$parents_status" | jq -c --arg gw "$VERIFY_PENDING_GATEWAY" 'map(select(.gateway != $gw))')
+}
+
 verify_httproute() {
     HTTPROUTE_NAME="$1"
     elapsed=0
+    _PENDING_WARNED=""
     local step_key="$2"
     shift 2
 
@@ -59,7 +74,16 @@ verify_httproute() {
         httproute_json=$(kubectl get httproute "$HTTPROUTE_NAME" -n "$K8S_NAMESPACE" -o json)
 
         parents_status=$(parents_status_of "$httproute_json")
+        if [ -n "${VERIFY_PENDING_GATEWAY:-}" ]; then
+            skip_pending_gateway
+        fi
         parents_count=$(echo "$parents_status" | jq 'length')
+
+        if [ "$parents_count" -eq 0 ] && [ -n "${VERIFY_PENDING_GATEWAY:-}" ]; then
+            log warn "⚠️  HTTPRoute $HTTPROUTE_NAME has no gateway but $VERIFY_PENDING_GATEWAY, which does not serve it yet"
+            np_scope_step_end 0
+            return 0
+        fi
 
         if [ "$parents_count" -eq 0 ]; then
             log debug "📝 HTTPRoute pending sync (no parent status yet)... (${elapsed}s/${MAX_WAIT_SECONDS}s)"
@@ -192,7 +216,13 @@ for INTERNAL_ROUTE in $(echo "$CONTEXT" | jq -r '
       | .service_to_service.ports[] | . as $port
       | "\($svc)-\(if any($grpc[]; . == $port) then "grpc" else "http" end)-\($port)"
     else empty end'); do
-    verify_httproute "$INTERNAL_ROUTE" verify-internal-httproute --iteration "$INTERNAL_ROUTE_ITERATION"
+    if [ -n "${SERVICE_TO_SERVICE_MOVE_PENDING_GATEWAY:-}" ] \
+      && ! kubectl get httproute "$INTERNAL_ROUTE" -n "$K8S_NAMESPACE" -o name >/dev/null 2>&1; then
+        log warn "⚠️  HTTPRoute $INTERNAL_ROUTE is not rendered while service-to-service stays on its live gateway"
+        continue
+    fi
+    VERIFY_PENDING_GATEWAY="${SERVICE_TO_SERVICE_MOVE_PENDING_GATEWAY:-}" \
+      verify_httproute "$INTERNAL_ROUTE" verify-internal-httproute --iteration "$INTERNAL_ROUTE_ITERATION"
     INTERNAL_ROUTE_ITERATION=$((INTERNAL_ROUTE_ITERATION + 1))
 done
 

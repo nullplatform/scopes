@@ -84,6 +84,9 @@ metadata:
   name: {{ .names.stable_service }}
   namespace: {{ .k8s_namespace }}
 {{- template "stable-metadata" (coll.Dict "root" . "modifier" "service") }}
+{{- if has $s2s "previous_hostnames" }}
+    nullplatform.io/previous-hostnames: {{ $s2s.previous_hostnames | data.ToJSON | strings.Quote }}
+{{- end }}
 spec:
   type: ExternalName
   externalName: {{ if has $s2s "external_name" }}{{ $s2s.external_name }}{{ else }}{{ $s2s.gateway_host }}{{ end }}
