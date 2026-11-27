@@ -410,3 +410,39 @@ run_verify_routes() {
   [ "$status" -eq 0 ]
   [[ "$(cat "$TRACE_LOG")" != *"verify-internal-httproute"* ]] || false
 }
+
+# Usage: moving_route <name> <new gateway Accepted condition json>
+moving_route() {
+  jq -n --argjson old "$(ref gateway-internal gateways)" --argjson new "$(ref gateway-in-cluster gateways)" \
+    --argjson old_parent "$(parent gateway-internal gateways "$ACCEPTED" "$RESOLVED")" \
+    --argjson new_parent "$(parent gateway-in-cluster gateways "$2" "$RESOLVED")" \
+    '{spec: {parentRefs: [$old, $new]}, status: {parents: [$old_parent, $new_parent]}}' > "$ROUTES_DIR/$1.json"
+}
+
+@test "verify_http_route_reconciliation: a pending gateway move verifies the live gateway and warns about the new one" {
+  enable_service_to_service
+  mock_tracing
+  export SERVICE_TO_SERVICE_MOVE_PENDING_GATEWAY="gateways/gateway-in-cluster"
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  moving_route checkout-api-production-http-8080 "$ACCEPTED"
+  moving_route checkout-api-production-http-8081 '{"type":"Accepted","status":"False","reason":"NoMatchingListenerHostname","message":"no listener matches"}'
+
+  run_verify_routes
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  HTTPRoute checkout-api-production-http-8081 not accepted by gateways/gateway-in-cluster yet (NoMatchingListenerHostname: no listener matches)"
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_output pending_gateway"
+  [[ "$output" != *"❌"* ]] || false
+}
+
+@test "verify_http_route_reconciliation: without a pending move a rejected new gateway still fails" {
+  enable_service_to_service
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  moving_route checkout-api-production-http-8080 "$ACCEPTED"
+  moving_route checkout-api-production-http-8081 '{"type":"Accepted","status":"False","reason":"NoMatchingListenerHostname","message":"no listener matches"}'
+
+  run_verify_routes
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ HTTPRoute failed to reconcile on gateway gateways/gateway-in-cluster"
+}
