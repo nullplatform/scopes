@@ -199,3 +199,21 @@ EOF
   result=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$result" "failed"
 }
+
+@test "service/service_endpoints: skips ExternalName services, which have no endpoints" {
+  echo '{"items":[{"metadata":{"name":"my-svc"},"spec":{"type":"ClusterIP"}},{"metadata":{"name":"checkout-api-production"},"spec":{"type":"ExternalName"}}]}' > "$SERVICES_FILE"
+  cat > "$ENDPOINTS_FILE" << 'EOF2'
+{
+  "items": [{
+    "metadata": {"name": "my-svc"},
+    "subsets": [{"addresses": [{"ip": "10.0.0.1", "targetRef": {"name": "pod-1"}}], "ports": [{"port": 8080}]}]
+  }]
+}
+EOF2
+
+  run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../service/service_endpoints'"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"checkout-api-production"* ]] || false
+  assert_equal "$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")" "success"
+}

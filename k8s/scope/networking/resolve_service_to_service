@@ -1,0 +1,103 @@
+#!/bin/bash
+
+# Resolves the service-to-service settings (docs/service-to-service.md).
+# Prints the settings as JSON, or nothing when the feature is disabled.
+# Needs GATEWAY_NAME, GATEWAY_NAMESPACE and SCOPE_VISIBILITY.
+
+resolve_service_to_service() {
+  local enabled mode gateway_name gateway_default listener_prefix cluster_domain name_pattern
+
+  enabled=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.service_to_service.enabled' \
+    --provider '.providers["container-orchestration"].gateway.service_to_service.enabled' \
+    --env SERVICE_TO_SERVICE_ENABLED \
+    --default "false"
+  )
+
+  case "$enabled" in
+    true) ;;
+    false) return 0 ;;
+    *)
+      log error "❌ service_to_service.enabled must be true or false, got: '$enabled'"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Set networking.service_to_service.enabled in scope-configurations (or SERVICE_TO_SERVICE_ENABLED) to true or false"
+      log error ""
+      return 1
+      ;;
+  esac
+
+  mode=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.service_to_service.mode' \
+    --provider '.providers["container-orchestration"].gateway.service_to_service.mode' \
+    --env SERVICE_TO_SERVICE_MODE \
+    --default "shared"
+  )
+
+  case "$mode" in
+    shared)
+      if [ "$SCOPE_VISIBILITY" = "public" ]; then
+        gateway_default=$(get_config_value \
+          --provider '.providers["scope-configurations"].networking.gateway_private_name' \
+          --provider '.providers["container-orchestration"].gateway.private_name' \
+          --default "${PRIVATE_GATEWAY_NAME:-gateway-internal}"
+        )
+      else
+        gateway_default="$GATEWAY_NAME"
+      fi
+      ;;
+    dedicated) gateway_default="gateway-in-cluster" ;;
+    *)
+      log error "❌ service_to_service.mode must be shared or dedicated, got: '$mode'"
+      log error ""
+      log error "🔧 How to fix:"
+      log error "   • Set networking.service_to_service.mode in scope-configurations (or SERVICE_TO_SERVICE_MODE) to shared or dedicated"
+      log error "   • Use the mode the cluster's in-cluster gateway was installed with (gateway.inCluster.mode in the base chart)"
+      log error ""
+      return 1
+      ;;
+  esac
+
+  gateway_name=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.service_to_service.gateway_name' \
+    --provider '.providers["container-orchestration"].gateway.service_to_service.gateway_name' \
+    --default "$gateway_default"
+  )
+  listener_prefix=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.service_to_service.listener_prefix' \
+    --provider '.providers["container-orchestration"].gateway.service_to_service.listener_prefix' \
+    --default "in-cluster-"
+  )
+  cluster_domain=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.service_to_service.cluster_domain' \
+    --provider '.providers["container-orchestration"].gateway.service_to_service.cluster_domain' \
+    --default "cluster.local"
+  )
+  name_pattern=$(get_config_value \
+    --provider '.providers["scope-configurations"].networking.service_to_service.name_pattern' \
+    --provider '.providers["container-orchestration"].gateway.service_to_service.name_pattern' \
+    --default "{.application.slug}-{.scope.slug}"
+  )
+
+  jq -nc \
+    --arg mode "$mode" \
+    --arg gateway_name "$gateway_name" \
+    --arg gateway_namespace "$GATEWAY_NAMESPACE" \
+    --arg listener_prefix "$listener_prefix" \
+    --arg cluster_domain "$cluster_domain" \
+    --arg name_pattern "$name_pattern" \
+    '{enabled: true, mode: $mode, gateway_name: $gateway_name, gateway_namespace: $gateway_namespace,
+      gateway_host: "\($gateway_name)-istio.\($gateway_namespace).svc.\($cluster_domain)",
+      listener_prefix: $listener_prefix, cluster_domain: $cluster_domain, name_pattern: $name_pattern}'
+}
+
+# Adds the stable name's hostnames once names.stable_service is resolved.
+# Short names only in dedicated mode: the shared gateway's listener accepts *.svc.<cluster domain> only.
+service_to_service_hostnames() {
+  echo "$CONTEXT" | jq '
+    if .service_to_service.enabled == true then
+      (.names.stable_service) as $svc | (.k8s_namespace) as $ns
+      | .service_to_service.hostnames = (["\($svc).\($ns).svc.\(.service_to_service.cluster_domain)"]
+          + (if .service_to_service.mode == "dedicated" then [$svc, "\($svc).\($ns)"] else [] end))
+    else . end'
+}

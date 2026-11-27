@@ -14,6 +14,11 @@ setup() {
   # Mock the sourced scripts
   export INGRESS_RECONCILIATION_CALLED="false"
   export HTTP_ROUTE_RECONCILIATION_CALLED="false"
+
+  for helper in np_scope_step_begin np_scope_step_end np_scope_step_timeout np_scope_wait_heartbeat np_scope_explain np_scope_output np_scope_consumes np_scope_progress np_scope_failure; do
+    eval "$helper() { :; }"
+    export -f "$helper"
+  done
 }
 
 teardown() {

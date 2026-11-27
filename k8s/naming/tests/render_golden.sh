@@ -19,11 +19,14 @@ kubectl() {
 			return 1
 			;;
 		"get service")
-			if [[ "$*" == *"deployment_id=789011"* ]]; then
+			if [[ "$*" == *"nullplatform.io/stable-service=true"* ]]; then
+				return 0
+			elif [[ "$*" == *"deployment_id=789011"* ]]; then
 				cat <<'JSON'
 {"items":[
   {"metadata":{"name":"d-123456-789011"},"spec":{"ports":[{"port":8080}]}},
-  {"metadata":{"name":"d-123456-789011-grpc-9090"},"spec":{"ports":[{"port":9090}]}}
+  {"metadata":{"name":"d-123456-789011-grpc-9090"},"spec":{"ports":[{"port":9090}]}},
+  {"metadata":{"name":"d-123456-789011-http-8083"},"spec":{"ports":[{"port":8083}]}}
 ]}
 JSON
 			else

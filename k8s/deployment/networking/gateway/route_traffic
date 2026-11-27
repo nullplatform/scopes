@@ -34,4 +34,5 @@ log info "✅ Ingress template created: $INGRESS_FILE"
 
 if grep -q '^kind: HTTPRoute' "$INGRESS_FILE"; then
   source "$SERVICE_PATH/deployment/networking/gateway/validate_gateways"
+  source "$SERVICE_PATH/deployment/networking/gateway/cleanup_service_to_service"
 fi

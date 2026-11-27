@@ -1,0 +1,59 @@
+# Service-to-service traffic
+
+A k8s scope on the Istio HTTPRoute templates can get a stable in-cluster name that other workloads call on the ports the application serves:
+
+```
+http://{app}-{scope}.{k8s namespace}.svc.cluster.local:{main_http_port}
+```
+
+Calls go through an Istio gateway and follow the same blue-green weights as the scope's public or private route. No sidecars, VirtualServices or DestinationRules. Off by default; with it off the scope renders exactly what it did before.
+
+## How it works
+
+| Object | Name | What it does |
+|---|---|---|
+| `Service` (`type: ExternalName`) | `names.stable_service` | Resolves to the gateway's Service, `<gateway>-istio.<gateway namespace>.svc.<cluster domain>` |
+| `HTTPRoute`, one per HTTP port | `<stable service>-http-<port>` | Attached to listener `<listener_prefix><port>` of the gateway; same backends and weights as the scope's route |
+
+- HTTP ports: `main_http_port` plus every `additional_ports` entry of type `HTTP`. GRPC ports are not exposed.
+- ExternalName does not remap ports: the gateway needs a listener for every HTTP port of the scope. The deployment fails naming the missing ones.
+- The objects carry `nullplatform.io/stable-service: "true"` and the scope labels, but no `deployment_id`, so they live as long as the scope's route: created by the initial deployment, updated by switch traffic, finalize and rollback, deleted with it.
+- The internal routes end in `-http-<port>` so the naming engine never mistakes them for the scope's main HTTPRoute.
+
+## Modes
+
+Chosen per cluster, must match how the gateway was installed (`gateway.inCluster` in the base chart, `gateway_in_cluster_*` in the base tofu module).
+
+| | `shared` (default) | `dedicated` |
+|---|---|---|
+| Gateway | The scope's private gateway | `gateway-in-cluster` |
+| Hostnames | `<svc>.<ns>.svc.<cluster domain>` | Also `<svc>` and `<svc>.<ns>` |
+
+In `shared` mode the gateway's in-cluster listeners only accept `*.svc.<cluster domain>`, so the scope's real domains are never served over plain HTTP on the private load balancer.
+
+## Configuration
+
+`scope-configurations` provider, `networking.service_to_service.*`; falls back to `gateway.service_to_service.*` in the container-orchestration provider.
+
+| Property | Env var | Default |
+|---|---|---|
+| `enabled` | `SERVICE_TO_SERVICE_ENABLED` | `false` |
+| `mode` | `SERVICE_TO_SERVICE_MODE` | `shared` |
+| `gateway_name` | - | `shared`: the private gateway name; `dedicated`: `gateway-in-cluster` |
+| `listener_prefix` | - | `in-cluster-` |
+| `cluster_domain` | - | `cluster.local` |
+| `name_pattern` | - | `{.application.slug}-{.scope.slug}` |
+
+The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses the [resource naming](resource-naming.md) engine with a 63-character budget and no id appended; once created, the name is kept even if the pattern changes.
+
+## Failures
+
+| Condition | Result |
+|---|---|
+| ALB ingress templates or `GATEWAY_TYPE=aro_cluster` | Deployment fails in build context |
+| An HTTP port is 443 or an Istio port (15000-15090) | Deployment fails in build context |
+| Gateway missing, or no listener for a port | Deployment fails before applying, listing what is missing |
+| A Service with the stable name exists and is not this scope's | Deployment fails; nothing is overwritten |
+| Disabled after being enabled, or a port removed | The next deployment deletes the objects no longer rendered |
+
+The agent needs `get` on `gateways` in the gateway namespace and `get`/`list`/`delete` on `services` and `httproutes` in the scope's namespace.

@@ -123,6 +123,17 @@ Every gateway the HTTPRoute references must exist before it is applied, and the 
 waits until each of them reports `Accepted` and `ResolvedRefs`. DNS records keep pointing at
 the main gateway only. The agent needs `get` on `gateways` in every namespace configured.
 
+#### Service-to-service
+
+A scope on the Istio HTTPRoute templates can get a stable in-cluster name,
+`{app}-{scope}.{namespace}.svc.cluster.local`, routed through a gateway with the scope's blue-green
+weights. Off by default; see `k8s/docs/service-to-service.md`.
+
+| Variable | Description | Scope Configuration Property |
+|----------|-------------|------------------------------|
+| **SERVICE_TO_SERVICE_ENABLED** | Create the stable name (default `false`) | `networking.service_to_service.enabled` |
+| **SERVICE_TO_SERVICE_MODE** | `shared` (the private gateway) or `dedicated` (`gateway-in-cluster`) | `networking.service_to_service.mode` |
+
 ### Deployment
 
 #### General

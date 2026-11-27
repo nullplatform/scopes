@@ -1,0 +1,56 @@
+#!/bin/bash
+
+
+cleanup_service_to_service() {
+  local namespace scope_id existing rendered stale delete_output
+  local -a stale_objects=()
+
+  namespace=$(echo "$CONTEXT" | jq -r --arg fallback "${K8S_NAMESPACE:-}" '.k8s_namespace // $fallback')
+  scope_id=$(echo "$CONTEXT" | jq -r --arg fallback "${SCOPE_ID:-}" '.scope.id // $fallback | tostring')
+
+  if ! existing=$(kubectl get service,httproute -n "$namespace" \
+    -l "nullplatform.io/stable-service=true,scope_id=$scope_id" \
+    -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}' 2>&1); then
+    log warn "⚠️  Could not list the scope's service-to-service objects, skipping their cleanup: $existing"
+    return 0
+  fi
+
+  [ -n "$existing" ] || return 0
+
+  rendered=$(echo "$CONTEXT" | jq -r '
+    if .service_to_service.enabled == true then
+      (.names.stable_service) as $svc
+      | "Service/\($svc)", (.service_to_service.ports[] | "HTTPRoute/\($svc)-http-\(.)")
+    else empty end')
+
+  while IFS= read -r stale; do
+    [ -n "$stale" ] || continue
+    if ! grep -qxF "$stale" <<< "$rendered"; then
+      stale_objects+=("$(echo "${stale%%/*}" | tr '[:upper:]' '[:lower:]')/${stale#*/}")
+    fi
+  done <<< "$existing"
+
+  [ "${#stale_objects[@]}" -gt 0 ] || return 0
+
+  np_scope_step_begin remove-stale-service-to-service --title "Remove stale service-to-service objects"
+  log info "📝 Removing service-to-service objects this scope no longer renders: ${stale_objects[*]}"
+
+  if ! delete_output=$(kubectl delete "${stale_objects[@]}" -n "$namespace" --ignore-not-found 2>&1); then
+    log error "❌ Could not remove the stale service-to-service objects: $delete_output"
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies deleting services or httproutes in namespace '$namespace'"
+    log error "🔧 How to fix:"
+    log error "   - Verify RBAC: kubectl auth can-i delete httproutes -n $namespace"
+    log error "   - Delete them by hand: kubectl delete ${stale_objects[*]} -n $namespace"
+    np_scope_failure StaleServiceToServiceCleanupFailed
+    np_scope_step_end 1 "Could not remove stale service-to-service objects"
+    exit 1
+  fi
+
+  np_scope_k8s_deleted "$namespace" "$delete_output"
+  log info "✅ Removed stale service-to-service objects: ${stale_objects[*]}"
+  np_scope_step_end 0
+}
+
+cleanup_service_to_service

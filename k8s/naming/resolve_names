@@ -257,11 +257,49 @@ np_naming_resolve() {
 	local visibility
 	visibility="$(echo "$CONTEXT" | jq -r '.ingress_visibility // ""')"
 
+	local emitted
 	if [ "$strategy" = "ids" ]; then
-		np_naming_roles_ids "$visibility"
+		emitted="$(np_naming_roles_ids "$visibility")" || return 1
 	else
-		np_naming_roles_patterned "$strategy"
+		emitted="$(np_naming_roles_patterned "$strategy")" || return 1
 	fi
+
+	if [ "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled // false')" != "true" ]; then
+		echo "$emitted"
+		return 0
+	fi
+
+	local stable
+	stable="$(np_naming_stable_service)" || return 1
+	echo "$emitted" | jq --arg stable "$stable" '. + {stable_service: $stable}'
+}
+
+NP_NAMING_STABLE_SERVICE_BUDGET=63
+NP_NAMING_STABLE_SERVICE_LABEL="nullplatform.io/stable-service=true"
+
+np_naming_stable_service() {
+	local pattern name existing status
+	pattern="$(echo "$CONTEXT" | jq -r '.service_to_service.name_pattern // "{.application.slug}-{.scope.slug}"')"
+
+	name="$(np_name_render "$NP_NAMING_STABLE_SERVICE_BUDGET" "$pattern")" || return 1
+
+	existing="$(np_naming_list_by_label service "${K8S_NAMESPACE:-nullplatform}" "$NP_NAMING_STABLE_SERVICE_LABEL,scope_id=$NP_NAME_SCOPE_ID")"
+	status=$?
+
+	case "$status" in
+		0)
+			existing="${existing%% *}"
+			if [ "$existing" != "$name" ]; then
+				log info "✅ Keeping the existing stable service name '$existing'" >&2
+			fi
+			echo "$existing"
+			;;
+		2) echo "$name" ;;
+		*)
+			np_naming_discover_error "the scope's existing stable service name" "service"
+			return 1
+			;;
+	esac
 }
 
 np_naming_roles_ids() {

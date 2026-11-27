@@ -171,7 +171,8 @@ teardown() {
   [ "$status" -eq 0 ]
   assert_contains "$output" "✅ All gateways exist: gateways/gateway-public, edge/partners"
   assert_equal "$(cat "$BATS_TEST_TMPDIR/kubectl.log")" "get gateway gateway-public -n gateways -o name
-get gateway partners -n edge -o name"
+get gateway partners -n edge -o name
+get service,httproute -n  -l nullplatform.io/stable-service=true,scope_id=scope-123 -o jsonpath={range .items[*]}{.kind}/{.metadata.name}{\"\\n\"}{end}"
 }
 
 @test "route_traffic: fails when a gateway of the HTTPRoute does not exist" {
