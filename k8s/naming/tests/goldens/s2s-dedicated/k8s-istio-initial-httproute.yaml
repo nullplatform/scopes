@@ -89,7 +89,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -129,7 +128,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -169,7 +167,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -209,7 +206,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io

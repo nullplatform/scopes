@@ -92,12 +92,13 @@ resolve_service_to_service() {
 }
 
 # Adds the stable name's hostnames once names.stable_service is resolved.
-# Short names only in dedicated mode: the shared gateway's listener accepts *.svc.<cluster domain> only.
+# <svc>.<ns> only in dedicated mode: the shared gateway's listener accepts *.svc.<cluster domain> only.
+# No bare <svc>: the same name in two namespaces would share one Host and the oldest route would win.
 service_to_service_hostnames() {
   echo "$CONTEXT" | jq '
     if .service_to_service.enabled == true then
       (.names.stable_service) as $svc | (.k8s_namespace) as $ns
       | .service_to_service.hostnames = (["\($svc).\($ns).svc.\(.service_to_service.cluster_domain)"]
-          + (if .service_to_service.mode == "dedicated" then [$svc, "\($svc).\($ns)"] else [] end))
+          + (if .service_to_service.mode == "dedicated" then ["\($svc).\($ns)"] else [] end))
     else . end'
 }

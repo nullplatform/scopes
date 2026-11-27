@@ -28,9 +28,11 @@ Chosen per cluster, must match how the gateway was installed (`gateway.inCluster
 | | `shared` (default) | `dedicated` |
 |---|---|---|
 | Gateway | The scope's private gateway | `gateway-in-cluster` |
-| Hostnames | `<svc>.<ns>.svc.<cluster domain>` | Also `<svc>` and `<svc>.<ns>` |
+| Hostnames | `<svc>.<ns>.svc.<cluster domain>` | Also `<svc>.<ns>` |
 
 In `shared` mode the gateway's in-cluster listeners only accept `*.svc.<cluster domain>`, so the scope's real domains are never served over plain HTTP on the private load balancer.
+
+The bare `<svc>` is not a hostname in either mode, so clients in the same namespace must call `<svc>.<ns>` or the FQDN. All namespaces share the gateway's listeners and the HTTP `Host` carries no namespace: two namespaces with the same `<svc>` would both claim Host `<svc>`, and the oldest route would silently get the other's traffic.
 
 ## Configuration
 

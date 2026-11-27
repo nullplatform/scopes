@@ -64,7 +64,7 @@ teardown() {
 	done
 }
 
-@test "golden: service-to-service dedicated mode adds the short hostnames" {
+@test "golden: service-to-service dedicated mode adds the <svc>.<ns> hostname" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
 		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-s2s-dedicated-raw.json" "$RENDER_DIR"
 	for f in k8s-service.yaml k8s-istio-service.yaml k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
