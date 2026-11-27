@@ -57,5 +57,6 @@ The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses th
 | A Service with the stable name exists and is not this scope's | Deployment fails; nothing is overwritten |
 | Disabled after being enabled, or a port removed | The next deployment deletes the objects no longer rendered |
 | Deployment deleted | Its objects are deleted, whether the feature is on or off |
+| GRPC port of a deployment created before the feature was on (its Service has no `appProtocol: grpc`) | gRPC calls to that deployment fail with `protocol error` until a newer deployment replaces it |
 
 The agent needs `get` on `gateways` in the gateway namespace and `get`/`list`/`delete` on `services` and `httproutes` in the scope's namespace.
