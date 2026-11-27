@@ -18,6 +18,11 @@ if [[ -z "$PROM_URL" ]]; then
   exit 1
 fi
 
+if [[ -n "$TRAFFIC" && "$TRAFFIC" != "internal" && "$TRAFFIC" != "external" ]]; then
+  echo '{"error":"traffic must be internal or external"}'
+  exit 1
+fi
+
 get_metric_config() {
   case "$METRIC_NAME" in
     "http.error_rate")
@@ -93,6 +98,14 @@ build_filters() {
     fi
     filters="${filters}deployment_id=\"$DEPLOYMENT_ID\""
   fi
+
+  case "$METRIC_NAME" in
+    "http.rpm"|"http.response_time"|"http.error_rate")
+      if [[ -n "$TRAFFIC" ]]; then
+        filters="${filters},traffic=\"$TRAFFIC\""
+      fi
+      ;;
+  esac
 
   echo "$filters"
 }

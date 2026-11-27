@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 - k8s scopes on Istio can get a stable in-cluster name, `{app}-{scope}.{namespace}.svc.cluster.local`, that other workloads call on the scope's HTTP ports. Calls go through an Istio gateway (the private one, or a dedicated `gateway-in-cluster`) and follow the scope's blue-green weights. Off by default; enable it with `networking.service_to_service.enabled` in scope-configurations. See `k8s/docs/service-to-service.md`
 - k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
+- k8s HTTP metrics (`http.rpm`, `http.response_time`, `http.error_rate`) accept a `traffic` filter and group-by (`internal` for calls through the stable in-cluster name, `external` otherwise). Needs a logs controller that emits the `traffic` label
 
 ## [1.21.0] - 2026-11-24
 - k8s scopes with `traffic_proxy: istio` deploy without the nginx traffic sidecar and take HTTP metrics from the Istio gateway (not available on ARO clusters).
