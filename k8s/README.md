@@ -135,7 +135,7 @@ weights. Off by default; see `k8s/docs/service-to-service.md`.
 
 | Variable | Description | Scope Configuration Property |
 |----------|-------------|------------------------------|
-| **SERVICE_TO_SERVICE_ENABLED** | Create the stable name (default `false`). A boolean in the providers; the strings `"true"`/`"false"` also work | `networking.service_to_service.enabled` |
+| **SERVICE_TO_SERVICE_ENABLED** | Create the stable name (default `false`). `"true"`/`"false"` like the other on/off keys; a JSON boolean also works via API | `networking.service_to_service.enabled` |
 | **SERVICE_TO_SERVICE_MODE** | `shared` (the private gateway) or `dedicated` (`gateway-in-cluster`) | `networking.service_to_service.mode` |
 
 ### Deployment
