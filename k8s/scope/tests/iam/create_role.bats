@@ -666,3 +666,41 @@ recording_aws() {
   assert_contains "$output" "❌ Tag 'AWS:owner' in IAM.TAGS has an invalid key or value 'me'"
   assert_contains "$output" "• Use letters, digits, spaces and _ . : / = + - @ (keys up to 128 characters, values up to 256), and do not start a key with aws:"
 }
+
+@test "create_role: the role is created under /nullplatform/custom-scopes/ when IAM.PATH is not set" {
+  recording_aws
+  export IAM='{"ENABLED": "true", "PREFIX": "test-prefix", "ROLE": {"POLICIES": []}}'
+
+  run bash -c 'source "$SCRIPT"'
+
+  assert_equal "$status" "0"
+  assert_contains "$(grep "iam create-role" "$AWS_LOG")" "--path /nullplatform/custom-scopes/ "
+}
+
+@test "create_role: the role is created under IAM.PATH" {
+  recording_aws
+  for role_path in /nullplatform/apps/ /; do
+    : > "$AWS_LOG"
+    export IAM="$(jq -nc --arg path "$role_path" '{ENABLED: "true", PREFIX: "test-prefix", MODE: "pod_identity", PATH: $path, ROLE: {POLICIES: []}}')"
+
+    run bash -c 'source "$SCRIPT"'
+
+    assert_equal "$status" "0"
+    assert_contains "$(grep "iam create-role" "$AWS_LOG")" "--path $role_path "
+  done
+}
+
+@test "create_role: an invalid IAM.PATH fails before creating anything" {
+  recording_aws
+  for path_json in '""' '"nullplatform/apps/"' '"/nullplatform/apps"' '"/null platform/"' '"/nullplatform/\n/apps/"' "\"/$(printf 'a%.0s' $(seq 511))/\"" 'null'; do
+    : > "$AWS_LOG"
+    export IAM="{\"ENABLED\": \"true\", \"PREFIX\": \"test-prefix\", \"PATH\": $path_json, \"ROLE\": {\"POLICIES\": []}}"
+
+    run bash -c 'source "$SCRIPT"'
+
+    assert_equal "$status" "1"
+    assert_contains "$output" "❌ Invalid IAM role path '$(jq -rn "$path_json")'"
+    assert_contains "$output" "• Set IAM.PATH to a path that starts and ends with /, e.g. /nullplatform/apps/, or remove it to use /nullplatform/custom-scopes/"
+    assert_empty "$(cat "$AWS_LOG")"
+  done
+}

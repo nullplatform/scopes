@@ -23,10 +23,19 @@ if [[ "$IAM_MODE" != "irsa" && "$IAM_MODE" != "pod_identity" ]]; then
   exit 1
 fi
 
+ROLE_PATH=$(echo "$IAM" | jq -r 'if has("PATH") then .PATH else "/nullplatform/custom-scopes/" end')
+if [[ ${#ROLE_PATH} -gt 512 || ! "$ROLE_PATH" =~ ^/([A-Za-z0-9_+=,.@/-]+/)?$ ]]; then
+  log error "   ❌ Invalid IAM role path '$ROLE_PATH'"
+  log error ""
+  log error "🔧 How to fix:"
+  log error "   • Set IAM.PATH to a path that starts and ends with /, e.g. /nullplatform/apps/, or remove it to use /nullplatform/custom-scopes/"
+  log error ""
+  exit 1
+fi
+
 NAMESPACE=$(echo "$CONTEXT" | jq -r .k8s_namespace)
 resolve_iam_role_name "$(echo "$IAM" | jq -r .PREFIX)" "$SCOPE_ID" "$NAMESPACE" || exit 1
 ROLE_NAME="$IAM_ROLE_NAME"
-ROLE_PATH="/nullplatform/custom-scopes/"
 
 if [[ "$IAM_MODE" == "irsa" ]]; then
   log debug "🔍 Getting EKS OIDC provider for cluster: $CLUSTER_NAME"
