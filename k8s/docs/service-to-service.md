@@ -32,11 +32,21 @@ Chosen per cluster, must match how the gateway was installed (`gateway.inCluster
 
 In `shared` mode the gateway's in-cluster listeners only accept `*.svc.<cluster domain>`, so the scope's real domains are never served over plain HTTP on the private load balancer.
 
+### Changing mode or gateway
+
+A deployment that changes `mode` or `gateway_name` moves the stable name without dropping calls:
+
+1. The internal routes are attached to both gateways (the live one only on listeners where it accepted them), and the ExternalName keeps pointing at the live gateway.
+2. After the apply, the deployment waits until the new gateway accepts every internal route (`SERVICE_TO_SERVICE_MOVE_TIMEOUT_SECONDS`, default 120), then points the ExternalName at it.
+3. The old gateway stays attached through the blue-green and is dropped at finalize or rollback.
+
+If the new gateway does not accept the routes in time, the ExternalName stays on the old gateway with a warning, and the next deployment retries.
+
 The bare `<svc>` is not a hostname in either mode, so clients in the same namespace must call `<svc>.<ns>` or the FQDN. All namespaces share the gateway's listeners and the HTTP `Host` carries no namespace: two namespaces with the same `<svc>` would both claim Host `<svc>`, and the oldest route would silently get the other's traffic.
 
 ## Configuration
 
-`scope-configurations` provider, `networking.service_to_service.*`; falls back to `gateway.service_to_service.*` in the container-orchestration provider.
+`scope-configurations` provider, `networking.service_to_service.*`; falls back to `gateway.service_to_service.*` in the container-orchestration provider. That fallback needs a providers-api whose container-orchestration specifications declare `gateway.service_to_service` (CLIEN-1247); until then the API drops it, so use the scope-configurations provider or the env vars.
 
 To enable it per account, namespace or dimension, set **Networking → Service-to-service → Enabled** (and **Mode**) in a scope-configurations provider. Its schema is `k8s/specs/scope-configuration.json.tpl` (see [the k8s README](../README.md#the-scope-configurations-schema)). Cluster-wide, set `SERVICE_TO_SERVICE_ENABLED` on the agent instead.
 
@@ -59,12 +69,20 @@ The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses th
 | A port is 443 or an Istio port (15000-15090) | Deployment fails in build context |
 | Gateway missing, or no listener for a port | Deployment fails before applying, listing what is missing |
 | A Service with the stable name exists and is not this scope's | Deployment fails; nothing is overwritten |
-| Disabled after being enabled, or a port removed | The next deployment deletes the objects no longer rendered |
+| Disabled after being enabled, or a port removed | The objects no longer rendered keep serving the blue deployment during a blue-green and are deleted at finalize or rollback (at once on an initial deployment) |
 | Deployment deleted | Its objects are deleted, whether the feature is on or off |
 | GRPC port of a deployment created before the feature was on with the default service template (its Service has no `appProtocol: grpc`) | gRPC calls to that deployment fail with `protocol error` until a newer deployment replaces it. The istio service template always sets it |
 | Feature turned on while the blue deployment has no per-port Services (created with the istio service template before this release) | That blue-green sends the additional ports 100% to green; the main port follows the switch |
 
 The agent needs `get` on `gateways` in the gateway namespace and `get`/`list`/`delete` on `services` and `httproutes` in the scope's namespace.
+
+## Downgrading
+
+A scope version without this feature neither updates nor deletes the objects: after its finalize the internal routes point at deleted Services (500), and a delete leaves them behind. Before downgrading, set `enabled` to `"false"` and redeploy every scope that had it on. Objects already left behind:
+
+```sh
+kubectl delete svc,httproute -n <namespace> -l nullplatform.io/stable-service=true,scope_id=<scope id>
+```
 
 ## Limits
 
