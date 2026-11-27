@@ -42,7 +42,7 @@ To enable it per account, namespace or dimension, set **Networking → Service-t
 
 | Property | Env var | Default |
 |---|---|---|
-| `enabled` | `SERVICE_TO_SERVICE_ENABLED` | `false` |
+| `enabled` (boolean; the strings `"true"`/`"false"` also work) | `SERVICE_TO_SERVICE_ENABLED` | `false` |
 | `mode` | `SERVICE_TO_SERVICE_MODE` | `shared` |
 | `gateway_name` | - | `shared`: the private gateway name; `dedicated`: `gateway-in-cluster` |
 | `listener_prefix` | - | `in-cluster-` |

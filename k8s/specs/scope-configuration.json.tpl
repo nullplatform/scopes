@@ -249,11 +249,7 @@
             "description": "Stable in-cluster name {app}-{scope}.{namespace}.svc.<cluster domain> through an Istio gateway (k8s/docs/service-to-service.md). Each key falls back to container-orchestration gateway.service_to_service.",
             "properties": {
               "enabled": {
-                "type": "string",
-                "enum": [
-                  "true",
-                  "false"
-                ],
+                "type": "boolean",
                 "title": "Enabled",
                 "description": "Unset: SERVICE_TO_SERVICE_ENABLED, then false.",
                 "order": 1
