@@ -41,3 +41,93 @@ spec:
     - IPv4
   ipFamilyPolicy: SingleStack
   internalTrafficPolicy: Cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-scope-123-deploy-456-grpc-9090
+  namespace: ns-test
+  labels:
+    name: d-scope-123-deploy-456-grpc-9090
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: scopeslug
+    app.kubernetes.io/name: scopeslug
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  annotations:
+spec:
+  ports:
+    - protocol: TCP
+      name: grpc-9090
+      appProtocol: grpc
+      port: 9090
+      targetPort: 19090
+  selector:
+    nullplatform: "true"
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: d-scope-123-deploy-456-http-9091
+  namespace: ns-test
+  labels:
+    name: d-scope-123-deploy-456-http-9091
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: scopeslug
+    app.kubernetes.io/name: scopeslug
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  annotations:
+spec:
+  ports:
+    - protocol: TCP
+      port: 9091
+      targetPort: 19091
+  selector:
+    nullplatform: "true"
+    account: acct
+    account_id: "acc1"
+    namespace: nsps
+    namespace_id: "ns1"
+    application: appslug
+    application_id: "app1"
+    scope: scopeslug
+    scope_id: "scope-123"
+    deployment_id: "deploy-456"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
