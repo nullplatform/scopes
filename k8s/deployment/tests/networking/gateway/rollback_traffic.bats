@@ -167,3 +167,11 @@ MOCK_SCRIPT
   backend="$(yq -N 'select(document_index == 0) | .spec.rules[0].http.paths[0].backend.service.name' "$OUTPUT_DIR/ingress-$SCOPE_ID-789011.yaml")"
   assert_equal "$backend" "d-123456-789011"
 }
+
+@test "rollback_traffic: renders the routes as a rollback, so a pending gateway move goes back to the live gateway" {
+  run grep -B1 -A1 'source "$SERVICE_PATH/deployment/networking/gateway/route_traffic"' \
+    "$PROJECT_ROOT/k8s/deployment/networking/gateway/rollback_traffic"
+  assert_equal "$output" 'SERVICE_TO_SERVICE_ROLLBACK=true
+source "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
+SERVICE_TO_SERVICE_ROLLBACK=false'
+}

@@ -240,11 +240,11 @@ _render_service() {
   [ "$target_ports" = "8080 9090 9091 " ]
 }
 
-@test "render istio service (istio): el targetPort apunta a la aplicación" {
+@test "render istio service (istio): todos los targetPort apuntan a la aplicación" {
   run _render_service "$ISTIO_SERVICE" istio
   [ "$status" -eq 0 ]
   target_ports=$(echo "$output" | grep -oE 'targetPort: [0-9]+' | cut -d' ' -f2 | tr '\n' ' ')
-  [ "$target_ports" = "8080 " ]
+  [ "$target_ports" = "8080 9090 9091 " ]
 }
 
 _application_prestop_seconds() {

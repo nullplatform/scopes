@@ -10,7 +10,10 @@ log debug "📋 Rollback target: $DEPLOYMENT_ID"
 
 log debug "📝 Creating ingress for rollback deployment..."
 
+# A pending service-to-service gateway move is rolled back to the live gateway.
+SERVICE_TO_SERVICE_ROLLBACK=true
 source "$SERVICE_PATH/deployment/networking/gateway/route_traffic"
+SERVICE_TO_SERVICE_ROLLBACK=false
 
 export DEPLOYMENT_ID=$NEW_DEPLOYMENT_ID
 

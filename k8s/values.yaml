@@ -56,6 +56,12 @@ configuration:
 # preStop wait of the application container: exec (default) or native.
 # exec needs /bin/sleep in the application image; native needs every node on Kubernetes >= 1.30.
 #  PRESTOP_SLEEP_MODE: exec
+# Stable in-cluster name per scope, routed through an Istio gateway (docs/service-to-service.md).
+# Needs the istio HTTPRoute templates and gateway listeners for every HTTP port of the scope.
+#  SERVICE_TO_SERVICE_ENABLED: true
+#  SERVICE_TO_SERVICE_MODE: shared # shared | dedicated
+# Slug of this scope's scope-configurations spec, so another scope type's provider is never read (README.md).
+#  SCOPE_CONFIGURATION_SLUG: containers
   IMAGE_PULL_SECRETS:
     ENABLED: true
     SECRETS:

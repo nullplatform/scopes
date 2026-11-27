@@ -10,6 +10,9 @@ log debug "📋 Scope: $SCOPE_ID | Deployment: $DEPLOYMENT_ID"
 log debug "📋 Template: $TEMPLATE"
 log debug "📋 Output: $INGRESS_FILE"
 
+source "$SERVICE_PATH/deployment/networking/gateway/service_to_service_gateway_move"
+service_to_service_previous_gateway
+
 echo "$CONTEXT" > "$CONTEXT_PATH"
 
 log debug "📝 Building ingress template..."
@@ -34,4 +37,5 @@ log info "✅ Ingress template created: $INGRESS_FILE"
 
 if grep -q '^kind: HTTPRoute' "$INGRESS_FILE"; then
   source "$SERVICE_PATH/deployment/networking/gateway/validate_gateways"
+  source "$SERVICE_PATH/deployment/networking/gateway/cleanup_service_to_service"
 fi

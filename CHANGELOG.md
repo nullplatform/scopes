@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- k8s scopes on Istio can get a stable in-cluster name, `{app}-{scope}.{namespace}.svc.cluster.local`, that other workloads call on the scope's HTTP, WebSocket and gRPC ports. Calls go through an Istio gateway (the private one, or a dedicated `gateway-in-cluster`) and follow the scope's blue-green weights. Off by default; enable it with `networking.service_to_service.enabled` in scope-configurations. In `dedicated` mode the name also answers as `{app}-{scope}.{namespace}`; never as the bare `{app}-{scope}`, which would collide across namespaces. See `k8s/docs/service-to-service.md`
+- k8s deployments with the istio service template (`deployment/templates/istio/service.yaml.tpl`) now always create a Service per additional HTTP and GRPC port, also with service-to-service off, so turning it on later keeps the blue-green weights on those ports. Unused until then
+- k8s service-to-service: turning it off or removing a port keeps the old objects serving the blue deployment until finalize or rollback, and changing `mode` or `gateway_name` moves the stable name without dropping calls
+- Fix: k8s deployments verify an HTTPRoute scope's routes (internal service-to-service routes included) whatever the DNS type; with `route53` they verified an Ingress the scope does not have and failed
+- k8s finalize fails, before deleting the previous deployment, if an HTTPRoute of the scope still sends it traffic
+- k8s scopes read their own scope-configurations provider with `SCOPE_CONFIGURATION_SLUG` (the spec slug), instead of the one the np CLI puts at the top level, which can belong to another scope type. Unset: unchanged
+- k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
+- k8s scopes ship a scope-configurations schema, `k8s/specs/scope-configuration.json.tpl`, with every key the scope reads from that provider (service-to-service included). Optional: register it with `create_scope_configuration = true` and `service_path = "k8s"`; orgs with their own schema keep it
+
 ## [1.22.0] - 2026-11-27
 - k8s scopes can limit the visibility options of the create form with `VISIBILITY_OPTIONS` (default `public,internal`). With a single option, e.g. `template_env_vars = { VISIBILITY_OPTIONS = "internal" }` in `scope_definition`, the form hides the Visibility selector and new scopes get that option; the spec keeps accepting both values, so existing scopes stay valid. The render fails on an unknown value or on a `DEFAULT_VISIBILITY` it does not offer
 - k8s scopes can rename the visibility options of the create form with `VISIBILITY_PUBLIC_LABEL` (default "Internet") and `VISIBILITY_INTERNAL_LABEL` (default "Private"), e.g. `template_env_vars = { VISIBILITY_INTERNAL_LABEL = "Internal" }` in `scope_definition`. Only the text changes; scopes are still stored as `public` or `internal`

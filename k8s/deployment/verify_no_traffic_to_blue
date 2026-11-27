@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Before finalize deletes the previous deployment, fails if any HTTPRoute of the scope
+# (the main one or a service-to-service one) still sends it traffic.
+
+verify_no_traffic_to_blue() {
+  local blue_id services routes offending
+
+  [ -n "${INGRESS_TEMPLATE:-}" ] && grep -q '^kind: HTTPRoute' "$INGRESS_TEMPLATE" 2>/dev/null || return 0
+  blue_id=$(echo "$CONTEXT" | jq -r '.scope.current_active_deployment // empty')
+  [ -n "$blue_id" ] && [ "$blue_id" != "$DEPLOYMENT_ID" ] || return 0
+
+  if ! services=$(kubectl get service -n "$K8S_NAMESPACE" -l "deployment_id=$blue_id" -o json 2>&1) \
+    || ! routes=$(kubectl get httproute -n "$K8S_NAMESPACE" -l "scope_id=$SCOPE_ID" -o json 2>&1); then
+    log warn "⚠️  Could not check which routes still send traffic to deployment $blue_id, continuing: $services$routes"
+    return 0
+  fi
+
+  offending=$(jq -rn --argjson services "$services" --argjson routes "$routes" '
+    [$services.items[].metadata.name] as $blue
+    | $routes.items[] | .metadata.name as $route
+    | .spec.rules[]?.backendRefs[]?
+    | select((.kind // "Service") == "Service" and (.group // "") == "" and (.name | IN($blue[])) and (.weight // 1) > 0)
+    | "\($route) → \(.name) (weight \(.weight // 1))"')
+
+  [ -n "$offending" ] || return 0
+
+  log error "❌ Routes still send traffic to the previous deployment $blue_id, which finalize would delete:"
+  while IFS= read -r line; do log error "   - $line"; done <<< "$offending"
+  log error "💡 Possible causes:"
+  log error "   - This finalize rendered the routes without some of them (e.g. service-to-service resolved off), so they were not moved to the new deployment"
+  log error "🔧 How to fix:"
+  log error "   • Check the scope's configuration and run finalize again"
+  log error "   • Inspect them: kubectl get httproute -n $K8S_NAMESPACE -l scope_id=$SCOPE_ID -o yaml"
+  np_scope_failure RoutesStillOnPreviousDeployment
+  exit 1
+}
+
+verify_no_traffic_to_blue

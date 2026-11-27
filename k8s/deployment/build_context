@@ -518,6 +518,71 @@ esac
 
 log debug "🔍 prestop_sleep_mode resolved to ${PRESTOP_SLEEP_MODE}"
 
+NP_SERVICE_TO_SERVICE_RESERVED_PORTS="443 15000 15001 15004 15006 15008 15009 15020 15021 15090"
+
+# Prints the scope's HTTP and GRPC ports (main first) when service-to-service is enabled and usable here.
+resolve_service_to_service_ports() {
+  [ "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled // false')" = "true" ] || return 0
+
+  # Never block removing or rolling back a deployment over a setting enabled after it started.
+  local enforce=true
+  case "${SERVICE_ACTION:-}" in delete-deployment|rollback-deployment) enforce=false ;; esac
+
+  if [[ "$enforce" == "true" && "${GATEWAY_TYPE:-istio}" == "aro_cluster" ]]; then
+    log error "❌ service_to_service is not supported with GATEWAY_TYPE 'aro_cluster'"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - ARO scopes receive traffic through OpenShift Routes, not an Istio gateway, so there is no gateway to route in-cluster calls through"
+    log error "🔧 How to fix:"
+    log error "   • Disable networking.service_to_service.enabled for this scope"
+    log error ""
+    return 1
+  fi
+
+  local template
+  for template in "${INITIAL_INGRESS_PATH:-}" "${BLUE_GREEN_INGRESS_PATH:-}"; do
+    if [[ "$enforce" == "true" && -n "$template" && "$template" != */istio/* ]]; then
+      log error "❌ service_to_service needs the Istio gateway ingress templates, but this scope uses: $template"
+      log error ""
+      log error "💡 Possible causes:"
+      log error "   - The scope is exposed through a load balancer Ingress (e.g. ALB), which has no Gateway API HTTPRoute to share its traffic split with"
+      log error "🔧 How to fix:"
+      log error "   • Use the istio HTTPRoute ingress templates (INITIAL_INGRESS_PATH and BLUE_GREEN_INGRESS_PATH under deployment/templates/istio)"
+      log error "   • Or disable networking.service_to_service.enabled for this scope"
+      log error ""
+      return 1
+    fi
+  done
+
+  local ports reserved=""
+  ports=$(echo "$CONTEXT" | jq -c --argjson main "$MAIN_HTTP_PORT" '
+    [$main] + [(.scope.capabilities.additional_ports // [])[]
+      | select((.type == "HTTP" or .type == "GRPC") and .port != $main) | .port]')
+
+  local port
+  for port in $(echo "$ports" | jq -r '.[]'); do
+    if [[ " $NP_SERVICE_TO_SERVICE_RESERVED_PORTS " == *" $port "* ]]; then
+      reserved="${reserved:+$reserved, }$port"
+    fi
+  done
+
+  if [[ "$enforce" == "true" && -n "$reserved" ]]; then
+    log error "❌ service_to_service cannot expose port(s) $reserved: the gateway reserves them"
+    log error ""
+    log error "💡 Possible causes:"
+    log error "   - 443 and Istio's own ports (15000-15090) cannot be in-cluster gateway listeners"
+    log error "🔧 How to fix:"
+    log error "   • Serve on another main_http_port or additional port"
+    log error "   • Or disable networking.service_to_service.enabled for this scope"
+    log error ""
+    return 1
+  fi
+
+  echo "$ports"
+}
+
+SERVICE_TO_SERVICE_PORTS=$(resolve_service_to_service_ports) || exit 1
+
 BLUE_NAME_FALLBACK=""
 if [ -n "$BLUE_DEPLOYMENT_ID" ]; then
   BLUE_NAME_FALLBACK="d-$SCOPE_ID-$BLUE_DEPLOYMENT_ID"
@@ -604,6 +669,13 @@ CONTEXT=$(echo "$CONTEXT" | jq \
           }')
 
 CONTEXT=$(normalize_capability_limits "$CONTEXT")
+
+if [ -n "$SERVICE_TO_SERVICE_PORTS" ]; then
+  CONTEXT=$(echo "$CONTEXT" | jq --argjson ports "$SERVICE_TO_SERVICE_PORTS" '
+    .service_to_service.ports = $ports
+    | .service_to_service.grpc_ports = [(.scope.capabilities.additional_ports // [])[]
+        | select(.type == "GRPC" and (.port as $p | any($ports[]; . == $p))) | .port]')
+fi
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')
 

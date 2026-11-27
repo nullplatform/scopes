@@ -22,6 +22,14 @@ Configuration variables follow a priority hierarchy:
 
 A provider only falls through when its value is missing or `null`. A boolean `false` is a value: it wins over later providers, env vars and the default.
 
+### Choosing the scope-configurations provider
+
+The np CLI puts one scope-configurations provider at the top of the context, whichever spec it belongs to (best dimension match, then longest NRN, then lowest id), so a k8s scope can read another scope type's provider. Set `SCOPE_CONFIGURATION_SLUG` (agent env or `values.yaml`) to the slug of this scope's scope-configurations specification, e.g. `containers-s2s-e2e`, and every setting is read from that spec's provider instead. The slug is the specification's `slug` (`GET /provider_specification?category=scope-configurations`, or `scope_configuration_specification_slug` from tofu-modules). Unset, or no provider of that spec applies (logged as a warning): the top-level provider, as before.
+
+### The scope-configurations schema
+
+`specs/scope-configuration.json.tpl` declares every key below that has a Scope Configuration Property, so the provider's form offers them. Register it with `create_scope_configuration = true` in tofu-modules' `scope_definition` or `scope_package_installation` (`service_path = "k8s"`). It is optional: an org that already has its own scope-configurations specification keeps it, and the scope reads the same keys either way. The schema sets no defaults, so a key left empty still falls back to the other providers and the agent's environment.
+
 ## Configuration Variables
 
 ### Cluster
@@ -122,6 +130,17 @@ address translation sits in front of the cluster.
 Every gateway the HTTPRoute references must exist before it is applied, and the deployment
 waits until each of them reports `Accepted` and `ResolvedRefs`. DNS records keep pointing at
 the main gateway only. The agent needs `get` on `gateways` in every namespace configured.
+
+#### Service-to-service
+
+A scope on the Istio HTTPRoute templates can get a stable in-cluster name,
+`{app}-{scope}.{namespace}.svc.cluster.local`, routed through a gateway with the scope's blue-green
+weights. Off by default; see `k8s/docs/service-to-service.md`.
+
+| Variable | Description | Scope Configuration Property |
+|----------|-------------|------------------------------|
+| **SERVICE_TO_SERVICE_ENABLED** | Create the stable name (default `false`). `"true"`/`"false"` like the other on/off keys; a JSON boolean also works via API | `networking.service_to_service.enabled` |
+| **SERVICE_TO_SERVICE_MODE** | `shared` (the private gateway) or `dedicated` (`gateway-in-cluster`) | `networking.service_to_service.mode` |
 
 ### Deployment
 

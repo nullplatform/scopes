@@ -312,3 +312,137 @@ np_scope_step_end 1 HTTPRoute k-8-s-my-app-scope-123-internet-facing failed to r
   assert_contains "$(cat "$TRACE_LOG")" "np_scope_failure ReconcileTimeout"
   assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_timeout HTTPRoute k-8-s-my-app-scope-123-internet-facing not reconciled after 1s"
 }
+
+# =============================================================================
+# Service-to-service internal HTTPRoutes
+# =============================================================================
+enable_service_to_service() {
+  export CONTEXT='{
+    "scope": {"slug": "my-app"},
+    "names": {"scope_ingress": "k-8-s-my-app-scope-123-internet-facing", "stable_service": "checkout-api-production"},
+    "service_to_service": {"enabled": true, "ports": [8080, 8081]}
+  }'
+  export ROUTES_DIR="$BATS_TEST_TMPDIR/routes"
+  mkdir -p "$ROUTES_DIR"
+}
+
+# Usage: internal_route <name> <condition json>...
+internal_route() {
+  local name="$1"
+  shift
+  jq -n --argjson ref "$(ref gateway-internal gateways)" --argjson parent "$(parent gateway-internal gateways "$@")" \
+    '{spec: {parentRefs: [$ref + {sectionName: "in-cluster"}]}, status: {parents: [$parent]}}' > "$ROUTES_DIR/$name.json"
+}
+
+run_verify_routes() {
+  run bash -c "
+    kubectl() {
+      if [ -f '$ROUTES_DIR/'\"\$3\"'.json' ]; then cat '$ROUTES_DIR/'\"\$3\"'.json'; else cat '$HTTPROUTE_FIXTURE'; fi
+    }
+    export -f kubectl
+    source '$BATS_TEST_DIRNAME/../verify_http_route_reconciliation'
+  "
+}
+
+@test "verify_http_route_reconciliation: also verifies every internal HTTPRoute" {
+  enable_service_to_service
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8080 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8081 "$ACCEPTED" "$RESOLVED"
+
+  run_verify_routes
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 HTTPRoute: k-8-s-my-app-scope-123-internet-facing | Namespace: test-namespace | Timeout: 1s"
+  assert_contains "$output" "📋 HTTPRoute: checkout-api-production-http-8080 | Namespace: test-namespace | Timeout: 1s"
+  assert_contains "$output" "📋 HTTPRoute: checkout-api-production-http-8081 | Namespace: test-namespace | Timeout: 1s"
+  assert_contains "$output" "✅ Gateways: gateways/gateway-internal"
+}
+
+@test "verify_http_route_reconciliation: verifies the grpc-<port> route of a GRPC port" {
+  enable_service_to_service
+  export CONTEXT=$(echo "$CONTEXT" | jq -c '.service_to_service.ports += [9090] | .service_to_service.grpc_ports = [9090]')
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8080 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8081 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-grpc-9090 "$ACCEPTED" "$RESOLVED"
+
+  run_verify_routes
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 HTTPRoute: checkout-api-production-grpc-9090 | Namespace: test-namespace | Timeout: 1s"
+}
+
+@test "verify_http_route_reconciliation: fails when an internal HTTPRoute is rejected" {
+  enable_service_to_service
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8080 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8081 '{"type":"Accepted","status":"False","reason":"NoMatchingListenerHostname","message":"no listener matches"}' "$RESOLVED"
+
+  run_verify_routes
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ HTTPRoute failed to reconcile on gateway gateways/gateway-internal"
+  assert_contains "$output" "- Reason: NoMatchingListenerHostname"
+}
+
+@test "verify_http_route_reconciliation: traces each internal HTTPRoute as its own iteration" {
+  enable_service_to_service
+  mock_tracing
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8080 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8081 "$ACCEPTED" "$RESOLVED"
+
+  run_verify_routes
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_begin verify-internal-httproute --iteration 0 --title Verify HTTPRoute reconciliation (checkout-api-production-http-8080)"
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_step_begin verify-internal-httproute --iteration 1 --title Verify HTTPRoute reconciliation (checkout-api-production-http-8081)"
+  assert_equal "$(tail -1 "$TRACE_LOG")" "np_scope_explain --title Verify networking --what HTTPRoute k-8-s-my-app-scope-123-internet-facing reconciled — DNS routing verified"
+}
+
+@test "verify_http_route_reconciliation: verifies only the scope's HTTPRoute when service-to-service is disabled" {
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  mock_tracing
+
+  run_verify
+
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TRACE_LOG")" != *"verify-internal-httproute"* ]] || false
+}
+
+# Usage: moving_route <name> <new gateway Accepted condition json>
+moving_route() {
+  jq -n --argjson old "$(ref gateway-internal gateways)" --argjson new "$(ref gateway-in-cluster gateways)" \
+    --argjson old_parent "$(parent gateway-internal gateways "$ACCEPTED" "$RESOLVED")" \
+    --argjson new_parent "$(parent gateway-in-cluster gateways "$2" "$RESOLVED")" \
+    '{spec: {parentRefs: [$old, $new]}, status: {parents: [$old_parent, $new_parent]}}' > "$ROUTES_DIR/$1.json"
+}
+
+@test "verify_http_route_reconciliation: a pending gateway move verifies the live gateway and warns about the new one" {
+  enable_service_to_service
+  mock_tracing
+  export SERVICE_TO_SERVICE_MOVE_PENDING_GATEWAY="gateways/gateway-in-cluster"
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  moving_route checkout-api-production-http-8080 "$ACCEPTED"
+  moving_route checkout-api-production-http-8081 '{"type":"Accepted","status":"False","reason":"NoMatchingListenerHostname","message":"no listener matches"}'
+
+  run_verify_routes
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "⚠️  HTTPRoute checkout-api-production-http-8081 not accepted by gateways/gateway-in-cluster yet (NoMatchingListenerHostname: no listener matches)"
+  assert_contains "$(cat "$TRACE_LOG")" "np_scope_output pending_gateway"
+  [[ "$output" != *"❌"* ]] || false
+}
+
+@test "verify_http_route_reconciliation: without a pending move a rejected new gateway still fails" {
+  enable_service_to_service
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  moving_route checkout-api-production-http-8080 "$ACCEPTED"
+  moving_route checkout-api-production-http-8081 '{"type":"Accepted","status":"False","reason":"NoMatchingListenerHostname","message":"no listener matches"}'
+
+  run_verify_routes
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ HTTPRoute failed to reconcile on gateway gateways/gateway-in-cluster"
+}

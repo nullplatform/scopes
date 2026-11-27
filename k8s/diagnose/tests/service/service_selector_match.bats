@@ -216,3 +216,21 @@ EOF
   result=$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")
   assert_equal "$result" "failed"
 }
+
+@test "service/service_selector_match: skips ExternalName services, which select no pods" {
+  cat > "$SERVICES_FILE" << 'EOF2'
+{
+  "items": [
+    {"metadata": {"name": "my-svc"}, "spec": {"type": "ClusterIP", "selector": {"app": "myapp"}}},
+    {"metadata": {"name": "checkout-api-production"}, "spec": {"type": "ExternalName", "externalName": "gateway-internal-istio.gateways.svc.cluster.local"}}
+  ]
+}
+EOF2
+  echo '{"items":[{"metadata":{"name":"pod-1","labels":{"app":"myapp"}}}]}' > "$PODS_FILE"
+
+  run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../service/service_selector_match'"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"checkout-api-production"* ]] || false
+  assert_equal "$(jq -r '.status' "$SCRIPT_OUTPUT_FILE")" "success"
+}

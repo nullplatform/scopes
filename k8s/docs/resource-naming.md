@@ -68,12 +68,15 @@ Here `{.application.slug}` and `{.scope.slug}` are flexible; `{.deployment.id}` 
 |---|---|---|
 | Deployment-scoped names (Deployment, HPA, PDB, Secret, CronJob) | 46 characters by default | `NAMING_MAX_LENGTH` env var, or `naming.max_length` on the `container-orchestration`/`scope-configurations` provider |
 | Scope-scoped names (Ingress, HTTPRoute, serving cert) | 52 characters, fixed | not configurable |
+| Stable service-to-service name (`names.stable_service`) | 63 characters, no id appended | `service_to_service.name_pattern` ([service-to-service.md](service-to-service.md)) |
 
 The deployment budget defaults to 46 rather than Kubernetes' 63-character object-name limit because the platform appends a further suffix to derive the ReplicaSet and Pod names (`-<replicaset-hash>-<pod-hash>`, up to 17 characters) — a Deployment name that used the full 63 characters would produce Pod names Kubernetes rejects.
 
 ## Existing scope objects are never renamed
 
 Switching a scope's `NAMING_STRATEGY` (or editing a `custom` pattern) does not rename objects that already exist, in either direction. Before computing a scope-scoped name, every strategy looks for an existing Ingress or HTTPRoute carrying the scope's `scope_id` label (`np_naming_discover_scope`); if one is found, its name is kept as-is instead of being recomputed. Per-port Ingresses are frozen the same way, matched by their `-<type>-<port>` suffix (`np_naming_discover_port`), so a live object is recognised whatever generation of names it was created under.
+
+The stable service-to-service name is frozen the same way, from the Service labelled `nullplatform.io/stable-service=true` and the scope's `scope_id`. Its internal HTTPRoutes end in `-http-<port>`, so discovery never takes them for the scope's main HTTPRoute.
 
 `ids` adopts a discovered name only when that name is not one the `ids` formula itself would produce. The `ids` name ends in the scope's visibility, so a scope that switches between `internal` and `internet-facing` still gets the new name, as it does today; what the freeze preserves is a name inherited from `qualified` or `custom`.
 
@@ -129,3 +132,4 @@ Resolving a scope's existing object name lists both `ingress` and `httproute` in
 - `k8s/naming/tests/qualified.bats` covers the `qualified` strategy, including the naming-budget precedence chain and the pod/CronJob length ceilings.
 - `k8s/naming/tests/pattern.bats` covers pattern validation (discriminant, unsafe paths, separator, literal budget) and the `custom` strategy.
 - `k8s/naming/tests/discover.bats` covers `np_naming_lookup`, `np_naming_discover_blue`, `np_naming_discover_scope`, and the existing-scope-name freeze behavior.
+- `k8s/naming/tests/stable_service.bats` covers `names.stable_service` (pattern, 63-character budget, freeze); `golden.bats` also diffs the service-to-service objects in `goldens/s2s-shared` and `goldens/s2s-dedicated`.

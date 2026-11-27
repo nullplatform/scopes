@@ -33,6 +33,8 @@ fi
 if [[ "$(type -t get_config_value 2>/dev/null)" != "function" ]]; then
   source "$_RESOLVE_K8S_NAMESPACE_DIR/get_config_value"
 fi
+source "$_RESOLVE_K8S_NAMESPACE_DIR/select_scope_configuration"
+np_select_scope_configuration
 
 K8S_DEFAULT_NAMESPACE="nullplatform"
 K8S_NAMESPACE_NAME_BUDGET=63

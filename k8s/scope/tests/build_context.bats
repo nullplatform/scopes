@@ -797,3 +797,98 @@ scope_runs_in() {
   [[ "$output" != *"Using the default domain"* ]]
   [[ "$output" != *"DOMAIN=nullapps.io"* ]]
 }
+
+# =============================================================================
+# Service-to-service
+# =============================================================================
+@test "build_context: service-to-service is off by default and leaves the context untouched" {
+  unset SERVICE_TO_SERVICE_ENABLED
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r 'has("service_to_service")')" "false"
+  assert_equal "$(echo "$CONTEXT" | jq -r '.names | has("stable_service")')" "false"
+}
+
+@test "build_context: service-to-service shared mode defaults to the private gateway, even for a public scope" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"].networking.service_to_service = {"enabled": true}')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.service_to_service | del(.hostnames)')" '{"enabled":true,"mode":"shared","gateway_name":"co-gateway-private","gateway_namespace":"gateways","gateway_host":"co-gateway-private-istio.gateways.svc.cluster.local","listener_prefix":"in-cluster-","cluster_domain":"cluster.local","name_pattern":"{.application.slug}-{.scope.slug}"}'
+  assert_equal "$(echo "$CONTEXT" | jq -r .names.stable_service)" "test-app-test-scope"
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.hostnames)" '["test-app-test-scope.default-namespace.svc.cluster.local"]'
+}
+
+@test "build_context: service-to-service dedicated mode uses gateway-in-cluster and adds <svc>.<ns>, never the bare <svc>" {
+  export SERVICE_TO_SERVICE_ENABLED=true
+  export SERVICE_TO_SERVICE_MODE=dedicated
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -r .service_to_service.gateway_host)" "gateway-in-cluster-istio.gateways.svc.cluster.local"
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.hostnames)" '["test-app-test-scope.default-namespace.svc.cluster.local","test-app-test-scope.default-namespace"]'
+}
+
+@test "build_context: service-to-service settings from container-orchestration, scope-configurations wins" {
+  export SERVICE_TO_SERVICE_MODE=shared
+  export CONTEXT=$(echo "$CONTEXT" | jq '
+    .providers["container-orchestration"].gateway.service_to_service = {"enabled": true, "mode": "dedicated", "gateway_name": "co-in-cluster", "listener_prefix": "s2s-", "cluster_domain": "corp.local"}
+    | .providers["scope-configurations"].networking.service_to_service = {"gateway_name": "scope-in-cluster"}')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.service_to_service | [.mode, .gateway_name, .listener_prefix, .gateway_host]')" '["dedicated","scope-in-cluster","s2s-","scope-in-cluster-istio.gateways.svc.corp.local"]'
+}
+
+@test "build_context: service-to-service fails on an unknown mode" {
+  export SERVICE_TO_SERVICE_ENABLED=true
+  export SERVICE_TO_SERVICE_MODE=mesh
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ service_to_service.mode must be shared or dedicated, got: 'mesh'"
+  assert_contains "$output" "🔧 How to fix:"
+}
+
+@test "build_context: service-to-service enabled accepts a boolean or a string in scope-configurations" {
+  unset SERVICE_TO_SERVICE_ENABLED
+  local value base="$CONTEXT"
+  for value in true '"true"'; do
+    export CONTEXT=$(echo "$base" | jq --argjson v "$value" '.providers["scope-configurations"].networking.service_to_service = {"enabled": $v}')
+    source "$SCRIPT"
+    assert_equal "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled')" "true" || return 1
+  done
+}
+
+@test "build_context: service-to-service enabled false, boolean or string, wins over the env var" {
+  export SERVICE_TO_SERVICE_ENABLED=true
+  local value base="$CONTEXT"
+  for value in false '"false"'; do
+    export CONTEXT=$(echo "$base" | jq --argjson v "$value" '.providers["scope-configurations"].networking.service_to_service = {"enabled": $v}')
+    source "$SCRIPT"
+    assert_equal "$(echo "$CONTEXT" | jq -r 'has("service_to_service")')" "false" || return 1
+  done
+}
+
+@test "build_context: SCOPE_CONFIGURATION_SLUG reads service-to-service from that spec's provider, not the CLI's top level" {
+  unset SERVICE_TO_SERVICE_ENABLED
+  export SCOPE_CONFIGURATION_SLUG=containers-s2s-e2e
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "networking": {"service_to_service": {"enabled": "false"}},
+    "containers-s2s-e2e": {"networking": {"service_to_service": {"enabled": "true", "mode": "dedicated"}}}}')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.service_to_service | [.enabled, .mode]')" '[true,"dedicated"]'
+}
+
+@test "build_context: service-to-service fails on an enabled value that is not a boolean" {
+  export SERVICE_TO_SERVICE_ENABLED=yes
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 1 ]
+  assert_contains "$output" "❌ service_to_service.enabled must be true or false, got: 'yes'"
+}

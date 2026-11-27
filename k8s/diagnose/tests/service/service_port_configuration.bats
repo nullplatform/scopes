@@ -600,3 +600,13 @@ EOF
   stripped=$(strip_ansi "$output")
   assert_contains "$stripped" "Service my-svc port configuration:"
 }
+
+@test "service/service_port_configuration: skips ExternalName services, which have no pods to compare" {
+  echo '{"items":[{"metadata":{"name":"checkout-api-production"},"spec":{"type":"ExternalName","ports":[{"port":8080}]}}]}' > "$SERVICES_FILE"
+  echo '{"items":[]}' > "$PODS_FILE"
+
+  run bash -c "source '$BATS_TEST_DIRNAME/../../utils/diagnose_utils' && source '$BATS_TEST_DIRNAME/../../service/service_port_configuration'"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"checkout-api-production"* ]] || false
+}

@@ -71,4 +71,103 @@ validate_gateways() {
   np_scope_step_end 0
 }
 
+validate_service_to_service() {
+  local gateway_name gateway_namespace listener_prefix stable namespace scope_id fqdn
+  local gateway_json gateway_status listener port service_json service_status owner managed
+  local -a missing_listeners=()
+
+  gateway_name=$(echo "$CONTEXT" | jq -r '.service_to_service.gateway_name')
+  gateway_namespace=$(echo "$CONTEXT" | jq -r '.service_to_service.gateway_namespace')
+  listener_prefix=$(echo "$CONTEXT" | jq -r '.service_to_service.listener_prefix')
+  stable=$(echo "$CONTEXT" | jq -r '.names.stable_service')
+  namespace=$(echo "$CONTEXT" | jq -r '.k8s_namespace')
+  scope_id=$(echo "$CONTEXT" | jq -r '.scope.id | tostring')
+  fqdn=$(echo "$CONTEXT" | jq -r '.service_to_service.hostnames[0]')
+
+  log debug "🔍 Validating service-to-service routing for $fqdn..."
+
+  np_scope_step_begin validate-service-to-service --title "Validate service-to-service routing"
+  np_scope_input service_to_service "$(echo "$CONTEXT" | jq -c '.service_to_service | {mode, gateway: "\(.gateway_namespace)/\(.gateway_name)", ports, hostnames}')"
+
+  gateway_status=0
+  gateway_json=$(kubectl get gateway "$gateway_name" -n "$gateway_namespace" -o json 2>&1) || gateway_status=$?
+
+  if [ "$gateway_status" -ne 0 ]; then
+    if echo "$gateway_json" | grep -q "NotFound"; then
+      log error "❌ In-cluster gateway '$gateway_namespace/$gateway_name' not found"
+      log error "💡 Possible causes:"
+      log error "   - The in-cluster gateway is not installed (gateway.inCluster in the base chart, gateway_in_cluster_enabled in the base tofu module)"
+      log error "   - service_to_service.mode or service_to_service.gateway_name does not match how the cluster was installed"
+      log error "🔧 How to fix:"
+      log error "   - List the gateways in the cluster: kubectl get gateways -n $gateway_namespace"
+      log error "   - Enable the in-cluster gateway, or fix service_to_service.mode / service_to_service.gateway_name"
+      fail_gateway_validation GatewayNotFound "In-cluster gateway not found: $gateway_namespace/$gateway_name"
+    fi
+    log error "❌ Could not check gateway '$gateway_namespace/$gateway_name': $gateway_json"
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading gateways in namespace '$gateway_namespace'"
+    log error "🔧 How to fix:"
+    log error "   - Verify cluster connectivity and RBAC: kubectl auth can-i get gateways -n $gateway_namespace"
+    fail_gateway_validation GatewayCheckFailed "Could not check gateway $gateway_namespace/$gateway_name"
+  fi
+
+  np_scope_consumes "k8s-gateway:$gateway_namespace/$gateway_name"
+
+  for port in $(echo "$CONTEXT" | jq -r '.service_to_service.ports[]'); do
+    listener="$listener_prefix$port"
+    if ! echo "$gateway_json" | jq -e --arg listener "$listener" 'any(.spec.listeners[]?; .name == $listener)' >/dev/null; then
+      missing_listeners+=("$listener")
+    fi
+  done
+
+  if [ "${#missing_listeners[@]}" -gt 0 ]; then
+    log error "❌ Gateway '$gateway_namespace/$gateway_name' has no listener for the scope's HTTP/gRPC ports: ${missing_listeners[*]}"
+    log error "💡 Possible causes:"
+    log error "   - Clients call the stable name on the ports the application serves, and the gateway only listens on its configured in-cluster ports"
+    log error "🔧 How to fix:"
+    log error "   - Add the ports to gateway.inCluster.ports (base chart) or gateway_in_cluster_ports (base tofu module)"
+    log error "   - Or serve on a port the gateway already listens on: kubectl get gateway $gateway_name -n $gateway_namespace -o jsonpath='{.spec.listeners[*].name}'"
+    np_scope_output missing_listeners "$(printf '%s\n' "${missing_listeners[@]}" | jq -Rnc '[inputs]')"
+    fail_gateway_validation ListenerNotFound "Gateway $gateway_namespace/$gateway_name has no listener: ${missing_listeners[*]}"
+  fi
+
+  service_status=0
+  service_json=$(kubectl get service "$stable" -n "$namespace" -o json 2>&1) || service_status=$?
+
+  if [ "$service_status" -ne 0 ] && ! echo "$service_json" | grep -q "NotFound"; then
+    log error "❌ Could not check service '$namespace/$stable': $service_json"
+    log error "💡 Possible causes:"
+    log error "   - The cluster API server is unreachable"
+    log error "   - RBAC denies reading services in namespace '$namespace'"
+    log error "🔧 How to fix:"
+    log error "   - Verify cluster connectivity and RBAC: kubectl auth can-i get services -n $namespace"
+    fail_gateway_validation StableServiceCheckFailed "Could not check service $namespace/$stable"
+  fi
+
+  if [ "$service_status" -eq 0 ]; then
+    owner=$(echo "$service_json" | jq -r '.metadata.labels.scope_id // ""')
+    managed=$(echo "$service_json" | jq -r '.metadata.labels["nullplatform.io/stable-service"] // ""')
+    if [ "$owner" != "$scope_id" ] || [ "$managed" != "true" ]; then
+      log error "❌ Service '$namespace/$stable' already exists and is not this scope's stable service"
+      log error "💡 Possible causes:"
+      log error "   - Another scope renders the same name (same application and scope slugs in this Kubernetes namespace)${owner:+; it belongs to scope_id=$owner}"
+      log error "   - A Service with this name was created outside nullplatform"
+      log error "🔧 How to fix:"
+      log error "   - Set a service_to_service.name_pattern that is unique in namespace '$namespace'"
+      log error "   - Or rename or delete the existing Service: kubectl get service $stable -n $namespace --show-labels"
+      fail_gateway_validation StableServiceNameTaken "Service $namespace/$stable already exists"
+    fi
+  fi
+
+  log info "✅ Service-to-service routing ready: $fqdn through $gateway_namespace/$gateway_name"
+
+  np_scope_explain --title "Validate service-to-service routing" --what "$fqdn routes through $gateway_namespace/$gateway_name"
+  np_scope_step_end 0
+}
+
 validate_gateways
+
+if [ "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled // false')" = "true" ]; then
+  validate_service_to_service
+fi
