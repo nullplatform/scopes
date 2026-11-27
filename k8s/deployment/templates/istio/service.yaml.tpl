@@ -74,3 +74,85 @@ spec:
     - IPv4
   ipFamilyPolicy: SingleStack
   internalTrafficPolicy: Cluster
+{{- if and (has . "service_to_service") .service_to_service.enabled .scope.capabilities.additional_ports }}
+{{- range .scope.capabilities.additional_ports }}
+{{- if eq .type "HTTP" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .service_name }}
+  namespace: {{ $.k8s_namespace }}
+  labels:
+    name: {{ .service_name }}
+    app.kubernetes.io/part-of: {{ $.component }}
+    app.kubernetes.io/component: application
+    app.kubernetes.io/instance: {{ $.scope.slug }}
+    app.kubernetes.io/name: {{ $.scope.slug }}
+    account: {{ $.account.slug }}
+    account_id: "{{ $.account.id }}"
+    namespace: {{ $.namespace.slug }}
+    namespace_id: "{{ $.namespace.id }}"
+    application: {{ $.application.slug }}
+    application_id: "{{ $.application.id }}"
+    scope: {{ $.scope.slug }}
+    scope_id: "{{ $.scope.id }}"
+    deployment_id: "{{ $.deployment.id }}"
+{{- $global := index $.k8s_modifiers "global" }}
+{{- if $global }}
+  {{- $labels := index $global "labels" }}
+  {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- $service := index $.k8s_modifiers "service" }}
+{{- if $service }}
+  {{- $labels := index $service "labels" }}
+  {{- if $labels }}
+{{ data.ToYAML $labels | indent 4 }}
+  {{- end }}
+{{- end }}
+  annotations:
+{{- $global := index $.k8s_modifiers "global" }}
+{{- if $global }}
+  {{- $annotations := index $global "annotations" }}
+  {{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- $service := index $.k8s_modifiers "service" }}
+{{- if $service }}
+  {{- $annotations := index $service "annotations" }}
+  {{- if $annotations }}
+{{ data.ToYAML $annotations | indent 4 }}
+  {{- end }}
+{{- end }}
+spec:
+  ports:
+    - protocol: TCP
+      port: {{ .port }}
+      {{- if $istio }}
+      targetPort: {{ .port }}
+      {{- else }}
+      targetPort: {{ .traffic_manager_port }}
+      {{- end }}
+  selector:
+    nullplatform: "true"
+    account: {{ $.account.slug }}
+    account_id: "{{ $.account.id }}"
+    namespace: {{ $.namespace.slug }}
+    namespace_id: "{{ $.namespace.id }}"
+    application: {{ $.application.slug }}
+    application_id: "{{ $.application.id }}"
+    scope: {{ $.scope.slug }}
+    scope_id: "{{ $.scope.id }}"
+    deployment_id: "{{ $.deployment.id }}"
+  type: ClusterIP
+  sessionAffinity: None
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  internalTrafficPolicy: Cluster
+{{- end }}
+{{- end }}
+{{- end }}
