@@ -66,6 +66,7 @@ configuration:
     ENABLED: false
 #    PREFIX: nullplatform-scopes
 #    MODE: irsa
+#    PATH: /nullplatform/custom-scopes/
 #    TAGS:
 #      team: "{.namespace.slug}"
 #      cost-center: "CC-1234"
