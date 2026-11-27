@@ -852,6 +852,26 @@ scope_runs_in() {
   assert_contains "$output" "🔧 How to fix:"
 }
 
+@test "build_context: service-to-service enabled accepts a boolean or a string in scope-configurations" {
+  unset SERVICE_TO_SERVICE_ENABLED
+  local value base="$CONTEXT"
+  for value in true '"true"'; do
+    export CONTEXT=$(echo "$base" | jq --argjson v "$value" '.providers["scope-configurations"].networking.service_to_service = {"enabled": $v}')
+    source "$SCRIPT"
+    assert_equal "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled')" "true" || return 1
+  done
+}
+
+@test "build_context: service-to-service enabled false, boolean or string, wins over the env var" {
+  export SERVICE_TO_SERVICE_ENABLED=true
+  local value base="$CONTEXT"
+  for value in false '"false"'; do
+    export CONTEXT=$(echo "$base" | jq --argjson v "$value" '.providers["scope-configurations"].networking.service_to_service = {"enabled": $v}')
+    source "$SCRIPT"
+    assert_equal "$(echo "$CONTEXT" | jq -r 'has("service_to_service")')" "false" || return 1
+  done
+}
+
 @test "build_context: service-to-service fails on an enabled value that is not a boolean" {
   export SERVICE_TO_SERVICE_ENABLED=yes
 
