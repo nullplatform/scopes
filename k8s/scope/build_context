@@ -2,6 +2,8 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/get_config_value"
+source "$SCRIPT_DIR/../utils/select_scope_configuration"
+np_select_scope_configuration
 source "$SCRIPT_DIR/../utils/resolve_k8s_namespace"
 
 K8S_NAMESPACE=$(k8s_configured_namespace)

@@ -48,7 +48,7 @@ The bare `<svc>` is not a hostname in either mode, so clients in the same namesp
 
 `scope-configurations` provider, `networking.service_to_service.*`; falls back to `gateway.service_to_service.*` in the container-orchestration provider. That fallback needs a providers-api whose container-orchestration specifications declare `gateway.service_to_service` (CLIEN-1247); until then the API drops it, so use the scope-configurations provider or the env vars.
 
-To enable it per account, namespace or dimension, set **Networking → Service-to-service → Enabled** (and **Mode**) in a scope-configurations provider. Its schema is `k8s/specs/scope-configuration.json.tpl` (see [the k8s README](../README.md#the-scope-configurations-schema)). Cluster-wide, set `SERVICE_TO_SERVICE_ENABLED` on the agent instead.
+To enable it per account, namespace or dimension, set **Networking → Service-to-service → Enabled** (and **Mode**) in a scope-configurations provider. Its schema is `k8s/specs/scope-configuration.json.tpl` (see [the k8s README](../README.md#the-scope-configurations-schema)). Cluster-wide, set `SERVICE_TO_SERVICE_ENABLED` on the agent instead. When the org has scope-configurations providers of other scope types, set `SCOPE_CONFIGURATION_SLUG` so the scope reads its own (see [the k8s README](../README.md#choosing-the-scope-configurations-provider)).
 
 | Property | Env var | Default |
 |---|---|---|

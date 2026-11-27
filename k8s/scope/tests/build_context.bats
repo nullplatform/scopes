@@ -872,6 +872,18 @@ scope_runs_in() {
   done
 }
 
+@test "build_context: SCOPE_CONFIGURATION_SLUG reads service-to-service from that spec's provider, not the CLI's top level" {
+  unset SERVICE_TO_SERVICE_ENABLED
+  export SCOPE_CONFIGURATION_SLUG=containers-s2s-e2e
+  export CONTEXT=$(echo "$CONTEXT" | jq '.providers["scope-configurations"] = {
+    "networking": {"service_to_service": {"enabled": "false"}},
+    "containers-s2s-e2e": {"networking": {"service_to_service": {"enabled": "true", "mode": "dedicated"}}}}')
+
+  source "$SCRIPT"
+
+  assert_equal "$(echo "$CONTEXT" | jq -c '.service_to_service | [.enabled, .mode]')" '[true,"dedicated"]'
+}
+
 @test "build_context: service-to-service fails on an enabled value that is not a boolean" {
   export SERVICE_TO_SERVICE_ENABLED=yes
 
