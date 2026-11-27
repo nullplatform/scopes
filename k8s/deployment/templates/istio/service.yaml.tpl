@@ -74,7 +74,7 @@ spec:
     - IPv4
   ipFamilyPolicy: SingleStack
   internalTrafficPolicy: Cluster
-{{- if and (has . "service_to_service") .service_to_service.enabled .scope.capabilities.additional_ports }}
+{{- if .scope.capabilities.additional_ports }}
 {{- range .scope.capabilities.additional_ports }}
 {{- if or (eq .type "HTTP") (eq .type "GRPC") }}
 ---

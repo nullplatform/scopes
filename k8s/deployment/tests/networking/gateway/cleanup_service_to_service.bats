@@ -165,3 +165,27 @@ np_scope_step_end 0'
   [ "$status" -eq 0 ]
   assert_equal "$output" "true"
 }
+
+@test "cleanup_service_to_service: keeps stale objects while blue still serves, warning when the feature is off" {
+  export CONTEXT=$(echo "$CONTEXT" | jq 'del(.service_to_service)')
+  export EXISTING_FIXTURE="Service/checkout-api-production HTTPRoute/checkout-api-production-http-8080"
+  export SERVICE_TO_SERVICE_KEEP_PREVIOUS=true
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$KUBECTL_LOG")" != *"delete"* ]] || false
+  assert_contains "$output" "⚠️  Service-to-service is off for this scope, but it still has: service/checkout-api-production httproute/checkout-api-production-http-8080"
+  assert_contains "$output" "📋 Keeping service/checkout-api-production httproute/checkout-api-production-http-8080 until finalize or rollback"
+}
+
+@test "cleanup_service_to_service: keeps the route of a removed port while blue still serves" {
+  export EXISTING_FIXTURE="Service/checkout-api-production HTTPRoute/checkout-api-production-http-8080 HTTPRoute/checkout-api-production-http-8081 HTTPRoute/checkout-api-production-http-9000"
+  export SERVICE_TO_SERVICE_KEEP_PREVIOUS=true
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$KUBECTL_LOG")" != *"delete"* ]] || false
+  [[ "$output" != *"is off"* ]] || false
+}

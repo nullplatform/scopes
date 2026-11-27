@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# Moves the stable name between gateways without dropping calls (docs/service-to-service.md).
+# Before the render, service_to_service_previous_gateway keeps the internal routes on the gateway
+# they are live on and the ExternalName pointing at it. After the apply,
+# service_to_service_finish_gateway_move waits for the new gateway to accept the routes, then
+# switches the ExternalName. The old parent is dropped by the next render that no longer keeps it.
+
+# Adds service_to_service.previous_parents (per port) and, while the move is pending,
+# service_to_service.external_name to CONTEXT.
+service_to_service_previous_gateway() {
+  local namespace stable_service scope_id live_host routes
+
+  [ "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled // false')" = "true" ] || return 0
+
+  namespace=$(echo "$CONTEXT" | jq -r '.k8s_namespace')
+  stable_service=$(echo "$CONTEXT" | jq -r '.names.stable_service')
+  scope_id=$(echo "$CONTEXT" | jq -r '.scope.id | tostring')
+
+  if ! live_host=$(kubectl get service "$stable_service" -n "$namespace" --ignore-not-found \
+      -o jsonpath='{.spec.externalName}' 2>&1) \
+    || ! routes=$(kubectl get httproute -n "$namespace" \
+      -l "nullplatform.io/stable-service=true,scope_id=$scope_id" -o json 2>&1); then
+    log warn "⚠️  Could not read the live service-to-service objects; a gateway change, if any, is applied at once"
+    return 0
+  fi
+
+  CONTEXT=$(echo "$CONTEXT" | jq \
+    --arg live_host "$live_host" \
+    --argjson routes "$routes" \
+    --arg keep "${SERVICE_TO_SERVICE_KEEP_PREVIOUS:-false}" '
+    .service_to_service as $s2s | .names.stable_service as $svc | .k8s_namespace as $ns
+    | ($live_host != "" and $live_host != $s2s.gateway_host) as $moving
+    | if $moving or $keep == "true" then
+        .service_to_service.previous_parents = ([
+          $routes.items[]
+          | select(.metadata.name | test("^" + $svc + "-(http|grpc)-[0-9]+$"))
+          | {key: (.metadata.name | capture("-(?<port>[0-9]+)$").port),
+             value: [(.status.parents // [])[]
+               | select(any(.conditions[]?; .type == "Accepted" and .status == "True"))
+               | .parentRef | .namespace = (.namespace // $ns)
+               | select(.name != $s2s.gateway_name or .namespace != $s2s.gateway_namespace)
+               | {name, namespace} + (if .sectionName then {sectionName} else {} end)]}
+          | select(.value | length > 0)
+        ] | from_entries)
+      else . end
+    | if $moving then .service_to_service.external_name = $live_host else . end')
+
+  if [ "$(echo "$CONTEXT" | jq -r '.service_to_service.external_name // empty')" != "" ]; then
+    log info "📋 Service-to-service moves to gateway $(echo "$CONTEXT" | jq -r '.service_to_service | "\(.gateway_namespace)/\(.gateway_name)"'); the routes stay on the current one until it accepts them"
+  fi
+}
+
+# Points the stable Service at the new gateway once every internal route is accepted there.
+service_to_service_finish_gateway_move() {
+  local namespace stable_service target live_host gateway_name gateway_namespace route status_json
+  local timeout="${SERVICE_TO_SERVICE_MOVE_TIMEOUT_SECONDS:-120}" elapsed pending patch_output
+  local -a routes=()
+
+  [ "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled // false')" = "true" ] || return 0
+
+  namespace=$(echo "$CONTEXT" | jq -r '.k8s_namespace')
+  stable_service=$(echo "$CONTEXT" | jq -r '.names.stable_service')
+  target=$(echo "$CONTEXT" | jq -r '.service_to_service.gateway_host')
+  gateway_name=$(echo "$CONTEXT" | jq -r '.service_to_service.gateway_name')
+  gateway_namespace=$(echo "$CONTEXT" | jq -r '.service_to_service.gateway_namespace')
+
+  live_host=$(kubectl get service "$stable_service" -n "$namespace" --ignore-not-found \
+    -o jsonpath='{.spec.externalName}' 2>/dev/null) || return 0
+  [ -n "$live_host" ] && [ "$live_host" != "$target" ] || return 0
+
+  np_scope_step_begin move-service-to-service-gateway --title "Move service-to-service to the new gateway"
+  log info "📝 Waiting for gateway $gateway_namespace/$gateway_name to accept the internal routes before moving $stable_service from $live_host"
+
+  while IFS= read -r route; do
+    [ -n "$route" ] && routes+=("$route")
+  done < <(echo "$CONTEXT" | jq -r '
+    (.names.stable_service) as $svc | (.service_to_service.grpc_ports // []) as $grpc
+    | .service_to_service.ports[] | . as $port
+    | "\($svc)-\(if any($grpc[]; . == $port) then "grpc" else "http" end)-\($port)"')
+
+  elapsed=0
+  while :; do
+    pending=()
+    for route in "${routes[@]}"; do
+      status_json=$(kubectl get httproute "$route" -n "$namespace" -o json 2>/dev/null) || status_json='{}'
+      echo "$status_json" | jq -e --arg name "$gateway_name" --arg ns "$gateway_namespace" --arg route_ns "$namespace" '
+        any((.status.parents // [])[];
+          .parentRef.name == $name and (.parentRef.namespace // $route_ns) == $ns
+          and any(.conditions[]?; .type == "Accepted" and .status == "True"))' >/dev/null || pending+=("$route")
+    done
+    [ "${#pending[@]}" -eq 0 ] && break
+    if [ "$elapsed" -ge "$timeout" ]; then
+      log warn "⚠️  Gateway $gateway_namespace/$gateway_name has not accepted ${pending[*]} after ${timeout}s; $stable_service keeps pointing at $live_host, which still serves them. The next deployment retries the move"
+      np_scope_step_end 0
+      return 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+
+  # Accepted is reported once istiod has the route; give the gateway pods a moment to load it.
+  sleep "${SERVICE_TO_SERVICE_MOVE_SETTLE_SECONDS:-3}"
+
+  if ! patch_output=$(kubectl patch service "$stable_service" -n "$namespace" --type merge \
+      -p "{\"spec\":{\"externalName\":\"$target\"}}" 2>&1); then
+    log warn "⚠️  Could not point $stable_service at $target, it keeps $live_host: $patch_output. The next deployment retries the move"
+    np_scope_step_end 0
+    return 0
+  fi
+
+  log info "✅ $stable_service now resolves to $target"
+  np_scope_step_end 0
+}

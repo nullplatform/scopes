@@ -1,14 +1,29 @@
 #!/bin/bash
 
 
+source "$SERVICE_PATH/deployment/networking/gateway/service_to_service_gateway_move"
+service_to_service_finish_gateway_move
+
 log debug "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
 
-case "$DNS_TYPE" in
-  route53)
-    source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
-    ;;
-  external_dns)
+# The rendered route decides the verifier: Istio scopes run HTTPRoutes whatever the DNS type.
+ROUTE_KIND=""
+for ROUTE_SOURCE in "${INGRESS_FILE:-}" "${INGRESS_TEMPLATE:-}"; do
+  [ -n "$ROUTE_SOURCE" ] && [ -f "$ROUTE_SOURCE" ] || continue
+  if grep -q '^kind: HTTPRoute' "$ROUTE_SOURCE"; then
+    ROUTE_KIND="HTTPRoute"
+  elif grep -q '^kind: Ingress' "$ROUTE_SOURCE"; then
+    ROUTE_KIND="Ingress"
+  fi
+  [ -n "$ROUTE_KIND" ] && break
+done
+
+case "$ROUTE_KIND:$DNS_TYPE" in
+  HTTPRoute:*|:external_dns)
     source "$SERVICE_PATH/deployment/verify_http_route_reconciliation"
+    ;;
+  Ingress:*|:route53)
+    source "$SERVICE_PATH/deployment/verify_ingress_reconciliation"
     ;;
   *)
     log warn "⚠️ Ingress reconciliation not available for DNS type: $DNS_TYPE, skipping"

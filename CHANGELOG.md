@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - k8s scopes on Istio can get a stable in-cluster name, `{app}-{scope}.{namespace}.svc.cluster.local`, that other workloads call on the scope's HTTP, WebSocket and gRPC ports. Calls go through an Istio gateway (the private one, or a dedicated `gateway-in-cluster`) and follow the scope's blue-green weights. Off by default; enable it with `networking.service_to_service.enabled` in scope-configurations. In `dedicated` mode the name also answers as `{app}-{scope}.{namespace}`; never as the bare `{app}-{scope}`, which would collide across namespaces. See `k8s/docs/service-to-service.md`
+- k8s deployments with the istio service template (`deployment/templates/istio/service.yaml.tpl`) now always create a Service per additional HTTP and GRPC port, also with service-to-service off, so turning it on later keeps the blue-green weights on those ports. Unused until then
+- k8s service-to-service: turning it off or removing a port keeps the old objects serving the blue deployment until finalize or rollback, and changing `mode` or `gateway_name` moves the stable name without dropping calls
+- Fix: k8s deployments verify an HTTPRoute scope's routes (internal service-to-service routes included) whatever the DNS type; with `route53` they verified an Ingress the scope does not have and failed
+- k8s finalize fails, before deleting the previous deployment, if an HTTPRoute of the scope still sends it traffic
 - k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
 - k8s HTTP metrics (`http.rpm`, `http.response_time`, `http.error_rate`) accept a `traffic` filter and group-by (`internal` for calls through the stable in-cluster name, `external` otherwise). Needs a logs controller that emits the `traffic` label
 - k8s scopes ship a scope-configurations schema, `k8s/specs/scope-configuration.json.tpl`, with every key the scope reads from that provider (service-to-service included). Optional: register it with `create_scope_configuration = true` and `service_path = "k8s"`; orgs with their own schema keep it

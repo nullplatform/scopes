@@ -61,6 +61,8 @@ trap 'rm -rf "$NP_OUTPUT_DIR"' EXIT
 
 source "$ROOT/k8s/utils/get_config_value"
 source "$ROOT/k8s/deployment/build_context" > /dev/null
+# Lets a test add what later steps put in the context, e.g. service_to_service.previous_parents.
+if [ -n "${GOLDEN_CONTEXT_PATCH:-}" ]; then CONTEXT="$(echo "$CONTEXT" | jq "$GOLDEN_CONTEXT_PATCH")"; fi
 
 ENRICHED_CONTEXT_DIR="$(mktemp -d)"
 trap 'rm -rf "$NP_OUTPUT_DIR" "$ENRICHED_CONTEXT_DIR"' EXIT

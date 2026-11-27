@@ -144,6 +144,13 @@ steps:
       - name: SERVICE_TEMPLATE_PATH
         type: file
         file: "$OUTPUT_DIR/service-$SCOPE_ID-$BLUE_DEPLOYMENT_ID.yaml"
+  - name: verify no traffic to previous deployment
+    trace:
+      title: Check nothing routes to the previous version
+      description: Fails before deleting the old version if any route of the scope still sends it traffic.
+      group: finalize
+    type: script
+    file: "$SERVICE_PATH/deployment/verify_no_traffic_to_blue"
   - name: delete deployment
     trace:
       title: Remove previous deployment

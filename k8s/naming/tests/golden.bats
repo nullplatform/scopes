@@ -111,3 +111,29 @@ http-8083"
 		"$RENDER_DIR/k8s-istio-blue-green-httproute.yaml"
 	assert_equal "$output" "in-cluster-9090"
 }
+
+@test "golden: istio service template renders the additional HTTP and GRPC port Services with service-to-service off" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
+	# A blue deployed with the feature off needs them once it is turned on, or its additional ports get no traffic.
+	run yq ea -N '.metadata.name' "$RENDER_DIR/k8s-istio-service.yaml"
+	assert_equal "$output" "d-123456-789012
+d-123456-789012-grpc-9090
+d-123456-789012-http-8081"
+}
+
+@test "golden: service-to-service during a gateway move keeps the ExternalName and adds the previous parents" {
+	GOLDEN_CONTEXT_PATCH='.service_to_service.external_name = "gateway-private-istio.gateways.svc.cluster.local"
+		| .service_to_service.previous_parents = {"8080": [{"name": "gateway-private", "namespace": "gateways", "sectionName": "in-cluster-8080"}]}' \
+		"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-s2s-dedicated-raw.json" "$RENDER_DIR"
+	for f in k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
+		run yq ea -N 'select(.spec.type == "ExternalName") | .spec.externalName' "$RENDER_DIR/$f"
+		assert_equal "$output" "gateway-private-istio.gateways.svc.cluster.local"
+		run yq ea -N 'select(.metadata.name == "checkout-api-production-http-8080") | .spec.parentRefs[] | .name + "/" + .sectionName' "$RENDER_DIR/$f"
+		assert_equal "$output" "gateway-in-cluster/in-cluster-8080
+gateway-private/in-cluster-8080"
+		run yq ea -N 'select(.metadata.name == "checkout-api-production-http-8083") | .spec.parentRefs | length' "$RENDER_DIR/$f"
+		assert_equal "$output" "1"
+	done
+}

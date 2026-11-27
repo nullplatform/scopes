@@ -208,3 +208,33 @@ get service,httproute -n  -l nullplatform.io/stable-service=true,scope_id=scope-
   [ ! -f "$BATS_TEST_TMPDIR/kubectl.log" ]
   [[ "$output" != *"Validating gateways referenced by the HTTPRoute"* ]] || false
 }
+
+@test "route_traffic: keeps stale service-to-service objects while blue still serves" {
+  gomplate() {
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --out) printf 'apiVersion: gateway.networking.k8s.io/v1\nkind: HTTPRoute\n' > "$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+  }
+  kubectl() { echo "$*" >> "$BATS_TEST_TMPDIR/kubectl.log"; }
+  export -f gomplate kubectl
+  export CONTEXT='{"gateways": [{"name": "gateway-public", "namespace": "gateways"}]}'
+  export SERVICE_TO_SERVICE_KEEP_PREVIOUS=true
+
+  run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
+
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$BATS_TEST_TMPDIR/kubectl.log")" != *"delete"* ]] || false
+}
+
+@test "route_traffic: only blue-green start and switch keep the previous service-to-service state" {
+  local workflows="$PROJECT_ROOT/k8s/deployment/workflows"
+  for wf in blue_green switch_traffic; do
+    assert_equal "$(yq '.configuration.SERVICE_TO_SERVICE_KEEP_PREVIOUS' "$workflows/$wf.yaml")" "true" || return 1
+  done
+  for wf in initial finalize rollback; do
+    assert_equal "$(yq '.configuration.SERVICE_TO_SERVICE_KEEP_PREVIOUS' "$workflows/$wf.yaml")" "null" || return 1
+  done
+}

@@ -246,7 +246,7 @@
           "service_to_service": {
             "type": "object",
             "title": "Service-to-service",
-            "description": "Stable in-cluster name {app}-{scope}.{namespace}.svc.<cluster domain> through an Istio gateway (k8s/docs/service-to-service.md). Each key falls back to container-orchestration gateway.service_to_service.",
+            "description": "Stable in-cluster name {app}-{scope}.{namespace}.svc.<cluster domain> through an Istio gateway (k8s/docs/service-to-service.md). Each key falls back to container-orchestration gateway.service_to_service, once providers-api accepts it.",
             "properties": {
               "enabled": {
                 "type": "string",
