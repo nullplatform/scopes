@@ -111,3 +111,13 @@ http-8083"
 		"$RENDER_DIR/k8s-istio-blue-green-httproute.yaml"
 	assert_equal "$output" "in-cluster-9090"
 }
+
+@test "golden: istio service template renders the additional HTTP and GRPC port Services with service-to-service off" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-normal-raw.json" "$RENDER_DIR"
+	# A blue deployed with the feature off needs them once it is turned on, or its additional ports get no traffic.
+	run yq ea -N '.metadata.name' "$RENDER_DIR/k8s-istio-service.yaml"
+	assert_equal "$output" "d-123456-789012
+d-123456-789012-grpc-9090
+d-123456-789012-http-8081"
+}

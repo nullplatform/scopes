@@ -61,7 +61,8 @@ The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses th
 | A Service with the stable name exists and is not this scope's | Deployment fails; nothing is overwritten |
 | Disabled after being enabled, or a port removed | The next deployment deletes the objects no longer rendered |
 | Deployment deleted | Its objects are deleted, whether the feature is on or off |
-| GRPC port of a deployment created before the feature was on (its Service has no `appProtocol: grpc`) | gRPC calls to that deployment fail with `protocol error` until a newer deployment replaces it |
+| GRPC port of a deployment created before the feature was on with the default service template (its Service has no `appProtocol: grpc`) | gRPC calls to that deployment fail with `protocol error` until a newer deployment replaces it. The istio service template always sets it |
+| Feature turned on while the blue deployment has no per-port Services (created with the istio service template before this release) | That blue-green sends the additional ports 100% to green; the main port follows the switch |
 
 The agent needs `get` on `gateways` in the gateway namespace and `get`/`list`/`delete` on `services` and `httproutes` in the scope's namespace.
 
