@@ -204,6 +204,10 @@ metadata:
 spec:
   ports:
     - protocol: TCP
+      {{- if and (has $ "service_to_service") $.service_to_service.enabled }}
+      name: grpc-{{ .port }}
+      appProtocol: grpc
+      {{- end }}
       port: {{ .port }}
       {{- if $istio }}
       targetPort: {{ .port }}

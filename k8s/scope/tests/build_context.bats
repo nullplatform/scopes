@@ -820,14 +820,14 @@ scope_runs_in() {
   assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.hostnames)" '["test-app-test-scope.default-namespace.svc.cluster.local"]'
 }
 
-@test "build_context: service-to-service dedicated mode uses gateway-in-cluster and adds short hostnames" {
+@test "build_context: service-to-service dedicated mode uses gateway-in-cluster and adds <svc>.<ns>, never the bare <svc>" {
   export SERVICE_TO_SERVICE_ENABLED=true
   export SERVICE_TO_SERVICE_MODE=dedicated
 
   source "$SCRIPT"
 
   assert_equal "$(echo "$CONTEXT" | jq -r .service_to_service.gateway_host)" "gateway-in-cluster-istio.gateways.svc.cluster.local"
-  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.hostnames)" '["test-app-test-scope.default-namespace.svc.cluster.local","test-app-test-scope","test-app-test-scope.default-namespace"]'
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.hostnames)" '["test-app-test-scope.default-namespace.svc.cluster.local","test-app-test-scope.default-namespace"]'
 }
 
 @test "build_context: service-to-service settings from container-orchestration, scope-configurations wins" {

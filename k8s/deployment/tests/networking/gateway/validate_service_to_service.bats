@@ -104,7 +104,7 @@ mock_tracing() {
   run bash -c 'source "$SCRIPT"'
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ Gateway 'gateways/gateway-internal' has no listener for the scope's HTTP ports: in-cluster-8080 in-cluster-8081"
+  assert_contains "$output" "❌ Gateway 'gateways/gateway-internal' has no listener for the scope's HTTP/gRPC ports: in-cluster-8080 in-cluster-8081"
   assert_contains "$output" "💡 Possible causes:"
   assert_contains "$output" "🔧 How to fix:"
   assert_contains "$output" "   - Add the ports to gateway.inCluster.ports (base chart) or gateway_in_cluster_ports (base tofu module)"

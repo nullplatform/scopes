@@ -82,7 +82,8 @@ spec:
   externalName: {{ $s2s.gateway_host }}
   ports:
 {{- range $s2s.ports }}
-    - name: http-{{ . }}
+{{- $port := . }}{{ $type := "http" }}{{ range $s2s.grpc_ports }}{{ if eq . $port }}{{ $type = "grpc" }}{{ end }}{{ end }}
+    - name: {{ $type }}-{{ . }}
       protocol: TCP
       port: {{ . }}
 {{- end }}
@@ -116,12 +117,12 @@ spec:
             type: PathPrefix
             value: /
 {{- range (index .scope.capabilities "additional_ports") }}
-{{- if and (eq .type "HTTP") (ne .port $.main_http_port) }}
+{{- if and (or (eq .type "HTTP") (eq .type "GRPC")) (ne .port $.main_http_port) }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ $.names.stable_service }}-http-{{ .port }}
+  name: {{ $.names.stable_service }}-{{ strings.ToLower .type }}-{{ .port }}
   namespace: {{ $.k8s_namespace }}
 {{- template "stable-metadata" (coll.Dict "root" $ "modifier" "ingress") }}
 spec:

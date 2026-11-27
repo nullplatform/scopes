@@ -76,7 +76,7 @@ spec:
   internalTrafficPolicy: Cluster
 {{- if and (has . "service_to_service") .service_to_service.enabled .scope.capabilities.additional_ports }}
 {{- range .scope.capabilities.additional_ports }}
-{{- if eq .type "HTTP" }}
+{{- if or (eq .type "HTTP") (eq .type "GRPC") }}
 ---
 apiVersion: v1
 kind: Service
@@ -130,6 +130,10 @@ metadata:
 spec:
   ports:
     - protocol: TCP
+      {{- if eq .type "GRPC" }}
+      name: grpc-{{ .port }}
+      appProtocol: grpc
+      {{- end }}
       port: {{ .port }}
       {{- if $istio }}
       targetPort: {{ .port }}

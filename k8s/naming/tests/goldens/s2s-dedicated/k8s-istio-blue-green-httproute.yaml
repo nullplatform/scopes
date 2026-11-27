@@ -66,6 +66,9 @@ spec:
     - name: http-8080
       protocol: TCP
       port: 8080
+    - name: grpc-9090
+      protocol: TCP
+      port: 9090
     - name: http-8083
       protocol: TCP
       port: 8083
@@ -93,7 +96,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -123,6 +125,52 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
+  name: checkout-api-production-grpc-9090
+  namespace: nullplatform
+  labels:
+    nullplatform: "true"
+    account: acme
+    account_id: "1"
+    namespace: payments
+    namespace_id: "11"
+    application: checkout-api
+    application_id: "111"
+    scope: production
+    scope_id: "123456"
+    nullplatform.io/stable-service: "true"
+  annotations:
+spec:
+  hostnames:
+    - checkout-api-production.nullplatform.svc.cluster.local
+    - checkout-api-production.nullplatform
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gateway-in-cluster
+      namespace: gateways
+      sectionName: in-cluster-9090
+  rules:
+    - backendRefs:
+        # Blue deployment (old version)
+        - group: ""
+          kind: Service
+          name: d-123456-789011-grpc-9090
+          port: 9090
+          weight: 70
+        # Green deployment (new version)
+        - group: ""
+          kind: Service
+          name: d-123456-789012-grpc-9090
+          port: 9090
+          weight: 30
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
   name: checkout-api-production-http-8083
   namespace: nullplatform
   labels:
@@ -140,7 +188,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io
@@ -187,7 +234,6 @@ metadata:
 spec:
   hostnames:
     - checkout-api-production.nullplatform.svc.cluster.local
-    - checkout-api-production
     - checkout-api-production.nullplatform
   parentRefs:
     - group: gateway.networking.k8s.io
