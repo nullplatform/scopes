@@ -60,6 +60,8 @@ configuration:
 # Needs the istio HTTPRoute templates and gateway listeners for every HTTP port of the scope.
 #  SERVICE_TO_SERVICE_ENABLED: true
 #  SERVICE_TO_SERVICE_MODE: shared # shared | dedicated
+# Slug of this scope's scope-configurations spec, so another scope type's provider is never read (README.md).
+#  SCOPE_CONFIGURATION_SLUG: containers
   IMAGE_PULL_SECRETS:
     ENABLED: true
     SECRETS:

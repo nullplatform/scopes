@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# The np CLI puts one scope-configurations provider, of any scope type, at the top of
+# .providers["scope-configurations"] and each spec's own under its slug. With
+# SCOPE_CONFIGURATION_SLUG set, this scope's spec replaces the top level, once per CONTEXT.
+np_select_scope_configuration() {
+  local slug="${SCOPE_CONFIGURATION_SLUG:-}" state
+  [ -n "$slug" ] && [ -n "${CONTEXT:-}" ] || return 0
+
+  state=$(echo "$CONTEXT" | jq -r --arg slug "$slug" '
+    if .scope_configuration_slug == $slug then "selected"
+    elif (.providers["scope-configurations"][$slug] | type) == "object" then "nested"
+    else "missing" end' 2>/dev/null) || return 0
+
+  case "$state" in
+    nested)
+      CONTEXT=$(echo "$CONTEXT" | jq -c --arg slug "$slug" '
+        .providers["scope-configurations"] = .providers["scope-configurations"][$slug]
+        | .scope_configuration_slug = $slug')
+      export CONTEXT
+      log debug "📋 Using the scope-configurations provider of spec '$slug'"
+      ;;
+    missing)
+      log warn "⚠️  No scope-configurations provider of spec '$slug' (SCOPE_CONFIGURATION_SLUG) applies here; using the one the CLI put at the top level, which may belong to another scope type"
+      ;;
+  esac
+}
