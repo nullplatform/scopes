@@ -484,3 +484,33 @@ secret/sec-1 created"
 	[ "$status" -eq 0 ]
 	! echo "$output" | grep -q "tracing SDK not bundled"
 }
+
+@test "events carry the scope's NRN from the context" {
+	export CONTEXT='{"scope": {"nrn": "organization=1:account=2:namespace=3:application=4:scope=5"}, "application": {"nrn": "organization=1:account=2:namespace=3:application=4"}}'
+	run_logged 'log error "❌ boom"'
+	unset CONTEXT
+	[ "$status" -eq 0 ]
+	echo "$output" | grep -q '"nrn":"organization=1:account=2:namespace=3:application=4:scope=5"'
+}
+
+@test "the deployment NRN wins over the scope's" {
+	export CONTEXT='{"deployment": {"nrn": "organization=1:account=2:deployment=6"}, "scope": {"nrn": "organization=1:account=2:scope=5"}}'
+	run_logged 'log error "❌ boom"'
+	unset CONTEXT
+	echo "$output" | grep -q '"nrn":"organization=1:account=2:deployment=6"'
+}
+
+@test "NP_TRACE_NRN wins over the context" {
+	export CONTEXT='{"scope": {"nrn": "organization=1:account=2:scope=5"}}'
+	export NP_TRACE_NRN="organization=1:account=9"
+	run_logged 'log error "❌ boom"'
+	unset CONTEXT NP_TRACE_NRN
+	echo "$output" | grep -q '"nrn":"organization=1:account=9"'
+}
+
+@test "without a context NRN the events carry none, as before" {
+	unset CONTEXT
+	run_logged 'log error "❌ boom"'
+	[ "$status" -eq 0 ]
+	! echo "$output" | grep -q '"nrn":"organization'
+}
