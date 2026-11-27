@@ -188,7 +188,9 @@ verify_httproute "$SCOPE_HTTPROUTE_NAME" verify-httproute
 INTERNAL_ROUTE_ITERATION=0
 for INTERNAL_ROUTE in $(echo "$CONTEXT" | jq -r '
     if .service_to_service.enabled == true then
-      (.names.stable_service) as $svc | .service_to_service.ports[] | "\($svc)-http-\(.)"
+      (.names.stable_service) as $svc | (.service_to_service.grpc_ports // []) as $grpc
+      | .service_to_service.ports[] | . as $port
+      | "\($svc)-\(if any($grpc[]; . == $port) then "grpc" else "http" end)-\($port)"
     else empty end'); do
     verify_httproute "$INTERNAL_ROUTE" verify-internal-httproute --iteration "$INTERNAL_ROUTE_ITERATION"
     INTERNAL_ROUTE_ITERATION=$((INTERNAL_ROUTE_ITERATION + 1))

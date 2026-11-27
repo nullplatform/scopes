@@ -122,12 +122,12 @@ validate_service_to_service() {
   done
 
   if [ "${#missing_listeners[@]}" -gt 0 ]; then
-    log error "❌ Gateway '$gateway_namespace/$gateway_name' has no listener for the scope's HTTP ports: ${missing_listeners[*]}"
+    log error "❌ Gateway '$gateway_namespace/$gateway_name' has no listener for the scope's HTTP/gRPC ports: ${missing_listeners[*]}"
     log error "💡 Possible causes:"
     log error "   - Clients call the stable name on the ports the application serves, and the gateway only listens on its configured in-cluster ports"
     log error "🔧 How to fix:"
     log error "   - Add the ports to gateway.inCluster.ports (base chart) or gateway_in_cluster_ports (base tofu module)"
-    log error "   - Or serve HTTP on a port the gateway already listens on: kubectl get gateway $gateway_name -n $gateway_namespace -o jsonpath='{.spec.listeners[*].name}'"
+    log error "   - Or serve on a port the gateway already listens on: kubectl get gateway $gateway_name -n $gateway_namespace -o jsonpath='{.spec.listeners[*].name}'"
     np_scope_output missing_listeners "$(printf '%s\n' "${missing_listeners[@]}" | jq -Rnc '[inputs]')"
     fail_gateway_validation ListenerNotFound "Gateway $gateway_namespace/$gateway_name has no listener: ${missing_listeners[*]}"
   fi

@@ -520,7 +520,7 @@ log debug "🔍 prestop_sleep_mode resolved to ${PRESTOP_SLEEP_MODE}"
 
 NP_SERVICE_TO_SERVICE_RESERVED_PORTS="443 15000 15001 15004 15006 15008 15009 15020 15021 15090"
 
-# Prints the scope's HTTP ports (main first) when service-to-service is enabled and usable here.
+# Prints the scope's HTTP and GRPC ports (main first) when service-to-service is enabled and usable here.
 resolve_service_to_service_ports() {
   [ "$(echo "$CONTEXT" | jq -r '.service_to_service.enabled // false')" = "true" ] || return 0
 
@@ -556,7 +556,8 @@ resolve_service_to_service_ports() {
 
   local ports reserved=""
   ports=$(echo "$CONTEXT" | jq -c --argjson main "$MAIN_HTTP_PORT" '
-    [$main] + [(.scope.capabilities.additional_ports // [])[] | select(.type == "HTTP" and .port != $main) | .port]')
+    [$main] + [(.scope.capabilities.additional_ports // [])[]
+      | select((.type == "HTTP" or .type == "GRPC") and .port != $main) | .port]')
 
   local port
   for port in $(echo "$ports" | jq -r '.[]'); do
@@ -571,7 +572,7 @@ resolve_service_to_service_ports() {
     log error "💡 Possible causes:"
     log error "   - 443 and Istio's own ports (15000-15090) cannot be in-cluster gateway listeners"
     log error "🔧 How to fix:"
-    log error "   • Serve HTTP on another main_http_port or additional port"
+    log error "   • Serve on another main_http_port or additional port"
     log error "   • Or disable networking.service_to_service.enabled for this scope"
     log error ""
     return 1
@@ -670,7 +671,10 @@ CONTEXT=$(echo "$CONTEXT" | jq \
 CONTEXT=$(normalize_capability_limits "$CONTEXT")
 
 if [ -n "$SERVICE_TO_SERVICE_PORTS" ]; then
-  CONTEXT=$(echo "$CONTEXT" | jq --argjson ports "$SERVICE_TO_SERVICE_PORTS" '.service_to_service.ports = $ports')
+  CONTEXT=$(echo "$CONTEXT" | jq --argjson ports "$SERVICE_TO_SERVICE_PORTS" '
+    .service_to_service.ports = $ports
+    | .service_to_service.grpc_ports = [(.scope.capabilities.additional_ports // [])[]
+        | select(.type == "GRPC" and (.port as $p | any($ports[]; . == $p))) | .port]')
 fi
 
 DEPLOYMENT_ID=$(echo "$CONTEXT" | jq -r '.deployment.id')

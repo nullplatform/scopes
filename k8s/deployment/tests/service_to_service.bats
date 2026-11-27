@@ -23,11 +23,11 @@ setup() {
   }'
 }
 
-@test "service_to_service: lists the main port first, then additional HTTP ports, without GRPC or duplicates" {
+@test "service_to_service: lists the main port first, then additional HTTP and GRPC ports, without duplicates" {
   run resolve_service_to_service_ports
 
   [ "$status" -eq 0 ]
-  assert_equal "$output" "[8080,8081]"
+  assert_equal "$output" "[8080,8081,9090]"
 }
 
 @test "service_to_service: prints nothing when disabled" {
@@ -47,7 +47,7 @@ setup() {
   run resolve_service_to_service_ports
 
   [ "$status" -eq 0 ]
-  assert_equal "$output" "[8080,8081]"
+  assert_equal "$output" "[8080,8081,9090]"
 }
 
 @test "service_to_service: fails with the ALB ingress templates" {
@@ -90,7 +90,7 @@ setup() {
   run resolve_service_to_service_ports
 
   [ "$status" -eq 1 ]
-  assert_contains "$output" "❌ service_to_service cannot expose port(s) 15021, 443: the gateway reserves them"
+  assert_contains "$output" "❌ service_to_service cannot expose port(s) 15021, 443, 15090: the gateway reserves them"
 }
 
 @test "service_to_service: a failing check aborts the full build_context" {
@@ -117,7 +117,7 @@ setup() {
   rm -rf "$NP_OUTPUT_DIR"
 }
 
-@test "service_to_service: the full build_context adds the HTTP ports and the stable name" {
+@test "service_to_service: the full build_context adds the HTTP and GRPC ports and the stable name" {
   export SERVICE_PATH="$PROJECT_ROOT/k8s"
   export NP_OUTPUT_DIR="$(mktemp -d)"
   export SERVICE_ACTION="start-initial"
@@ -128,7 +128,7 @@ setup() {
   export CONTEXT='{
     "scope": {"id": "123", "slug": "prod", "nrn": "nrn:organization=1:account=2:namespace=3:application=4", "domain": "x.io",
       "capabilities": {"visibility": "private", "scaling_type": "fixed", "fixed_instances": 1, "protocol": "http",
-        "main_http_port": 3000, "additional_ports": [{"port": 3001, "type": "HTTP"}]}},
+        "main_http_port": 3000, "additional_ports": [{"port": 3001, "type": "HTTP"}, {"port": 3002, "type": "GRPC"}]}},
     "namespace": {"slug": "ns"}, "application": {"slug": "app"},
     "deployment": {"id": "456", "status": "creating"},
     "providers": {"container-orchestration": {"cluster": {"namespace": "apps"}}}
@@ -136,7 +136,8 @@ setup() {
 
   source "$PROJECT_ROOT/k8s/deployment/build_context" >/dev/null
 
-  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.ports)" "[3000,3001]"
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.ports)" "[3000,3001,3002]"
+  assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.grpc_ports)" "[3002]"
   assert_equal "$(echo "$CONTEXT" | jq -r .names.stable_service)" "app-prod"
   assert_equal "$(echo "$CONTEXT" | jq -c .service_to_service.hostnames)" '["app-prod.apps.svc.cluster.local"]'
   rm -rf "$NP_OUTPUT_DIR"
@@ -149,6 +150,6 @@ setup() {
     export SERVICE_ACTION=$action
     run resolve_service_to_service_ports
     [ "$status" -eq 0 ]
-    assert_equal "$output" "[8080,8081]"
+    assert_equal "$output" "[8080,8081,9090]"
   done
 }

@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- k8s scopes on Istio can get a stable in-cluster name, `{app}-{scope}.{namespace}.svc.cluster.local`, that other workloads call on the scope's HTTP ports. Calls go through an Istio gateway (the private one, or a dedicated `gateway-in-cluster`) and follow the scope's blue-green weights. Off by default; enable it with `networking.service_to_service.enabled` in scope-configurations. See `k8s/docs/service-to-service.md`
+- k8s scopes on Istio can get a stable in-cluster name, `{app}-{scope}.{namespace}.svc.cluster.local`, that other workloads call on the scope's HTTP, WebSocket and gRPC ports. Calls go through an Istio gateway (the private one, or a dedicated `gateway-in-cluster`) and follow the scope's blue-green weights. Off by default; enable it with `networking.service_to_service.enabled` in scope-configurations. See `k8s/docs/service-to-service.md`
 - k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
 
 ## [1.21.0] - 2026-11-24

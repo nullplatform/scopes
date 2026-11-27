@@ -96,6 +96,17 @@ mock_tracing() {
   assert_contains "$(cat "$KUBECTL_LOG")" "delete httproute/checkout-api-production-http-9000 -n apps --ignore-not-found"
 }
 
+@test "cleanup_service_to_service: keeps the grpc route of a GRPC port and deletes its old http route" {
+  export CONTEXT=$(echo "$CONTEXT" | jq '.service_to_service.ports += [9090] | .service_to_service.grpc_ports = [9090]')
+  export EXISTING_FIXTURE="Service/checkout-api-production HTTPRoute/checkout-api-production-http-8080 HTTPRoute/checkout-api-production-http-8081 HTTPRoute/checkout-api-production-grpc-9090 HTTPRoute/checkout-api-production-http-9090"
+
+  run bash -c 'source "$SCRIPT"'
+
+  [ "$status" -eq 0 ]
+  assert_contains "$(cat "$KUBECTL_LOG")" "delete httproute/checkout-api-production-http-9090 -n apps --ignore-not-found"
+  [[ "$(cat "$KUBECTL_LOG")" != *"grpc-9090 "* ]] || false
+}
+
 @test "cleanup_service_to_service: a failed listing only warns" {
   export LIST_FAILS=1
 

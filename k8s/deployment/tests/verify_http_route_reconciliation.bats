@@ -359,6 +359,20 @@ run_verify_routes() {
   assert_contains "$output" "✅ Gateways: gateways/gateway-internal"
 }
 
+@test "verify_http_route_reconciliation: verifies the grpc-<port> route of a GRPC port" {
+  enable_service_to_service
+  export CONTEXT=$(echo "$CONTEXT" | jq -c '.service_to_service.ports += [9090] | .service_to_service.grpc_ports = [9090]')
+  single_gateway "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8080 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-http-8081 "$ACCEPTED" "$RESOLVED"
+  internal_route checkout-api-production-grpc-9090 "$ACCEPTED" "$RESOLVED"
+
+  run_verify_routes
+
+  [ "$status" -eq 0 ]
+  assert_contains "$output" "📋 HTTPRoute: checkout-api-production-grpc-9090 | Namespace: test-namespace | Timeout: 1s"
+}
+
 @test "verify_http_route_reconciliation: fails when an internal HTTPRoute is rejected" {
   enable_service_to_service
   single_gateway "$ACCEPTED" "$RESOLVED"

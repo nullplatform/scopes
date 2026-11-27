@@ -55,10 +55,10 @@ teardown() {
 	assert_equal "$output" "15"
 }
 
-@test "golden: service-to-service shared mode renders the stable Service and one internal HTTPRoute per HTTP port" {
+@test "golden: service-to-service shared mode renders the stable Service and one internal HTTPRoute per HTTP and GRPC port" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
 		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-s2s-shared-raw.json" "$RENDER_DIR"
-	for f in k8s-istio-service.yaml k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
+	for f in k8s-service.yaml k8s-istio-service.yaml k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
 		run diff "$PROJECT_ROOT/k8s/naming/tests/goldens/s2s-shared/$f" "$RENDER_DIR/$f"
 		[ "$status" -eq 0 ]
 	done
@@ -67,7 +67,7 @@ teardown() {
 @test "golden: service-to-service dedicated mode adds the short hostnames" {
 	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
 		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-s2s-dedicated-raw.json" "$RENDER_DIR"
-	for f in k8s-istio-service.yaml k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
+	for f in k8s-service.yaml k8s-istio-service.yaml k8s-istio-initial-httproute.yaml k8s-istio-blue-green-httproute.yaml; do
 		run diff "$PROJECT_ROOT/k8s/naming/tests/goldens/s2s-dedicated/$f" "$RENDER_DIR/$f"
 		[ "$status" -eq 0 ]
 	done
@@ -80,6 +80,7 @@ teardown() {
 		"$RENDER_DIR/k8s-istio-blue-green-httproute.yaml"
 	assert_equal "$output" "false
 false
+false
 false"
 }
 
@@ -91,5 +92,22 @@ false"
 Service
 HTTPRoute
 HTTPRoute
+HTTPRoute
 HTTPRoute"
+}
+
+@test "golden: service-to-service names GRPC ports grpc-<port> with appProtocol grpc, so the gateway speaks HTTP/2 upstream" {
+	"$PROJECT_ROOT/k8s/naming/tests/render_golden.sh" \
+		"$PROJECT_ROOT/k8s/naming/tests/fixtures/context-s2s-shared-raw.json" "$RENDER_DIR"
+	run yq ea -N 'select(.spec.type == "ExternalName") | .spec.ports[].name' "$RENDER_DIR/k8s-istio-initial-httproute.yaml"
+	assert_equal "$output" "http-8080
+grpc-9090
+http-8083"
+	for f in k8s-service.yaml k8s-istio-service.yaml; do
+		run yq ea -N 'select(.metadata.name == "d-123456-789012-grpc-9090") | .spec.ports[0].appProtocol' "$RENDER_DIR/$f"
+		assert_equal "$output" "grpc"
+	done
+	run yq ea -N 'select(.metadata.name == "checkout-api-production-grpc-9090") | .spec.parentRefs[0].sectionName' \
+		"$RENDER_DIR/k8s-istio-blue-green-httproute.yaml"
+	assert_equal "$output" "in-cluster-9090"
 }

@@ -1,6 +1,6 @@
 # Service-to-service traffic
 
-A k8s scope on the Istio HTTPRoute templates can get a stable in-cluster name that other workloads call on the ports the application serves:
+A k8s scope on the Istio HTTPRoute templates can get a stable in-cluster name that other workloads call on the ports the application serves (HTTP, WebSocket and gRPC):
 
 ```
 http://{app}-{scope}.{k8s namespace}.svc.cluster.local:{main_http_port}
@@ -13,10 +13,11 @@ Calls go through an Istio gateway and follow the same blue-green weights as the 
 | Object | Name | What it does |
 |---|---|---|
 | `Service` (`type: ExternalName`) | `names.stable_service` | Resolves to the gateway's Service, `<gateway>-istio.<gateway namespace>.svc.<cluster domain>` |
-| `HTTPRoute`, one per HTTP port | `<stable service>-http-<port>` | Attached to listener `<listener_prefix><port>` of the gateway; same backends and weights as the scope's route |
+| `HTTPRoute`, one per HTTP or GRPC port | `<stable service>-http-<port>`, `<stable service>-grpc-<port>` | Attached to listener `<listener_prefix><port>` of the gateway; same backends and weights as the scope's route |
 
-- HTTP ports: `main_http_port` plus every `additional_ports` entry of type `HTTP`. GRPC ports are not exposed.
-- ExternalName does not remap ports: the gateway needs a listener for every HTTP port of the scope. The deployment fails naming the missing ones.
+- Ports: `main_http_port` plus every `additional_ports` entry of type `HTTP` or `GRPC`. WebSocket (`protocol: web_sockets`) upgrades on the main port pass through the HTTP route.
+- GRPC ports use an `HTTPRoute` too (gRPC is HTTP/2; no method matching is needed, and cleanup and verification stay on one kind). Their per-deployment Service port gets `name: grpc-<port>` and `appProtocol: grpc` so the gateway speaks HTTP/2 to the pods, and the stable Service names the port `grpc-<port>`.
+- ExternalName does not remap ports: the gateway needs a listener for every port of the scope. The deployment fails naming the missing ones.
 - The objects carry `nullplatform.io/stable-service: "true"` and the scope labels, but no `deployment_id`, so they live as long as the scope's route: created by the initial deployment, updated by switch traffic, finalize and rollback, deleted with it.
 - The internal routes end in `-http-<port>` so the naming engine never mistakes them for the scope's main HTTPRoute.
 
@@ -51,7 +52,7 @@ The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses th
 | Condition | Result |
 |---|---|
 | ALB ingress templates or `GATEWAY_TYPE=aro_cluster` | Deployment fails in build context |
-| An HTTP port is 443 or an Istio port (15000-15090) | Deployment fails in build context |
+| A port is 443 or an Istio port (15000-15090) | Deployment fails in build context |
 | Gateway missing, or no listener for a port | Deployment fails before applying, listing what is missing |
 | A Service with the stable name exists and is not this scope's | Deployment fails; nothing is overwritten |
 | Disabled after being enabled, or a port removed | The next deployment deletes the objects no longer rendered |
