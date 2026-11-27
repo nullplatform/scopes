@@ -62,3 +62,7 @@ The gateway namespace is the scope's `gateway_namespace`. `name_pattern` uses th
 | GRPC port of a deployment created before the feature was on (its Service has no `appProtocol: grpc`) | gRPC calls to that deployment fail with `protocol error` until a newer deployment replaces it |
 
 The agent needs `get` on `gateways` in the gateway namespace and `get`/`list`/`delete` on `services` and `httproutes` in the scope's namespace.
+
+## Limits
+
+- No access control between workloads: any pod in the cluster can call any scope's stable name, as with a plain k8s Service. In `shared` mode the in-cluster routes are also reachable from the VPC through the private load balancer if its security group opens the ports. Restricting callers (e.g. an Istio `AuthorizationPolicy` on the gateway) is out of scope for this version.
