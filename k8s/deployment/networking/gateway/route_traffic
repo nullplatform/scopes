@@ -37,8 +37,5 @@ log info "✅ Ingress template created: $INGRESS_FILE"
 
 if grep -q '^kind: HTTPRoute' "$INGRESS_FILE"; then
   source "$SERVICE_PATH/deployment/networking/gateway/validate_gateways"
-  # Blue still serves during a blue-green: its stale objects go at finalize or rollback.
-  if [ "${SERVICE_TO_SERVICE_KEEP_PREVIOUS:-false}" != "true" ]; then
-    source "$SERVICE_PATH/deployment/networking/gateway/cleanup_service_to_service"
-  fi
+  source "$SERVICE_PATH/deployment/networking/gateway/cleanup_service_to_service"
 fi

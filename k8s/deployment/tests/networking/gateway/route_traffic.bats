@@ -226,7 +226,7 @@ get service,httproute -n  -l nullplatform.io/stable-service=true,scope_id=scope-
   run bash "$PROJECT_ROOT/k8s/deployment/networking/gateway/route_traffic"
 
   [ "$status" -eq 0 ]
-  assert_equal "$(cat "$BATS_TEST_TMPDIR/kubectl.log")" "get gateway gateway-public -n gateways -o name"
+  [[ "$(cat "$BATS_TEST_TMPDIR/kubectl.log")" != *"delete"* ]] || false
 }
 
 @test "route_traffic: only blue-green start and switch keep the previous service-to-service state" {

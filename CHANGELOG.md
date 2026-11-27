@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - k8s deployments with the istio service template (`deployment/templates/istio/service.yaml.tpl`) now always create a Service per additional HTTP and GRPC port, also with service-to-service off, so turning it on later keeps the blue-green weights on those ports. Unused until then
 - k8s service-to-service: turning it off or removing a port keeps the old objects serving the blue deployment until finalize or rollback, and changing `mode` or `gateway_name` moves the stable name without dropping calls
 - Fix: k8s deployments verify an HTTPRoute scope's routes (internal service-to-service routes included) whatever the DNS type; with `route53` they verified an Ingress the scope does not have and failed
+- k8s finalize fails, before deleting the previous deployment, if an HTTPRoute of the scope still sends it traffic
 - k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
 - k8s scopes ship a scope-configurations schema, `k8s/specs/scope-configuration.json.tpl`, with every key the scope reads from that provider (service-to-service included). Optional: register it with `create_scope_configuration = true` and `service_path = "k8s"`; orgs with their own schema keep it
 
