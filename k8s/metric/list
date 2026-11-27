@@ -6,22 +6,22 @@ echo '{
 			"name": "http.rpm",
 			"title": "Throughput",
 			"unit": "rpm",
-			"available_filters": ["scope_id", "instance_id"],
-			"available_group_by": ["instance_id"]
+			"available_filters": ["scope_id", "instance_id", "traffic"],
+			"available_group_by": ["instance_id", "traffic"]
 		},
 		{
 			"name": "http.response_time",
 			"title": "Response time",
 			"unit": "ms",
-			"available_filters": ["scope_id", "instance_id"],
-			"available_group_by": ["instance_id"]
+			"available_filters": ["scope_id", "instance_id", "traffic"],
+			"available_group_by": ["instance_id", "traffic"]
 		},
 		{
 			"name": "http.error_rate",
 			"title": "Error rate",
 			"unit": "%",
-			"available_filters": ["scope_id", "instance_id"],
-			"available_group_by": ["instance_id"]
+			"available_filters": ["scope_id", "instance_id", "traffic"],
+			"available_group_by": ["instance_id", "traffic"]
 		},
 		{
 			"name": "system.cpu_usage_percentage",

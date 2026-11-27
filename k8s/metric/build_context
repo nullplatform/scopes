@@ -30,6 +30,10 @@ if [[ -n "$METRIC" ]]; then
   export METRIC_NAME="$METRIC"
 fi
 
+# The telemetry API sends ?dimensions=traffic:internal as arguments.filters.traffic.
+TRAFFIC=$(echo "$CONTEXT" | jq -r '(.arguments.filters | objects | .traffic) // .arguments.traffic // empty')
+
 export PROM_URL
 export K8S_NAMESPACE
 export SCOPE_ID
+export TRAFFIC

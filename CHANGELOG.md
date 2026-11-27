@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - k8s finalize fails, before deleting the previous deployment, if an HTTPRoute of the scope still sends it traffic
 - k8s scopes read their own scope-configurations provider with `SCOPE_CONFIGURATION_SLUG` (the spec slug), instead of the one the np CLI puts at the top level, which can belong to another scope type. Unset: unchanged
 - k8s diagnose no longer reports `ExternalName` services as having no selector or no endpoints
+- k8s HTTP metrics (`http.rpm`, `http.response_time`, `http.error_rate`) accept a `traffic` filter and group-by (`internal` for calls through the stable in-cluster name, `external` otherwise). Needs a logs controller that emits the `traffic` label
 - k8s scopes ship a scope-configurations schema, `k8s/specs/scope-configuration.json.tpl`, with every key the scope reads from that provider (service-to-service included). Optional: register it with `create_scope_configuration = true` and `service_path = "k8s"`; orgs with their own schema keep it
 
 ## [1.22.0] - 2026-11-27
