@@ -79,7 +79,7 @@ metadata:
 {{- template "stable-metadata" (coll.Dict "root" . "modifier" "service") }}
 spec:
   type: ExternalName
-  externalName: {{ $s2s.gateway_host }}
+  externalName: {{ if has $s2s "external_name" }}{{ $s2s.external_name }}{{ else }}{{ $s2s.gateway_host }}{{ end }}
   ports:
 {{- range $s2s.ports }}
 {{- $port := . }}{{ $type := "http" }}{{ range $s2s.grpc_ports }}{{ if eq . $port }}{{ $type = "grpc" }}{{ end }}{{ end }}
@@ -105,6 +105,7 @@ spec:
       name: {{ $s2s.gateway_name }}
       namespace: {{ $s2s.gateway_namespace }}
       sectionName: {{ $s2s.listener_prefix }}{{ .main_http_port }}
+{{- template "s2s-previous-parents" (coll.Dict "s2s" $s2s "port" .main_http_port) }}
   rules:
     - backendRefs:
         - group: ""
@@ -136,6 +137,7 @@ spec:
       name: {{ $s2s.gateway_name }}
       namespace: {{ $s2s.gateway_namespace }}
       sectionName: {{ $s2s.listener_prefix }}{{ .port }}
+{{- template "s2s-previous-parents" (coll.Dict "s2s" $s2s "port" .port) }}
   rules:
     - backendRefs:
         - group: ""
@@ -149,7 +151,19 @@ spec:
             value: /
 {{- end }}
 {{- end }}
-{{ end }}{{ define "stable-metadata" }}
+{{ end }}{{ define "s2s-previous-parents" }}
+{{- if and (has .s2s "previous_parents") (has .s2s.previous_parents (print .port)) }}
+{{- range index .s2s.previous_parents (print .port) }}
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .name }}
+      namespace: {{ .namespace }}
+{{- if has . "sectionName" }}
+      sectionName: {{ .sectionName }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}{{ define "stable-metadata" }}
   labels:
     nullplatform: "true"
     account: {{ .root.account.slug }}

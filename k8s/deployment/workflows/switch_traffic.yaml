@@ -2,6 +2,8 @@ include:
   - "$SERVICE_PATH/values.yaml"
 configuration:
   INGRESS_TEMPLATE: "$BLUE_GREEN_INGRESS_PATH"
+  # Blue still serves: keep its service-to-service routes and gateway until finalize or rollback.
+  SERVICE_TO_SERVICE_KEEP_PREVIOUS: "true"
 trace:
   title: Switch traffic
   flavors: ["$K8S_FLAVOR", "$DNS_TYPE"]

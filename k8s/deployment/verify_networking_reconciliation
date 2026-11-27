@@ -1,6 +1,9 @@
 #!/bin/bash
 
 
+source "$SERVICE_PATH/deployment/networking/gateway/service_to_service_gateway_move"
+service_to_service_finish_gateway_move
+
 log debug "🔍 Verifying networking reconciliation for DNS type: $DNS_TYPE"
 
 case "$DNS_TYPE" in
